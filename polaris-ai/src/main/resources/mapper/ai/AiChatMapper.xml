@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.polaris.ai.mapper.AiChatMapper">
+
+    <!-- ==================== 会话 ==================== -->
+    <resultMap id="ConversationResult" type="com.polaris.ai.domain.AiConversation">
+        <id     property="id"              column="id"            />
+        <result property="title"           column="title"         />
+        <result property="userId"          column="user_id"       />
+        <result property="model"           column="model"         />
+        <result property="delFlag"         column="del_flag"      />
+        <result property="knowledgeBaseId" column="knowledge_base_id" />
+        <result property="createTime"      column="create_time"   />
+        <result property="updateTime"      column="update_time"   />
+    </resultMap>
+
+    <!-- ==================== 消息 ==================== -->
+    <resultMap id="MessageResult" type="com.polaris.ai.domain.AiMessage">
+        <id     property="id"             column="id"/>
+        <result property="conversationId" column="conversation_id"/>
+        <result property="role"           column="role"/>
+        <result property="content"        column="content"/>
+        <result property="reasoningContent" column="reasoning_content"/>
+        <result property="tokens"         column="tokens"/>
+        <result property="fileUrl"        column="file_url"/>
+        <result property="fileName"       column="file_name"/>
+        <result property="fileContent"    column="file_content"/>
+        <result property="createTime"     column="create_time"/>
+    </resultMap>
+
+    <insert id="insertConversation" parameterType="com.polaris.ai.domain.AiConversation"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_conversation(title, user_id, model, del_flag, knowledge_base_id, create_by, create_time, update_time)
+        VALUES (#{title}, #{userId}, #{model}, '0', #{knowledgeBaseId}, #{createBy}, NOW(), NOW())
+    </insert>
+
+    <update id="updateConversationTitle">
+        UPDATE ai_conversation SET title = #{title}, update_time = NOW()
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="updateConversationConfig">
+        UPDATE ai_conversation
+        <set>
+            <if test="model != null and model != ''">model = #{model},</if>
+            knowledge_base_id = #{knowledgeBaseId},
+            update_time = NOW()
+        </set>
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="deleteConversation">
+        UPDATE ai_conversation SET del_flag = '2', update_time = NOW()
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <select id="selectConversationsByUserId" resultMap="ConversationResult">
+        SELECT * FROM ai_conversation
+        WHERE user_id = #{userId} AND del_flag = '0'
+        ORDER BY update_time DESC
+        LIMIT 50
+    </select>
+
+    <select id="selectConversationById" resultMap="ConversationResult">
+        SELECT * FROM ai_conversation
+        WHERE id = #{id} AND user_id = #{userId} AND del_flag = '0'
+    </select>
+
+    <insert id="insertMessage" parameterType="com.polaris.ai.domain.AiMessage"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_message(conversation_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, create_time)
+        VALUES (#{conversationId}, #{role}, #{content}, #{reasoningContent}, #{tokens}, #{fileUrl}, #{fileName}, #{fileContent}, NOW())
+    </insert>
+
+    <select id="selectMessagesByConversationId" resultMap="MessageResult">
+        SELECT * FROM ai_message
+        WHERE conversation_id = #{conversationId}
+        ORDER BY id ASC
+        LIMIT 100
+    </select>
+
+    <delete id="deleteMessagesByConversationId">
+        DELETE FROM ai_message WHERE conversation_id = #{conversationId}
+    </delete>
+
+</mapper>

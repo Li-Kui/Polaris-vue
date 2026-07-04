@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.polaris.ai.mapper.AiKnowledgeMapper">
+
+    <!-- ==================== 知识库 ==================== -->
+    <resultMap id="KnowledgeBaseResult" type="com.polaris.ai.domain.AiKnowledgeBase">
+        <id     property="id"          column="id"/>
+        <result property="name"        column="name"/>
+        <result property="description" column="description"/>
+        <result property="deptId"      column="dept_id"/>
+        <result property="createBy"    column="create_by"/>
+        <result property="createTime"  column="create_time"/>
+        <result property="updateBy"    column="update_by"/>
+        <result property="updateTime"  column="update_time"/>
+    </resultMap>
+
+    <!-- ==================== 文档 ==================== -->
+    <resultMap id="DocumentResult" type="com.polaris.ai.domain.AiDocument">
+        <id     property="id"              column="id"/>
+        <result property="knowledgeBaseId" column="knowledge_base_id"/>
+        <result property="name"            column="name"/>
+        <result property="fileUrl"         column="file_url"/>
+        <result property="status"          column="status"/>
+        <result property="wordCount"       column="word_count"/>
+        <result property="createBy"        column="create_by"/>
+        <result property="createTime"      column="create_time"/>
+    </resultMap>
+
+    <!-- 知识库 CRUD -->
+    <insert id="insertKnowledgeBase" parameterType="com.polaris.ai.domain.AiKnowledgeBase"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_knowledge_base(name, description, dept_id, create_by, create_time, update_by, update_time)
+        VALUES (#{name}, #{description}, #{deptId}, #{createBy}, NOW(), #{createBy}, NOW())
+    </insert>
+
+    <update id="updateKnowledgeBase" parameterType="com.polaris.ai.domain.AiKnowledgeBase">
+        UPDATE ai_knowledge_base
+        <set>
+            <if test="name != null and name != ''">name = #{name},</if>
+            <if test="description != null">description = #{description},</if>
+            <if test="deptId != null">dept_id = #{deptId},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteKnowledgeBase">
+        DELETE FROM ai_knowledge_base WHERE id = #{id}
+    </delete>
+
+    <select id="selectKnowledgeBaseList" resultMap="KnowledgeBaseResult">
+        SELECT kb.* FROM ai_knowledge_base kb
+        <where>
+            <if test="name != null and name != ''">
+                AND kb.name LIKE concat('%', #{name}, '%')
+            </if>
+            <!-- 数据范围过滤 -->
+            ${params.dataScope}
+        </where>
+        ORDER BY kb.create_time DESC
+    </select>
+
+    <select id="selectKnowledgeBaseById" resultMap="KnowledgeBaseResult">
+        SELECT * FROM ai_knowledge_base WHERE id = #{id}
+    </select>
+
+    <!-- 文档 CRUD -->
+    <insert id="insertDocument" parameterType="com.polaris.ai.domain.AiDocument"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_document(knowledge_base_id, name, file_url, status, word_count, create_by, create_time)
+        VALUES (#{knowledgeBaseId}, #{name}, #{fileUrl}, #{status}, #{wordCount}, #{createBy}, NOW())
+    </insert>
+
+    <update id="updateDocument" parameterType="com.polaris.ai.domain.AiDocument">
+        UPDATE ai_document
+        <set>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="wordCount != null">word_count = #{wordCount},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteDocument">
+        DELETE FROM ai_document WHERE id = #{id}
+    </delete>
+
+    <delete id="deleteDocumentsByKnowledgeBaseId">
+        DELETE FROM ai_document WHERE knowledge_base_id = #{knowledgeBaseId}
+    </delete>
+
+    <select id="selectDocumentList" resultMap="DocumentResult">
+        SELECT * FROM ai_document
+        <where>
+            <if test="knowledgeBaseId != null">
+                AND knowledge_base_id = #{knowledgeBaseId}
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="name != null and name != ''">
+                AND name LIKE concat('%', #{name}, '%')
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectDocumentById" resultMap="DocumentResult">
+        SELECT * FROM ai_document WHERE id = #{id}
+    </select>
+
+</mapper>

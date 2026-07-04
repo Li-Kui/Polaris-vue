@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.polaris.ai.mapper.AiModelConfigMapper">
+
+    <resultMap id="AiModelConfigResult" type="com.polaris.ai.domain.AiModelConfig">
+        <id     property="id"                 column="id"/>
+        <result property="name"               column="name"/>
+        <result property="provider"           column="provider"/>
+        <result property="modelName"          column="model_name"/>
+        <result property="apiKey"             column="api_key"/>
+        <result property="baseUrl"            column="base_url"/>
+        <result property="maxTokens"          column="max_tokens"/>
+        <result property="temperature"        column="temperature"/>
+        <result property="maxHistoryMessages" column="max_history_messages"/>
+        <result property="systemPrompt"        column="system_prompt"/>
+        <result property="isDefault"          column="is_default"/>
+        <result property="isDefaultEmbedding" column="is_default_embedding"/>
+        <result property="enableThinking"     column="enable_thinking"/>
+        <result property="reasoningEffort"    column="reasoning_effort"/>
+        <result property="deptId"              column="dept_id"/>
+        <result property="enableSearch"       column="enable_search"/>
+        <result property="searchKey"          column="search_key"/>
+        <result property="status"             column="status"/>
+        <result property="createBy"           column="create_by"/>
+        <result property="createTime"         column="create_time"/>
+        <result property="updateBy"           column="update_by"/>
+        <result property="updateTime"         column="update_time"/>
+    </resultMap>
+
+    <sql id="selectAiModelConfigVo">
+        SELECT * FROM ai_model_config
+    </sql>
+
+    <select id="selectModelConfigList" parameterType="com.polaris.ai.domain.AiModelConfig" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        <where>
+            <if test="name != null and name != ''">
+                AND name LIKE concat('%', #{name}, '%')
+            </if>
+            <if test="provider != null and provider != ''">
+                AND provider = #{provider}
+            </if>
+            <if test="modelName != null and modelName != ''">
+                AND model_name = #{modelName}
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+            <if test="deptId != null">
+                AND dept_id = #{deptId}
+            </if>
+        </where>
+        ORDER BY create_time DESC
+    </select>
+
+    <select id="selectModelConfigById" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectModelConfigByModelName" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE model_name = #{modelName} AND status = '1'
+        LIMIT 1
+    </select>
+
+    <select id="selectDefaultChatModel" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE is_default = '1' AND status = '1'
+        LIMIT 1
+    </select>
+
+    <select id="selectDefaultEmbeddingModel" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE is_default_embedding = '1' AND status = '1'
+        LIMIT 1
+    </select>
+
+    <insert id="insertModelConfig" parameterType="com.polaris.ai.domain.AiModelConfig" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_model_config (
+            <if test="name != null and name != ''">name,</if>
+            <if test="provider != null and provider != ''">provider,</if>
+            <if test="modelName != null and modelName != ''">model_name,</if>
+            <if test="apiKey != null">api_key,</if>
+            <if test="baseUrl != null">base_url,</if>
+            <if test="maxTokens != null">max_tokens,</if>
+            <if test="temperature != null">temperature,</if>
+            <if test="maxHistoryMessages != null">max_history_messages,</if>
+            <if test="systemPrompt != null">system_prompt,</if>
+            <if test="isDefault != null and isDefault != ''">is_default,</if>
+            <if test="isDefaultEmbedding != null and isDefaultEmbedding != ''">is_default_embedding,</if>
+            <if test="enableThinking != null and enableThinking != ''">enable_thinking,</if>
+            <if test="reasoningEffort != null and reasoningEffort != ''">reasoning_effort,</if>
+            <if test="deptId != null">dept_id,</if>
+            <if test="enableSearch != null and enableSearch != ''">enable_search,</if>
+            <if test="searchKey != null">search_key,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            create_time
+        ) VALUES (
+            <if test="name != null and name != ''">#{name},</if>
+            <if test="provider != null and provider != ''">#{provider},</if>
+            <if test="modelName != null and modelName != ''">#{modelName},</if>
+            <if test="apiKey != null">#{apiKey},</if>
+            <if test="baseUrl != null">#{baseUrl},</if>
+            <if test="maxTokens != null">#{maxTokens},</if>
+            <if test="temperature != null">#{temperature},</if>
+            <if test="maxHistoryMessages != null">#{maxHistoryMessages},</if>
+            <if test="systemPrompt != null">#{systemPrompt},</if>
+            <if test="isDefault != null and isDefault != ''">#{isDefault},</if>
+            <if test="isDefaultEmbedding != null and isDefaultEmbedding != ''">#{isDefaultEmbedding},</if>
+            <if test="enableThinking != null and enableThinking != ''">#{enableThinking},</if>
+            <if test="reasoningEffort != null and reasoningEffort != ''">#{reasoningEffort},</if>
+            <if test="deptId != null">#{deptId},</if>
+            <if test="enableSearch != null and enableSearch != ''">#{enableSearch},</if>
+            <if test="searchKey != null">#{searchKey},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            NOW()
+        )
+    </insert>
+
+    <update id="updateModelConfig" parameterType="com.polaris.ai.domain.AiModelConfig">
+        UPDATE ai_model_config
+        <set>
+            <if test="name != null and name != ''">name = #{name},</if>
+            <if test="provider != null and provider != ''">provider = #{provider},</if>
+            <if test="modelName != null and modelName != ''">model_name = #{modelName},</if>
+            <if test="apiKey != null">api_key = #{apiKey},</if>
+            <if test="baseUrl != null">base_url = #{baseUrl},</if>
+            <if test="maxTokens != null">max_tokens = #{maxTokens},</if>
+            <if test="temperature != null">temperature = #{temperature},</if>
+            <if test="maxHistoryMessages != null">max_history_messages = #{maxHistoryMessages},</if>
+            <if test="systemPrompt != null">system_prompt = #{systemPrompt},</if>
+            <if test="isDefault != null and isDefault != ''">is_default = #{isDefault},</if>
+            <if test="isDefaultEmbedding != null and isDefaultEmbedding != ''">is_default_embedding = #{isDefaultEmbedding},</if>
+            <if test="enableThinking != null and enableThinking != ''">enable_thinking = #{enableThinking},</if>
+            <if test="reasoningEffort != null and reasoningEffort != ''">reasoning_effort = #{reasoningEffort},</if>
+            dept_id = #{deptId},
+            <if test="enableSearch != null and enableSearch != ''">enable_search = #{enableSearch},</if>
+            <if test="searchKey != null">search_key = #{searchKey},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteModelConfigById">
+        DELETE FROM ai_model_config WHERE id = #{id}
+    </delete>
+
+    <update id="cleanDefaultChatStatus">
+        UPDATE ai_model_config SET is_default = '0' WHERE is_default = '1'
+    </update>
+
+    <update id="cleanDefaultEmbeddingStatus">
+        UPDATE ai_model_config SET is_default_embedding = '0' WHERE is_default_embedding = '1'
+    </update>
+
+    <select id="selectAvailableModelConfigs" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE status = '1'
+        <if test="!isAdmin">
+            <choose>
+                <when test="deptId != null">
+                    AND (dept_id IS NULL OR dept_id = #{deptId})
+                </when>
+                <otherwise>
+                    AND dept_id IS NULL
+                </otherwise>
+            </choose>
+        </if>
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>
