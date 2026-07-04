@@ -9,7 +9,7 @@
     <version>3.9.2</version>
 
     <name>polaris</name>
-    <description>AI管理系统</description>
+    <description>北辰AI管理系统</description>
     
     <properties>
         <polaris.version>3.9.2</polaris.version>
