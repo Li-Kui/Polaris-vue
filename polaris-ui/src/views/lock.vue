@@ -34,9 +34,9 @@
 </template>
 
 <script>
-import { mapGetters } from 'vuex'
-import { unlockScreen } from '@/api/login'
-import defAva from '@/assets/images/profile.jpg'
+import {mapGetters} from 'vuex'
+import {unlockScreen} from '@/api/login'
+import defAva from '@/assets/logo/logo.png'
 
 export default {
   name: 'LockScreen',

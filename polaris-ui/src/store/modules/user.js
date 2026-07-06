@@ -5,7 +5,7 @@ import {MessageBox} from 'element-ui'
 import {getInfo, login, logout} from '@/api/login'
 import {getToken, removeToken, setToken} from '@/utils/auth'
 import {isEmpty, isHttp} from "@/utils/validate"
-import defAva from '@/assets/images/profile.jpg'
+import defAva from '@/assets/logo/logo.png'
 
 const user = {
   state: {

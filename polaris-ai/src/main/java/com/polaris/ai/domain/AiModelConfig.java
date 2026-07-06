@@ -1,6 +1,8 @@
 package com.polaris.ai.domain;
 
+import com.polaris.common.annotation.Sensitive;
 import com.polaris.common.core.domain.BaseEntity;
+import com.polaris.common.enums.DesensitizedType;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -36,6 +38,7 @@ public class AiModelConfig extends BaseEntity
 
     /** API Key */
     @Schema(description = "API Key")
+    @Sensitive(desensitizedType = DesensitizedType.PASSWORD)
     private String apiKey;
 
     /** API Base URL */
@@ -84,6 +87,7 @@ public class AiModelConfig extends BaseEntity
 
     /** 联网搜索 API Key */
     @Schema(description = "联网搜索 API Key")
+    @Sensitive(desensitizedType = DesensitizedType.PASSWORD)
     private String searchKey;
 
     /** 状态 (1正常 0禁用) */

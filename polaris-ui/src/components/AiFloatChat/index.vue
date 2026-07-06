@@ -273,15 +273,32 @@ export default {
         const res = await listAvailableModel()
         if (res.code === 200) {
           this.models = (res.data.rows || res.data || []).filter(m => m.isDefaultEmbedding !== '1' && !m.modelName.toLowerCase().includes('embed'))
-          const defModel = this.models.find(m => m.isDefault === '1')
-          if (defModel) {
-            this.selectedModelName = defModel.modelName
-          } else if (this.models.length > 0) {
-            this.selectedModelName = this.models[0].modelName
+          if (this.models.length === 0) {
+            const defaultModelName = process.env.VUE_APP_DEFAULT_MODEL || 'deepseek-chat'
+            this.models = [{
+              id: 'default',
+              name: '默认模型',
+              modelName: defaultModelName
+            }]
+            this.selectedModelName = defaultModelName
+          } else {
+            const defModel = this.models.find(m => m.isDefault === '1')
+            if (defModel) {
+              this.selectedModelName = defModel.modelName
+            } else if (this.models.length > 0) {
+              this.selectedModelName = this.models[0].modelName
+            }
           }
         }
       } catch (e) {
         console.error('加载大模型列表失败', e)
+        const defaultModelName = process.env.VUE_APP_DEFAULT_MODEL || 'deepseek-chat'
+        this.models = [{
+          id: 'default',
+          name: '默认模型',
+          modelName: defaultModelName
+        }]
+        this.selectedModelName = defaultModelName
       }
     },
     async loadKnowledgeBases() {

@@ -85,6 +85,12 @@ public class AiModelConfigController extends BaseController
     public ResultData add(@RequestBody AiModelConfig config)
     {
         config.setCreateBy(SecurityUtils.getUsername());
+        if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
+            config.setApiKey(null);
+        }
+        if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
+            config.setSearchKey(null);
+        }
         // 如果新增配置时指定为默认，则先清空其他默认状态
         if ("1".equals(config.getIsDefault())) {
             modelConfigMapper.cleanDefaultChatStatus();
@@ -107,6 +113,12 @@ public class AiModelConfigController extends BaseController
     public ResultData edit(@RequestBody AiModelConfig config)
     {
         config.setUpdateBy(SecurityUtils.getUsername());
+        if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
+            config.setApiKey(null);
+        }
+        if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
+            config.setSearchKey(null);
+        }
         // 如果更新为默认，先清空其他默认状态
         if ("1".equals(config.getIsDefault())) {
             modelConfigMapper.cleanDefaultChatStatus();
