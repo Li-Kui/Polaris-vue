@@ -1,5 +1,6 @@
-package com.polaris.ai.chat;
+package com.polaris.ai.controller;
 
+import com.polaris.ai.chat.IAiChatService;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiMessage;
 import com.polaris.common.annotation.ApiGroup;
