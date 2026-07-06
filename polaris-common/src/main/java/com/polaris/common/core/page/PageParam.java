@@ -3,11 +3,13 @@ package com.polaris.common.core.page;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 
 /**
  * 类说明：分页查询参数
  *
  */
+@EqualsAndHashCode(callSuper=false)
 @Data
 public class PageParam extends Param {
 

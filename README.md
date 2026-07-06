@@ -1,6 +1,10 @@
 # 🌌 北辰 (Polaris) · 智能大模型对话与数据分析管理平台
 
 <p align="center">
+  <img src="polaris-ui/src/assets/logo/logo_full.png" alt="Polaris Logo" width="160" height="160">
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Spring%20Boot-3.x%20%2F%204.x-brightgreen.svg" alt="Spring Boot">
   <img src="https://img.shields.io/badge/LangChain4j-1.17.0-blue.svg" alt="LangChain4j">
   <img src="https://img.shields.io/badge/Vue-2.6.12-4fc08d.svg" alt="Vue">
