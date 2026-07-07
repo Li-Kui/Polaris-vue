@@ -1,8 +1,9 @@
 package com.polaris.system.service;
 
+import com.polaris.common.core.domain.entity.SysUser;
+
 import java.util.Date;
 import java.util.List;
-import com.polaris.common.core.domain.entity.SysUser;
 
 /**
  * 用户 业务层
@@ -214,4 +215,12 @@ public interface ISysUserService
      * @return 结果
      */
     public String importUser(List<SysUser> userList, Boolean isUpdateSupport, String operName);
+
+    /**
+     * 新增用户（带唯一性校验及密码加密）
+     * 
+     * @param user 用户信息
+     * @return 错误原因提示，如果新增成功则返回空字符串 ""
+     */
+    public String insertUserWithCheck(SysUser user);
 }

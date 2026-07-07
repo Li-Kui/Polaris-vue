@@ -38,4 +38,57 @@ public class SysUserTools implements AiTool {
         List<SysUser> userList = userService.selectUserList(queryUser);
         return userList;
     }
+
+    /**
+     * 新增系统用户
+     *
+     * @param userName    登录账号（必填）
+     * @param nickName    用户昵称（必填）
+     * @param password    登录密码（必填）
+     * @param phonenumber 手机号码（可选）
+     * @param email       邮箱账号（可选）
+     * @param sex         用户性别（可选，'0'代表男，'1'代表女，'2'代表未知）
+     * @return 新增结果提示
+     */
+    @Tool("在系统中新增一个系统用户，支持设置账号、昵称、密码、手机号、邮箱和性别。所有输入参数均需以明确的文字提供。")
+    public String createUser(
+            @P("登录账号，必填，必须唯一") String userName,
+            @P("用户昵称，必填") String nickName,
+            @P("登录密码，必填") String password,
+            @P("手机号码，可选") String phonenumber,
+            @P("电子邮箱，可选") String email,
+            @P("用户性别，可选，'0'代表男，'1'代表女，'2'代表未知") String sex
+    ) {
+        if (userName == null || userName.trim().isEmpty()) {
+            return "新增用户失败：登录账号不能为空";
+        }
+        if (nickName == null || nickName.trim().isEmpty()) {
+            return "新增用户失败：用户昵称不能为空";
+        }
+        if (password == null || password.trim().isEmpty()) {
+            return "新增用户失败：登录密码不能为空";
+        }
+
+        SysUser user = new SysUser();
+        user.setUserName(userName);
+        user.setNickName(nickName);
+        user.setPassword(password);
+        user.setPhonenumber(phonenumber);
+        user.setEmail(email);
+        user.setSex(sex == null || sex.trim().isEmpty() ? "0" : sex);
+
+        try {
+            user.setCreateBy(com.polaris.common.utils.SecurityUtils.getUsername());
+        } catch (Exception e) {
+            user.setCreateBy("admin");
+        }
+
+        // 统一调用封装的 Service 业务方法，进行唯一性校验、密码加密和数据库保存
+        String errorMsg = userService.insertUserWithCheck(user);
+        if (com.polaris.common.utils.StringUtils.isNotEmpty(errorMsg)) {
+            return errorMsg;
+        }
+
+        return "成功新增系统用户，账号: " + userName + ", 昵称: " + nickName;
+    }
 }

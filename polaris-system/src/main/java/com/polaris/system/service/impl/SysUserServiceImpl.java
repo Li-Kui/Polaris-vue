@@ -1,16 +1,5 @@
 package com.polaris.system.service.impl;
 
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.stream.Collectors;
-import jakarta.validation.Validator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.CollectionUtils;
 import com.polaris.common.annotation.DataScope;
 import com.polaris.common.constant.UserConstants;
 import com.polaris.common.core.domain.entity.SysRole;
@@ -23,14 +12,22 @@ import com.polaris.common.utils.spring.SpringUtils;
 import com.polaris.system.domain.SysPost;
 import com.polaris.system.domain.SysUserPost;
 import com.polaris.system.domain.SysUserRole;
-import com.polaris.system.mapper.SysPostMapper;
-import com.polaris.system.mapper.SysRoleMapper;
-import com.polaris.system.mapper.SysUserMapper;
-import com.polaris.system.mapper.SysUserPostMapper;
-import com.polaris.system.mapper.SysUserRoleMapper;
+import com.polaris.system.mapper.*;
 import com.polaris.system.service.ISysConfigService;
 import com.polaris.system.service.ISysDeptService;
 import com.polaris.system.service.ISysUserService;
+import jakarta.validation.Validator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 用户 业务层处理
@@ -553,5 +550,33 @@ public class SysUserServiceImpl implements ISysUserService
             successMsg.insert(0, "恭喜您，数据已全部导入成功！共 " + successNum + " 条，数据如下：");
         }
         return successMsg.toString();
+    }
+
+    /**
+     * 新增用户（带唯一性校验及密码加密）
+     * 
+     * @param user 用户信息
+     * @return 错误原因提示，如果新增成功则返回空字符串 ""
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String insertUserWithCheck(SysUser user)
+    {
+        if (!checkUserNameUnique(user))
+        {
+            return "新增用户'" + user.getUserName() + "'失败，登录账号已存在";
+        }
+        else if (StringUtils.isNotEmpty(user.getPhonenumber()) && !checkPhoneUnique(user))
+        {
+            return "新增用户'" + user.getUserName() + "'失败，手机号码已存在";
+        }
+        else if (StringUtils.isNotEmpty(user.getEmail()) && !checkEmailUnique(user))
+        {
+            return "新增用户'" + user.getUserName() + "'失败，邮箱账号已存在";
+        }
+        
+        user.setPassword(SecurityUtils.encryptPassword(user.getPassword()));
+        int rows = insertUser(user);
+        return rows > 0 ? "" : "新增用户失败，数据库保存异常";
     }
 }
