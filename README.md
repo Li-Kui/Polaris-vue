@@ -82,21 +82,8 @@
 | **`polaris-generator`** | `com.polaris.generator` | 代码生成工具模块，支持一键生成前后端 CRUD 代码 |
 | **`polaris-ui`** | *(前端工程)* | 基于 Vue 2 + Element UI 的前端工程，集成大模型对话、ECharts 报告展示等 |
 
-### 📂 `polaris-ai` 模块内部包结构设计
 
-为了让项目职责更内聚，并且与上述核心智能星宿在物理层面对齐，`polaris-ai` 模块内部采用了结构分明的子包规划：
-
-```text
-com.polaris.ai
-  ├── pivot/                 # 🌌 天枢星 (多模型热插拔路由) - 动态模型工厂与热路由代理配置
-  ├── chat/                  # 🧠 天璇星 (思考流) / 📊 天玑星 (智能分析) 主逻辑 - 核心流式对话服务与控制器
-  ├── attachment/            # 📎 天权星 (附件关联与免导解析) - PDF、Word、Excel 高性能文本提取器
-  ├── rag/                   # 📚 知识库与 RAG 核心 - 负责文档拆分、向量持久化、相关度检索关联器
-  ├── tools/                 # 🛠️ AI 插件与工具 - 整合联网搜索与系统工具
-  ├── domain/                # (保持不变) 数据实体定义 - 统一存放 AI Message、ModelConfig 等模型对象
-  └── mapper/                # (保持不变) MyBatis Mapper 接口定义 - 系统底层数据库持久层契约
 ```
-
 ---
 
 ## 🛠️ 技术选型
