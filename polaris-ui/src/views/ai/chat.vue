@@ -406,70 +406,115 @@
                 <i class="el-icon-mic"></i>
               </el-button>
 
-              <!-- 模型选择下拉 -->
-              <el-select
-                v-model="selectedModelName"
-                :disabled="isStreaming"
-                class="tool-select-modern"
-                placeholder="AI模型"
-                size="mini"
-                style="width: 140px;"
-                @change="handleModelOrKbChange"
+              <!-- 模型选择药丸 -->
+              <el-popover
+                v-model="showModelPopover"
+                placement="top-start"
+                title="选择 AI 核心大脑"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-model"
               >
-                <el-option
-                  v-for="item in models"
-                  :key="item.id"
-                  :label="'🤖 ' + item.name"
-                  :value="item.modelName"
-                />
-              </el-select>
+                <div class="popper-selector-list">
+                  <div
+                    v-for="item in models"
+                    :key="item.id"
+                    :class="['popper-selector-item', { 'is-active': selectedModelName === item.modelName }]"
+                    @click="selectedModelName = item.modelName; handleModelOrKbChange(); showModelPopover = false"
+                  >
+                    <i class="el-icon-cpu item-icon"></i>
+                    <span class="item-name">{{ item.name }}</span>
+                    <i v-if="selectedModelName === item.modelName" class="el-icon-check check-icon"></i>
+                  </div>
+                </div>
+                <button slot="reference" :disabled="isStreaming" class="config-pill-btn pill-model">
+                  <i class="el-icon-cpu"></i>
+                  <span class="pill-label">{{ getSelectedModelLabel() }}</span>
+                  <i class="el-icon-arrow-down pill-arrow"></i>
+                </button>
+              </el-popover>
 
-              <!-- 知识库选择下拉 -->
-              <el-select
-                v-model="selectedKbId"
-                :disabled="isStreaming"
-                class="tool-select-modern"
-                clearable
-                placeholder="关联知识库"
-                size="mini"
-                style="width: 130px;"
-                @change="handleModelOrKbChange"
+              <!-- 知识库选择药丸 -->
+              <el-popover
+                v-model="showKbPopover"
+                placement="top-start"
+                title="关联专属知识库"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-kb"
               >
-                <el-option
-                  v-for="item in knowledgeBases"
-                  :key="item.id"
-                  :label="'📚 ' + item.name"
-                  :value="item.id"
-                />
-              </el-select>
+                <div class="popper-selector-list">
+                  <div
+                    :class="['popper-selector-item', { 'is-active': !selectedKbId }]"
+                    @click="selectedKbId = null; handleModelOrKbChange(); showKbPopover = false"
+                  >
+                    <i class="el-icon-folder-delete item-icon"></i>
+                    <span class="item-name">不挂载任何知识库</span>
+                    <i v-if="!selectedKbId" class="el-icon-check check-icon"></i>
+                  </div>
+                  <div
+                    v-for="item in knowledgeBases"
+                    :key="item.id"
+                    :class="['popper-selector-item', { 'is-active': selectedKbId === item.id }]"
+                    @click="selectedKbId = item.id; handleModelOrKbChange(); showKbPopover = false"
+                  >
+                    <i class="el-icon-collection item-icon"></i>
+                    <span class="item-name">{{ item.name }}</span>
+                    <i v-if="selectedKbId === item.id" class="el-icon-check check-icon"></i>
+                  </div>
+                </div>
+                <button slot="reference" :disabled="isStreaming" :class="['config-pill-btn pill-kb', { 'is-active': selectedKbId }]">
+                  <i class="el-icon-collection"></i>
+                  <span class="pill-label">{{ getSelectedKbLabel() }}</span>
+                  <i class="el-icon-arrow-down pill-arrow"></i>
+                </button>
+              </el-popover>
 
-              <!-- 工作流选择下拉 -->
-              <el-select
-                v-model="selectedWorkflowCode"
-                :disabled="isStreaming"
-                class="tool-select-modern"
-                clearable
-                placeholder="常规对话"
-                size="mini"
-                style="width: 130px; margin-left: 8px;"
+              <!-- 工作流选择药丸 -->
+              <el-popover
+                v-model="showWorkflowPopover"
+                placement="top-start"
+                title="选用智能体工作流"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-workflow"
               >
-                <el-option
-                  v-for="item in workflows"
-                  :key="item.workflowCode"
-                  :label="'⚡ ' + item.workflowName"
-                  :value="item.workflowCode"
-                />
-              </el-select>
+                <div class="popper-selector-list">
+                  <div
+                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode }]"
+                    @click="selectedWorkflowCode = ''; showWorkflowPopover = false"
+                  >
+                    <i class="el-icon-chat-dot-round item-icon"></i>
+                    <span class="item-name">直接常规提问</span>
+                    <i v-if="!selectedWorkflowCode" class="el-icon-check check-icon"></i>
+                  </div>
+                  <div
+                    v-for="item in workflows"
+                    :key="item.workflowCode"
+                    :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
+                    @click="selectedWorkflowCode = item.workflowCode; showWorkflowPopover = false"
+                  >
+                    <i class="el-icon-connection item-icon"></i>
+                    <span class="item-name">{{ item.workflowName }}</span>
+                    <i v-if="selectedWorkflowCode === item.workflowCode" class="el-icon-check check-icon"></i>
+                  </div>
+                </div>
+                <button slot="reference" :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode }]">
+                  <i class="el-icon-connection"></i>
+                  <span class="pill-label">{{ getSelectedWorkflowLabel() }}</span>
+                  <i class="el-icon-arrow-down pill-arrow"></i>
+                </button>
+              </el-popover>
 
-              <!-- 联网搜索按钮切换器 -->
+              <!-- 联网搜索快速切换按钮 -->
               <button
                 v-if="currentModelSupportsSearch"
-                :class="['web-search-btn-modern', { 'is-active': enableWebSearch }]"
+                :class="['config-pill-btn pill-search', { 'is-active': enableWebSearch }]"
                 :disabled="isStreaming"
-                style="margin-left: 12px;"
                 @click="toggleWebSearch"
               >
-                <i class="el-icon-connection"></i> 联网搜索
+                <i class="el-icon-search"></i>
+                <span class="pill-label">联网搜索</span>
               </button>
             </div>
 
@@ -623,6 +668,9 @@ export default {
       selectedModelName: null,
       selectedWorkflowCode: '',
       workflows: [],
+      showModelPopover: false,
+      showKbPopover: false,
+      showWorkflowPopover: false,
 
       conversations: [],
       loadingConvs: false,
@@ -816,6 +864,22 @@ export default {
         this.selectedKbId = c.knowledgeBaseId || null
       }
       await this.loadMessageList(id)
+    },
+
+    getSelectedModelLabel() {
+      if (!this.selectedModelName) return '选择 AI 模型';
+      const found = this.models.find(m => m.modelName === this.selectedModelName);
+      return found ? found.name : this.selectedModelName;
+    },
+    getSelectedKbLabel() {
+      if (!this.selectedKbId) return '关联知识库';
+      const found = this.knowledgeBases.find(k => k.id === this.selectedKbId);
+      return found ? found.name : '已关联知识库';
+    },
+    getSelectedWorkflowLabel() {
+      if (!this.selectedWorkflowCode) return '常规对话';
+      const found = this.workflows.find(w => w.workflowCode === this.selectedWorkflowCode);
+      return found ? found.workflowName : '已选工作流';
     },
 
     async handleModelOrKbChange() {
@@ -2243,51 +2307,69 @@ export default {
 .msg-row {
   display: flex;
   align-items: flex-start;
-  padding: 5px 44px;
-  gap: 12px;
+  padding: 12px 44px;
+  gap: 16px;
   max-width: 1200px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
 }
-.msg-row.user { justify-content: flex-end; }
+.msg-row.user {
+  justify-content: flex-end;
+}
 
 /* 头像 */
 .avatar {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease;
+}
+.avatar:hover {
+  transform: scale(1.05);
 }
 .user-av {
-  background: #409eff;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   color: #fff;
-  font-size: 12px;
+  font-size: 11px;
 }
 .ai-av {
-  background: linear-gradient(135deg, #6c3be4 0%, #409eff 100%);
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
   color: #fff;
   font-size: 16px;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
 }
 
 /* 气泡 */
 .bubble {
-  max-width: 70%;
-  padding: 11px 16px;
-  border-radius: 14px;
+  max-width: 75%;
+  padding: 12px 18px;
+  border-radius: 16px;
   font-size: 14px;
-  line-height: 1.75;
+  line-height: 1.7;
   word-break: break-word;
+  box-sizing: border-box;
 }
 .user-bubble {
-  background: #409eff;
-  color: #fff;
+  background: linear-gradient(135deg, #6366f1 0%, #3b82f6 100%);
+  color: #ffffff;
   border-bottom-right-radius: 4px;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.05);
+}
+.assistant-bubble {
+  background: #ffffff;
+  color: #1e293b;
+  border-bottom-left-radius: 4px;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
 }
 
 .user-bubble-wrapper {
@@ -2435,6 +2517,227 @@ export default {
   border: none;
   border-top: 1px solid #ebeef5;
   margin: 10px 0;
+}
+
+/* ===== 输入框底部配置气泡药丸 (Config Pills) ===== */
+.config-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  margin-right: 6px;
+}
+.config-pill-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #334155;
+  transform: translateY(-1px);
+}
+.config-pill-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 药丸小 icon 与文字 */
+.config-pill-btn i {
+  font-size: 13px;
+  color: #94a3b8;
+  transition: color 0.2s ease;
+}
+.config-pill-btn .pill-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-pill-btn .pill-arrow {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* 模型大脑药丸 (淡雅蓝紫主题) */
+.pill-model {
+  background: #f5f3ff;
+  border-color: #ddd6fe;
+  color: #7c3aed;
+}
+.pill-model i {
+  color: #8b5cf6;
+}
+.pill-model:hover {
+  background: #ede9fe;
+  border-color: #c084fc;
+}
+
+/* 知识库药丸 (淡雅草绿主题) */
+.pill-kb.is-active {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #059669;
+}
+.pill-kb.is-active i {
+  color: #10b981;
+}
+.pill-kb.is-active:hover {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+}
+
+/* 工作流药丸 (淡雅琥珀主题) */
+.pill-workflow.is-active {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #d97706;
+}
+.pill-workflow.is-active i {
+  color: #f59e0b;
+}
+.pill-workflow.is-active:hover {
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+/* 联网搜索药丸 (淡雅海洋蓝主题) */
+.pill-search.is-active {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+}
+.pill-search.is-active i {
+  color: #3b82f6;
+}
+.pill-search.is-active:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+
+/* 弹出层全局统一定制 */
+.pill-selector-popper {
+  border-radius: 16px !important;
+  background: rgba(255, 255, 255, 0.98) !important;
+  backdrop-filter: blur(12px) !important;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.08), 0 15px 25px -10px rgba(0, 0, 0, 0.04) !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  padding: 10px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.pill-selector-popper .el-popover__title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.popper-selector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.popper-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  transform: translateX(0);
+  box-sizing: border-box;
+}
+
+/* 柔和侧滑 Hover 动效，让选择充满质感 */
+.popper-selector-item:hover {
+  background: #f8fafc;
+  transform: translateX(4px);
+}
+
+.popper-selector-item:active {
+  transform: scale(0.97);
+}
+
+.popper-selector-item .item-icon {
+  font-size: 14px;
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+
+.popper-selector-item .item-name {
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popper-selector-item .check-icon {
+  font-size: 13px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* === 核心大脑激活态 (淡蓝紫主题) === */
+.popper-model .popper-selector-item.is-active {
+  background: #f5f3ff;
+  color: #7c3aed;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.08);
+}
+.popper-model .popper-selector-item.is-active .item-icon {
+  color: #8b5cf6;
+}
+.popper-model .popper-selector-item.is-active .check-icon {
+  color: #7c3aed;
+}
+
+/* === 专属知识库激活态 (淡雅绿主题) === */
+.popper-kb .popper-selector-item.is-active {
+  background: #ecfdf5;
+  color: #059669;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.08);
+}
+.popper-kb .popper-selector-item.is-active .item-icon {
+  color: #10b981;
+}
+.popper-kb .popper-selector-item.is-active .check-icon {
+  color: #059669;
+}
+
+/* === 智能体工作流激活态 (琥珀橙主题) === */
+.popper-workflow .popper-selector-item.is-active {
+  background: #fffbeb;
+  color: #d97706;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.08);
+}
+.popper-workflow .popper-selector-item.is-active .item-icon {
+  color: #f59e0b;
+}
+.popper-workflow .popper-selector-item.is-active .check-icon {
+  color: #d97706;
 }
 
 /* ===== 输入区域 ===== */
