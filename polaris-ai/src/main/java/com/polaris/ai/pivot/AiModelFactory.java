@@ -1,7 +1,7 @@
 package com.polaris.ai.pivot;
 
 import com.polaris.ai.domain.AiModelConfig;
-import com.polaris.ai.mapper.AiModelConfigMapper;
+import com.polaris.ai.service.IAiModelConfigService;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -38,7 +38,7 @@ public class AiModelFactory
     private volatile StreamingChatModel defaultStreamingModel;
     private volatile EmbeddingModel defaultEmbeddingModel;
     @Autowired
-    private AiModelConfigMapper modelConfigMapper;
+    private IAiModelConfigService modelConfigService;
     @Autowired
     private AiModelProperties fileProps;
 
@@ -63,7 +63,7 @@ public class AiModelFactory
             synchronized (this) {
                 if (defaultStreamingModel == null) {
                     try {
-                        AiModelConfig config = modelConfigMapper.selectDefaultChatModel();
+                        AiModelConfig config = modelConfigService.selectDefaultChatModel();
                         if (config != null) {
                             defaultStreamingModel = getChatModelInstance(config);
                         }
@@ -89,7 +89,7 @@ public class AiModelFactory
         }
 
         try {
-            AiModelConfig config = modelConfigMapper.selectModelConfigByModelName(modelName);
+            AiModelConfig config = modelConfigService.selectModelConfigByModelName(modelName);
             if (config != null) {
                 return getChatModelInstance(config);
             }
@@ -116,7 +116,7 @@ public class AiModelFactory
             synchronized (this) {
                 if (defaultEmbeddingModel == null) {
                     try {
-                        AiModelConfig config = modelConfigMapper.selectDefaultEmbeddingModel();
+                        AiModelConfig config = modelConfigService.selectDefaultEmbeddingModel();
                         if (config != null) {
                             defaultEmbeddingModel = getEmbeddingModelInstance(config);
                         }

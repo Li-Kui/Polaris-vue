@@ -1,8 +1,8 @@
 package com.polaris.ai.controller;
 
-import com.polaris.ai.chat.IAiChatService;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiMessage;
+import com.polaris.ai.service.IAiChatService;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.annotation.Log;
 import com.polaris.common.constant.ApiVersionConstants;

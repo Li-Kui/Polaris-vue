@@ -1,7 +1,8 @@
-package com.polaris.ai.rag;
+package com.polaris.ai.controller;
 
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
+import com.polaris.ai.service.IAiKnowledgeService;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.annotation.Log;
 import com.polaris.common.config.PolarisConfig;
@@ -31,7 +32,7 @@ import java.util.List;
 @RequestMapping("/ai/knowledge")
 public class AiKnowledgeController extends BaseController {
     @Autowired
-    private AiKnowledgeService aiKnowledgeService;
+    private IAiKnowledgeService aiKnowledgeService;
 
     // ================================================================
     //  知识库管理接口

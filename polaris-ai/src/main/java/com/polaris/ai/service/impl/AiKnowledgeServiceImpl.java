@@ -1,11 +1,13 @@
-package com.polaris.ai.rag;
+package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
+import com.polaris.ai.service.IAiKnowledgeService;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
@@ -13,8 +15,7 @@ import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -27,14 +28,14 @@ import java.util.List;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 /**
- * AI 知识库服务层
+ * AI 知识库服务层实现类
  * 
  * @author polaris
  */
+@Slf4j
 @Service
-public class AiKnowledgeService
+public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKnowledgeBase> implements IAiKnowledgeService
 {
-    private static final Logger log = LoggerFactory.getLogger(AiKnowledgeService.class);
 
     @Autowired
     private AiKnowledgeMapper aiKnowledgeMapper;
@@ -52,26 +53,31 @@ public class AiKnowledgeService
     //  知识库 CRUD
     // ================================================================
 
+    @Override
     public List<AiKnowledgeBase> listKnowledgeBase(AiKnowledgeBase kb)
     {
         return aiKnowledgeMapper.selectKnowledgeBaseList(kb);
     }
 
+    @Override
     public AiKnowledgeBase selectKnowledgeBaseById(Long id)
     {
         return aiKnowledgeMapper.selectById(id);
     }
 
+    @Override
     public int insertKnowledgeBase(AiKnowledgeBase kb)
     {
         return aiKnowledgeMapper.insert(kb);
     }
 
+    @Override
     public int updateKnowledgeBase(AiKnowledgeBase kb)
     {
         return aiKnowledgeMapper.updateById(kb);
     }
 
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public int deleteKnowledgeBase(Long id)
     {
@@ -93,16 +99,19 @@ public class AiKnowledgeService
     //  文档 CRUD
     // ================================================================
 
+    @Override
     public List<AiDocument> listDocument(AiDocument doc)
     {
         return aiDocumentMapper.selectDocumentList(doc);
     }
 
+    @Override
     public AiDocument selectDocumentById(Long id)
     {
         return aiDocumentMapper.selectById(id);
     }
 
+    @Override
     public int insertDocument(AiDocument doc)
     {
         doc.setStatus("0"); // 待解析
@@ -110,6 +119,7 @@ public class AiKnowledgeService
         return aiDocumentMapper.insert(doc);
     }
 
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public int deleteDocument(Long id)
     {
@@ -132,6 +142,7 @@ public class AiKnowledgeService
     /**
      * 异步解析文档并向量化
      */
+    @Override
     @Async("threadPoolTaskExecutor")
     public void importDocumentAsync(Long docId)
     {

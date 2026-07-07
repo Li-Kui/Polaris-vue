@@ -1,7 +1,8 @@
-package com.polaris.ai.pivot;
+package com.polaris.ai.controller;
 
 import com.polaris.ai.domain.AiModelConfig;
-import com.polaris.ai.mapper.AiModelConfigMapper;
+import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.annotation.Log;
 import com.polaris.common.constant.ApiVersionConstants;
@@ -30,7 +31,7 @@ import java.util.List;
 public class AiModelConfigController extends BaseController
 {
     @Autowired
-    private AiModelConfigMapper modelConfigMapper;
+    private IAiModelConfigService modelConfigService;
 
     @Autowired
     private AiModelFactory modelFactory;
@@ -43,7 +44,7 @@ public class AiModelConfigController extends BaseController
     public ResultData<Page<AiModelConfig>> list(AiModelConfig config)
     {
         startPage();
-        List<AiModelConfig> list = modelConfigMapper.selectModelConfigList(config);
+        List<AiModelConfig> list = modelConfigService.selectModelConfigList(config);
         return ok(getDataPage(list));
     }
 
@@ -62,7 +63,7 @@ public class AiModelConfigController extends BaseController
                 deptId = SecurityUtils.getLoginUser().getUser().getDeptId();
             }
         }
-        List<AiModelConfig> list = modelConfigMapper.selectAvailableModelConfigs(deptId, isAdmin);
+        List<AiModelConfig> list = modelConfigService.selectAvailableModelConfigs(deptId, isAdmin);
         return ok(list);
     }
 
@@ -73,7 +74,7 @@ public class AiModelConfigController extends BaseController
     @GetMapping("/{id}")
     public ResultData getInfo(@PathVariable Long id)
     {
-        return ok(modelConfigMapper.selectModelConfigById(id));
+        return ok(modelConfigService.selectModelConfigById(id));
     }
 
     /**
@@ -93,13 +94,13 @@ public class AiModelConfigController extends BaseController
         }
         // 如果新增配置时指定为默认，则先清空其他默认状态
         if ("1".equals(config.getIsDefault())) {
-            modelConfigMapper.cleanDefaultChatStatus();
+            modelConfigService.cleanDefaultChatStatus();
         }
         if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigMapper.cleanDefaultEmbeddingStatus();
+            modelConfigService.cleanDefaultEmbeddingStatus();
         }
         
-        int result = modelConfigMapper.insertModelConfig(config);
+        int result = modelConfigService.insertModelConfig(config);
         modelFactory.clearCache(); // 清除工厂缓存以应用最新配置
         return toAjaxResult(result);
     }
@@ -121,13 +122,13 @@ public class AiModelConfigController extends BaseController
         }
         // 如果更新为默认，先清空其他默认状态
         if ("1".equals(config.getIsDefault())) {
-            modelConfigMapper.cleanDefaultChatStatus();
+            modelConfigService.cleanDefaultChatStatus();
         }
         if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigMapper.cleanDefaultEmbeddingStatus();
+            modelConfigService.cleanDefaultEmbeddingStatus();
         }
 
-        int result = modelConfigMapper.updateModelConfig(config);
+        int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache(); // 清除工厂缓存以应用最新配置
         return toAjaxResult(result);
     }
@@ -140,7 +141,7 @@ public class AiModelConfigController extends BaseController
     @DeleteMapping("/{id}")
     public ResultData remove(@PathVariable Long id)
     {
-        int result = modelConfigMapper.deleteById(id);
+        int result = modelConfigService.deleteModelConfigById(id);
         modelFactory.clearCache(); // 清除工厂缓存
         return toAjaxResult(result);
     }
@@ -154,11 +155,11 @@ public class AiModelConfigController extends BaseController
     @PutMapping("/{id}/default")
     public ResultData setDefaultChat(@PathVariable Long id)
     {
-        modelConfigMapper.cleanDefaultChatStatus();
+        modelConfigService.cleanDefaultChatStatus();
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
         config.setIsDefault("1");
-        int result = modelConfigMapper.updateModelConfig(config);
+        int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache();
         return toAjaxResult(result);
     }
@@ -172,11 +173,11 @@ public class AiModelConfigController extends BaseController
     @PutMapping("/{id}/defaultEmbedding")
     public ResultData setDefaultEmbedding(@PathVariable Long id)
     {
-        modelConfigMapper.cleanDefaultEmbeddingStatus();
+        modelConfigService.cleanDefaultEmbeddingStatus();
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
         config.setIsDefaultEmbedding("1");
-        int result = modelConfigMapper.updateModelConfig(config);
+        int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache();
         return toAjaxResult(result);
     }

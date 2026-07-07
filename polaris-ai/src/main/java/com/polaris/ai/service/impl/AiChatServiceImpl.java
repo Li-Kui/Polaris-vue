@@ -1,13 +1,14 @@
-package com.polaris.ai.chat.impl;
+package com.polaris.ai.service.impl;
 
-import com.polaris.ai.pivot.AiModelProperties;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.polaris.ai.attachment.AttachmentParserHelper;
+import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.mapper.AiChatMapper;
-import com.polaris.ai.mapper.AiModelConfigMapper;
-import com.polaris.ai.chat.AiAssistant;
-import com.polaris.ai.chat.IAiChatService;
+import com.polaris.ai.pivot.AiModelProperties;
+import com.polaris.ai.service.IAiChatService;
+import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.tools.base.AiTool;
-import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.common.core.domain.entity.SysRole;
 import com.polaris.common.utils.SecurityUtils;
 import com.polaris.system.service.ISysConfigService;
@@ -29,8 +30,7 @@ import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.store.embedding.EmbeddingStore;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContext;
@@ -53,9 +53,9 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
  *
  * @author polaris
  */
+@Slf4j
 @Service
-public class AiChatServiceImpl implements IAiChatService {
-    private static final Logger log = LoggerFactory.getLogger(AiChatServiceImpl.class);
+public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation> implements IAiChatService {
 
     @Autowired
     private EmbeddingModel embeddingModel;
@@ -87,7 +87,7 @@ public class AiChatServiceImpl implements IAiChatService {
     private ISysConfigService configService;
 
     @Autowired
-    private AiModelConfigMapper modelConfigMapper;
+    private IAiModelConfigService modelConfigService;
 
     @Autowired
     private com.polaris.ai.pivot.AiModelFactory modelFactory;
@@ -100,7 +100,7 @@ public class AiChatServiceImpl implements IAiChatService {
     // ----------------------------------------------------------------
 
     /**
-     * 新建会话 model 参数为空时，取 application.yml 中配置的默认模型名
+     * 新建会话 model 参数为空时，取 application.yml 中配置 of 默认模型名
      */
     @Override
     public AiConversation createConversation(Long userId, String model, Long knowledgeBaseId) {
@@ -230,7 +230,7 @@ public class AiChatServiceImpl implements IAiChatService {
         SecurityContext securityContext = SecurityContextHolder.getContext();
         String searchKey = null;
         try {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigMapper.selectModelConfigByModelName(conv.getModel());
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
             if (modelConfig != null) {
                 searchKey = modelConfig.getSearchKey();
             }
@@ -331,7 +331,7 @@ public class AiChatServiceImpl implements IAiChatService {
 
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
         if (conv != null && conv.getModel() != null) {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigMapper.selectModelConfigByModelName(conv.getModel());
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
             if (modelConfig != null) {
                 // 获取模型专属提示词
                 if (modelConfig.getSystemPrompt() != null && !modelConfig.getSystemPrompt().trim().isEmpty()) {

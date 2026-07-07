@@ -1,5 +1,6 @@
-package com.polaris.ai.chat;
+package com.polaris.ai.service;
 
+import com.baomidou.mybatisplus.extension.service.IService;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiMessage;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -13,7 +14,7 @@ import java.util.List;
  * 
  * @author polaris
  */
-public interface IAiChatService
+public interface IAiChatService extends IService<AiConversation>
 {
     /**
      * 新建会话

@@ -1,5 +1,6 @@
 package com.polaris.ai.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiMessage;
 import org.apache.ibatis.annotations.Param;
@@ -13,7 +14,7 @@ import java.util.List;
  * 
  * @author polaris
  */
-public interface AiChatMapper
+public interface AiChatMapper extends BaseMapper<AiConversation>
 {
     // ================================================================
     //  会话相关操作
