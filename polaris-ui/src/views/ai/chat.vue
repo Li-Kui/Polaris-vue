@@ -138,6 +138,24 @@
               </el-select>
             </div>
 
+            <div class="setup-item">
+              <label style="font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; display: block;"><i class="el-icon-s-operation" style="color: #8b5cf6;"></i> 选用智能体工作流 (可选)</label>
+              <el-select
+                v-model="selectedWorkflowCode"
+                clearable
+                placeholder="常规对话模式"
+                size="medium"
+                style="width: 100%;"
+              >
+                <el-option
+                  v-for="item in workflows"
+                  :key="item.workflowCode"
+                  :label="item.workflowName"
+                  :value="item.workflowCode"
+                />
+              </el-select>
+            </div>
+
             <el-button
               icon="el-icon-chat-dot-round"
               style="margin-top: 10px; width: 100%; height: 42px; font-size: 14px; font-weight: 600; border-radius: 8px; border: none; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);"
@@ -191,6 +209,46 @@
                 <div v-else-if="msg.role === 'assistant'">
                   <div v-if="msg.statusMsg" class="loading-status-text" style="margin-bottom: 8px;">
                     <i class="el-icon-loading"></i> {{ msg.statusMsg }}
+                  </div>
+                  <!-- 智能体工作流执行步骤 -->
+                  <div v-if="msg.workflowSteps && msg.workflowSteps.length > 0" class="workflow-steps-container">
+                    <div class="workflow-header">
+                      <i class="el-icon-s-operation"></i>
+                      <span>智能体工作流执行链路</span>
+                    </div>
+                    <div class="workflow-steps-list">
+                      <div 
+                        v-for="(step, stepIdx) in msg.workflowSteps" 
+                        :key="stepIdx"
+                        :class="['workflow-step-item', step.status]"
+                      >
+                        <div class="step-icon">
+                          <i v-if="step.status === 'running'" class="el-icon-loading"></i>
+                          <i v-else-if="step.status === 'success'" class="el-icon-circle-check"></i>
+                          <i v-else-if="step.status === 'error'" class="el-icon-circle-close"></i>
+                          <i v-else class="el-icon-time"></i>
+                        </div>
+                        <div class="step-content">
+                          <div class="step-title">
+                            <span class="step-name">{{ step.name }}</span>
+                            <span class="step-code">({{ step.code }})</span>
+                          </div>
+                          <!-- 正在调用的系统工具展示 -->
+                          <div v-if="step.activeTool" class="step-tool-badge">
+                            <i class="el-icon-folder-opened"></i> 正在调用系统工具: <span class="tool-name">{{ step.activeTool }}</span>
+                          </div>
+                          <!-- 节点输出的思考过程 -->
+                          <div v-if="step.thinking" class="step-thinking-box">
+                            <div class="thinking-title">思考过程：</div>
+                            <div class="thinking-text">{{ step.thinking }}</div>
+                          </div>
+                          <!-- 节点输出的内容 -->
+                          <div v-if="step.content && step.status !== 'success'" class="step-content-box">
+                            <div class="content-text" v-html="renderMarkdown(step.content)"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <!-- 高端科技感思考过程展示 -->
                   <div v-if="msg.reasoningContent" class="thinking-container">
@@ -385,6 +443,24 @@
                 />
               </el-select>
 
+              <!-- 工作流选择下拉 -->
+              <el-select
+                v-model="selectedWorkflowCode"
+                :disabled="isStreaming"
+                class="tool-select-modern"
+                clearable
+                placeholder="常规对话"
+                size="mini"
+                style="width: 130px; margin-left: 8px;"
+              >
+                <el-option
+                  v-for="item in workflows"
+                  :key="item.workflowCode"
+                  :label="'⚡ ' + item.workflowName"
+                  :value="item.workflowCode"
+                />
+              </el-select>
+
               <!-- 联网搜索按钮切换器 -->
               <button
                 v-if="currentModelSupportsSearch"
@@ -532,6 +608,7 @@ import {
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
+import {listActiveWorkflows} from '@/api/ai/workflow'
 
 export default {
   name: 'AiChat',
@@ -544,6 +621,8 @@ export default {
       // 可选大模型与当前选择
       models: [],
       selectedModelName: null,
+      selectedWorkflowCode: '',
+      workflows: [],
 
       conversations: [],
       loadingConvs: false,
@@ -615,6 +694,7 @@ export default {
     this.sseEventBuffer = null
     this.loadKnowledgeBases()
     this.loadModels()
+    this.loadWorkflows()
     // 读取联网搜索的偏好设置
     const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
     this.enableWebSearch = savedPreference === 'true'
@@ -689,6 +769,17 @@ export default {
           modelName: defaultModelName
         }]
         this.selectedModelName = defaultModelName
+      }
+    },
+
+    async loadWorkflows() {
+      try {
+        const res = await listActiveWorkflows()
+        if (res.code === 200) {
+          this.workflows = res.data || []
+        }
+      } catch (e) {
+        console.error('加载工作流列表失败', e)
       }
     },
 
@@ -861,9 +952,16 @@ export default {
 
       const baseUrl = process.env.VUE_APP_BASE_API || ''
       const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
-      let url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
-      if (attachedFile) {
-        url += `&fileUrl=${encodeURIComponent(attachedFile.url)}`
+      
+      const isWorkflowMode = !!this.selectedWorkflowCode
+      let url = ''
+      if (isWorkflowMode) {
+        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}`
+      } else {
+        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+        if (attachedFile) {
+          url += `&fileUrl=${encodeURIComponent(attachedFile.url)}`
+        }
       }
       const token = getToken()
 
@@ -894,14 +992,12 @@ export default {
 
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split('\n')
-          buffer = lines.pop()   // 末尾可能是不完整行，留到下轮
+          buffer = lines.pop()
 
           for (const line of lines) {
-            // 绝不能在处理前全局 line.trim()，因为会把行首空格、缩进及单纯的换行符过滤掉
             if (line.startsWith('event:')) {
               this.sseEventBuffer = line.slice(6).trim()
             } else if (line.startsWith('data:')) {
-              // 提取 data 后的内容。根据 SSE 规范，冒号后如果有一个空格，需将其去除
               let data = ''
               if (line.startsWith('data: ')) {
                 data = line.slice(6)
@@ -910,45 +1006,134 @@ export default {
               }
               const event = this.sseEventBuffer || 'message'
 
-              if (event === 'message') {
-                const cur = this.messages[aiIndex]
-                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                this.$set(this.messages, aiIndex, {
-                  ...cur,
-                  content: cur.content + processedData
-                })
-                this.$nextTick(() => this.scrollToBottom())
-
-              } else if (event === 'reasoning') {
-                const cur = this.messages[aiIndex]
-                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                this.$set(this.messages, aiIndex, {
-                  ...cur,
-                  reasoningContent: (cur.reasoningContent || '') + processedData
-                })
-                this.$nextTick(() => this.scrollToBottom())
-
-              } else if (event === 'status') {
-                const cur = this.messages[aiIndex]
-                this.$set(this.messages, aiIndex, {
-                  ...cur,
-                  statusMsg: data || ''
-                })
-              } else if (event === 'done') {
-                this.$set(this.messages, aiIndex, {
-                  ...this.messages[aiIndex],
-                  streaming: false
-                })
-                this.isStreaming = false
-                this.currentReader = null
-                this.loadConvList()   // 刷新侧栏标题
-                return
-
-              } else if (event === 'error') {
-                throw new Error(data.trim() || 'AI 服务异常')
+              if (isWorkflowMode) {
+                // --- 智能体工作流模式专属解析 ---
+                if (event === 'node_start') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const nodeName = parts[1] || nodeCode
+                  steps.push({
+                    code: nodeCode,
+                    name: nodeName,
+                    status: 'running',
+                    content: '',
+                    thinking: ''
+                  })
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$set(this.messages[aiIndex], 'statusMsg', `智能体「${nodeName}」正在处理...`)
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_tool') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const toolName = parts[1] || ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    this.$set(step, 'activeTool', toolName)
+                  }
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$set(this.messages[aiIndex], 'statusMsg', `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`)
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_thinking') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.thinking = (step.thinking || '') + chunk
+                  }
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_chunk') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.content = (step.content || '') + chunk
+                  }
+                  // 也追加到消息的总内容中供聊天界面常规显示
+                  this.$set(this.messages[aiIndex], 'content', cur.content + chunk)
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_done') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const nodeCode = data.trim()
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'success'
+                  }
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$set(this.messages[aiIndex], 'statusMsg', '')
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_error') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const errMsg = parts[1] || '执行异常'
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'error'
+                    step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
+                  }
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'workflow_done') {
+                  this.$set(this.messages[aiIndex], 'streaming', false)
+                  this.isStreaming = false
+                  this.currentReader = null
+                  this.loadConvList()
+                  return
+                } else if (event === 'error') {
+                  throw new Error(data.trim() || '工作流执行失败')
+                }
+              } else {
+                // --- 常规聊天问答模式 ---
+                if (event === 'message') {
+                  const cur = this.messages[aiIndex]
+                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  this.$set(this.messages, aiIndex, {
+                    ...cur,
+                    content: cur.content + processedData
+                  })
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'reasoning') {
+                  const cur = this.messages[aiIndex]
+                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  this.$set(this.messages, aiIndex, {
+                    ...cur,
+                    reasoningContent: (cur.reasoningContent || '') + processedData
+                  })
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'status') {
+                  const cur = this.messages[aiIndex]
+                  this.$set(this.messages, aiIndex, {
+                    ...cur,
+                    statusMsg: data || ''
+                  })
+                } else if (event === 'done') {
+                  this.$set(this.messages, aiIndex, {
+                    ...this.messages[aiIndex],
+                    streaming: false
+                  })
+                  this.isStreaming = false
+                  this.currentReader = null
+                  this.loadConvList()
+                  return
+                } else if (event === 'error') {
+                  throw new Error(data.trim() || 'AI 服务异常')
+                }
               }
             } else if (line.trim() === '') {
-              // 空行标识事件组结束，重置 event 缓存
               this.sseEventBuffer = null
             }
           }
@@ -3020,5 +3205,178 @@ export default {
 .web-search-btn-modern:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* 智能体工作流流转高级样式 */
+.workflow-steps-container {
+  background: rgba(248, 247, 250, 0.75);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(225, 219, 236, 0.5);
+  border-radius: 16px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.03);
+  transition: all 0.3s ease;
+}
+.workflow-steps-container:hover {
+  box-shadow: 0 12px 36px rgba(139, 92, 246, 0.07);
+}
+.workflow-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #f8f7fa 0%, #e8def8 100%);
+  border-bottom: 1px solid rgba(225, 219, 236, 0.4);
+  font-size: 13px;
+  font-weight: 600;
+  color: #6d28d9;
+}
+.workflow-steps-list {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.workflow-step-item {
+  display: flex;
+  gap: 12px;
+  position: relative;
+}
+.workflow-step-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 22px;
+  bottom: -20px;
+  width: 2px;
+  background: #e2e8f0;
+}
+.workflow-step-item.running:not(:last-child)::after {
+  background: linear-gradient(to bottom, #3b82f6, rgba(59, 130, 246, 0.1), #3b82f6);
+  background-size: 100% 200%;
+  animation: lineFlow 1.5s infinite linear;
+}
+@keyframes lineFlow {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 200%; }
+}
+.workflow-step-item.success:not(:last-child)::after {
+  background: #10b981;
+}
+.step-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 2px solid #cbd5e1;
+  z-index: 1;
+  font-size: 11px;
+  color: #64748b;
+  transition: all 0.3s;
+}
+.workflow-step-item.running .step-icon {
+  border-color: #3b82f6;
+  color: #3b82f6;
+  box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4), 
+              0 0 0 4px rgba(59, 130, 246, 0.2);
+  animation: pulseGlow 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4), 0 0 0 0 rgba(59, 130, 246, 0.2); }
+  100% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0), 0 0 0 12px rgba(59, 130, 246, 0); }
+}
+.workflow-step-item.success .step-icon {
+  border-color: #10b981;
+  background: #10b981;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+}
+.workflow-step-item.error .step-icon {
+  border-color: #ef4444;
+  background: #ef4444;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.2);
+}
+.step-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.step-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+.workflow-step-item.running .step-name {
+  color: #2563eb;
+}
+.step-code {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.step-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #1e40af;
+  margin-top: 4px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.05);
+}
+.step-tool-badge i {
+  color: #2563eb;
+}
+.step-tool-badge .tool-name {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-weight: 600;
+}
+.step-thinking-box {
+  background: #fdfbf7;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin-top: 6px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.01);
+}
+.step-thinking-box .thinking-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #b5895b;
+  margin-bottom: 3px;
+}
+.step-thinking-box .thinking-text {
+  font-size: 12px;
+  color: #64748b;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.step-content-box {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.01);
+}
+.step-content-box .content-text {
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.6;
 }
 </style>

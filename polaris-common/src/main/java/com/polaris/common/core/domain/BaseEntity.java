@@ -1,5 +1,6 @@
 package com.polaris.common.core.domain;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -22,6 +23,7 @@ public class BaseEntity implements Serializable
     /** 搜索值 */
     @Hidden
     @JsonIgnore
+    @TableField(exist = false)
     private String searchValue;
 
     /** 创建者 */
@@ -46,6 +48,7 @@ public class BaseEntity implements Serializable
     /** 请求参数 */
     @Hidden
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @TableField(exist = false)
     private Map<String, Object> params;
 
     public String getSearchValue()

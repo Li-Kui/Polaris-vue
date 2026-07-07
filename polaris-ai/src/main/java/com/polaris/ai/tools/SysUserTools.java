@@ -1,5 +1,6 @@
 package com.polaris.ai.tools;
 
+import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.common.core.domain.entity.SysUser;
 import com.polaris.system.service.ISysUserService;
@@ -16,6 +17,7 @@ import java.util.List;
  * @author polaris
  */
 @Component
+@AiAgentTool("系统用户审计")
 public class SysUserTools implements AiTool {
     @Autowired
     private ISysUserService userService;
