@@ -197,288 +197,275 @@ export default {
   },
 }
 </script>
-<style>
-    .verifybox{
+<style lang="scss">
+    /* 全局遮罩层 */
+    .mask {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 2001; /* 确保盖在所有一般 dialog 顶层 */
+        width: 100%;
+        height: 100vh;
+        background: rgba(7, 10, 19, 0.65) !important;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        transition: all .5s;
+    }
+
+    /* 验证框主体 - 暗黑毛玻璃风格 */
+    .verifybox {
         position: relative;
         box-sizing: border-box;
-        border-radius: 2px;
-        border: 1px solid #e4e7eb;
-        background-color: #fff;
-        box-shadow: 0 0 10px rgba(0,0,0,.3);
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        background-color: rgba(15, 23, 42, 0.85) !important;
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(25px);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
         left: 50%;
-        top:50%;
-        transform: translate(-50%,-50%);
+        top: 50%;
+        transform: translate(-50%, -50%);
+        overflow: hidden;
+        transition: all 0.3s;
     }
-    .verifybox-top{
-        padding: 0 15px;
+
+    /* 头部标题区域 */
+    .verifybox-top {
+        padding: 0 20px !important;
         height: 50px;
         line-height: 50px;
         text-align: left;
-        font-size: 16px;
-        color: #45494c;
-        border-bottom: 1px solid #e4e7eb;
+        font-size: 15px !important;
+        font-weight: 600 !important;
+        color: #e2e8f0 !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
         box-sizing: border-box;
+        background: rgba(30, 41, 59, 0.2) !important;
+        position: relative;
     }
-    .verifybox-bottom{
-        padding: 15px;
-        box-sizing: border-box;
-    }
-    .verifybox-close{
+
+    /* 关闭按钮 */
+    .verifybox-close {
         position: absolute;
         top: 13px;
-        right: 9px;
+        right: 15px;
         width: 24px;
         height: 24px;
         text-align: center;
         cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.3s;
+        
+        .iconfont {
+            color: #64748b !important;
+            transition: color 0.3s;
+        }
+        
+        &:hover {
+            transform: rotate(90deg);
+            .iconfont {
+                color: #f43f5e !important;
+            }
+        }
     }
-    .mask{
-        position: fixed;
-        top: 0;
-        left:0;
-        z-index: 1001;
-        width: 100%;
-        height: 100vh;
-        background: rgba(0,0,0,.3);
-        /* display: none; */
-        transition: all .5s;
+
+    /* 底部验证区域 */
+    .verifybox-bottom {
+        padding: 20px !important;
+        box-sizing: border-box;
     }
-    .verify-tips{
+
+    /* 提示字条样式（成功/失败） */
+    .verify-tips {
         position: absolute;
         left: 0px;
-        bottom:0px;
+        bottom: 0px;
         width: 100%;
         height: 30px;
-        line-height:30px;
-        color: #fff;
+        line-height: 30px;
+        color: #fff !important;
+        font-size: 13px !important;
+        text-align: center;
+        z-index: 10;
+        border-bottom-left-radius: 8px;
+        border-bottom-right-radius: 8px;
     }
-    .suc-bg{
-       background-color:rgba(92, 184, 92,.5);
-       filter: progid:DXImageTransform.Microsoft.gradient(startcolorstr=#7f5CB85C, endcolorstr=#7f5CB85C);
+    .suc-bg {
+        background-color: rgba(16, 185, 129, 0.85) !important;
     }
-    .err-bg{
-       background-color:rgba(217, 83, 79,.5);
-       filter: progid:DXImageTransform.Microsoft.gradient(startcolorstr=#7fD9534F, endcolorstr=#7fD9534F);
+    .err-bg {
+        background-color: rgba(239, 68, 68, 0.85) !important;
     }
-    .tips-enter,.tips-leave-to{
-        bottom: -30px;
-    }
-    .tips-enter-active,.tips-leave-active{
-        transition: bottom .5s;
-    }
-    /* ---------------------------- */
-    /*常规验证码*/
+
+    /* 常规验证码输入框及按钮 */
     .verify-code {
         font-size: 20px;
         text-align: center;
         cursor: pointer;
         margin-bottom: 5px;
-        border: 1px solid #ddd;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        background-color: rgba(30, 41, 59, 0.4) !important;
+        color: #e2e8f0 !important;
+        border-radius: 6px;
     }
-
-    .cerify-code-panel {
-        height: 100%;
-        overflow: hidden;
-    }
-
-    .verify-code-area {
-        float: left;
-    }
-
-    .verify-input-area {
-        float: left;
-        width: 60%;
-        padding-right: 10px;
-
-    }
-
-    .verify-change-area {
-        line-height: 30px;
-        float: left;
-    }
-
     .varify-input-code {
-        display: inline-block;
-        width: 100%;
-        height: 25px;
+        background-color: rgba(30, 41, 59, 0.4) !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        color: #e2e8f0 !important;
+        border-radius: 6px;
+        padding: 4px 8px;
     }
-
     .verify-change-code {
-        color: #337AB7;
+        color: #38bdf8 !important;
         cursor: pointer;
+        &:hover {
+            color: #7dd3fc !important;
+        }
     }
-
     .verify-btn {
         width: 200px;
-        height: 30px;
-        background-color: #337AB7;
-        color: #FFFFFF;
-        border: none;
+        height: 34px;
+        background: linear-gradient(135deg, #0ea5e9, #8b5cf6) !important;
+        color: #FFFFFF !important;
+        border: none !important;
         margin-top: 10px;
+        border-radius: 6px;
+        font-weight: 600;
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        cursor: pointer;
+        transition: all 0.3s;
+        
+        &:hover {
+            background: linear-gradient(135deg, #38bdf8, #a78bfa) !important;
+            box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4);
+        }
     }
 
-    /*滑动验证码*/
+    /* 滑动验证轨道区 - 必须使用 content-box */
     .verify-bar-area {
         position: relative;
-        background: #FFFFFF;
+        background: rgba(30, 41, 59, 0.4) !important;
         text-align: center;
-        -webkit-box-sizing: content-box;
-        -moz-box-sizing: content-box;
-        box-sizing: content-box;
-        border: 1px solid #ddd;
-        -webkit-border-radius: 4px;
+        -webkit-box-sizing: content-box !important;
+        -moz-box-sizing: content-box !important;
+        box-sizing: content-box !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 8px !important;
+        
+        .verify-msg {
+            color: #64748b !important;
+            font-size: 14px;
+        }
     }
 
+    /* 移动滑块 - 必须使用 content-box */
     .verify-bar-area .verify-move-block {
         position: absolute;
         top: 0px;
         left: 0;
-        background: #fff;
+        background: linear-gradient(135deg, #0ea5e9, #8b5cf6) !important;
         cursor: pointer;
-        -webkit-box-sizing: content-box;
-        -moz-box-sizing: content-box;
-        box-sizing: content-box;
-        box-shadow: 0 0 2px #888888;
-        -webkit-border-radius: 1px;
+        -webkit-box-sizing: content-box !important;
+        -moz-box-sizing: content-box !important;
+        box-sizing: content-box !important;
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3) !important;
+        border-radius: 8px !important;
+        border: none !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.3s, box-shadow 0.3s;
+        
+        &:hover {
+            background: linear-gradient(135deg, #38bdf8, #a78bfa) !important;
+            box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4), 0 0 8px rgba(14, 165, 233, 0.3) !important;
+        }
     }
 
-    .verify-bar-area .verify-move-block:hover {
-        background-color: #337ab7;
-        color: #FFFFFF;
-    }
-
+    /* 左侧滑过的区域 - 必须使用 content-box */
     .verify-bar-area .verify-left-bar {
         position: absolute;
         top: -1px;
         left: -1px;
-        background: #f0fff0;
+        background: rgba(14, 165, 233, 0.1) !important;
         cursor: pointer;
-        -webkit-box-sizing: content-box;
-        -moz-box-sizing: content-box;
-        box-sizing: content-box;
-        border: 1px solid #ddd;
+        -webkit-box-sizing: content-box !important;
+        -moz-box-sizing: content-box !important;
+        box-sizing: content-box !important;
+        border: 1px solid #0ea5e9 !important;
+        border-radius: 8px !important;
+        
+        .verify-msg {
+            color: #38bdf8 !important;
+            font-size: 14px;
+        }
     }
 
+    /* 移动滑块内的拼图小块 - 必须加回绝对定位，否则滑块会错位并且遮挡鼠标事件 */
+    .verify-bar-area .verify-move-block .verify-sub-block {
+        position: absolute !important;
+        text-align: center !important;
+        z-index: 3 !important;
+    }
+
+    /* 验证图片面板 - 必须使用 content-box */
     .verify-img-panel {
         margin: 0;
-        -webkit-box-sizing: content-box;
-        -moz-box-sizing: content-box;
-        box-sizing: content-box;
-        border-top: 1px solid #ddd;
-        border-bottom: 1px solid #ddd;
-        border-radius: 3px;
+        -webkit-box-sizing: content-box !important;
+        -moz-box-sizing: content-box !important;
+        box-sizing: content-box !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        border-radius: 8px !important;
         position: relative;
+        overflow: hidden;
     }
 
+    /* 刷新按钮 */
     .verify-img-panel .verify-refresh {
-        width: 25px;
-        height: 25px;
+        width: 30px;
+        height: 30px;
         text-align: center;
-        padding: 5px;
+        padding: 0;
         cursor: pointer;
         position: absolute;
-        top: 0;
-        right: 0;
-        z-index: 2;
+        top: 8px;
+        right: 8px;
+        z-index: 12;
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition: background 0.3s, transform 0.3s;
+        
+        &:hover {
+            background: rgba(15, 23, 42, 0.85);
+            transform: rotate(180deg);
+        }
+        
+        .icon-refresh {
+            font-size: 16px;
+            color: #e2e8f0 !important;
+        }
     }
 
-    .verify-img-panel .icon-refresh {
-        font-size: 20px;
-        color: #fff;
-    }
-
+    /* 底图镂空的遮挡背景板 */
     .verify-img-panel .verify-gap {
-        background-color: #fff;
-        position: relative;
-        z-index: 2;
-        border: 1px solid #fff;
+        background-color: #fff !important;
+        position: relative !important;
+        z-index: 2 !important;
+        border: 1px solid #fff !important;
     }
 
-    .verify-bar-area .verify-move-block .verify-sub-block {
-        position: absolute;
-        text-align: center;
-        z-index: 3;
-        /* border: 1px solid #fff; */
-    }
-
-    .verify-bar-area .verify-move-block .verify-icon {
-        font-size: 18px;
-    }
-
-    .verify-bar-area .verify-msg {
-        z-index: 3;
-    }
-
-    .iconfont {
-        font-family: "iconfont" !important;
-        font-size: 16px;
-        font-style: normal;
-        -webkit-font-smoothing: antialiased;
-        -moz-osx-font-smoothing: grayscale;
-    }
-
-    .icon-check:before {
-        content: " ";
-        display: block;
-        width: 16px;
-        height: 16px;
-        position: absolute;
-        margin: auto;
-        left: 0;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 9999;
-        background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADIEAYAAAD9yHLdAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAZiS0dEAAAAAAAA+UO7fwAAAAlwSFlzAAAASAAAAEgARslrPgAAIlFJREFUeNrt3X1cVNW6B/BnbcS3xJd7fLmSeo+op/Qmyp4BFcQEwpd8Nyc9iZppgUfE49u1tCwlNcMySCM1S81jCoaioiJvKoYgswfUo5wSJ69SZFKCKSAws+4f2/GetFFRYG3g9/2Hz2xj+O2J4Zm19trrIQIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAKgjmOgAAADwOBhz83TzdPNs397qanW1ujJ2s8fNHjd7FBTkhuSG5IbculVdP1kSfeoAAPBwdFzHdXzgQN0S3RLdkpgY2SJbZMvNm9It6ZZ064cfGmQ2yGyQmZfX3KO5R3OPwkJdsi5Zl5yYKIfL4XL4mDHqs7AqGzhgBAIAoFFdI7pGdI1o1KjFlhZbWmxZv149OmXK4z3r4cPEiROfOFExKSbFVFDwqM+EEQgAgMY8y5/lz/LGjZu3bt66eev9+9Wjj1s4bAYNIkaMWHKyx3mP8x7nmzd/1GdyEP1CAQCASifrZJ3s6FjmWuZa5rprF3uLvcXeGjq0en5au3a8nJfz8k6d8lPyU/JTYmIq+wwYgQAAaIIk0WgaTaO/+IJm0SyaNWJEtf/IPMqjvJde0g/QD9APcHOrdGIhrxMAANzGmJwr58q569ZRLMVS7MSJNfajFVJIYYy/wF/gL7z0UmW/vUGNvk4AAHCHTqfT6XQrVtB4Gk/jg4KEBfmBfqAf+vSp7LdhBAIAUMPUwvH66+oj21eBSqmUStu3r+y3oYAAANQQtXDMmKE+WrlSdB4bvpwv58t/+62y34cCAgBQzeSt8lZ568SJFEiBFLh2reg8d2MD2UA28PTpyn4fCggAQDXRh+pD9aEjR1IABVDA5s20ntbTeklzf3eZF/NiXvv2Vfb7NHciAAC1nRwsB8vBvr5Wf6u/1X/nTubO3Jl7A+0tWvImb/LOyemc3zm/c/6ePZX9dmxlAgBQRfTd9N303Tw8rFusW6xbEhPZLDaLzXJyEp3rHjNoBs24dYt/wj/hn3h5mUwmk8mkKJV9GoxAAAAekz5AH6APeOYZ6znrOeu5Awc0WzgCKZACrVZ2hB1hR15++VELhw1GIAAAj0hdVdWli/ooNVX9WvnlsNUflHSk45wbuZEbg4LUwrFhw+M+LUYgAACV1CuoV1CvoCef5Kv4Kr4qIUE9qsHCcRsv4AW8YOHCqiocNtq7qAMAoFHqZoetW9MgGkSDDh+mhbSQFnbuLDrX/YWGmmJMMaaYsLCqfmZMYQEAPIBt23PLp5ZPLZ8mJ9MROkJHdDr蕾特码码");
-        background-size: contain;
-    }
-
-    .icon-close:before {
-        content: " ";
-        display: block;
-        width: 16px;
-        height: 16px;
-        position: absolute;
-        margin: auto;
-        left: 0;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 9999;
-        background-image: url("data:image/png;base64,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");
-        background-size: contain;
-    }
-
-    .icon-right:before {
-        content: " ";
-        display: block;
-        width: 16px;
-        height: 16px;
-        position: absolute;
-        margin: auto;
-        left: 0;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        background-size: cover;
-        z-index: 9999;
-        background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADIEAYAAAD9yHLdAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAZiS0dEAAAAAAAA+UO7fwAAAAlwSFlzAAAASAAAAEgARslrPgAAJ4pJREFUeNrt3XtcVXW6P/Dn2VwCBxUzNbnkkXRSGzXW2huQRLyMIqKRJF7Q1CkrDS+VGp3Gy9g5YzI6qVsNfTmlqGmipQiIiJqAcnOvhaKRHidshoatpKaBogL7OX+s6Mz8flO5CfzutXne/+zXWhR8QOXZ3+93Pd8vAHuAEKW10lpp7dix0mXpsnR5/34pX8qX8r/7TpZlWZaJGl//9f6+fY3/X+PnEf2dMMYY/yJqYcbbxtvG2/7+lEM5lLN7NyyCRbBowICmfj56m96mt/PzDZGGSEPkxImWNpY2ljYVFaK/T8ZY6+MiOoCzMn1t+tr09a9/TQfpIB0sLITlsByW9+r1Sz8v5mEe5vn7Q3toD+0nT/Y77Xfa73ROTuWNyhuVNyorRX/fjLHWg0cgzUybcmrThvIoj/JUFcMwDMOeeKLFvmA8xEN8TQ2sh/Ww/rnnFFVRFfXwYdE/B8aY8zOIDuBsqDf1pt6vvdbaui//wL90DawAMXdHc7BOTi3Y4e8R94j75kwR/RPhDHmvHgKqpqZYk2xptinnrKV28pt5SUlkPM0ogE0gAb88Y/qenW9un7x4u/vkuhcjDH94xFIQ6lX6pV6pXiZ/mX5l+Vf/8sP6SAdpC/1199Wd4O7wd3QfPtt+YV8IT/Yv596eHiKzsUYcxw8gmgqT086Tadpd+/STr29aR/t026qqtT0qKq2f00NfUff0Xdf/lXqHekd6R2TkyM6F2PMcfEUVuujcTE6ICAgICAgOpr20B7ao79GPpyH83Deww8b0IAGzM4OzI+1H2QpKhYdiTFHwlNYLYc0WZoszZZmjx6NFbAMlsGyGzdE52qqL7/Ueucf1lT0R3/0//CD6FyMseblIsIWQtpEaZI0SVo0diwqoyIqatw40bmabsoUZZAySJncuVPeIe+Qd8TGio7FGGMti9dAGGPthN95MMbYj+MCwlh74HceTOfi94Eyxh6o/yFpjDSGNZKyyP+QNIay0tLSstIZM0Tna6oklqySFau0tLTG/zL+l/G/Hn20sLdhr2FvKCpEdCzWWnENhLHmJh/yR/5+/jxaR+to3dSpdJAO0tFvvxWdr2leeklb0n/rFuVQDnnySeVQDn/6E+VQDlOnio7FWmvBBYSxZid1yjpJnbI2bICt2NZR9/1h7N+xDZZhGZb95S98D/fgnm++oRAKoRBeAxGDRyCMNQMpUyW/kt/2xBO2L1u2fX3DhiJ312D/RjW2Xq5e/exv1r3Wvda9fMIE7cOFC6JzMdYK8FMwxh5Enn6aLtPlDRuYwAxmK1eKztV0e/ZoY87mzfA/PPA/PPDOO/y/s2PHW8dG7iLdM3gEwpjL8tpr2qQ2K4u+oS/oa9mXq/p1qgJb1mU2fJn2f5l2Zc4cbZPh6ePqLzkGexQ8gmDMdfmlnO1T+2n7tF27tA69bdrY5W13o8z1tq8Zf+rKkCFcRBh7BDyCYMxl2fGnvLfyV7+SHyX+RfxX/x9mG/5j3O3/X79e8Vf8ld/k5Ohc9eWnBvLqA49AGDsv21+0H/xbeU//d/h7/P/iF8W/jv+Pvy+wL/An+BO8Tz6Z59Hz7NmeX5UeqR6pHqkeeeKJJ81F4y/G/w9X21Fh9aQ1+AAAAABJRU5ErkJggg==");
-        background-size: contain;
-    }
-
+    /* 图标与 Base64 反色滤镜 */
+    .icon-right:before,
+    .icon-close:before,
+    .icon-check:before,
     .icon-refresh:before {
-        content: " ";
-        display: block;
-        width: 16px;
-        height: 16px;
-        position: absolute;
-        margin: auto;
-        left: 0;
-        right: 0;
-        top: 0;
-        bottom: 0;
-        z-index: 9999;
-        background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAADIEAYAAAD9yHLdAAAABGdBTUEAALGPC/xhBQAAAAFzUkdCAK7OHOkAAAAgY0hSTQAAeiYAAICEAAD6AAAAgOgAAHUwAADqYAAAOpgAABdwnLpRPAAAAAZiS0dEAAAAAAAA+UO7fwAAAAlwSFlzAAAASAAAAEgARslrPgAAMQpJREFUeNrt3XlcVHX3B/Bz7rCISi6IC+ijkpZpIswMyBLgluVuKm4pqWmEuG/hUpr5uFYoiuaSFrklZvroo+jPFRURZgYVxZ1K3HIXUBSGe35/XC9PWpYL8J2B8/6H1wwGn3sb5sz93u/3fAEYY4wxxhhjjDHGGGOMMcYYY4wxxhhjjDHGGGOMMcYYY4wxxhhjjDHGGGOMMcYYY4wxxhhjjDHGGGOM/QUUHYCx59F0dd");
-        background-size: contain;
+        filter: invert(1) brightness(2) !important;
     }
 </style>
