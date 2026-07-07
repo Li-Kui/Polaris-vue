@@ -1,5 +1,6 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.annotation.Sensitive;
 import com.polaris.common.core.domain.BaseEntity;
 import com.polaris.common.enums.DesensitizedType;
@@ -93,4 +94,10 @@ public class AiModelConfig extends BaseEntity
     /** 状态 (1正常 0禁用) */
     @Schema(description = "状态 (1正常 0禁用)")
     private String status;
+
+    /** 删除标志（0代表存在 2代表删除） */
+    @Schema(description = "删除标志（0代表存在 2代表删除）")
+    @TableLogic(value = "0", delval = "2")
+    private String delFlag;
 }
+

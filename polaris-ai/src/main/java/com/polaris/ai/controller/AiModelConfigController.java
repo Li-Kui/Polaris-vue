@@ -140,7 +140,7 @@ public class AiModelConfigController extends BaseController
     @DeleteMapping("/{id}")
     public ResultData remove(@PathVariable Long id)
     {
-        int result = modelConfigMapper.deleteModelConfigById(id);
+        int result = modelConfigMapper.deleteById(id);
         modelFactory.clearCache(); // 清除工厂缓存
         return toAjaxResult(result);
     }

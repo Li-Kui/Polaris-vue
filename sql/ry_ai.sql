@@ -7,6 +7,7 @@ CREATE TABLE `ai_knowledge_base` (
   `name` varchar(100) NOT NULL COMMENT '知识库名称',
   `description` varchar(500) DEFAULT NULL COMMENT '知识库描述',
   `dept_id` bigint(20) DEFAULT NULL COMMENT '部门ID',
+  `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
@@ -25,6 +26,7 @@ CREATE TABLE `ai_document` (
   `file_url` varchar(500) NOT NULL COMMENT '文件OSS/本地路径',
   `status` char(1) DEFAULT '0' COMMENT '状态（0待解析 1解析中 2已解析 3失败）',
   `word_count` int(11) DEFAULT '0' COMMENT '总字数',
+  `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
@@ -104,6 +106,7 @@ CREATE TABLE `ai_model_config` (
   `enable_search` char(1) DEFAULT '0' COMMENT '是否启用联网搜索(1是 0否)',
   `search_key` varchar(255) DEFAULT NULL COMMENT '联网搜索 API Key',
   `status` char(1) DEFAULT '1' COMMENT '状态(1正常 0禁用)',
+  `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
@@ -125,3 +128,6 @@ VALUES ('阿里通义向量', 'dashscope', 'text-embedding-v3', 'sk-您的Key', 
 -- ----------------------------
 -- ALTER TABLE `ai_model_config` ADD COLUMN `enable_search` CHAR(1) DEFAULT '0' COMMENT '是否启用联网搜索 (1是 0否)';
 -- ALTER TABLE `ai_model_config` ADD COLUMN `search_key` VARCHAR(255) DEFAULT NULL COMMENT '联网搜索 API Key';
+-- ALTER TABLE `ai_model_config` ADD COLUMN `del_flag` CHAR(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）';
+-- ALTER TABLE `ai_knowledge_base` ADD COLUMN `del_flag` CHAR(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）';
+-- ALTER TABLE `ai_document` ADD COLUMN `del_flag` CHAR(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）';

@@ -1,5 +1,6 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -47,4 +48,10 @@ public class AiDocument extends BaseEntity
     /** 总字数 */
     @Schema(description = "总字数")
     private Integer wordCount;
+
+    /** 删除标志（0代表存在 2代表删除） */
+    @Schema(description = "删除标志（0代表存在 2代表删除）")
+    @TableLogic(value = "0", delval = "2")
+    private String delFlag;
 }
+

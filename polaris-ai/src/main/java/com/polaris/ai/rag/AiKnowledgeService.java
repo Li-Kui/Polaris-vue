@@ -1,9 +1,11 @@
 package com.polaris.ai.rag;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
+import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
-import com.polaris.ai.attachment.AttachmentParserHelper;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
@@ -38,6 +40,9 @@ public class AiKnowledgeService
     private AiKnowledgeMapper aiKnowledgeMapper;
 
     @Autowired
+    private AiDocumentMapper aiDocumentMapper;
+
+    @Autowired
     private EmbeddingModel embeddingModel;
 
     @Autowired
@@ -54,17 +59,17 @@ public class AiKnowledgeService
 
     public AiKnowledgeBase selectKnowledgeBaseById(Long id)
     {
-        return aiKnowledgeMapper.selectKnowledgeBaseById(id);
+        return aiKnowledgeMapper.selectById(id);
     }
 
     public int insertKnowledgeBase(AiKnowledgeBase kb)
     {
-        return aiKnowledgeMapper.insertKnowledgeBase(kb);
+        return aiKnowledgeMapper.insert(kb);
     }
 
     public int updateKnowledgeBase(AiKnowledgeBase kb)
     {
-        return aiKnowledgeMapper.updateKnowledgeBase(kb);
+        return aiKnowledgeMapper.updateById(kb);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -78,9 +83,10 @@ public class AiKnowledgeService
             log.warn("从向量数据库移除知识库 {} 的数据失败", id, e);
         }
 
-        // 2. 级联删除数据库中的文档列表与知识库本身
-        aiKnowledgeMapper.deleteDocumentsByKnowledgeBaseId(id);
-        return aiKnowledgeMapper.deleteKnowledgeBase(id);
+        // 2. 级联逻辑删除数据库中的文档列表与知识库本身
+        aiDocumentMapper.delete(new LambdaQueryWrapper<AiDocument>()
+                .eq(AiDocument::getKnowledgeBaseId, id));
+        return aiKnowledgeMapper.deleteById(id);
     }
 
     // ================================================================
@@ -89,19 +95,19 @@ public class AiKnowledgeService
 
     public List<AiDocument> listDocument(AiDocument doc)
     {
-        return aiKnowledgeMapper.selectDocumentList(doc);
+        return aiDocumentMapper.selectDocumentList(doc);
     }
 
     public AiDocument selectDocumentById(Long id)
     {
-        return aiKnowledgeMapper.selectDocumentById(id);
+        return aiDocumentMapper.selectById(id);
     }
 
     public int insertDocument(AiDocument doc)
     {
         doc.setStatus("0"); // 待解析
         doc.setWordCount(0);
-        return aiKnowledgeMapper.insertDocument(doc);
+        return aiDocumentMapper.insert(doc);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -115,8 +121,8 @@ public class AiKnowledgeService
             log.warn("从向量数据库移除文档 {} 的数据失败", id, e);
         }
 
-        // 2. 物理删除数据库记录
-        return aiKnowledgeMapper.deleteDocument(id);
+        // 2. 逻辑删除数据库记录
+        return aiDocumentMapper.deleteById(id);
     }
 
     // ================================================================
@@ -129,7 +135,7 @@ public class AiKnowledgeService
     @Async("threadPoolTaskExecutor")
     public void importDocumentAsync(Long docId)
     {
-        AiDocument doc = aiKnowledgeMapper.selectDocumentById(docId);
+        AiDocument doc = aiDocumentMapper.selectById(docId);
         if (doc == null) {
             log.error("未找到待导入的文档，ID: {}", docId);
             return;
@@ -139,7 +145,7 @@ public class AiKnowledgeService
         
         // 1. 更新状态为解析中 (1)
         doc.setStatus("1");
-        aiKnowledgeMapper.updateDocument(doc);
+        aiDocumentMapper.updateById(doc);
 
         try {
             // 2. 提取文本内容
@@ -171,13 +177,13 @@ public class AiKnowledgeService
             // 6. 更新状态为已解析 (2)
             doc.setStatus("2");
             doc.setWordCount(wordCount);
-            aiKnowledgeMapper.updateDocument(doc);
+            aiDocumentMapper.updateById(doc);
             log.info(">>> 文档 {} 向量化入库成功", doc.getName());
 
         } catch (Exception e) {
             log.error(">>> 文档 {} 向量化失败", doc.getName(), e);
             doc.setStatus("3"); // 失败
-            aiKnowledgeMapper.updateDocument(doc);
+            aiDocumentMapper.updateById(doc);
         }
     }
 
@@ -193,7 +199,7 @@ public class AiKnowledgeService
         
         AiDocument query = new AiDocument();
         query.setStatus("2"); // 已解析
-        List<AiDocument> readyDocs = aiKnowledgeMapper.selectDocumentList(query);
+        List<AiDocument> readyDocs = aiDocumentMapper.selectDocumentList(query);
         
         if (readyDocs == null || readyDocs.isEmpty()) {
             log.info(">>> 没有已解析的文档需要加载到内存向量库");

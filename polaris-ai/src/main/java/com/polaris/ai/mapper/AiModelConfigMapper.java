@@ -1,5 +1,6 @@
 package com.polaris.ai.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiModelConfig;
 
 import java.util.List;
@@ -9,7 +10,7 @@ import java.util.List;
  * 
  * @author polaris
  */
-public interface AiModelConfigMapper
+public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
 {
     /**
      * 查询模型配置列表
@@ -53,10 +54,7 @@ public interface AiModelConfigMapper
      */
     int updateModelConfig(AiModelConfig config);
 
-    /**
-     * 根据 ID 删除模型配置
-     */
-    int deleteModelConfigById(Long id);
+
 
     /**
      * 重置所有模型配置的默认聊天模型状态 (将 is_default 置为 '0')

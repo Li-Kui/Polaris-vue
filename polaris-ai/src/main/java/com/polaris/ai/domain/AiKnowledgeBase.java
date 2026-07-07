@@ -1,5 +1,6 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -33,4 +34,10 @@ public class AiKnowledgeBase extends BaseEntity
     /** 部门 ID */
     @Schema(description = "部门 ID")
     private Long deptId;
+
+    /** 删除标志（0代表存在 2代表删除） */
+    @Schema(description = "删除标志（0代表存在 2代表删除）")
+    @TableLogic(value = "0", delval = "2")
+    private String delFlag;
 }
+
