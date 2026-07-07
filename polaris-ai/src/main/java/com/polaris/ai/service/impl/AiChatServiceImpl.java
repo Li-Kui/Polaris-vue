@@ -2,22 +2,24 @@ package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.attachment.AttachmentParserHelper;
+import com.polaris.ai.attachment.MultimodalMediaHelper;
 import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.domain.AiConversation;
+import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
+import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.service.IAiModelConfigService;
-import com.polaris.ai.tools.base.AiTool;
-import com.polaris.common.config.PolarisConfig;
-import com.polaris.common.core.domain.entity.SysRole;
+import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
 import com.polaris.system.service.ISysConfigService;
 import com.polaris.system.service.ISysRoleService;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.agent.tool.ToolSpecifications;
-import dev.langchain4j.data.message.*;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -25,29 +27,18 @@ import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.rendering.ImageType;
-import org.apache.pdfbox.rendering.PDFRenderer;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.request.RequestAttributes;
-import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.nio.file.Files;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -98,8 +89,17 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     @Autowired
     private com.polaris.ai.pivot.AiModelFactory modelFactory;
 
-    @Autowired(required = false)
-    private List<AiTool> aiTools = new ArrayList<>();
+    @Autowired
+    private MultimodalMediaHelper mediaHelper;
+
+    @Autowired
+    private SystemPromptResolver promptResolver;
+
+    @Autowired
+    private AiToolRegistry toolRegistry;
+
+    @Autowired
+    private SsePushHelper sseHelper;
 
     // ----------------------------------------------------------------
     // 会话管理
@@ -179,7 +179,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         // 1. 鉴权：会话必须属于当前用户
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
         if (conv == null) {
-            sendSse(emitter, "error", "会话不存在或无权限");
+            sseHelper.sendSse(emitter, "error", "会话不存在或无权限");
             return;
         }
 
@@ -187,9 +187,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         String parsedAttachmentContent = null;
         String fileName = null;
         if (fileUrl != null && !fileUrl.trim().isEmpty()) {
-            sendSse(emitter, "status", "正在解析文件附件...");
+            sseHelper.sendSse(emitter, "status", "正在解析文件附件...");
             parsedAttachmentContent = AttachmentParserHelper.parse(fileUrl);
-            sendSse(emitter, "status", "附件解析成功，正在初始化 AI 思考...");
+            sseHelper.sendSse(emitter, "status", "附件解析成功，正在初始化 AI 思考...");
             fileName = fileUrl.substring(fileUrl.lastIndexOf("/") + 1);
 
             // 安全限制：若解析内容过大超过 28000 字符，进行截断，防止超限报错
@@ -198,7 +198,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         + "\n\n...[由于文件附件体积过大，已自动截断保留前 28000 字符内容]...";
             }
         } else {
-            sendSse(emitter, "status", "正在呼叫 AI 助手...");
+            sseHelper.sendSse(emitter, "status", "正在呼叫 AI 助手...");
         }
 
         com.polaris.ai.domain.AiMessage userMsg = new com.polaris.ai.domain.AiMessage();
@@ -243,7 +243,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         } catch (Exception e) {
             log.error(">>> 查询模型配置失败，无法提取 searchKey: {}", e.getMessage());
         }
-        Map<ToolSpecification, ToolExecutor> tools = getContextAwareTools(securityContext, Boolean.TRUE.equals(enableSearch), searchKey);
+        Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, Boolean.TRUE.equals(enableSearch), searchKey);
 
         // 动态根据当前会话绑定的模型名称，获取对应的执行模型实例
         StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModel());
@@ -266,17 +266,17 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         TokenStream tokenStream = assistant.chat(messages);
         tokenStream.onPartialResponse(token -> {
                     if (fullReply.length() == 0) {
-                        sendSse(emitter, "status", "");
+                        sseHelper.sendSse(emitter, "status", "");
                     }
                     fullReply.append(token);
                     String escapedToken = token != null ? token.replace("\n", "__SSE_NEWLINE__") : "";
-                    sendSse(emitter, "message", escapedToken);
+                    sseHelper.sendSse(emitter, "message", escapedToken);
                 })
                 .onPartialThinking(thinking -> {
                     if (thinking != null && thinking.text() != null) {
                         fullReasoning.append(thinking.text());
                         String escapedThinking = thinking.text().replace("\n", "__SSE_NEWLINE__");
-                        sendSse(emitter, "reasoning", escapedThinking);
+                        sseHelper.sendSse(emitter, "reasoning", escapedThinking);
                     }
                 })
                 .onCompleteResponse(response -> {
@@ -289,19 +289,19 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         if (fullReasoning.length() > 0) {
                             aiMsg.setReasoningContent(fullReasoning.toString());
                         }
-                        // 记录本次对话消耗的 Token 总数（用于统计和计费）
+                        // 记录本次对话消耗 of Token 总数（用于统计和计费）
                         if (response != null && response.tokenUsage() != null) {
                             aiMsg.setTokens(response.tokenUsage().totalTokenCount());
                         }
                         aiChatMapper.insertMessage(aiMsg);
                     }
                     // 通知前端流式结束，前端收到后关闭 EventSource
-                    sendSse(emitter, "done", "[DONE]");
+                    sseHelper.sendSse(emitter, "done", "[DONE]");
                     emitter.complete();
                 })
                 .onError(error -> {
                     log.error("LangChain4j 声明式 AI 助手流式调用异常", error);
-                    sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
+                    sseHelper.sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
                     emitter.complete();
                 })
                 .start();
@@ -352,7 +352,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
         // 2. 若无专属提示词，回退获取特定角色的系统提示词（含全局默认兜底）
         if (system == null) {
-            system = getRoleSpecificSystemPrompt(userId);
+            system = promptResolver.getRoleSpecificSystemPrompt(userId);
         }
 
         if (system != null && !system.isEmpty()) {
@@ -367,48 +367,12 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 String fileUrl = m.getFileUrl();
                 if (fileUrl != null && !fileUrl.trim().isEmpty()) {
                     String fileName = m.getFileName() != null ? m.getFileName() : "";
-                    
-                    if (isImageFile(fileName)) {
-                        // A. 图片多模态处理：转换为 Base64 直接发给大模型
-                        String base64 = convertImageToBase64(fileUrl);
-                        if (base64 != null) {
-                            List<Content> contents = new ArrayList<>();
-                            contents.add(TextContent.from(m.getContent()));
-                            contents.add(ImageContent.from(base64, getImageMimeType(fileName)));
-                            list.add(UserMessage.from(contents));
-                        } else {
-                            list.add(UserMessage.from(m.getContent()));
-                        }
+                    if (mediaHelper.isImageFile(fileName)) {
+                        list.add(mediaHelper.buildImageMessage(m.getContent(), fileUrl, fileName));
                     } else if (fileName.toLowerCase().endsWith(".pdf")) {
-                        // B. PDF 多模态图文解析：运行时利用 PDFBox 渲染前 3 页为图片
-                        List<String> pagesBase64 = renderPdfPagesToBase64(fileUrl, 3);
-                        if (!pagesBase64.isEmpty()) {
-                            List<Content> contents = new ArrayList<>();
-                            String combinedPrompt = m.getContent() + "\n\n"
-                                    + "--------------------------------------------------\n"
-                                    + "[已为您解析并关联对话 PDF 附件: " + fileName + "]\n"
-                                    + "--------------------------------------------------\n"
-                                    + m.getFileContent();
-                            contents.add(TextContent.from(combinedPrompt));
-                            for (String pageBase64 : pagesBase64) {
-                                contents.add(ImageContent.from(pageBase64, "image/png"));
-                            }
-                            list.add(UserMessage.from(contents));
-                        } else {
-                            // 降级为纯文本拼接
-                            if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
-                                String combinedPrompt = m.getContent() + "\n\n"
-                                        + "--------------------------------------------------\n"
-                                        + "[已为您解析并关联对话附件: " + fileName + "]\n"
-                                        + "--------------------------------------------------\n"
-                                        + m.getFileContent();
-                                list.add(UserMessage.from(combinedPrompt));
-                            } else {
-                                list.add(UserMessage.from(m.getContent()));
-                            }
-                        }
+                        list.add(mediaHelper.buildPdfMultimodalMessage(m.getContent(), fileUrl, fileName, m.getFileContent()));
                     } else {
-                        // C. 其他纯文本文档：常规提取纯文本拼接
+                        // 其他纯文本文档：常规提取纯文本拼接
                         if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
                             String combinedPrompt = m.getContent() + "\n\n"
                                     + "--------------------------------------------------\n"
@@ -431,350 +395,4 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         return list;
     }
 
-    private boolean isImageFile(String fileName) {
-        if (fileName == null) return false;
-        String ext = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
-        return "png".equals(ext) || "jpg".equals(ext) || "jpeg".equals(ext) || "gif".equals(ext) || "webp".equals(ext) || "bmp".equals(ext);
-    }
-
-    private String getImageMimeType(String fileName) {
-        if (fileName == null) return "image/jpeg";
-        String ext = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
-        switch (ext) {
-            case "png": return "image/png";
-            case "gif": return "image/gif";
-            case "webp": return "image/webp";
-            case "bmp": return "image/bmp";
-            default: return "image/jpeg";
-        }
-    }
-
-    private String convertImageToBase64(String fileUrl) {
-        try {
-            String localPath = PolarisConfig.getProfile();
-            String relativePath = fileUrl;
-            if (fileUrl.startsWith("/profile")) {
-                relativePath = fileUrl.substring("/profile".length());
-            }
-            File file = new File(localPath + relativePath);
-            if (file.exists()) {
-                byte[] fileBytes = Files.readAllBytes(file.toPath());
-                // 动态缩放与压缩，初始参数设为更安全的 600x600, 0.45f，并在内部支持自适应降级循环
-                byte[] compressedBytes = compressImage(fileBytes, 600, 600, 0.45f);
-                return Base64.getEncoder().encodeToString(compressedBytes);
-            } else {
-                log.warn(">>> 未找到多模态图片文件: {}", file.getAbsolutePath());
-            }
-        } catch (Exception e) {
-            log.error(">>> 读取图片并转换为 Base64 失败: {}", e.getMessage(), e);
-        }
-        return null;
-    }
-
-    private byte[] compressImage(byte[] imageBytes, int maxWidth, int maxHeight, float quality) {
-        byte[] resultBytes = imageBytes;
-        int currentWidth = maxWidth;
-        int currentHeight = maxHeight;
-        float currentQuality = quality;
-
-        try {
-            // 自适应降级压缩循环，最多尝试 4 次，直到 Base64 长度小于 120,000 字符（对应 90KB 左右）
-            for (int i = 0; i < 4; i++) {
-                resultBytes = compressImageOnce(imageBytes, currentWidth, currentHeight, currentQuality);
-                String base64 = Base64.getEncoder().encodeToString(resultBytes);
-                
-                if (base64.length() < 120000) {
-                    log.info(">>> 图片动态压缩第 {} 次成功，原体积: {} bytes, 压缩后体积: {} bytes, Base64字符长度: {}", 
-                            i + 1, imageBytes.length, resultBytes.length, base64.length());
-                    break;
-                }
-                
-                log.warn(">>> 图片第 {} 次压缩后 Base64 长度 {} 仍超 120000 限额，启动等比降级...", i + 1, base64.length());
-                currentWidth = (int) (currentWidth * 0.75);
-                currentHeight = (int) (currentHeight * 0.75);
-                currentQuality = currentQuality * 0.75f;
-            }
-        } catch (Exception e) {
-            log.error(">>> 自适应压缩失败，回退到原图: {}", e.getMessage());
-        }
-        return resultBytes;
-    }
-
-    private byte[] compressImageOnce(byte[] imageBytes, int maxWidth, int maxHeight, float quality) throws Exception {
-        try (java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(imageBytes)) {
-            BufferedImage originalImage = ImageIO.read(bais);
-            if (originalImage == null) return imageBytes;
-
-            int width = originalImage.getWidth();
-            int height = originalImage.getHeight();
-
-            // 计算等比缩放比例
-            if (width > maxWidth || height > maxHeight) {
-                double widthRatio = (double) maxWidth / width;
-                double heightRatio = (double) maxHeight / height;
-                double ratio = Math.min(widthRatio, heightRatio);
-                width = (int) (width * ratio);
-                height = (int) (height * ratio);
-            }
-
-            BufferedImage resizedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            java.awt.Graphics2D g2d = resizedImage.createGraphics();
-            g2d.drawImage(originalImage, 0, 0, width, height, null);
-            g2d.dispose();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            java.util.Iterator<javax.imageio.ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
-            if (writers.hasNext()) {
-                javax.imageio.ImageWriter writer = writers.next();
-                try (javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
-                    writer.setOutput(ios);
-                    javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
-                    if (param.canWriteCompressed()) {
-                        param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
-                        param.setCompressionQuality(quality);
-                    }
-                    writer.write(null, new javax.imageio.IIOImage(resizedImage, null, null), param);
-                } catch (Exception err) {
-                    baos.reset();
-                    ImageIO.write(resizedImage, "jpg", baos);
-                } finally {
-                    writer.dispose();
-                }
-            } else {
-                ImageIO.write(resizedImage, "jpg", baos);
-            }
-
-            return baos.toByteArray();
-        }
-    }
-
-    private List<String> renderPdfPagesToBase64(String fileUrl, int maxPages) {
-        List<String> resultList = new ArrayList<>();
-        try {
-            String localPath = PolarisConfig.getProfile();
-            String relativePath = fileUrl;
-            if (fileUrl.startsWith("/profile")) {
-                relativePath = fileUrl.substring("/profile".length());
-            }
-            File file = new File(localPath + relativePath);
-            if (!file.exists()) {
-                log.warn(">>> 未找到多模态 PDF 文件: {}", file.getAbsolutePath());
-                return resultList;
-            }
-
-            try (PDDocument document = PDDocument.load(file)) {
-                PDFRenderer pdfRenderer = new PDFRenderer(document);
-                int pagesToRender = Math.min(document.getNumberOfPages(), maxPages);
-                log.info(">>> 开始对 PDF [{}] 进行渲染，总页数: {}, 限制渲染页数: {}", file.getName(), document.getNumberOfPages(), pagesToRender);
-                for (int i = 0; i < pagesToRender; i++) {
-                    BufferedImage bim = pdfRenderer.renderImageWithDPI(i, 110, ImageType.RGB);
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    ImageIO.write(bim, "png", baos);
-                    byte[] bytes = baos.toByteArray();
-                    resultList.add(Base64.getEncoder().encodeToString(bytes));
-                }
-            }
-        } catch (Exception e) {
-            log.error(">>> 渲染 PDF 页面为图片 Base64 失败: {}", e.getMessage(), e);
-        }
-        return resultList;
-    }
-
-    /**
-     * 根据当前登录用户的角色获取对应的系统提示词。
-     * 1. 查询用户所属的角色列表。
-     * 2. 过滤正常运行的角色并按照 roleSort 升序排列。
-     * 3. 逐个查找 sys.ai.prompt.[roleKey] 的参数配置，若存在则收集。
-     * 4. 若收集到配置的 Prompt，则按换行符拼接。
-     * 5. 若均未配置，则回退到全局默认 Prompt（从 modelProps 获取）。
-     *
-     * @param userId 用户 ID
-     * @return 合并或回退后的系统提示词
-     */
-    private String getRoleSpecificSystemPrompt(Long userId) {
-        if (userId == null) {
-            return modelProps.getSystemPrompt();
-        }
-        try {
-            List<SysRole> roles = roleService.selectRolesByUserId(userId);
-            if (roles != null && !roles.isEmpty()) {
-                List<String> rolePrompts = roles.stream()
-                        .filter(role -> "0".equals(role.getStatus()) && (role.getDelFlag() == null || !"2".equals(role.getDelFlag())))
-                        .sorted(Comparator.comparing(SysRole::getRoleSort, Comparator.nullsLast(Integer::compareTo)))
-                        .map(role -> {
-                            String configKey = "sys.ai.prompt." + role.getRoleKey();
-                            return configService.selectConfigByKey(configKey);
-                        })
-                        .filter(prompt -> prompt != null && !prompt.trim().isEmpty())
-                        .map(String::trim)
-                        .collect(Collectors.toList());
-
-                if (!rolePrompts.isEmpty()) {
-                    return String.join("\n", rolePrompts);
-                }
-            }
-        } catch (Exception e) {
-            log.error("根据用户ID: {} 获取角色专属提示词发生异常", userId, e);
-        }
-        return modelProps.getSystemPrompt();
-    }
-
-    /**
-     * 向前端安全推送一条 SSE 事件
-     * 捕获异常防止因客户端断开连接而导致整个线程崩溃
-     *
-     * @param emitter SSE 发射器
-     * @param event   事件名称（message / done / error）
-     * @param data    事件数据
-     */
-    private void sendSse(SseEmitter emitter, String event, String data) {
-        try {
-            emitter.send(SseEmitter.event().name(event).data(data));
-        } catch (Exception e) {
-            log.warn("SSE 推送失败，客户端可能已断开连接: event={}", event);
-        }
-    }
-
-    /**
-     * 通用反射解析 AI 工具并绑定当前线程安全上下文与请求上下文
-     */
-    private Map<ToolSpecification, ToolExecutor> getContextAwareTools(SecurityContext securityContext, boolean enableSearch, String searchKey) {
-        Map<ToolSpecification, ToolExecutor> map = new HashMap<>();
-        if (aiTools == null || aiTools.isEmpty()) {
-            return map;
-        }
-
-        // 捕获当前的 RequestAttributes 并拷贝到 SimpleRequestAttributes 容器中，以防容器回收
-        SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
-
-        for (Object toolObj : aiTools) {
-            Class<?> targetClass = AopUtils.getTargetClass(toolObj);
-            // 过滤：如果未开启联网搜索，且当前工具类是 WebSearchTools，则直接跳过不注册
-            if (targetClass.getSimpleName().contains("WebSearchTools") && !enableSearch) {
-                continue;
-            }
-            java.lang.reflect.Method[] methods = targetClass.getDeclaredMethods();
-            for (java.lang.reflect.Method method : methods) {
-                if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                    ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(method);
-                    ToolExecutor originalExecutor = new DefaultToolExecutor(toolObj, method);
-                    ToolExecutor wrappedExecutor = new SecurityContextPropagatingToolExecutor(originalExecutor, securityContext, simpleAttrs, searchKey);
-                    map.put(spec, wrappedExecutor);
-                }
-            }
-        }
-        return map;
-    }
-
-    /**
-     * 通用 ToolExecutor 装饰器，实现跨线程安全上下文、请求上下文与联网搜索密钥传递
-     */
-    private static class SecurityContextPropagatingToolExecutor implements ToolExecutor {
-        private final ToolExecutor delegate;
-        private final SecurityContext securityContext;
-        private final RequestAttributes requestAttributes;
-        private final String searchKey;
-
-        public SecurityContextPropagatingToolExecutor(ToolExecutor delegate, SecurityContext securityContext, RequestAttributes requestAttributes, String searchKey) {
-            this.delegate = delegate;
-            this.securityContext = securityContext;
-            this.requestAttributes = requestAttributes;
-            this.searchKey = searchKey;
-        }
-
-        @Override
-        public String execute(ToolExecutionRequest request, Object memoryId) {
-            SecurityContext previousContext = SecurityContextHolder.getContext();
-            RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
-            try {
-                SecurityContextHolder.setContext(securityContext);
-                if (requestAttributes != null) {
-                    RequestContextHolder.setRequestAttributes(requestAttributes);
-                }
-                // 绑定联网搜索 Key 到执行线程中
-                com.polaris.ai.utils.SearchKeyHolder.set(searchKey);
-                return delegate.execute(request, memoryId);
-            } finally {
-                // 清理联网 Key，防止线程池污染
-                com.polaris.ai.utils.SearchKeyHolder.clear();
-                RequestContextHolder.resetRequestAttributes();
-                if (previousAttributes != null) {
-                    RequestContextHolder.setRequestAttributes(previousAttributes);
-                }
-                if (previousContext != null) {
-                    SecurityContextHolder.setContext(previousContext);
-                } else {
-                    SecurityContextHolder.clearContext();
-                }
-            }
-        }
-    }
-
-    /**
-     * 纯内存的线程安全 RequestAttributes 实现，专门用于在异步线程中传递请求作用域参数
-     */
-    private static class SimpleRequestAttributes implements RequestAttributes {
-        private final Map<String, Object> attributes = new java.util.concurrent.ConcurrentHashMap<>();
-
-        public SimpleRequestAttributes(RequestAttributes originalAttrs) {
-            if (originalAttrs != null) {
-                try {
-                    for (String name : originalAttrs.getAttributeNames(SCOPE_REQUEST)) {
-                        Object val = originalAttrs.getAttribute(name, SCOPE_REQUEST);
-                        if (val != null) {
-                            attributes.put(name, val);
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-        }
-
-        @Override
-        public Object getAttribute(String name, int scope) {
-            return scope == SCOPE_REQUEST ? attributes.get(name) : null;
-        }
-
-        @Override
-        public void setAttribute(String name, Object value, int scope) {
-            if (scope == SCOPE_REQUEST) {
-                if (value != null) {
-                    attributes.put(name, value);
-                } else {
-                    attributes.remove(name);
-                }
-            }
-        }
-
-        @Override
-        public void removeAttribute(String name, int scope) {
-            if (scope == SCOPE_REQUEST) {
-                attributes.remove(name);
-            }
-        }
-
-        @Override
-        public String[] getAttributeNames(int scope) {
-            return scope == SCOPE_REQUEST ? attributes.keySet().toArray(new String[0]) : new String[0];
-        }
-
-        @Override
-        public void registerDestructionCallback(String name, Runnable callback, int scope) {
-        }
-
-        @Override
-        public Object resolveReference(String key) {
-            return null;
-        }
-
-        @Override
-        public String getSessionId() {
-            return "session";
-        }
-
-        @Override
-        public Object getSessionMutex() {
-            return this;
-        }
-    }
 }
