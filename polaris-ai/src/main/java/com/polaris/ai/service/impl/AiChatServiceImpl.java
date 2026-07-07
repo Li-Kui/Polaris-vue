@@ -9,6 +9,7 @@ import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.common.config.PolarisConfig;
 import com.polaris.common.core.domain.entity.SysRole;
 import com.polaris.common.utils.SecurityUtils;
 import com.polaris.system.service.ISysConfigService;
@@ -16,10 +17,7 @@ import com.polaris.system.service.ISysRoleService;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -31,6 +29,9 @@ import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.ImageType;
+import org.apache.pdfbox.rendering.PDFRenderer;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContext;
@@ -40,6 +41,11 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -358,13 +364,62 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         for (int i = start; i < history.size(); i++) {
             com.polaris.ai.domain.AiMessage m = history.get(i);
             if ("user".equals(m.getRole())) {
-                if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
-                    String combinedPrompt = m.getContent() + "\n\n"
-                            + "--------------------------------------------------\n"
-                            + "[已为您解析并关联对话附件: " + m.getFileName() + "]\n"
-                            + "--------------------------------------------------\n"
-                            + m.getFileContent();
-                    list.add(UserMessage.from(combinedPrompt));
+                String fileUrl = m.getFileUrl();
+                if (fileUrl != null && !fileUrl.trim().isEmpty()) {
+                    String fileName = m.getFileName() != null ? m.getFileName() : "";
+                    
+                    if (isImageFile(fileName)) {
+                        // A. 图片多模态处理：转换为 Base64 直接发给大模型
+                        String base64 = convertImageToBase64(fileUrl);
+                        if (base64 != null) {
+                            List<Content> contents = new ArrayList<>();
+                            contents.add(TextContent.from(m.getContent()));
+                            contents.add(ImageContent.from(base64, getImageMimeType(fileName)));
+                            list.add(UserMessage.from(contents));
+                        } else {
+                            list.add(UserMessage.from(m.getContent()));
+                        }
+                    } else if (fileName.toLowerCase().endsWith(".pdf")) {
+                        // B. PDF 多模态图文解析：运行时利用 PDFBox 渲染前 3 页为图片
+                        List<String> pagesBase64 = renderPdfPagesToBase64(fileUrl, 3);
+                        if (!pagesBase64.isEmpty()) {
+                            List<Content> contents = new ArrayList<>();
+                            String combinedPrompt = m.getContent() + "\n\n"
+                                    + "--------------------------------------------------\n"
+                                    + "[已为您解析并关联对话 PDF 附件: " + fileName + "]\n"
+                                    + "--------------------------------------------------\n"
+                                    + m.getFileContent();
+                            contents.add(TextContent.from(combinedPrompt));
+                            for (String pageBase64 : pagesBase64) {
+                                contents.add(ImageContent.from(pageBase64, "image/png"));
+                            }
+                            list.add(UserMessage.from(contents));
+                        } else {
+                            // 降级为纯文本拼接
+                            if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
+                                String combinedPrompt = m.getContent() + "\n\n"
+                                        + "--------------------------------------------------\n"
+                                        + "[已为您解析并关联对话附件: " + fileName + "]\n"
+                                        + "--------------------------------------------------\n"
+                                        + m.getFileContent();
+                                list.add(UserMessage.from(combinedPrompt));
+                            } else {
+                                list.add(UserMessage.from(m.getContent()));
+                            }
+                        }
+                    } else {
+                        // C. 其他纯文本文档：常规提取纯文本拼接
+                        if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
+                            String combinedPrompt = m.getContent() + "\n\n"
+                                    + "--------------------------------------------------\n"
+                                    + "[已为您解析并关联对话附件: " + fileName + "]\n"
+                                    + "--------------------------------------------------\n"
+                                    + m.getFileContent();
+                            list.add(UserMessage.from(combinedPrompt));
+                        } else {
+                            list.add(UserMessage.from(m.getContent()));
+                        }
+                    }
                 } else {
                     list.add(UserMessage.from(m.getContent()));
                 }
@@ -374,6 +429,155 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             }
         }
         return list;
+    }
+
+    private boolean isImageFile(String fileName) {
+        if (fileName == null) return false;
+        String ext = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
+        return "png".equals(ext) || "jpg".equals(ext) || "jpeg".equals(ext) || "gif".equals(ext) || "webp".equals(ext) || "bmp".equals(ext);
+    }
+
+    private String getImageMimeType(String fileName) {
+        if (fileName == null) return "image/jpeg";
+        String ext = fileName.substring(fileName.lastIndexOf(".") + 1).toLowerCase();
+        switch (ext) {
+            case "png": return "image/png";
+            case "gif": return "image/gif";
+            case "webp": return "image/webp";
+            case "bmp": return "image/bmp";
+            default: return "image/jpeg";
+        }
+    }
+
+    private String convertImageToBase64(String fileUrl) {
+        try {
+            String localPath = PolarisConfig.getProfile();
+            String relativePath = fileUrl;
+            if (fileUrl.startsWith("/profile")) {
+                relativePath = fileUrl.substring("/profile".length());
+            }
+            File file = new File(localPath + relativePath);
+            if (file.exists()) {
+                byte[] fileBytes = Files.readAllBytes(file.toPath());
+                // 动态缩放与压缩，初始参数设为更安全的 600x600, 0.45f，并在内部支持自适应降级循环
+                byte[] compressedBytes = compressImage(fileBytes, 600, 600, 0.45f);
+                return Base64.getEncoder().encodeToString(compressedBytes);
+            } else {
+                log.warn(">>> 未找到多模态图片文件: {}", file.getAbsolutePath());
+            }
+        } catch (Exception e) {
+            log.error(">>> 读取图片并转换为 Base64 失败: {}", e.getMessage(), e);
+        }
+        return null;
+    }
+
+    private byte[] compressImage(byte[] imageBytes, int maxWidth, int maxHeight, float quality) {
+        byte[] resultBytes = imageBytes;
+        int currentWidth = maxWidth;
+        int currentHeight = maxHeight;
+        float currentQuality = quality;
+
+        try {
+            // 自适应降级压缩循环，最多尝试 4 次，直到 Base64 长度小于 120,000 字符（对应 90KB 左右）
+            for (int i = 0; i < 4; i++) {
+                resultBytes = compressImageOnce(imageBytes, currentWidth, currentHeight, currentQuality);
+                String base64 = Base64.getEncoder().encodeToString(resultBytes);
+                
+                if (base64.length() < 120000) {
+                    log.info(">>> 图片动态压缩第 {} 次成功，原体积: {} bytes, 压缩后体积: {} bytes, Base64字符长度: {}", 
+                            i + 1, imageBytes.length, resultBytes.length, base64.length());
+                    break;
+                }
+                
+                log.warn(">>> 图片第 {} 次压缩后 Base64 长度 {} 仍超 120000 限额，启动等比降级...", i + 1, base64.length());
+                currentWidth = (int) (currentWidth * 0.75);
+                currentHeight = (int) (currentHeight * 0.75);
+                currentQuality = currentQuality * 0.75f;
+            }
+        } catch (Exception e) {
+            log.error(">>> 自适应压缩失败，回退到原图: {}", e.getMessage());
+        }
+        return resultBytes;
+    }
+
+    private byte[] compressImageOnce(byte[] imageBytes, int maxWidth, int maxHeight, float quality) throws Exception {
+        try (java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(imageBytes)) {
+            BufferedImage originalImage = ImageIO.read(bais);
+            if (originalImage == null) return imageBytes;
+
+            int width = originalImage.getWidth();
+            int height = originalImage.getHeight();
+
+            // 计算等比缩放比例
+            if (width > maxWidth || height > maxHeight) {
+                double widthRatio = (double) maxWidth / width;
+                double heightRatio = (double) maxHeight / height;
+                double ratio = Math.min(widthRatio, heightRatio);
+                width = (int) (width * ratio);
+                height = (int) (height * ratio);
+            }
+
+            BufferedImage resizedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g2d = resizedImage.createGraphics();
+            g2d.drawImage(originalImage, 0, 0, width, height, null);
+            g2d.dispose();
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            java.util.Iterator<javax.imageio.ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpg");
+            if (writers.hasNext()) {
+                javax.imageio.ImageWriter writer = writers.next();
+                try (javax.imageio.stream.ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
+                    writer.setOutput(ios);
+                    javax.imageio.ImageWriteParam param = writer.getDefaultWriteParam();
+                    if (param.canWriteCompressed()) {
+                        param.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+                        param.setCompressionQuality(quality);
+                    }
+                    writer.write(null, new javax.imageio.IIOImage(resizedImage, null, null), param);
+                } catch (Exception err) {
+                    baos.reset();
+                    ImageIO.write(resizedImage, "jpg", baos);
+                } finally {
+                    writer.dispose();
+                }
+            } else {
+                ImageIO.write(resizedImage, "jpg", baos);
+            }
+
+            return baos.toByteArray();
+        }
+    }
+
+    private List<String> renderPdfPagesToBase64(String fileUrl, int maxPages) {
+        List<String> resultList = new ArrayList<>();
+        try {
+            String localPath = PolarisConfig.getProfile();
+            String relativePath = fileUrl;
+            if (fileUrl.startsWith("/profile")) {
+                relativePath = fileUrl.substring("/profile".length());
+            }
+            File file = new File(localPath + relativePath);
+            if (!file.exists()) {
+                log.warn(">>> 未找到多模态 PDF 文件: {}", file.getAbsolutePath());
+                return resultList;
+            }
+
+            try (PDDocument document = PDDocument.load(file)) {
+                PDFRenderer pdfRenderer = new PDFRenderer(document);
+                int pagesToRender = Math.min(document.getNumberOfPages(), maxPages);
+                log.info(">>> 开始对 PDF [{}] 进行渲染，总页数: {}, 限制渲染页数: {}", file.getName(), document.getNumberOfPages(), pagesToRender);
+                for (int i = 0; i < pagesToRender; i++) {
+                    BufferedImage bim = pdfRenderer.renderImageWithDPI(i, 110, ImageType.RGB);
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    ImageIO.write(bim, "png", baos);
+                    byte[] bytes = baos.toByteArray();
+                    resultList.add(Base64.getEncoder().encodeToString(bytes));
+                }
+            }
+        } catch (Exception e) {
+            log.error(">>> 渲染 PDF 页面为图片 Base64 失败: {}", e.getMessage(), e);
+        }
+        return resultList;
     }
 
     /**

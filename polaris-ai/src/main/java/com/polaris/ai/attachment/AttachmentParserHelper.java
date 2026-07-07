@@ -90,7 +90,7 @@ public class AttachmentParserHelper {
             } else if (fileName.endsWith(".png") || fileName.endsWith(".jpg") 
                     || fileName.endsWith(".jpeg") || fileName.endsWith(".gif") 
                     || fileName.endsWith(".webp") || fileName.endsWith(".bmp")) {
-                return "[该附件为图片文件，当前 AI 暂不支持直接读取图片，建议您直接用文字向 AI 描述图片上的内容]";
+                return "";
             } else {
                 // 对于未知类型的二进制文件，默认作为文本试读取，读不出再友好提示
                 try {

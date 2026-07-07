@@ -295,21 +295,40 @@
                 </div>
                 <!-- 用户消息包装（支持附件卡片展现） -->
                 <div v-else class="user-bubble-wrapper">
-                  <div v-if="msg.fileName" class="msg-attachment-card">
-                    <i class="el-icon-document attachment-card-icon"></i>
-                    <div class="attachment-card-info">
-                      <span :title="msg.fileName" class="attachment-card-name">{{ msg.fileName }}</span>
-                      <span class="attachment-card-desc">已成功关联此对话解析</span>
+                  <div v-if="msg.fileName" class="msg-attachment-card-wrapper">
+                    <!-- 如果是图片附件 -->
+                    <div v-if="isImageFile(msg.fileName)" class="msg-image-attachment">
+                      <el-image
+                        :preview-src-list="[msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : '']"
+                        :src="msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : ''"
+                        class="chat-inline-image"
+                        fit="cover"
+                      >
+                        <div slot="placeholder" class="image-slot">
+                          加载中<span class="dot">...</span>
+                        </div>
+                      </el-image>
+                      <div class="image-name-badge">{{ msg.fileName }}</div>
                     </div>
-                    <el-link
-                      v-if="msg.fileUrl"
-                      :href="msg.fileUrl"
-                      :underlined="false"
-                      class="attachment-card-download"
-                      icon="el-icon-download"
-                      target="_blank"
-                      type="primary"
-                    ></el-link>
+                    <!-- 其他普通文档/PDF 附件 -->
+                    <div v-else class="msg-attachment-card">
+                      <i class="el-icon-document attachment-card-icon"></i>
+                      <div class="attachment-card-info">
+                        <span :title="msg.fileName" class="attachment-card-name">{{ msg.fileName }}</span>
+                        <span class="attachment-card-desc">
+                          {{ msg.fileName.toLowerCase().endsWith('.pdf') ? '已成功关联 PDF 多模态图文解析' : '已成功关联此对话解析' }}
+                        </span>
+                      </div>
+                      <el-link
+                        v-if="msg.fileUrl"
+                        :href="msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)"
+                        :underlined="false"
+                        class="attachment-card-download"
+                        icon="el-icon-download"
+                        target="_blank"
+                        type="primary"
+                      ></el-link>
+                    </div>
                   </div>
                   <span class="user-text">{{ msg.content }}</span>
                 </div>
@@ -327,7 +346,14 @@
         <!-- 待发送附件预览栏 -->
         <div v-if="attachment" class="attachment-preview-bar">
           <div class="attachment-tag">
-            <i class="el-icon-document"></i>
+            <template v-if="isImageFile(attachment.name)">
+              <el-image
+                :src="attachment.url ? (attachment.url.startsWith('http') ? attachment.url : (uploadUrl.replace('/common/upload', '') + attachment.url)) : ''"
+                class="preview-inline-image"
+                fit="cover"
+              />
+            </template>
+            <i v-else class="el-icon-document"></i>
             <span :title="attachment.name" class="file-name">{{ attachment.name }}</span>
             <i class="el-icon-close remove-btn" @click="handleRemoveAttachment"></i>
           </div>
@@ -519,9 +545,9 @@
             </div>
 
             <div class="tools-right">
-              <!-- 停止生成按钮 -->
+              <!-- 停止生成/终止等待按钮 -->
               <el-button
-                v-if="isStreaming"
+                v-if="canStop"
                 class="btn-send-modern btn-stop-modern"
                 type="danger"
                 @click="handleStopMessage"
@@ -531,7 +557,7 @@
               <!-- 发送按钮 -->
               <el-button
                 v-else
-                :disabled="isStreaming || !inputText.trim() || uploadingAttachment"
+                :disabled="canStop || !inputText.trim() || uploadingAttachment"
                 class="btn-send-modern"
                 @click="handleSendMessage"
               >
@@ -735,6 +761,12 @@ export default {
       if (!this.selectedModelName) return false
       const m = this.models.find(item => item.modelName === this.selectedModelName)
       return m && m.enableSearch === '1'
+    },
+    canStop() {
+      if (this.isStreaming) return true
+      if (!this.messages || this.messages.length === 0) return false
+      const lastMsg = this.messages[this.messages.length - 1]
+      return lastMsg.role === 'assistant' && (lastMsg.loading || lastMsg.streaming || (lastMsg.statusMsg && !lastMsg.content))
     }
   },
   created() {
@@ -1231,7 +1263,8 @@ export default {
             ...lastMsg,
             streaming: false,
             loading: false,
-            statusMsg: ''
+            statusMsg: '',
+            content: lastMsg.content || '（已停止生成/终止等待）'
           })
         }
       }
@@ -1810,7 +1843,7 @@ export default {
       }
 
       // 校验文件格式
-      const allowedExts = ['pdf', 'docx', 'xlsx', 'xls', 'txt', 'md', 'json', 'xml', 'csv', 'html', 'java', 'py', 'js', 'ts']
+      const allowedExts = ['pdf', 'docx', 'xlsx', 'xls', 'txt', 'md', 'json', 'xml', 'csv', 'html', 'java', 'py', 'js', 'ts', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
       const nameParts = file.name.split('.')
       const ext = nameParts[nameParts.length - 1].toLowerCase()
       if (!allowedExts.includes(ext)) {
@@ -1820,6 +1853,12 @@ export default {
 
       this.uploadingAttachment = true
       return true
+    },
+
+    isImageFile(fileName) {
+      if (!fileName) return false
+      const ext = fileName.split('.').pop().toLowerCase()
+      return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)
     },
 
     handleAttachmentSuccess(res, file) {
@@ -3019,6 +3058,66 @@ export default {
   font-size: 11px;
   color: #c0c4cc;
   text-align: center;
+}
+
+/* ===== 多模态图片预览与展示样式 ===== */
+.msg-attachment-card-wrapper {
+  margin-bottom: 10px;
+}
+
+.msg-image-attachment {
+  position: relative;
+  display: inline-block;
+  max-width: 260px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  background-color: #f5f7fa;
+}
+
+.msg-image-attachment:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.chat-inline-image {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  cursor: zoom-in;
+}
+
+.image-name-badge {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #606266;
+  background: #f0f2f5;
+  border-top: 1px solid #e4e7ed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.preview-inline-image {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #dcdfe6;
+  object-fit: cover;
+}
+
+.image-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 120px;
+  background: #f5f7fa;
+  color: #909399;
+  font-size: 12px;
 }
 
 /* ===== 待发送附件预览栏 ===== */
