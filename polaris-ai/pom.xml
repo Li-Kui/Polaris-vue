@@ -61,6 +61,41 @@
 		    <version>2.0.31</version>
 		</dependency>
 
+		<!-- LangGraph4j 核心：图状态机引擎 -->
+		<dependency>
+		    <groupId>org.bsc.langgraph4j</groupId>
+		    <artifactId>langgraph4j-core</artifactId>
+		</dependency>
+
+		<!-- LangGraph4j ↔ LangChain4j 适配层 -->
+		<dependency>
+		    <groupId>org.bsc.langgraph4j</groupId>
+		    <artifactId>langgraph4j-langchain4j</artifactId>
+		    <exclusions>
+		        <exclusion>
+		            <groupId>dev.langchain4j</groupId>
+		            <artifactId>langchain4j</artifactId>
+		        </exclusion>
+		        <exclusion>
+		            <groupId>dev.langchain4j</groupId>
+		            <artifactId>langchain4j-open-ai</artifactId>
+		        </exclusion>
+		    </exclusions>
+		</dependency>
+
+		<!-- LangGraph4j MySQL 持久化检查点存储 -->
+		<dependency>
+		    <groupId>org.bsc.langgraph4j</groupId>
+		    <artifactId>langgraph4j-mysql-saver</artifactId>
+		</dependency>
+
+		<!-- Lombok 依赖 -->
+		<dependency>
+		    <groupId>org.projectlombok</groupId>
+		    <artifactId>lombok</artifactId>
+		    <scope>provided</scope>
+		</dependency>
+
     </dependencies>
 
 </project>

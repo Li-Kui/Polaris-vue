@@ -62,3 +62,14 @@ export function delWorkflow(id) {
     method: 'delete'
   })
 }
+
+/**
+ * 获取工作流的 Mermaid 拓扑图可视化文本
+ */
+export function getWorkflowGraph(workflowCode) {
+  return request({
+    url: '/ai/workflow/graph',
+    method: 'get',
+    params: { workflowCode }
+  })
+}

@@ -35,8 +35,13 @@ public class AiWorkflow extends BaseEntity {
     private String description;
 
     /** 流程节点编排JSON (如: ["intent_route", "sys_user_analyst"]) */
-    @Schema(description = "流程节点编排JSON")
+    @Deprecated(since = "3.10.0", forRemoval = true)
+    @Schema(description = "流程节点编排JSON（已废弃，请使用 graphJson）")
     private String nodes;
+
+    /** 图拓扑描述JSON（统一格式，替代 nodes） */
+    @Schema(description = "图拓扑描述JSON")
+    private String graphJson;
 
     /** 状态(1启用 0禁用) */
     @Schema(description = "状态(1启用 0禁用)")

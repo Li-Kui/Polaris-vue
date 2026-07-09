@@ -10,30 +10,25 @@ import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.service.IAiWorkflowService;
+import com.polaris.ai.tools.SecurityContextToolExecutor;
 import com.polaris.ai.tools.base.AiTool;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
-import org.springframework.web.context.request.RequestAttributes;
-import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 
 /**
@@ -203,43 +198,8 @@ public class WorkflowEngine {
         latch.await();
     }
 
-    /**
-     * 根据英文逗号分隔的 Tools 类名，过滤系统中加载的 Spring Bean 工具，并包装为上下文安全执行器
-     */
     private Map<ToolSpecification, ToolExecutor> getActiveTools(String toolsConfig, SecurityContext securityContext, String searchKey, SseEmitter emitter, String nodeCode) {
-        Map<ToolSpecification, ToolExecutor> map = new HashMap<>();
-        if (toolsConfig == null || toolsConfig.trim().isEmpty() || allTools == null || allTools.isEmpty()) {
-            return map;
-        }
-
-        // 解析智能体绑定的工具集合
-        Set<String> toolNames = new HashSet<>();
-        for (String t : toolsConfig.split(",")) {
-            toolNames.add(t.trim());
-        }
-
-        // 构造当前线程 Web 请求上下文拷贝，防异步回收
-        SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
-
-        for (Object toolObj : allTools) {
-            Class<?> targetClass = AopUtils.getTargetClass(toolObj);
-            String className = targetClass.getSimpleName();
-            
-            // 匹配类名
-            if (toolNames.contains(className)) {
-                java.lang.reflect.Method[] methods = targetClass.getDeclaredMethods();
-                for (java.lang.reflect.Method method : methods) {
-                    if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                        ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(method);
-                        ToolExecutor originalExecutor = new DefaultToolExecutor(toolObj, method);
-                        ToolExecutor wrappedExecutor = new SecurityContextPropagatingToolExecutor(
-                                originalExecutor, securityContext, simpleAttrs, searchKey, emitter, nodeCode);
-                        map.put(spec, wrappedExecutor);
-                    }
-                }
-            }
-        }
-        return map;
+        return SecurityContextToolExecutor.getFilteredTools(allTools, toolsConfig, securityContext, searchKey, emitter, nodeCode);
     }
 
     private List<String> parseNodesJson(String json) {
@@ -268,123 +228,6 @@ public class WorkflowEngine {
             emitter.send(SseEmitter.event().name(event).data(data));
         } catch (Exception e) {
             log.warn("工作流 SSE 推送失败: event={}", event);
-        }
-    }
-
-    // ================================================================
-    //  内部辅助线程安全上下文封装类（安全重用已有的装饰器模式）
-    // ================================================================
-
-    private class SecurityContextPropagatingToolExecutor implements ToolExecutor {
-        private final ToolExecutor delegate;
-        private final SecurityContext securityContext;
-        private final RequestAttributes requestAttributes;
-        private final String searchKey;
-        private final SseEmitter emitter;
-        private final String nodeCode;
-
-        public SecurityContextPropagatingToolExecutor(ToolExecutor delegate, SecurityContext securityContext,
-                                                     RequestAttributes requestAttributes, String searchKey,
-                                                     SseEmitter emitter, String nodeCode) {
-            this.delegate = delegate;
-            this.securityContext = securityContext;
-            this.requestAttributes = requestAttributes;
-            this.searchKey = searchKey;
-            this.emitter = emitter;
-            this.nodeCode = nodeCode;
-        }
-
-        @Override
-        public String execute(ToolExecutionRequest request, Object memoryId) {
-            SecurityContext previousContext = SecurityContextHolder.getContext();
-            RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
-            try {
-                // 执行工具前向前端推送 node_tool 状态事件
-                sendSse(emitter, "node_tool", nodeCode + "|" + request.name());
-                
-                SecurityContextHolder.setContext(securityContext);
-                if (requestAttributes != null) {
-                    RequestContextHolder.setRequestAttributes(requestAttributes);
-                }
-                com.polaris.ai.utils.SearchKeyHolder.set(searchKey);
-                return delegate.execute(request, memoryId);
-            } finally {
-                com.polaris.ai.utils.SearchKeyHolder.clear();
-                RequestContextHolder.resetRequestAttributes();
-                if (previousAttributes != null) {
-                    RequestContextHolder.setRequestAttributes(previousAttributes);
-                }
-                if (previousContext != null) {
-                    SecurityContextHolder.setContext(previousContext);
-                } else {
-                    SecurityContextHolder.clearContext();
-                }
-            }
-        }
-    }
-
-    private static class SimpleRequestAttributes implements RequestAttributes {
-        private final Map<String, Object> attributes = new ConcurrentHashMap<>();
-
-        public SimpleRequestAttributes(RequestAttributes originalAttrs) {
-            if (originalAttrs != null) {
-                try {
-                    for (String name : originalAttrs.getAttributeNames(SCOPE_REQUEST)) {
-                        Object val = originalAttrs.getAttribute(name, SCOPE_REQUEST);
-                        if (val != null) {
-                            attributes.put(name, val);
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-        }
-
-        @Override
-        public Object getAttribute(String name, int scope) {
-            return scope == SCOPE_REQUEST ? attributes.get(name) : null;
-        }
-
-        @Override
-        public void setAttribute(String name, Object value, int scope) {
-            if (scope == SCOPE_REQUEST) {
-                if (value != null) {
-                    attributes.put(name, value);
-                } else {
-                    attributes.remove(name);
-                }
-            }
-        }
-
-        @Override
-        public void removeAttribute(String name, int scope) {
-            if (scope == SCOPE_REQUEST) {
-                attributes.remove(name);
-            }
-        }
-
-        @Override
-        public String[] getAttributeNames(int scope) {
-            return scope == SCOPE_REQUEST ? attributes.keySet().toArray(new String[0]) : new String[0];
-        }
-
-        @Override
-        public void registerDestructionCallback(String name, Runnable callback, int scope) {
-        }
-
-        @Override
-        public Object resolveReference(String key) {
-            return null;
-        }
-
-        @Override
-        public String getSessionId() {
-            return "session";
-        }
-
-        @Override
-        public Object getSessionMutex() {
-            return this;
         }
     }
 }

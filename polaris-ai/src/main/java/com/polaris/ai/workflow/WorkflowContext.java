@@ -27,8 +27,23 @@ public class WorkflowContext {
     /** 最近一个节点执行后的完整文本输出（作为下一个节点的输入上下文） */
     private String latestOutput;
 
+    /** 条件路由决策值（Java 节点可设置，用于图引擎条件分支） */
+    private String routeDecision;
+
+    /** 当前节点执行后的输出（等同于 latestOutput，供适配器读取） */
+    private String output;
+
     public WorkflowContext(String userInput, SseEmitter emitter) {
         this.userInput = userInput;
+        this.emitter = emitter;
+    }
+
+    /**
+     * 三参数构造函数（LangGraph4j 适配器使用）
+     */
+    public WorkflowContext(String userInput, String latestOutput, SseEmitter emitter) {
+        this.userInput = userInput;
+        this.latestOutput = latestOutput;
         this.emitter = emitter;
     }
 

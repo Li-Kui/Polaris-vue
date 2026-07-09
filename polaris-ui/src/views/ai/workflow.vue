@@ -64,12 +64,12 @@
                 <div class="pipeline-visualization">
                   <span class="pipeline-label">执行流向：</span>
                   <div class="pipeline-flow-container">
-                    <template v-for="(node, idx) in parseNodes(item.nodes)">
+                    <template v-for="(node, idx) in parseNodes(item)">
                       <div :key="'node-'+idx" :class="['pipeline-node', { 'is-java': node === 'sys_task' }]">
                         <i :class="node === 'sys_task' ? 'el-icon-setting' : 'el-icon-cpu'"></i>
                         <span class="node-name-text">{{ getAgentShortName(node) }}</span>
                       </div>
-                      <div v-if="idx < parseNodes(item.nodes).length - 1" :key="'arrow-'+idx" class="pipeline-arrow">
+                      <div v-if="idx < parseNodes(item).length - 1" :key="'arrow-'+idx" class="pipeline-arrow">
                         <i class="el-icon-right"></i>
                       </div>
                     </template>
@@ -170,7 +170,7 @@
                     <!-- 卡片主体：仅展示节点名称与编码，保持画布极其清爽 -->
                     <div class="step-node-mini-card">
                       <h4 class="mini-node-title">{{ getAgentShortName(nodeSteps[index]) || '未选择执行节点' }}</h4>
-                      <span class="mini-node-code" v-if="nodeSteps[index]">({{ nodeSteps[index] }})</span>
+                      <span class="mini-node-code" v-if="nodeSteps[index]">({{ nodeSteps[index].ref || nodeSteps[index] }})</span>
                     </div>
 
                     <!-- 删除操作 -->
@@ -204,7 +204,7 @@
             </div>
 
             <!-- 选择步骤后的详细设置区 -->
-            <el-form v-else label-position="top" size="small" class="node-config-form">
+            <el-form v-else-if="activeStepIndex !== null && nodeSteps[activeStepIndex]" label-position="top" size="small" class="node-config-form">
               <div class="selected-step-indicator">
                 <span class="indicator-badge">步骤 {{ activeStepIndex + 1 }}</span>
                 <span class="indicator-text">当前节点属性配置</span>
@@ -212,7 +212,7 @@
 
               <!-- 执行节点选择 -->
               <el-form-item label="指向执行组件/智能体">
-                <el-select v-model="nodeSteps[activeStepIndex]" placeholder="请选择智能体 / 代码组件" style="width: 100%;" size="medium">
+                <el-select v-model="nodeSteps[activeStepIndex].ref" placeholder="请选择智能体 / 代码组件" style="width: 100%;" size="medium">
                   <el-option-group label="AI 智能体">
                     <el-option
                       v-for="item in activeAgents"
@@ -227,31 +227,53 @@
                 </el-select>
               </el-form-item>
 
+              <el-form-item label="需要人工审核 (Human-in-the-Loop)">
+                <el-switch 
+                  v-model="nodeSteps[activeStepIndex].requireApproval" 
+                />
+                <span :style="{ marginLeft: '10px', fontSize: '13px', verticalAlign: 'middle', fontWeight: '500', color: nodeSteps[activeStepIndex].requireApproval ? '#10b981' : '#94a3b8' }">
+                  {{ nodeSteps[activeStepIndex].requireApproval ? '开启挂起' : '已关闭' }}
+                </span>
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.4;">
+                  开启后，工作流执行到当前步骤前会挂起暂停并等待人工在对话页面审批后方可恢复运行。
+                </div>
+              </el-form-item>
+
+              <!-- 节点超时时长 (二期新增) -->
+              <el-form-item label="节点执行超时限制 (秒)">
+                <el-input-number 
+                  v-model="nodeSteps[activeStepIndex].timeoutSeconds" 
+                  :min="10" 
+                  :max="1800"
+                  style="width: 100%;"
+                />
+              </el-form-item>
+
               <!-- 智能体实时属性透视 (只读面板) -->
-              <div v-if="nodeSteps[activeStepIndex] && nodeSteps[activeStepIndex] !== 'sys_task' && getAgentByCode(nodeSteps[activeStepIndex])" class="agent-live-properties">
+              <div v-if="nodeSteps[activeStepIndex].ref && nodeSteps[activeStepIndex].ref !== 'sys_task' && getAgentByCode(nodeSteps[activeStepIndex].ref)" class="agent-live-properties">
 
                 <!-- 大模型底座 -->
                 <div class="prop-group">
                   <span class="prop-label-title"><i class="el-icon-cpu"></i> 底座大模型</span>
                   <el-tag size="small" type="primary" effect="plain" class="full-width-tag">
-                    {{ getAgentByCode(nodeSteps[activeStepIndex]).modelName }}
+                    {{ getAgentByCode(nodeSteps[activeStepIndex].ref).modelName }}
                   </el-tag>
                 </div>
 
                 <!-- 温度参数 -->
                 <div class="prop-group">
-                  <span class="prop-label-title"><i class="el-icon-odometer"></i> 随机温度 (Temperature): {{ getAgentByCode(nodeSteps[activeStepIndex]).temperature }}</span>
-                  <el-progress :percentage="getAgentByCode(nodeSteps[activeStepIndex]).temperature * 100" :show-text="false" :stroke-width="5" color="#6366f1" />
+                  <span class="prop-label-title"><i class="el-icon-odometer"></i> 随机温度 (Temperature): {{ getAgentByCode(nodeSteps[activeStepIndex].ref).temperature }}</span>
+                  <el-progress :percentage="getAgentByCode(nodeSteps[activeStepIndex].ref).temperature * 100" :show-text="false" :stroke-width="5" color="#6366f1" />
                 </div>
 
                 <!-- 绑定系统工具 -->
                 <div class="prop-group">
                   <span class="prop-label-title"><i class="el-icon-folder-opened"></i> 绑定系统工具</span>
                   <div class="live-tools-badges">
-                    <span v-if="!getAgentByCode(nodeSteps[activeStepIndex]).tools" class="no-tools-info">未绑定任何工具</span>
+                    <span v-if="!getAgentByCode(nodeSteps[activeStepIndex].ref).tools" class="no-tools-info">未绑定任何工具</span>
                     <el-tag
                       v-else
-                      v-for="(t, tIdx) in getAgentByCode(nodeSteps[activeStepIndex]).tools.split(',')"
+                      v-for="(t, tIdx) in getAgentByCode(nodeSteps[activeStepIndex].ref).tools.split(',')"
                       :key="tIdx"
                       size="mini"
                       type="success"
@@ -266,13 +288,13 @@
                 <div class="prop-group">
                   <span class="prop-label-title"><i class="el-icon-document"></i> 大脑核心指令 (System Prompt)</span>
                   <div class="live-prompt-editor-preview">
-                    {{ getAgentByCode(nodeSteps[activeStepIndex]).systemPrompt }}
+                    {{ getAgentByCode(nodeSteps[activeStepIndex].ref).systemPrompt }}
                   </div>
                 </div>
               </div>
 
               <!-- Java 节点实时参数透视 -->
-              <div v-else-if="nodeSteps[activeStepIndex] === 'sys_task'" class="agent-live-properties">
+              <div v-else-if="nodeSteps[activeStepIndex].ref === 'sys_task'" class="agent-live-properties">
                 <div class="prop-group">
                   <span class="prop-label-title"><i class="el-icon-setting"></i> 执行类型</span>
                   <el-tag size="small" type="success" effect="plain" class="full-width-tag">本地 Java 业务处理任务</el-tag>
@@ -349,22 +371,32 @@ export default {
         console.error(err);
       }
     },
-    parseNodes(nodesJson) {
+    parseNodes(row) {
+      if (row.graphJson) {
+        try {
+          const graph = JSON.parse(row.graphJson);
+          if (graph && graph.nodes) {
+            return graph.nodes.map(n => n.ref || n.id);
+          }
+        } catch (e) {}
+      }
       try {
-        return JSON.parse(nodesJson) || [];
+        return JSON.parse(row.nodes) || [];
       } catch (e) {
         return [];
       }
     },
-    getAgentShortName(nodeCode) {
-      if (nodeCode === 'sys_task') {
+    getAgentShortName(node) {
+      const code = (node && typeof node === 'object') ? node.ref : node;
+      if (code === 'sys_task') {
         return "系统任务";
       }
-      const agent = this.activeAgents.find(a => a.agentCode === nodeCode);
-      return agent ? agent.agentName : nodeCode;
+      const agent = this.activeAgents.find(a => a.agentCode === code);
+      return agent ? agent.agentName : code;
     },
-    getAgentByCode(nodeCode) {
-      return this.activeAgents.find(a => a.agentCode === nodeCode);
+    getAgentByCode(node) {
+      const code = (node && typeof node === 'object') ? node.ref : node;
+      return this.activeAgents.find(a => a.agentCode === code);
     },
     async handleStatusChange(row) {
       const text = row.status === "1" ? "启用" : "禁用";
@@ -420,7 +452,12 @@ export default {
       this.handleQuery();
     },
     addNodeStep() {
-      this.nodeSteps.push("");
+      this.nodeSteps.push({
+        ref: "",
+        type: "agent",
+        requireApproval: false,
+        timeoutSeconds: 120
+      });
       // 自动高亮选中新节点，方便在右边控制台直接配置它
       this.activeStepIndex = this.nodeSteps.length - 1;
     },
@@ -468,10 +505,47 @@ export default {
         const res = await getWorkflow(row.id);
         if (res.code === 200) {
           this.form = res.data;
-          try {
-            this.nodeSteps = JSON.parse(this.form.nodes) || [];
-          } catch (e) {
-            this.nodeSteps = [];
+          let graphObj = null;
+          if (this.form.graphJson) {
+            try {
+              graphObj = JSON.parse(this.form.graphJson);
+            } catch (e) {
+              console.error("解析 graphJson 失败", e);
+            }
+          }
+
+          if (graphObj && graphObj.nodes) {
+            this.nodeSteps = graphObj.nodes.map(n => {
+              return {
+                ref: n.ref || n.id,
+                type: n.type || ('sys_task' === n.ref ? 'java' : 'agent'),
+                requireApproval: !!n.requireApproval,
+                timeoutSeconds: n.timeoutSeconds || 120
+              };
+            });
+          } else {
+            try {
+              const oldNodes = JSON.parse(this.form.nodes) || [];
+              this.nodeSteps = oldNodes.map(item => {
+                if (typeof item === 'string') {
+                  return {
+                    ref: item,
+                    type: 'sys_task' === item ? 'java' : 'agent',
+                    requireApproval: false,
+                    timeoutSeconds: 120
+                  };
+                } else {
+                  return {
+                    ref: item.ref || item.id,
+                    type: item.type || ('sys_task' === item.ref ? 'java' : 'agent'),
+                    requireApproval: !!item.requireApproval,
+                    timeoutSeconds: item.timeoutSeconds || 120
+                  };
+                }
+              });
+            } catch (e) {
+              this.nodeSteps = [];
+            }
           }
           this.viewMode = 'edit';
           this.$nextTick(() => {

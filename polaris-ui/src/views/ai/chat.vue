@@ -231,21 +231,20 @@
                         <div class="step-content">
                           <div class="step-title">
                             <span class="step-name">{{ step.name }}</span>
-                            <span class="step-code">({{ step.code }})</span>
                           </div>
                           <!-- 正在调用的系统工具展示 -->
                           <div v-if="step.activeTool" class="step-tool-badge">
-                            <i class="el-icon-folder-opened"></i> 正在调用系统工具: <span class="tool-name">{{ step.activeTool }}</span>
+                            <i class="el-icon-folder-opened"></i> 正在调用系统工具: <span class="tool-name">{{ translateToolName(step.activeTool) }}</span>
                           </div>
                           <!-- 节点输出的思考过程 -->
                           <div v-if="step.thinking" class="step-thinking-box">
                             <div class="thinking-title">思考过程：</div>
                             <div class="thinking-text">{{ step.thinking }}</div>
                           </div>
-                          <!-- 节点输出的内容 -->
-                          <div v-if="step.content && step.status !== 'success'" class="step-content-box">
+                          <!-- 节点输出的内容（已优化：不再在步骤列表卡片中重复显示大文本输出，保持消息区域只显示一次） -->
+                          <!-- <div v-if="step.content && step.status !== 'success'" class="step-content-box">
                             <div class="content-text" v-html="renderMarkdown(step.content)"></div>
-                          </div>
+                          </div> -->
                         </div>
                       </div>
                     </div>
@@ -291,6 +290,57 @@
                     >
                       以精美报告形式查看
                     </el-button>
+                  </div>
+                  <!-- 审批控制面板 -->
+                  <div v-if="msg.requireApproval && msg.approved === null" class="approval-card-panel">
+                    <div class="approval-title-box">
+                      <div class="approval-title-text">
+                        <i class="el-icon-warning-outline approval-warning-icon"></i>
+                        <span>工作流已挂起，等待您的人工审核</span>
+                      </div>
+                      <div class="approval-node-badge">
+                        <span class="badge-label">挂起节点</span>
+                        <span class="badge-value">{{ getStepName(msg, msg.currentNodeCode) }}</span>
+                      </div>
+                    </div>
+                    
+                    <div class="approval-input-wrapper">
+                      <el-input
+                        type="textarea"
+                        v-model="msg.approvalFeedback"
+                        placeholder="请输入您的审核意见或调优反馈（非必填）"
+                        rows="2"
+                        class="approval-textarea"
+                      ></el-input>
+                    </div>
+
+                    <div class="approval-action-bar">
+                      <el-button 
+                        class="approval-btn btn-reject"
+                        size="medium" 
+                        icon="el-icon-close" 
+                        :disabled="msg.status === 'resuming'"
+                        @click="submitApproval(msg, false)"
+                      >驳回审批</el-button>
+                      <el-button 
+                        class="approval-btn btn-approve"
+                        size="medium" 
+                        icon="el-icon-check" 
+                        :loading="msg.status === 'resuming'"
+                        @click="submitApproval(msg, true)"
+                      >同意执行</el-button>
+                    </div>
+                  </div>
+                  <!-- 已审批状态展示 -->
+                  <div v-else-if="msg.requireApproval && msg.approved !== null" class="approval-status-panel">
+                    <div class="status-header">
+                      <i class="el-icon-circle-check status-icon"></i>
+                      <span>已于 {{ msg.approvalTime }} 处理完毕。决策：<strong>{{ msg.approved ? '同意通过' : '驳回申请' }}</strong></span>
+                    </div>
+                    <div v-if="msg.approvalFeedback" class="status-feedback">
+                      <span class="feedback-label">审核意见:</span>
+                      <span class="feedback-value">“{{ msg.approvalFeedback }}”</span>
+                    </div>
                   </div>
                 </div>
                 <!-- 用户消息包装（支持附件卡片展现） -->
@@ -694,6 +744,7 @@ export default {
       selectedModelName: null,
       selectedWorkflowCode: '',
       workflows: [],
+      currentWorkflowThreadId: null,
       showModelPopover: false,
       showKbPopover: false,
       showWorkflowPopover: false,
@@ -789,6 +840,208 @@ export default {
     document.body.classList.remove('ai-chat-page')
   },
   methods: {
+    getStepName(message, code) {
+      const localMap = {
+        'intent_router': '意图分发员',
+        'sys_user_analyst': '系统用户审计师',
+        'sys_user_query': '系统用户查询员',
+        'sys_user_audit': '系统用户审计师'
+      };
+      if (localMap[code]) return localMap[code];
+      const step = (message.workflowSteps || []).find(s => s.code === code);
+      return step ? step.name : code;
+    },
+    translateToolName(toolName) {
+      if (!toolName) return '';
+      const map = {
+        'queryUserList': '查询系统用户列表',
+        'querySystemUser': '查询系统用户列表',
+        'auditUserRole': '审计用户角色权限',
+        'getUserAuditReport': '获取用户审计报告'
+      };
+      return map[toolName] || toolName;
+    },
+    generateUuid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    },
+
+    async submitApproval(message, approve) {
+      const feedback = (message.approvalFeedback || '').trim()
+      this.$set(message, 'status', 'resuming')
+      
+      const baseUrl = process.env.VUE_APP_BASE_API || ''
+      const url = `${baseUrl}/ai/workflow/resume?workflowCode=${message.workflowCode}&threadId=${message.threadId}&conversationId=${this.currentConvId}`
+      const token = getToken()
+      
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({
+            approve: approve,
+            feedback: feedback
+          })
+        })
+        
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `HTTP ${response.status}`)
+        }
+        
+        this.$set(message, 'approved', approve)
+        this.$set(message, 'approvalTime', new Date().toLocaleTimeString())
+        this.$set(message, 'status', '')
+        
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        let currentEvent = ''
+        
+        this.isStreaming = true
+        this.$set(message, 'streaming', true)
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim()
+            } else if (line.startsWith('data:')) {
+              let data = ''
+              if (line.startsWith('data: ')) {
+                data = line.slice(6)
+              } else {
+                data = line.slice(5)
+              }
+              const event = currentEvent || 'message'
+              
+              if (event === 'node_start') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const nodeName = parts[1] || nodeCode
+                steps.push({
+                  code: nodeCode,
+                  name: nodeName,
+                  status: 'running',
+                  content: '',
+                  thinking: ''
+                })
+                this.$set(message, 'workflowSteps', steps)
+                this.$set(message, 'content', '') // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
+                this.$set(message, 'statusMsg', `智能体「${nodeName}」正在处理...`)
+              } else if (event === 'node_tool') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const toolName = parts[1] || ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  this.$set(step, 'activeTool', toolName)
+                }
+                this.$set(message, 'workflowSteps', steps)
+                this.$set(message, 'statusMsg', `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`)
+              } else if (event === 'node_thinking') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.thinking = (step.thinking || '') + chunk
+                }
+                this.$set(message, 'workflowSteps', steps)
+              } else if (event === 'node_chunk') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.content = (step.content || '') + chunk
+                }
+                const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
+                const isJson = step && step.content && step.content.trim().startsWith('{');
+                if (!isRouter && !isJson) {
+                  this.$set(message, 'content', step ? step.content : (message.content + chunk))
+                } else {
+                  this.$set(message, 'content', '')
+                }
+                this.$set(message, 'workflowSteps', steps)
+              } else if (event === 'node_done') {
+                const steps = message.workflowSteps || []
+                const nodeCode = data.trim()
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'success'
+                  step.activeTool = null
+                }
+                this.$set(message, 'workflowSteps', steps)
+                this.$set(message, 'statusMsg', '')
+              } else if (event === 'node_error') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const errMsg = parts[1] || '执行异常'
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'error'
+                  step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
+                }
+                this.$set(message, 'workflowSteps', steps)
+              } else if (event === 'node_interrupt') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const msg = parts[1] || '等待审批'
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'paused'
+                }
+                this.$set(message, 'workflowSteps', steps)
+                this.$set(message, 'statusMsg', '')
+                this.$set(message, 'requireApproval', true)
+                this.$set(message, 'currentNodeCode', nodeCode)
+                this.$set(message, 'approved', null)
+                this.$set(message, 'approvalFeedback', '')
+                
+                this.isStreaming = false
+                this.$set(message, 'streaming', false)
+                if (reader) {
+                  reader.cancel()
+                }
+                return
+              } else if (event === 'workflow_done') {
+                this.$set(message, 'streaming', false)
+                this.isStreaming = false
+                this.loadConvList()
+                return
+              } else if (event === 'error') {
+                throw new Error(data.trim() || '工作流执行失败')
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('恢复审批流失败', err)
+        this.$message.error('流式恢复失败：' + err.message)
+        this.$set(message, 'status', 'error')
+        this.isStreaming = false
+        this.$set(message, 'streaming', false)
+      }
+    },
+
     // ──────────────────────────────────────────
     // 会话管理
     // ──────────────────────────────────────────
@@ -1054,7 +1307,9 @@ export default {
       const isWorkflowMode = !!this.selectedWorkflowCode
       let url = ''
       if (isWorkflowMode) {
-        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}`
+        const threadId = this.currentWorkflowThreadId || this.generateUuid()
+        this.currentWorkflowThreadId = threadId
+        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
       } else {
         url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
         if (attachedFile) {
@@ -1120,6 +1375,7 @@ export default {
                     thinking: ''
                   })
                   this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$set(this.messages[aiIndex], 'content', '') // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
                   this.$set(this.messages[aiIndex], 'statusMsg', `智能体「${nodeName}」正在处理...`)
                   this.$nextTick(() => this.scrollToBottom())
                 } else if (event === 'node_tool') {
@@ -1157,8 +1413,13 @@ export default {
                   if (step) {
                     step.content = (step.content || '') + chunk
                   }
-                  // 也追加到消息的总内容中供聊天界面常规显示
-                  this.$set(this.messages[aiIndex], 'content', cur.content + chunk)
+                  const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
+                  const isJson = step && step.content && step.content.trim().startsWith('{');
+                  if (!isRouter && !isJson) {
+                    this.$set(this.messages[aiIndex], 'content', step ? step.content : (cur.content + chunk))
+                  } else {
+                    this.$set(this.messages[aiIndex], 'content', '')
+                  }
                   this.$set(this.messages[aiIndex], 'workflowSteps', steps)
                   this.$nextTick(() => this.scrollToBottom())
                 } else if (event === 'node_done') {
@@ -1168,6 +1429,7 @@ export default {
                   const step = steps.find(s => s.code === nodeCode)
                   if (step) {
                     step.status = 'success'
+                    step.activeTool = null
                   }
                   this.$set(this.messages[aiIndex], 'workflowSteps', steps)
                   this.$set(this.messages[aiIndex], 'statusMsg', '')
@@ -1185,6 +1447,33 @@ export default {
                   }
                   this.$set(this.messages[aiIndex], 'workflowSteps', steps)
                   this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_interrupt') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const msg = parts[1] || '等待审批'
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'paused'
+                  }
+                  this.$set(this.messages[aiIndex], 'workflowSteps', steps)
+                  this.$set(this.messages[aiIndex], 'statusMsg', '')
+                  this.$set(this.messages[aiIndex], 'requireApproval', true)
+                  this.$set(this.messages[aiIndex], 'threadId', this.currentWorkflowThreadId)
+                  this.$set(this.messages[aiIndex], 'workflowCode', this.selectedWorkflowCode)
+                  this.$set(this.messages[aiIndex], 'currentNodeCode', nodeCode)
+                  this.$set(this.messages[aiIndex], 'approved', null)
+                  this.$set(this.messages[aiIndex], 'approvalFeedback', '')
+
+                  this.isStreaming = false
+                  this.$set(this.messages[aiIndex], 'streaming', false)
+                  this.currentWorkflowThreadId = null // 重置，下次新发时新起
+                  if (this.currentReader) {
+                    this.currentReader.cancel()
+                  }
+                  this.currentReader = null
+                  return
                 } else if (event === 'workflow_done') {
                   this.$set(this.messages[aiIndex], 'streaming', false)
                   this.isStreaming = false
@@ -1295,7 +1584,15 @@ export default {
 
     renderMarkdown(text) {
       if (!text) return ''
-      let html = this.escapeHtml(text)
+      
+      // 全局英文字符方法名替换为更友好的业务中文
+      let cleanText = text
+        .replace(/queryUserList/g, '查询系统用户列表')
+        .replace(/querySystemUser/g, '查询系统用户列表')
+        .replace(/auditUserRole/g, '审计用户角色权限')
+        .replace(/getUserAuditReport/g, '获取用户审计报告');
+
+      let html = this.escapeHtml(cleanText)
 
       // 1. 代码块
       html = html.replace(
@@ -3092,6 +3389,177 @@ body.ai-chat-page .copyright {
   gap: 8px;
 }
 
+/* ===== 智能工作流人工审批控制面板高品质设计 ===== */
+.approval-card-panel {
+  margin-top: 18px;
+  padding: 16px 20px;
+  background: #1e293b !important; /* 改为高级深灰蓝暗卡片，完全适配暗黑模式底色 */
+  border-radius: 12px;
+  border: 1px solid #334155 !important; /* 深灰色边框 */
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.3), 0 4px 12px -2px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.approval-card-panel:hover {
+  box-shadow: 0 20px 35px -3px rgba(0, 0, 0, 0.4), 0 8px 20px -2px rgba(0, 0, 0, 0.3);
+  border-color: #475569 !important;
+}
+
+.approval-title-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.approval-title-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14.5px;
+  color: #f8fafc !important; /* 强制明亮字 */
+}
+
+.approval-warning-icon {
+  color: #f59e0b; /* 鲜明暖黄色 */
+  font-size: 17px;
+  font-weight: bold;
+  animation: warningPulse 2s infinite ease-in-out;
+}
+
+@keyframes warningPulse {
+  0% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+
+.approval-node-badge {
+  display: inline-flex;
+  align-items: center;
+  background: #334155;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 11px;
+  border: 1px solid #475569;
+}
+
+.approval-node-badge .badge-label {
+  background: #475569;
+  color: #ffffff !important;
+  padding: 2px 6px;
+  font-weight: 500;
+}
+
+.approval-node-badge .badge-value {
+  color: #cbd5e1 !important;
+  padding: 2px 8px;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+}
+
+.approval-input-wrapper {
+  margin-bottom: 14px;
+}
+
+.approval-textarea >>> .el-textarea__inner {
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background-color: #0f172a !important; /* 极深灰蓝底板 */
+  font-size: 13px;
+  color: #f8fafc !important; /* 强制亮白字 */
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+}
+
+.approval-textarea >>> .el-textarea__inner::placeholder {
+  color: #64748b !important; /* 强对比度的灰占位符 */
+}
+
+.approval-textarea >>> .el-textarea__inner:focus {
+  border-color: #3b82f6;
+  background-color: #0f172a;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.approval-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.approval-btn {
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-reject {
+  background-color: #334155 !important; /* 高级深灰背景 */
+  border-color: #475569 !important;
+  color: #cbd5e1 !important; /* 浅灰色文字 */
+}
+
+.btn-reject:hover {
+  background-color: #ef4444 !important; /* hover时变红，警告清晰 */
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.btn-reject:active {
+  transform: translateY(0);
+}
+
+.btn-approve {
+  background-color: #10b981 !important;
+  border-color: #10b981 !important;
+  color: #ffffff !important; /* 强制纯白字 */
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+.btn-approve:hover {
+  background-color: #059669 !important;
+  border-color: #059669 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-approve:active {
+  transform: translateY(0);
+}
+
+.approval-status-panel {
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: rgba(16, 185, 129, 0.1) !important;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+  font-size: 13px;
+  color: #10b981 !important; /* 鲜明绿色字 */
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.2);
+}
+
+.approval-status-panel .status-header strong {
+  font-weight: 600;
+  color: #34d399 !important;
+}
+
+.approval-status-panel .status-feedback {
+  margin-top: 6px;
+  padding-left: 21px;
+  font-size: 12px;
+  color: #a7f3d0 !important;
+  display: flex;
+  gap: 4px;
+}
+
+
 .loading-status-text {
   font-size: 13px;
   color: #909399;
@@ -3663,34 +4131,39 @@ body.ai-chat-page .copyright {
 
 /* 智能体工作流流转高级样式 */
 .workflow-steps-container {
-  background: rgba(248, 247, 250, 0.75);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(225, 219, 236, 0.5);
-  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
   margin-bottom: 18px;
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(139, 92, 246, 0.03);
+  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.08), 0 2px 8px -1px rgba(148, 163, 184, 0.04);
   transition: all 0.3s ease;
 }
 .workflow-steps-container:hover {
-  box-shadow: 0 12px 36px rgba(139, 92, 246, 0.07);
+  box-shadow: 0 10px 30px -3px rgba(148, 163, 184, 0.12), 0 4px 12px -2px rgba(148, 163, 184, 0.08);
+  border-color: #cbd5e1;
 }
 .workflow-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, #f8f7fa 0%, #e8def8 100%);
-  border-bottom: 1px solid rgba(225, 219, 236, 0.4);
-  font-size: 13px;
+  padding: 12px 18px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13.5px;
   font-weight: 600;
-  color: #6d28d9;
+  color: #334155;
+}
+.workflow-header i {
+  color: #64748b;
+  font-size: 15px;
 }
 .workflow-steps-list {
-  padding: 14px 16px;
+  padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  background: #ffffff;
 }
 .workflow-step-item {
   display: flex;
@@ -3702,9 +4175,9 @@ body.ai-chat-page .copyright {
   position: absolute;
   left: 9px;
   top: 22px;
-  bottom: -20px;
+  bottom: -22px;
   width: 2px;
-  background: #e2e8f0;
+  background: #f1f5f9;
 }
 .workflow-step-item.running:not(:last-child)::after {
   background: linear-gradient(to bottom, #3b82f6, rgba(59, 130, 246, 0.1), #3b82f6);
@@ -3716,7 +4189,7 @@ body.ai-chat-page .copyright {
   100% { background-position: 0% 200%; }
 }
 .workflow-step-item.success:not(:last-child)::after {
-  background: #10b981;
+  background: #0d9488; /* 雅致的莫兰迪蓝绿色连线 */
 }
 .step-icon {
   width: 20px;
@@ -3725,7 +4198,7 @@ body.ai-chat-page .copyright {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fff;
+  background: #ffffff;
   border: 2px solid #cbd5e1;
   z-index: 1;
   font-size: 11px;
@@ -3744,15 +4217,15 @@ body.ai-chat-page .copyright {
   100% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0), 0 0 0 12px rgba(59, 130, 246, 0); }
 }
 .workflow-step-item.success .step-icon {
-  border-color: #10b981;
-  background: #10b981;
-  color: #fff;
-  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+  border-color: #0d9488;
+  background: #0d9488;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.2);
 }
 .workflow-step-item.error .step-icon {
   border-color: #ef4444;
   background: #ef4444;
-  color: #fff;
+  color: #ffffff;
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.2);
 }
 .step-content {
@@ -3767,42 +4240,44 @@ body.ai-chat-page .copyright {
   gap: 6px;
 }
 .step-name {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
-  color: #1e293b;
+  color: #334155;
 }
 .workflow-step-item.running .step-name {
   color: #2563eb;
+  font-weight: 700;
 }
 .step-code {
   font-size: 11px;
   color: #94a3b8;
+  font-weight: 400;
 }
 .step-tool-badge {
   display: inline-flex;
   align-items: center;
   align-self: flex-start;
   gap: 4px;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  border: 1px solid #bfdbfe;
-  border-radius: 4px;
-  padding: 3px 8px;
-  font-size: 11px;
-  color: #1e40af;
+  background: #f0fdf4; /* 清爽淡绿底 */
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: #166534;
   margin-top: 4px;
   font-weight: 500;
-  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.05);
+  box-shadow: 0 1px 2px rgba(16, 101, 52, 0.02);
 }
 .step-tool-badge i {
-  color: #2563eb;
+  color: #10b981;
 }
 .step-tool-badge .tool-name {
   font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
   font-weight: 600;
 }
 .step-thinking-box {
-  background: #fdfbf7;
-  border-left: 3px solid #f59e0b;
+  background: #fafaf9; /* 无尘灰 */
+  border-left: 3px solid #e2e8f0;
   border-radius: 4px;
   padding: 10px 14px;
   margin-top: 6px;
@@ -3811,17 +4286,17 @@ body.ai-chat-page .copyright {
 .step-thinking-box .thinking-title {
   font-size: 11px;
   font-weight: 600;
-  color: #b5895b;
+  color: #78716c;
   margin-bottom: 3px;
 }
 .step-thinking-box .thinking-text {
   font-size: 12px;
-  color: #64748b;
+  color: #575249;
   white-space: pre-wrap;
   line-height: 1.6;
 }
 .step-content-box {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 8px 12px;
