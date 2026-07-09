@@ -18,11 +18,11 @@
       <span :style="{ borderColor: themeColor }" class="ai-btn-pulse"></span>
     </div>
 
-    <!-- 聊天面板 -->
+    <!-- 聊天面板 (科技感暗黑毛玻璃风格) -->
     <transition name="slide-fade">
       <div v-show="chatVisible" class="ai-chat-panel">
         <!-- 头部 -->
-        <div :style="{ borderTopColor: themeColor }" class="panel-header">
+        <div class="panel-header">
           <div class="header-left">
             <span :style="{ background: themeColorGradient }" class="avatar-mini">✦</span>
             <div class="title-wrapper">
@@ -34,7 +34,7 @@
             <!-- 清空当前对话 -->
             <el-tooltip content="清空当前对话" placement="top">
               <el-button
-                :disabled="isStreaming || messages.length === 0"
+                :disabled="isStreaming || (messages.length === 0 && !selectedWorkflowCode)"
                 class="action-btn"
                 icon="el-icon-refresh-left"
                 type="text"
@@ -46,51 +46,78 @@
           </div>
         </div>
 
-        <!-- 模型与知识库小型配置区 -->
+        <!-- 配置栏：模型、知识库与工作流配置区 (两行自适应布局，防止溢出) -->
         <div class="panel-configs">
-          <el-select
-            v-model="selectedModelName"
-            :disabled="isStreaming"
-            class="config-select"
-            placeholder="选择模型"
-            size="mini"
-            style="width: 49%"
-            @change="handleModelOrKbChange"
-          >
-            <el-option
-              v-for="item in models"
-              :key="item.id"
-              :label="'🤖 ' + item.name"
-              :value="item.modelName"
-            />
-          </el-select>
-          <el-select
-            v-model="selectedKbId"
-            :disabled="isStreaming"
-            class="config-select"
-            clearable
-            placeholder="关联知识库"
-            size="mini"
-            style="width: 49%; margin-left: 2%"
-            @change="handleModelOrKbChange"
-          >
-            <el-option
-              v-for="item in knowledgeBases"
-              :key="item.id"
-              :label="'📚 ' + item.name"
-              :value="item.id"
-            />
-          </el-select>
+          <div class="config-row">
+            <el-select
+              v-model="selectedModelName"
+              :disabled="isStreaming || !!selectedWorkflowCode"
+              class="config-select"
+              placeholder="选择模型"
+              size="mini"
+              style="width: 49%"
+              @change="handleModelOrKbChange"
+            >
+              <el-option
+                v-for="item in models"
+                :key="item.id"
+                :label="'🤖 ' + item.name"
+                :value="item.modelName"
+              />
+            </el-select>
+            <el-select
+              v-model="selectedKbId"
+              :disabled="isStreaming || !!selectedWorkflowCode"
+              class="config-select"
+              clearable
+              placeholder="关联知识库"
+              size="mini"
+              style="width: 49%; margin-left: 2%"
+              @change="handleModelOrKbChange"
+            >
+              <el-option
+                v-for="item in knowledgeBases"
+                :key="item.id"
+                :label="'📚 ' + item.name"
+                :value="item.id"
+              />
+            </el-select>
+          </div>
+          <div class="config-row" style="margin-top: 6px;">
+            <el-select
+              v-model="selectedWorkflowCode"
+              :disabled="isStreaming"
+              class="config-select"
+              clearable
+              placeholder="选用智能体工作流 (可选)"
+              size="mini"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="item in workflows"
+                :key="item.workflowCode"
+                :label="'⚡ ' + item.workflowName"
+                :value="item.workflowCode"
+              />
+            </el-select>
+          </div>
         </div>
 
         <!-- 消息区 -->
         <div ref="msgArea" class="panel-messages">
+          <!-- 欢迎页 -->
           <div v-if="messages.length === 0" class="welcome-container">
-            <div :style="{ color: themeColor }" class="welcome-icon">✦</div>
+            <div class="welcome-glow"></div>
+            <div :style="{ color: '#dfb889' }" class="welcome-icon">✦</div>
             <h3>你好！我是 AI 助理</h3>
             <p>我可以回答问题、编写代码或提供决策支持。</p>
-            <p class="welcome-hint">输入下方框内即可开始，聊天记录在关闭或重置后不会保留。</p>
+            <p class="welcome-hint">
+              <span v-if="selectedWorkflowCode">🚀 已选用工作流: <b>{{ currentWorkflowName }}</b></span>
+              <span v-else>输入下方框内即可开始，聊天记录在关闭或重置后不会保留。</span>
+            </p>
           </div>
+          
+          <!-- 消息列表 -->
           <div v-else class="messages-list">
             <div
               v-for="(msg, index) in messages"
@@ -146,18 +173,34 @@
               @keydown.native="handleKeyDown"
             />
             <div class="input-actions">
-              <!-- 联网搜索开关 -->
-              <div v-if="currentModelSupportsSearch" class="search-toggle-wrapper">
-                <span class="search-label">联网搜索</span>
-                <el-switch
-                  v-model="enableWebSearch"
-                  active-color="#1890ff"
-                  size="mini"
-                  @change="handleWebSearchChange"
-                ></el-switch>
+              <!-- 左侧操作区：录音按钮 + 联网搜索 -->
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <!-- 语音输入 -->
+                <el-tooltip :content="isListening ? '停止听取并识别' : '语音输入'" placement="top">
+                  <el-button
+                    :class="{ 'pulse-active': isListening }"
+                    :type="isListening ? 'danger' : 'info'"
+                    :icon="isListening ? 'el-icon-loading' : 'el-icon-microphone'"
+                    circle
+                    size="mini"
+                    style="font-size: 13px; border: none; background-color: rgba(255,255,255,0.06); color: #f8fafc;"
+                    @click="isListening ? stopVoiceInput() : startVoiceInput()"
+                  ></el-button>
+                </el-tooltip>
+                
+                <!-- 联网搜索开关 (工作流模式下屏蔽) -->
+                <div v-if="currentModelSupportsSearch && !selectedWorkflowCode" class="search-toggle-wrapper">
+                  <span class="search-label">联网搜索</span>
+                  <el-switch
+                    v-model="enableWebSearch"
+                    active-color="#3b82f6"
+                    size="mini"
+                    @change="handleWebSearchChange"
+                  ></el-switch>
+                </div>
               </div>
-              <div v-else></div>
 
+              <!-- 右侧按钮：停止/发送 -->
               <div class="action-buttons">
                 <!-- 停止生成 -->
                 <el-button
@@ -193,6 +236,7 @@ import {getToken} from '@/utils/auth'
 import {listAvailableModel} from '@/api/ai/model'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {createConversation, updateConversationConfig} from '@/api/ai/chat'
+import {listActiveWorkflows} from '@/api/ai/workflow'
 
 export default {
   name: 'AiFloatChat',
@@ -211,6 +255,15 @@ export default {
       knowledgeBases: [],
       selectedKbId: null,
 
+      // 工作流
+      workflows: [],
+      selectedWorkflowCode: null,
+
+      // 语音识别录音
+      isListening: false,
+      voiceBaseText: '',
+      voiceTempText: '',
+
       // 联网搜索
       enableWebSearch: false,
 
@@ -223,26 +276,32 @@ export default {
       return this.$store.state.settings.theme || '#1890ff'
     },
     themeColorGradient() {
-      const mainColor = this.themeColor
-      return `linear-gradient(135deg, ${mainColor}, ${this.lightenColor(mainColor, 20)})`
+      return 'linear-gradient(135deg, #7c3aed 0%, #3b82f6 50%, #06b6d4 100%)'
     },
     themeColorShadow() {
-      return `0 8px 24px rgba(24, 144, 255, 0.25)`
+      return '0 8px 32px rgba(124, 58, 237, 0.45), 0 0 15px rgba(6, 182, 212, 0.25)'
     },
     currentModelSupportsSearch() {
       if (!this.selectedModelName) return false
       const m = this.models.find(item => item.modelName === this.selectedModelName)
       return m && m.enableSearch === '1'
+    },
+    currentWorkflowName() {
+      if (!this.selectedWorkflowCode) return ''
+      const w = this.workflows.find(item => item.workflowCode === this.selectedWorkflowCode)
+      return w ? w.workflowName : ''
     }
   },
   created() {
     this.loadModels()
     this.loadKnowledgeBases()
+    this.loadActiveWorkflows()
     const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
     this.enableWebSearch = savedPreference === 'true'
   },
   beforeDestroy() {
     this.abortStream()
+    this.cleanupVoiceInput()
   },
   methods: {
     lightenColor(hex, percent) {
@@ -250,15 +309,16 @@ export default {
       if (hex.length === 3) {
         hex = hex.replace(/(.)/g, '$1$1')
       }
-      let r = parseInt(hex.substr(0, 2), 16)
-      let g = parseInt(hex.substr(2, 2), 16)
-      let b = parseInt(hex.substr(4, 2), 16)
-
-      r = Math.min(255, Math.floor(r + (255 - r) * (percent / 100)))
-      g = Math.min(255, Math.floor(g + (255 - g) * (percent / 100)))
-      b = Math.min(255, Math.floor(b + (255 - b) * (percent / 100)))
-
-      return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+      let r = parseInt(hex.substr(0, 2), 16),
+        g = parseInt(hex.substr(2, 2), 16),
+        b = parseInt(hex.substr(4, 2), 16)
+      return `#${(0x1000000 +
+        Math.round((255 - r) * (percent / 100) + r) * 0x10000 +
+        Math.round((255 - g) * (percent / 100) + g) * 0x100 +
+        Math.round((255 - b) * (percent / 100) + b)
+      )
+        .toString(16)
+        .slice(1)}`
     },
     toggleChat() {
       this.chatVisible = !this.chatVisible
@@ -311,6 +371,16 @@ export default {
         console.error('加载知识库失败', e)
       }
     },
+    async loadActiveWorkflows() {
+      try {
+        const res = await listActiveWorkflows()
+        if (res.code === 200) {
+          this.workflows = res.data || []
+        }
+      } catch (e) {
+        console.error('加载工作流列表失败', e)
+      }
+    },
     async handleModelOrKbChange() {
       if (this.currentConvId) {
         try {
@@ -352,9 +422,11 @@ export default {
       })
       this.$nextTick(() => this.scrollToBottom())
 
+      const isWorkflowMode = !!this.selectedWorkflowCode
+
       try {
-        // 首条消息懒加载会话
-        if (!this.currentConvId) {
+        // 只有非工作流模式，首条消息才懒加载创建会话
+        if (!isWorkflowMode && !this.currentConvId) {
           const convRes = await createConversation(this.selectedModelName, this.selectedKbId)
           if (convRes.code === 200) {
             this.currentConvId = convRes.data.id
@@ -365,7 +437,13 @@ export default {
 
         const baseUrl = process.env.VUE_APP_BASE_API || ''
         const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
-        const url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+        
+        let url = ''
+        if (isWorkflowMode) {
+          url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}`
+        } else {
+          url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+        }
         const token = getToken()
 
         const response = await fetch(url, {
@@ -476,6 +554,7 @@ export default {
       this.handleStopMessage()
       this.messages = []
       this.currentConvId = null
+      this.selectedWorkflowCode = null
       this.$message.success('已清空当前会话，您可以重新开始聊天。')
     },
     toggleThinkingExpanded(index) {
@@ -521,6 +600,16 @@ export default {
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
 
+      // 4.5 超链接
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+        let href = url
+        if (url.startsWith('/profile')) {
+          const baseUrl = process.env.VUE_APP_BASE_API || ''
+          href = baseUrl + url
+        }
+        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+      })
+
       // 5. 表格
       const lines = html.split('\n')
       let inTable = false
@@ -564,22 +653,111 @@ export default {
       html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`)
       html = html.replace(/<\/ul>\s*<ul>/g, '')
 
-      html = html.replace(/^\d+\. (.+)$/gm, '<ol-li>$1</ol-li>')
-      html = html.replace(/(<ol-li>[\s\S]*?<\/ol-li>)/g, m => `<ol>${m}</ol>`)
+      html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ol>${m}</ol>`)
       html = html.replace(/<\/ol>\s*<ol>/g, '')
-      html = html.replace(/ol-li/g, 'li')
 
-      // 7. 引用
-      html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
-      html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>')
-
-      // 8. 换行
-      html = html.replace(/\n{3,}/g, '\n\n')
+      // 7. 换行
       html = html.replace(/\n/g, '<br>')
-      html = html.replace(/<br>\s*(<\/?(table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|h4|h5|h6|blockquote|hr))/gi, '$1')
-      html = html.replace(/(<\/(table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|h4|h5|h6|blockquote|hr)>)\s*<br>/gi, '$1')
-
       return html
+    },
+
+    // ──────────────────────────────────────────
+    // 语音输入核心逻辑
+    // ──────────────────────────────────────────
+    startVoiceInput() {
+      if (this.isStreaming) return
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition || window.msSpeechRecognition
+      if (!SpeechRecognition) {
+        this.$message.warning('您的浏览器暂不支持原生语音识别，建议使用 Chrome、Edge 或 Safari 浏览器。')
+        return
+      }
+
+      this.voiceBaseText = this.inputText
+      this.voiceTempText = ''
+      this.isListening = true
+
+      try {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = 'zh-CN'
+
+        recognition.onstart = () => {
+          console.log('Speech recognition started in float window')
+        }
+
+        recognition.onresult = (event) => {
+          let interimTranscript = ''
+          let finalTranscript = ''
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript
+            } else {
+              interimTranscript += event.results[i][0].transcript
+            }
+          }
+          const newlyRecognized = finalTranscript + interimTranscript
+          this.voiceTempText = newlyRecognized
+          this.inputText = this.voiceBaseText + newlyRecognized
+        }
+
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error in float window', event.error)
+          if (event.code === 'not-allowed' || event.error === 'not-allowed') {
+            this.$message.error('麦克风权限被拒绝，请在浏览器设置中开启麦克风权限！')
+          } else if (event.error === 'network') {
+            this.$message.error('语音识别网络连接超时，请检查网络（Chrome 语音识别可能需要连接谷歌服务器）')
+          } else if (event.error === 'no-speech') {
+            // 正常逻辑
+          } else {
+            this.$message.error('语音识别异常：' + event.error)
+          }
+          this.cleanupVoiceInput()
+        }
+
+        recognition.onend = () => {
+          console.log('Speech recognition ended in float window')
+          this.cleanupVoiceInput()
+        }
+
+        this.$options.recognitionInstance = recognition
+        recognition.start()
+      } catch (err) {
+        console.error('Failed to start speech recognition in float window', err)
+        this.$message.error('无法启动语音识别：' + (err.message || err))
+        this.cleanupVoiceInput()
+      }
+    },
+
+    stopVoiceInput() {
+      if (this.$options.recognitionInstance) {
+        try {
+          this.$options.recognitionInstance.stop()
+        } catch (e) {
+          console.error(e)
+        }
+      }
+      this.isListening = false
+    },
+
+    cancelVoiceInput() {
+      if (this.$options.recognitionInstance) {
+        try {
+          this.$options.recognitionInstance.abort()
+        } catch (e) {
+          console.error(e)
+        }
+      }
+      this.inputText = this.voiceBaseText
+      this.isListening = false
+    },
+
+    cleanupVoiceInput() {
+      this.isListening = false
+      if (this.$options.recognitionInstance) {
+        this.$options.recognitionInstance = null
+      }
     }
   }
 }
@@ -597,8 +775,8 @@ export default {
 
 /* 悬浮球 */
 .ai-float-btn {
-  width: 50px;
-  height: 50px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   cursor: pointer;
   position: relative;
@@ -608,9 +786,11 @@ export default {
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   color: #fff;
   z-index: 10;
+  background-size: 200% 200% !important;
+  animation: auroraFlow 6s ease infinite, shadowPulse 4s ease-in-out infinite;
 
   &:hover {
-    transform: scale(1.08) translateY(-2px);
+    transform: scale(1.1) translateY(-3px);
 
     .ai-btn-pulse {
       animation: pulse 1.6s infinite;
@@ -618,7 +798,8 @@ export default {
   }
 
   &.is-active {
-    transform: rotate(90deg);
+    transform: rotate(90deg) scale(0.95);
+    animation: shadowPulse 4s ease-in-out infinite;
   }
 }
 
@@ -629,10 +810,16 @@ export default {
   justify-content: center;
 
   .ai-svg-icon {
-    width: 22px;
-    height: 22px;
+    width: 23px;
+    height: 23px;
     display: block;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+    transition: transform 0.3s ease;
   }
+}
+
+.ai-float-btn:hover .ai-svg-icon {
+  transform: rotate(8deg) scale(1.05);
 }
 
 .ai-btn-pulse {
@@ -641,37 +828,57 @@ export default {
   left: -4px;
   right: -4px;
   bottom: -4px;
-  border: 2px solid;
+  border: 2px solid rgba(124, 58, 237, 0.4);
+  background: radial-gradient(circle, rgba(6, 182, 212, 0.1) 0%, transparent 80%);
   border-radius: 50%;
   opacity: 0;
   pointer-events: none;
   transition: all 0.3s;
 }
 
-@keyframes pulse {
-  0% {
-    transform: scale(0.95);
-    opacity: 0.5;
+@keyframes auroraFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+@keyframes shadowPulse {
+  0%, 100% {
+    box-shadow: 0 8px 32px rgba(124, 58, 237, 0.45), 0 0 15px rgba(6, 182, 212, 0.25);
   }
-  100% {
-    transform: scale(1.2);
-    opacity: 0;
+  50% {
+    box-shadow: 0 12px 40px rgba(124, 58, 237, 0.65), 0 0 25px rgba(6, 182, 212, 0.45);
   }
 }
 
-/* 聊天面板 */
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+    border-color: rgba(124, 58, 237, 0.5);
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.3);
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+    border-color: rgba(6, 182, 212, 0);
+    box-shadow: 0 0 20px 10px rgba(6, 182, 212, 0);
+  }
+}
+
+/* 聊天面板 - 高端暗色系毛玻璃设计 */
 .ai-chat-panel {
   position: absolute;
   right: 0;
   bottom: 64px;
-  width: 380px;
-  height: 550px;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(230, 235, 245, 0.8);
+  width: 390px;
+  height: 570px;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -685,9 +892,8 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 4px solid;
-  border-bottom: 1px solid #f0f2f5;
-  background: #ffffff;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: transparent;
 
   .header-left {
     display: flex;
@@ -713,12 +919,12 @@ export default {
       .title {
         font-size: 14px;
         font-weight: 600;
-        color: #303133;
+        color: #ffffff;
       }
 
       .subtitle {
         font-size: 10px;
-        color: #909399;
+        color: rgba(255, 255, 255, 0.45);
         margin-top: 1px;
       }
     }
@@ -731,43 +937,54 @@ export default {
 
     .action-btn {
       font-size: 16px;
-      color: #606266;
-      padding: 4px;
+      color: rgba(255, 255, 255, 0.7);
+      padding: 6px;
+      border-radius: 6px;
+      transition: all 0.2s;
 
       &:hover {
-        color: #1890ff;
-        background: #f5f7fa;
-        border-radius: 4px;
+        color: #3b82f6;
+        background: rgba(255, 255, 255, 0.06);
       }
 
       &:disabled {
-        color: #c0c4cc;
+        color: rgba(255, 255, 255, 0.2);
         background: transparent;
       }
     }
   }
 }
 
-/* 配置选择区 */
+/* 配置选择区 (两行自适应) */
 .panel-configs {
   padding: 8px 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #f0f2f5;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+
+  .config-row {
+    display: flex;
+    width: 100%;
+  }
 
   ::v-deep .config-select {
     .el-input__inner {
-      border: 1px solid #e4e7ed;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
       border-radius: 6px;
-      background-color: #fff;
-      font-size: 12px;
+      background-color: rgba(255, 255, 255, 0.04) !important;
+      color: #e2e8f0 !important;
+      font-size: 11px;
       height: 28px;
       line-height: 28px;
-      padding-left: 8px;
+      padding-left: 6px;
+      padding-right: 18px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
 
       &:focus {
-        border-color: #409eff;
+        border-color: #3b82f6 !important;
       }
     }
 
@@ -782,15 +999,15 @@ export default {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  background: #f8fafc;
+  background: transparent;
   scroll-behavior: smooth;
+  position: relative;
 
-  /* 隐藏滚动条 */
   &::-webkit-scrollbar {
-    width: 6px;
+    width: 5px;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 3px;
   }
   &::-webkit-scrollbar-track {
@@ -806,47 +1023,58 @@ export default {
   justify-content: center;
   text-align: center;
   height: 100%;
-  color: #606266;
+  color: #f8fafc;
   padding: 0 20px;
+  position: relative;
+  z-index: 1;
+
+  .welcome-glow {
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, transparent 70%);
+    z-index: -1;
+  }
 
   .welcome-icon {
-    font-size: 48px;
+    font-size: 44px;
     margin-bottom: 16px;
     animation: float 3s ease-in-out infinite;
+    text-shadow: 0 0 10px rgba(223, 184, 137, 0.2);
   }
 
   h3 {
     margin: 0 0 10px 0;
     font-size: 16px;
     font-weight: 600;
-    color: #303133;
+    color: #ffffff;
   }
 
   p {
     margin: 0 0 6px 0;
     font-size: 12px;
     line-height: 1.6;
-    color: #777;
+    color: rgba(255, 255, 255, 0.6);
   }
 
   .welcome-hint {
     margin-top: 14px;
     padding: 8px 12px;
-    background: #fff;
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 8px;
-    border: 1px solid #ebeef5;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     font-size: 11px;
-    color: #909399;
+    color: rgba(255, 255, 255, 0.4);
+    
+    b {
+      color: #3b82f6;
+    }
   }
 }
 
 @keyframes float {
-  0%, 100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-8px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
 }
 
 /* 消息气泡列表 */
@@ -879,9 +1107,9 @@ export default {
   }
 
   .user-av {
-    background: #e1f5fe;
-    color: #0288d1;
-    border: 1px solid #b3e5fc;
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.3);
   }
 
   &.user {
@@ -894,31 +1122,31 @@ export default {
   padding: 10px 14px;
   font-size: 13.5px;
   line-height: 1.6;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
   word-break: break-word;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 
   &.user-bubble {
-    background: #e3f2fd;
-    color: #1e3a8a;
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+    color: #ffffff;
     border-radius: 16px 16px 4px 16px;
-    border: 1px solid rgba(187, 222, 251, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   &.assistant-bubble {
-    background: #ffffff;
-    color: #2c3e50;
+    background: rgba(255, 255, 255, 0.04);
+    color: #f1f5f9;
     border-radius: 16px 16px 16px 4px;
-    border: 1px solid #eaeaea;
+    border: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   &.has-error {
-    background: #fef0f0;
-    border-color: #fde2e2;
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.2);
   }
 }
 
 .error-text {
-  color: #f56c6c;
+  color: #f87171;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -934,7 +1162,7 @@ export default {
   span {
     width: 6px;
     height: 6px;
-    background-color: #909399;
+    background-color: rgba(255, 255, 255, 0.5);
     border-radius: 50%;
     display: inline-block;
     animation: bounce 1.4s infinite ease-in-out both;
@@ -951,8 +1179,9 @@ export default {
 
 /* 深度思维链 */
 .thinking-block {
-  background: #f4f6f8;
-  border-left: 3px solid #909399;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-left: 3px solid #dfb889;
   border-radius: 4px;
   margin-bottom: 10px;
   padding: 6px 10px;
@@ -963,7 +1192,7 @@ export default {
     gap: 6px;
     cursor: pointer;
     font-size: 12px;
-    color: #7f8c8d;
+    color: #dfb889;
     user-select: none;
 
     .arrow {
@@ -979,9 +1208,9 @@ export default {
   .thinking-content {
     margin-top: 8px;
     font-size: 11.5px;
-    color: #555;
+    color: rgba(255, 255, 255, 0.7);
     line-height: 1.5;
-    border-top: 1px dashed #e2e8f0;
+    border-top: 1px dashed rgba(255, 255, 255, 0.08);
     padding-top: 6px;
   }
 }
@@ -989,28 +1218,28 @@ export default {
 /* 底部输入区 */
 .panel-input {
   padding: 12px;
-  background: #ffffff;
-  border-top: 1px solid #f0f2f5;
+  background: transparent;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
   transition: border-color 0.3s;
 
   &.is-focused {
-    border-top-color: #cbd5e1;
+    border-top-color: rgba(255, 255, 255, 0.12);
   }
 
   .input-container {
     display: flex;
     flex-direction: column;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
     overflow: hidden;
     padding: 6px 8px 4px 8px;
     transition: all 0.3s;
 
     &:focus-within {
-      border-color: #409eff;
-      background: #ffffff;
-      box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.1);
+      border-color: #3b82f6;
+      background: rgba(255, 255, 255, 0.05);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
     }
   }
 
@@ -1020,12 +1249,12 @@ export default {
       background: transparent !important;
       padding: 0;
       font-size: 12.5px;
-      color: #303133;
+      color: #f8fafc;
       box-shadow: none !important;
       line-height: 1.6;
 
       &::placeholder {
-        color: #c0c4cc;
+        color: rgba(255, 255, 255, 0.35);
       }
     }
   }
@@ -1035,7 +1264,7 @@ export default {
     align-items: center;
     justify-content: space-between;
     margin-top: 6px;
-    border-top: 1px solid rgba(0, 0, 0, 0.02);
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
     padding-top: 6px;
 
     .search-toggle-wrapper {
@@ -1045,7 +1274,7 @@ export default {
 
       .search-label {
         font-size: 11px;
-        color: #909399;
+        color: rgba(255, 255, 255, 0.45);
       }
     }
 
@@ -1055,6 +1284,23 @@ export default {
       margin-left: auto;
     }
   }
+}
+
+/* 语音识别呼吸灯 */
+@keyframes recordPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+.pulse-active {
+  animation: recordPulse 1.2s infinite ease-in-out;
+  background-color: #ef4444 !important;
 }
 
 /* 动画效果 slide-fade */
@@ -1073,7 +1319,7 @@ export default {
   opacity: 0;
 }
 
-/* Markdown 部分元素样式覆盖 */
+/* Markdown 样式 */
 .markdown-body {
   font-size: 13px;
 
@@ -1086,8 +1332,8 @@ export default {
     }
 
     code.inline-code {
-      background: #f1f5f9;
-      color: #e11d48;
+      background: rgba(255, 255, 255, 0.08);
+      color: #f43f5e;
       padding: 2px 4px;
       border-radius: 4px;
       font-family: monospace;
@@ -1103,6 +1349,7 @@ export default {
       font-family: monospace;
       font-size: 11.5px;
       margin: 8px 0;
+      border: 1px solid rgba(255, 255, 255, 0.05);
     }
 
     ul, ol {
@@ -1115,9 +1362,9 @@ export default {
     }
 
     blockquote {
-      border-left: 4px solid #cbd5e1;
+      border-left: 4px solid rgba(255, 255, 255, 0.15);
       padding-left: 8px;
-      color: #64748b;
+      color: rgba(255, 255, 255, 0.5);
       margin: 6px 0;
       font-style: italic;
     }
@@ -1135,14 +1382,19 @@ export default {
       font-size: 12px;
 
       th, td {
-        border: 1px solid #e2e8f0;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         padding: 6px 10px;
         text-align: left;
       }
 
       th {
-        background-color: #f1f5f9;
+        background-color: rgba(255, 255, 255, 0.06);
         font-weight: 600;
+        color: #ffffff;
+      }
+      
+      td {
+        color: rgba(255, 255, 255, 0.85);
       }
     }
   }

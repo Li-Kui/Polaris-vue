@@ -1,7 +1,7 @@
 import defaultSettings from '@/settings'
 import {useDynamicTitle} from '@/utils/dynamicTitle'
 
-const { sideTheme, showSettings, navType, tagsView, tagsViewPersist, tagsIcon, tagsViewStyle, fixedHeader, sidebarLogo, dynamicTitle, footerVisible, footerContent } = defaultSettings
+const { sideTheme, showSettings, navType, tagsView, tagsViewPersist, tagsIcon, tagsViewStyle, fixedHeader, sidebarLogo, dynamicTitle, footerVisible, footerContent, polarisTheme, polarisLayout } = defaultSettings
 
 const storageSetting = JSON.parse(localStorage.getItem('layout-setting')) || ''
 const state = {
@@ -18,7 +18,9 @@ const state = {
   sidebarLogo: storageSetting.sidebarLogo === undefined ? sidebarLogo : storageSetting.sidebarLogo,
   dynamicTitle: storageSetting.dynamicTitle === undefined ? dynamicTitle : storageSetting.dynamicTitle,
   footerVisible: storageSetting.footerVisible === undefined ? footerVisible : storageSetting.footerVisible,
-  footerContent: footerContent
+  footerContent: footerContent,
+  polarisTheme: storageSetting.polarisTheme || polarisTheme,
+  polarisLayout: storageSetting.polarisLayout || polarisLayout
 }
 const mutations = {
   CHANGE_SETTING: (state, { key, value }) => {

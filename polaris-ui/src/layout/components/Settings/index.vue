@@ -1,58 +1,30 @@
 <template>
-  <el-drawer :append-to-body="true" :before-close="closeSetting" :lock-scroll="false" :visible="showSettings" :with-header="false" size="280px">
+  <el-drawer :append-to-body="true" :before-close="closeSetting" :lock-scroll="false" :visible="showSettings" :with-header="false" custom-class="polaris-settings-drawer" size="280px">
     <div class="drawer-container">
       <div>
         <div class="setting-drawer-content">
           <div class="setting-drawer-title">
-            <h3 class="drawer-title">菜单导航设置</h3>
-          </div>
-          <div class="nav-wrap">
-            <el-tooltip content="左侧菜单" placement="bottom">
-              <div :class="{ activeItem: navType == 1 }" :style="{'--theme': theme}" class="item left" @click="handleNavType(1)">
-                <b></b><b></b>
-              </div>
-            </el-tooltip>
-
-            <el-tooltip content="混合菜单" placement="bottom">
-              <div :class="{ activeItem: navType == 2 }" :style="{'--theme': theme}" class="item mix" @click="handleNavType(2)">
-                <b></b><b></b>
-              </div>
-            </el-tooltip>
-            <el-tooltip content="顶部菜单" placement="bottom">
-              <div :class="{ activeItem: navType == 3 }" :style="{'--theme': theme}" class="item top" @click="handleNavType(3)">
-                <b></b><b></b>
-              </div>
-            </el-tooltip>
-          </div>
-          <div class="setting-drawer-title">
-            <h3 class="drawer-title">主题风格设置</h3>
-          </div>
-          <div class="setting-drawer-block-checbox">
-            <div class="setting-drawer-block-checbox-item" @click="handleTheme('theme-dark')">
-              <img alt="dark" src="@/assets/images/dark.svg">
-              <div v-if="sideTheme === 'theme-dark'" class="setting-drawer-block-checbox-selectIcon" style="display: block;">
-                <i aria-label="图标: check" class="anticon anticon-check">
-                  <svg :fill="theme" aria-hidden="true" class="" data-icon="check" focusable="false" height="1em" viewBox="64 64 896 896" width="1em">
-                    <path d="M912 190h-69.9c-9.8 0-19.1 4.5-25.1 12.2L404.7 724.5 207 474a32 32 0 0 0-25.1-12.2H112c-6.7 0-10.4 7.7-6.3 12.9l273.9 347c12.8 16.2 37.4 16.2 50.3 0l488.4-618.9c4.1-5.1.4-12.8-6.3-12.8z"/>
-                  </svg>
-                </i>
-              </div>
-            </div>
-            <div class="setting-drawer-block-checbox-item" @click="handleTheme('theme-light')">
-              <img alt="light" src="@/assets/images/light.svg">
-              <div v-if="sideTheme === 'theme-light'" class="setting-drawer-block-checbox-selectIcon" style="display: block;">
-                <i aria-label="图标: check" class="anticon anticon-check">
-                  <svg :fill="theme" aria-hidden="true" class="" data-icon="check" focusable="false" height="1em" viewBox="64 64 896 896" width="1em">
-                    <path d="M912 190h-69.9c-9.8 0-19.1 4.5-25.1 12.2L404.7 724.5 207 474a32 32 0 0 0-25.1-12.2H112c-6.7 0-10.4 7.7-6.3 12.9l273.9 347c12.8 16.2 37.4 16.2 50.3 0l488.4-618.9c4.1-5.1.4-12.8-6.3-12.8z"/>
-                  </svg>
-                </i>
-              </div>
-            </div>
+            <h3 class="drawer-title">Polaris 极光视觉设置</h3>
           </div>
 
           <div class="drawer-item">
-            <span>主题颜色</span>
-            <theme-picker style="float: right;height: 26px;margin: -3px 8px 0 0;" @change="themeChange" />
+            <span>主题风格</span>
+            <el-select v-model="polarisTheme" size="mini" style="float: right; width: 140px; margin-top: -3px;">
+              <el-option label="🌌 极光玻璃 (A - 暗)" value="A" />
+              <el-option label="⚡ 赛博霓虹 (B - 暗)" value="B" />
+              <el-option label="⚙️ 钛金极简 (C - 暗)" value="C" />
+              <el-option label="经典原版" value="default" />
+            </el-select>
+          </div>
+
+          <div class="drawer-item">
+            <span>排版结构</span>
+            <el-select v-model="polarisLayout" size="mini" style="float: right; width: 120px; margin-top: -3px;">
+              <el-option label="🛸 悬浮 Dock (1)" value="1" />
+              <el-option label="📊 双轨微缩 (2)" value="2" />
+              <el-option label="💻 顶部通栏 (3)" value="3" />
+              <el-option label="经典左侧" value="default" />
+            </el-select>
           </div>
         </div>
 
@@ -215,6 +187,34 @@ export default {
           value: val
         })
       }
+    },
+    polarisTheme: {
+      get() {
+        return this.$store.state.settings.polarisTheme
+      },
+      set(val) {
+        this.$store.dispatch('settings/changeSetting', {
+          key: 'polarisTheme',
+          value: val
+        })
+      }
+    },
+    polarisLayout: {
+      get() {
+        return this.$store.state.settings.polarisLayout
+      },
+      set(val) {
+        this.$store.dispatch('settings/changeSetting', {
+          key: 'polarisLayout',
+          value: val
+        })
+        // 联动导航模式
+        if (val === '1' || val === '2') {
+          this.handleNavType(1)
+        } else if (val === '3') {
+          this.handleNavType(3)
+        }
+      }
     }
   },
   watch: {
@@ -222,11 +222,18 @@ export default {
       handler(val) {
         if (val == 1) {
           this.$store.dispatch("app/toggleSideBarHide", false)
+          if (this.polarisLayout === '3') {
+            this.$store.dispatch('settings/changeSetting', { key: 'polarisLayout', value: '1' })
+          }
         }
         if (val == 2) {
+          if (this.polarisLayout === '3') {
+            this.$store.dispatch('settings/changeSetting', { key: 'polarisLayout', value: '1' })
+          }
         }
         if (val == 3) {
           this.$store.dispatch("app/toggleSideBarHide", true)
+          this.$store.dispatch('settings/changeSetting', { key: 'polarisLayout', value: '3' })
         }
         if ([1, 3].includes(val)) {
           this.$store.commit("SET_SIDEBAR_ROUTERS",this.$store.state.permission.defaultRoutes)
@@ -282,7 +289,9 @@ export default {
             "dynamicTitle":${this.dynamicTitle},
             "footerVisible":${this.footerVisible},
             "sideTheme":"${this.sideTheme}",
-            "theme":"${this.theme}"
+            "theme":"${this.theme}",
+            "polarisTheme":"${this.polarisTheme}",
+            "polarisLayout":"${this.polarisLayout}"
           }`
       )
       setTimeout(this.$modal.closeLoading(), 1000)

@@ -537,16 +537,18 @@ export default {
 
 <style scoped>
 .ai-workflow-manager {
-  background-color: #fafbfe;
+  background-color: transparent !important;
   min-height: 100vh;
 }
 .filter-container {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
   border-radius: 12px;
   padding: 16px 20px 4px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
-  border: 1px solid #edf2f7;
   margin-bottom: 24px;
+  box-shadow: none !important;
 }
 .btn-gradient-success {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -566,15 +568,16 @@ export default {
   margin-bottom: 24px;
 }
 .workflow-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
   transition: all 0.3s ease;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   height: 240px;
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 .workflow-card:hover {
   transform: translateY(-4px);
@@ -582,16 +585,16 @@ export default {
   border-color: rgba(109, 40, 217, 0.3);
 }
 .workflow-card.is-disabled {
-  opacity: 0.65;
-  background: #f8fafc;
+  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.01) !important;
 }
 .card-header {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid #f1f5f9;
-  background: linear-gradient(135deg, #ffffff 0%, #fafafd 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: transparent !important;
 }
 .workflow-avatar {
   width: 40px;
@@ -612,7 +615,7 @@ export default {
 .workflow-title-text {
   font-size: 15px;
   font-weight: 700;
-  color: #1e293b;
+  color: #ffffff !important;
   margin: 0 0 4px;
 }
 .workflow-code-tag {
@@ -1097,16 +1100,48 @@ export default {
 .empty-state {
   text-align: center;
   padding: 80px 20px;
-  background: #fff;
+  background: rgba(30, 41, 59, 0.45) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 16px;
-  border: 1px dashed #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  width: 100%;
+  margin-top: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.empty-state::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.06) 0%, transparent 70%);
+  pointer-events: none;
 }
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 56px;
+  margin-bottom: 20px;
+  display: inline-block;
+  animation: float-icon 3s ease-in-out infinite;
 }
 .empty-state p {
-  color: #64748b;
-  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 14.5px;
+  margin: 0;
+  line-height: 1.6;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+@keyframes float-icon {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+  }
+  50% {
+    transform: translateY(-8px) scale(1.05);
+    filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.2));
+  }
 }
 </style>

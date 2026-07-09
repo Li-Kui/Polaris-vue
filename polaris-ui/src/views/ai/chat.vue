@@ -62,8 +62,8 @@
     <!-- ========== 主聊天区 ========== -->
     <main class="chat-main">
       <!-- 顶部知识库关联与模型指示栏 -->
-      <div v-if="currentConvId" class="chat-header-bar" style="padding: 12px 20px; background: #ffffff; border-bottom: 1px solid #f2f5f8; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
-        <span class="chat-header-indicator" style="font-size: 14px; font-weight: 600; color: #2d3748; display: flex; align-items: center; gap: 6px;">
+      <div v-if="currentConvId" class="chat-header-bar" style="padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+        <span class="chat-header-indicator" style="font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
           <i class="el-icon-chat-line-round"></i>
           AI 助手对话中
         </span>
@@ -73,7 +73,7 @@
             class="model-indicator-tag"
             effect="plain"
             size="small"
-            style="font-weight: 600; border: 1px solid #cbd5e0; color: #4a5568; background-color: #f7fafc;"
+            style="font-weight: 600;"
             type="info"
           >
             <i class="el-icon-cpu"></i> 模型: {{ currentConvModel }}
@@ -100,9 +100,9 @@
           <p class="welcome-subtitle">请配置或选择您要使用的模型及知识库，随时开启智能对话</p>
 
           <!-- 初始化配置启动卡片 -->
-          <div class="welcome-setup-card" style="margin-top: 30px; width: 480px; padding: 25px; background: rgba(255, 255, 255, 0.9); border-radius: 16px; box-shadow: 0 10px 30px rgba(31, 38, 135, 0.06); border: 1px solid rgba(226, 232, 240, 0.8); display: flex; flex-direction: column; gap: 16px; text-align: left;">
+          <div class="welcome-setup-card" style="margin-top: 30px; width: 480px; padding: 25px; background: rgba(255, 255, 255, 0.03); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15); border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 16px; text-align: left; backdrop-filter: blur(20px);">
             <div class="setup-item">
-              <label style="font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; display: block;"><i class="el-icon-cpu" style="color: #3b82f6;"></i> 选择 AI 大模型</label>
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><i class="el-icon-cpu" style="color: #3b82f6;"></i> 选择 AI 大模型</label>
               <el-select
                 v-model="selectedModelName"
                 placeholder="请选择要使用的大语言模型"
@@ -120,7 +120,7 @@
             </div>
 
             <div class="setup-item">
-              <label style="font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; display: block;"><i class="el-icon-collection" style="color: #10b981;"></i> 关联知识库 (可选)</label>
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><i class="el-icon-collection" style="color: #10b981;"></i> 关联知识库 (可选)</label>
               <el-select
                 v-model="selectedKbId"
                 clearable
@@ -139,7 +139,7 @@
             </div>
 
             <div class="setup-item">
-              <label style="font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; display: block;"><i class="el-icon-s-operation" style="color: #8b5cf6;"></i> 选用智能体工作流 (可选)</label>
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><i class="el-icon-s-operation" style="color: #8b5cf6;"></i> 选用智能体工作流 (可选)</label>
               <el-select
                 v-model="selectedWorkflowCode"
                 clearable
@@ -781,10 +781,12 @@ export default {
   },
   mounted() {
     this.loadConvList(true)
+    document.body.classList.add('ai-chat-page')
   },
   beforeDestroy() {
     this.abortStream()
     this.cleanupVoiceInput()
+    document.body.classList.remove('ai-chat-page')
   },
   methods: {
     // ──────────────────────────────────────────
@@ -1314,6 +1316,16 @@ export default {
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       // 5. 斜体
       html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+
+      // 5.5 超链接
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+        let href = url
+        if (url.startsWith('/profile')) {
+          const baseUrl = process.env.VUE_APP_BASE_API || ''
+          href = baseUrl + url
+        }
+        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+      })
 
       // 6. 简单的 Markdown 表格解析逻辑
       const lines = html.split('\n')
@@ -1989,13 +2001,24 @@ export default {
 }
 </script>
 
-<style scoped>
+<style>
+/* 针对 AI 对话页面，取消外层滚动条，隐藏版权信息 */
+body.ai-chat-page .app-main {
+  overflow: hidden !important;
+}
+body.ai-chat-page .app-main:has(.copyright) {
+  padding-bottom: 0px !important;
+}
+body.ai-chat-page .copyright {
+  display: none !important;
+}
+
 /* ===== 整体布局 ===== */
 .ai-chat-wrapper {
   display: flex;
   /* 适配 RuoYi-Vue3 的 layout：顶部 navbar 50px + tabs-nav 34px + 内边距 */
   height: calc(100vh - 84px);
-  background: #f5f7fa;
+  background: transparent !important;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
                'Microsoft YaHei', sans-serif;
@@ -2005,8 +2028,8 @@ export default {
 .sidebar {
   width: 226px;
   min-width: 226px;
-  background: #ffffff;
-  border-right: 1px solid #ebeef5;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.05) !important;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2019,9 +2042,9 @@ export default {
 
 .btn-new-chat {
   width: 100% !important;
-  background: #f0f7ff !important;
-  border: 1.5px dashed #409eff !important;
-  color: #409eff !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1.5px dashed rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
   border-radius: 9px !important;
   font-size: 13px !important;
   font-weight: 500 !important;
@@ -2030,8 +2053,8 @@ export default {
   transition: all 0.2s !important;
 }
 .btn-new-chat:hover:not(:disabled) {
-  background: #d9ecff !important;
-  border-color: #66b1ff !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
 }
 
 .conv-list {
@@ -2056,17 +2079,17 @@ export default {
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
-  color: #606266;
+  color: rgba(255, 255, 255, 0.7);
   transition: background 0.15s;
   user-select: none;
   gap: 7px;
   margin-bottom: 2px;
   position: relative;
 }
-.conv-item:hover { background: #f5f7fa; }
+.conv-item:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
 .conv-item.active {
-  background: #ecf5ff;
-  color: #409eff;
+  background: rgba(99, 102, 241, 0.15) !important;
+  color: #ffffff !important;
   font-weight: 500;
 }
 
@@ -2112,17 +2135,17 @@ export default {
 
 /* 高端 AI 思考块容器 */
 .thinking-container {
-  background: #fcfbf9;
-  border: 1px solid #eadecc;
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 12px;
   margin-bottom: 16px;
   overflow: hidden;
-  box-shadow: 0 2px 12px rgba(181, 137, 91, 0.04);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15) !important;
   transition: all 0.3s ease;
 }
 
 .thinking-container:hover {
-  box-shadow: 0 4px 16px rgba(181, 137, 91, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
 }
 
 /* 思考框头部 */
@@ -2131,15 +2154,15 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  background: linear-gradient(135deg, #fbfaf7 0%, #f7f4ed 100%);
+  background: rgba(255, 255, 255, 0.04) !important;
   cursor: pointer;
   user-select: none;
-  border-bottom: 1px solid rgba(234, 222, 204, 0.5);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
   transition: background 0.3s ease;
 }
 
 .thinking-header:hover {
-  background: linear-gradient(135deg, #f7f4ed 0%, #efeae0 100%);
+  background: rgba(255, 255, 255, 0.08) !important;
 }
 
 .thinking-title-left {
@@ -2151,8 +2174,8 @@ export default {
 /* 科技感大脑图标 */
 .thinking-icon {
   font-size: 16px;
-  color: #b5895b;
-  text-shadow: 0 0 8px rgba(181, 137, 91, 0.3);
+  color: #dfb889;
+  text-shadow: 0 0 8px rgba(223, 184, 137, 0.3);
   animation: pulse 2s infinite ease-in-out;
 }
 
@@ -2164,7 +2187,7 @@ export default {
 .thinking-title-text {
   font-size: 13px;
   font-weight: 600;
-  color: #8c6a46;
+  color: #dfb889;
   letter-spacing: 0.5px;
 }
 
@@ -2176,13 +2199,13 @@ export default {
 
 .thinking-status {
   font-size: 12px;
-  color: #b5895b;
+  color: #dfb889;
 }
 
 /* 旋转箭头动画 */
 .collapse-arrow {
   font-size: 13px;
-  color: #b5895b;
+  color: #dfb889;
   transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -2194,14 +2217,14 @@ export default {
 .thinking-content-wrapper {
   display: flex;
   padding: 14px 16px;
-  background-color: #faf9f6;
+  background-color: transparent !important;
   position: relative;
 }
 
 /* 左侧设计感推演竖线 */
 .thinking-left-line {
   width: 2px;
-  background: linear-gradient(to bottom, #eadecc 0%, rgba(234, 222, 204, 0.1) 100%);
+  background: linear-gradient(to bottom, rgba(223, 184, 137, 0.6) 0%, rgba(223, 184, 137, 0.05) 100%);
   margin-right: 14px;
   flex-shrink: 0;
   border-radius: 1px;
@@ -2212,7 +2235,7 @@ export default {
   flex-grow: 1;
   font-size: 12px !important;
   line-height: 1.625 !important;
-  color: #6e5a47 !important;
+  color: rgba(255, 255, 255, 0.8) !important;
 }
 
 /* 让 Markdown 中的列表和引用在思考区更加清秀 */
@@ -2230,7 +2253,7 @@ export default {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
-  background: #f5f7fa;
+  background: transparent !important;
   position: relative;
 }
 
@@ -2272,14 +2295,14 @@ export default {
 .welcome-title {
   font-size: 24px;
   font-weight: 600;
-  color: #1a1a2e;
+  color: #ffffff;
   margin: 0;
   letter-spacing: -0.3px;
 }
 
 .welcome-subtitle {
   font-size: 14px;
-  color: #909399;
+  color: rgba(255, 255, 255, 0.6);
   margin: 0;
 }
 
@@ -2294,19 +2317,20 @@ export default {
   align-items: center;
   gap: 6px;
   padding: 9px 16px;
-  background: #fff;
-  border: 1px solid #ebeef5;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   font-size: 13px;
-  color: #606266;
+  color: rgba(255, 255, 255, 0.75);
   cursor: pointer;
   transition: all 0.2s;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 .tip-card:hover {
-  border-color: #409eff;
-  color: #409eff;
-  box-shadow: 0 2px 12px rgba(64, 158, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.12);
   transform: translateY(-1px);
 }
 
@@ -2404,7 +2428,9 @@ export default {
   border: 1px solid rgba(99, 102, 241, 0.05);
 }
 .assistant-bubble {
-  background: #ffffff;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
   color: #1e293b;
   border-bottom-left-radius: 4px;
   border: 1px solid #f1f5f9;
@@ -2473,13 +2499,17 @@ export default {
 }
 .assistant-bubble {
   max-width: 85% !important;
-  background: #fff;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
   color: #303133;
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
 }
 .has-error {
-  background: #fff5f5;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
   border: 1px solid #fde2e2;
 }
 
@@ -2538,8 +2568,8 @@ export default {
   line-height: 1.65;
 }
 .markdown-body ::v-deep code.inline-code {
-  background: #f0f2f5;
-  color: #e83e8c;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #a5b4fc !important;
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 13px;
@@ -2550,8 +2580,8 @@ export default {
   padding-left: 20px;
 }
 .markdown-body ::v-deep li { margin: 3px 0; }
-.markdown-body ::v-deep strong { font-weight: 600; color: #1a1a2e; }
-.markdown-body ::v-deep em { font-style: italic; color: #606266; }
+.markdown-body ::v-deep strong { font-weight: 600; color: #ffffff !important; }
+.markdown-body ::v-deep em { font-style: italic; color: rgba(255, 255, 255, 0.7) !important; }
 .markdown-body ::v-deep hr {
   border: none;
   border-top: 1px solid #ebeef5;
@@ -2566,21 +2596,21 @@ export default {
   height: 28px;
   padding: 0 12px;
   border-radius: 14px;
-  border: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: rgba(255, 255, 255, 0.75) !important;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   outline: none;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15) !important;
   margin-right: 6px;
 }
 .config-pill-btn:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
-  color: #334155;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
   transform: translateY(-1px);
 }
 .config-pill-btn:disabled {
@@ -2608,44 +2638,44 @@ export default {
 
 /* 模型大脑药丸 (淡雅蓝紫主题) */
 .pill-model {
-  background: #f5f3ff;
-  border-color: #ddd6fe;
-  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.15) !important;
+  border-color: rgba(124, 58, 237, 0.3) !important;
+  color: #a78bfa !important;
 }
 .pill-model i {
-  color: #8b5cf6;
+  color: #a78bfa !important;
 }
 .pill-model:hover {
-  background: #ede9fe;
-  border-color: #c084fc;
+  background: rgba(124, 58, 237, 0.25) !important;
+  border-color: rgba(124, 58, 237, 0.45) !important;
 }
 
 /* 知识库药丸 (淡雅草绿主题) */
 .pill-kb.is-active {
-  background: #ecfdf5;
-  border-color: #a7f3d0;
-  color: #059669;
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+  color: #34d399 !important;
 }
 .pill-kb.is-active i {
-  color: #10b981;
+  color: #34d399 !important;
 }
 .pill-kb.is-active:hover {
-  background: #d1fae5;
-  border-color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.25) !important;
+  border-color: rgba(16, 185, 129, 0.45) !important;
 }
 
 /* 工作流药丸 (淡雅琥珀主题) */
 .pill-workflow.is-active {
-  background: #fffbeb;
-  border-color: #fde68a;
-  color: #d97706;
+  background: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+  color: #fbbf24 !important;
 }
 .pill-workflow.is-active i {
-  color: #f59e0b;
+  color: #fbbf24 !important;
 }
 .pill-workflow.is-active:hover {
-  background: #fef3c7;
-  border-color: #fcd34d;
+  background: rgba(245, 158, 11, 0.25) !important;
+  border-color: rgba(245, 158, 11, 0.45) !important;
 }
 
 /* 联网搜索药丸 (淡雅海洋蓝主题) */
@@ -2666,10 +2696,11 @@ export default {
 /* 弹出层全局统一定制 */
 .pill-selector-popper {
   border-radius: 16px !important;
-  background: rgba(255, 255, 255, 0.98) !important;
-  backdrop-filter: blur(12px) !important;
-  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.08), 0 15px 25px -10px rgba(0, 0, 0, 0.04) !important;
-  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  background: rgba(30, 30, 45, 0.85) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 15px 25px -10px rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   padding: 10px !important;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
@@ -2677,11 +2708,11 @@ export default {
 .pill-selector-popper .el-popover__title {
   font-size: 11px;
   font-weight: 800;
-  color: #94a3b8;
+  color: rgba(255, 255, 255, 0.5) !important;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
   padding: 4px 8px;
-  border-bottom: 1px solid #f8fafc;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
 }
 
 .popper-selector-list {
@@ -2690,6 +2721,23 @@ export default {
   gap: 5px;
   max-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden; /* 防止 hover translateX 时触发横向滚动条 */
+}
+
+/* 美化列表的滚动条，适应暗色毛玻璃弹窗 */
+.popper-selector-list::-webkit-scrollbar {
+  width: 4px;
+  height: 0px;
+}
+.popper-selector-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.popper-selector-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-radius: 2px;
+}
+.popper-selector-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
 }
 
 .popper-selector-item {
@@ -2704,11 +2752,13 @@ export default {
   user-select: none;
   transform: translateX(0);
   box-sizing: border-box;
+  color: rgba(255, 255, 255, 0.8) !important;
 }
 
 /* 柔和侧滑 Hover 动效，让选择充满质感 */
 .popper-selector-item:hover {
-  background: #f8fafc;
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #ffffff !important;
   transform: translateX(4px);
 }
 
@@ -2739,41 +2789,41 @@ export default {
 
 /* === 核心大脑激活态 (淡蓝紫主题) === */
 .popper-model .popper-selector-item.is-active {
-  background: #f5f3ff;
-  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.15) !important;
+  color: #c084fc !important;
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.25) !important;
 }
 .popper-model .popper-selector-item.is-active .item-icon {
-  color: #8b5cf6;
+  color: #c084fc !important;
 }
 .popper-model .popper-selector-item.is-active .check-icon {
-  color: #7c3aed;
+  color: #c084fc !important;
 }
 
 /* === 专属知识库激活态 (淡雅绿主题) === */
 .popper-kb .popper-selector-item.is-active {
-  background: #ecfdf5;
-  color: #059669;
+  background: rgba(16, 185, 129, 0.15) !important;
+  color: #34d399 !important;
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(5, 150, 105, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.25) !important;
 }
 .popper-kb .popper-selector-item.is-active .item-icon {
-  color: #10b981;
+  color: #34d399 !important;
 }
 .popper-kb .popper-selector-item.is-active .check-icon {
-  color: #059669;
+  color: #34d399 !important;
 }
 
 /* === 智能体工作流激活态 (琥珀橙主题) === */
 .popper-workflow .popper-selector-item.is-active {
-  background: #fffbeb;
-  color: #d97706;
+  background: rgba(245, 158, 11, 0.15) !important;
+  color: #fbbf24 !important;
   font-weight: 700;
-  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.25) !important;
 }
 .popper-workflow .popper-selector-item.is-active .item-icon {
-  color: #f59e0b;
+  color: #fbbf24 !important;
 }
 .popper-workflow .popper-selector-item.is-active .check-icon {
   color: #d97706;
@@ -2782,7 +2832,9 @@ export default {
 /* ===== 输入区域 ===== */
 .input-area {
   padding: 10px 44px 14px;
-  background: #f5f7fa;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
   flex-shrink: 0;
 }
 

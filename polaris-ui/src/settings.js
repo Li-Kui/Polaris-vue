@@ -62,5 +62,15 @@ module.exports = {
   /**
    * 底部版权文本内容
    */
-  footerContent: 'Copyright © 2018-2026 Polaris. All Rights Reserved.'
+  footerContent: 'Copyright © 2018-2026 Polaris. All Rights Reserved.',
+
+  /**
+   * Polaris 极光星空主题系列: 'A' (极光玻璃), 'B' (赛博霓虹), 'C' (钛金极简), 'default' (经典主题)
+   */
+  polarisTheme: 'A',
+
+  /**
+   * Polaris 布局排版结构: '1' (悬浮 Dock 独立栏), '2' (双轨道侧边栏), '3' (顶部通栏), 'default' (传统贴边侧栏)
+   */
+  polarisLayout: '1'
 }

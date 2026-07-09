@@ -184,6 +184,18 @@ public class AiChatController extends BaseController {
         SseEmitter emitter = new SseEmitter(0L);
         Long userId = SecurityUtils.getUserId();
 
+        // 抓取当前主线程的域名与端口，利用 polaris-common 的 ServletUtils 规避跨模块依赖
+        String baseUrl = "";
+        try {
+            jakarta.servlet.http.HttpServletRequest request = com.polaris.common.utils.ServletUtils.getRequest();
+            StringBuffer url = request.getRequestURL();
+            String contextPath = request.getServletContext().getContextPath();
+            baseUrl = url.delete(url.length() - request.getRequestURI().length(), url.length()).append(contextPath).toString();
+        } catch (Exception e) {
+            baseUrl = "";
+        }
+        final String finalBaseUrl = baseUrl;
+
         // 获取当前主线程的安全上下文（包含已登录用户信息）
         final SecurityContext context = SecurityContextHolder.getContext();
 
@@ -192,8 +204,12 @@ public class AiChatController extends BaseController {
             try {
                 // 将安全上下文绑定到子线程
                 SecurityContextHolder.setContext(context);
+                // 将域名设置到 ThreadLocal 中
+                com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
                 aiChatService.chat(conversationId, message, fileUrl, enableSearch, userId, emitter);
             } finally {
+                // 清理 ThreadLocal
+                com.polaris.ai.utils.BaseUrlHolder.clear();
                 // 执行完成后清除上下文，避免对线程造成污染
                 SecurityContextHolder.clearContext();
             }

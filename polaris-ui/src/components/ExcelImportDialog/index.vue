@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :title="title" :visible.sync="visible" :width="width" append-to-body @close="handleClose">
+  <el-dialog :title="title" :visible.sync="visible" :width="width" custom-class="polaris-import-dialog" append-to-body @close="handleClose">
     <el-upload ref="uploadRef" :action="uploadUrl" :auto-upload="false" :disabled="isUploading" :headers="headers" :limit="1" :on-progress="handleProgress" :on-success="handleSuccess" accept=".xlsx, .xls" drag>
       <i class="el-icon-upload"></i>
       <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>

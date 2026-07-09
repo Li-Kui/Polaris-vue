@@ -149,7 +149,7 @@
     </div>
 
     <!-- 添加或修改模型配置对话框 -->
-    <el-dialog :title="title" :visible.sync="open" append-to-body class="ai-model-dialog" width="640px">
+    <el-dialog :title="title" :visible.sync="open" append-to-body custom-class="polaris-form-dialog" class="ai-model-dialog" width="640px">
       <el-form ref="form" :model="form" :rules="rules" label-width="110px" size="small">
         <el-row>
           <el-col :span="24">
@@ -491,18 +491,21 @@ export default {
 
 <style scoped>
 .ai-model-manager {
-  background: #f7f9fc;
+  background: transparent !important;
   min-height: calc(100vh - 84px);
   padding: 24px;
 }
 
 /* 顶部搜索栏 */
 .filter-container {
-  background: #ffffff;
-  padding: 18px 24px 4px 24px;
+  background: rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
   border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  padding: 18px 24px 4px 24px;
   margin-bottom: 20px;
+  box-shadow: none !important;
 }
 
 .btn-gradient-success {
@@ -516,15 +519,53 @@ export default {
   transform: translateY(-1px);
 }
 
-/* 空状态 */
+/* 空状态 (科技感暗色毛玻璃风格) */
 .empty-state {
   text-align: center;
-  padding: 80px 0;
-  color: #a0aec0;
+  padding: 80px 20px;
+  background: rgba(30, 41, 59, 0.45) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  width: 100%;
+  margin-top: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.empty-state::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
 }
 .empty-icon {
-  font-size: 64px;
-  margin-bottom: 16px;
+  font-size: 56px;
+  margin-bottom: 20px;
+  display: inline-block;
+  animation: float-icon 3s ease-in-out infinite;
+}
+.empty-state p {
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 14.5px;
+  margin: 0;
+  line-height: 1.6;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+@keyframes float-icon {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+  }
+  50% {
+    transform: translateY(-8px) scale(1.05);
+    filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.2));
+  }
 }
 
 /* 卡片布局 */
@@ -536,20 +577,22 @@ export default {
 }
 
 .model-card {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.03) !important;
   border-radius: 16px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15) !important;
   display: flex;
   flex-direction: column;
   height: 430px;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   overflow: hidden;
   position: relative;
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 .model-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.08);
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 12px 30px rgba(99, 102, 241, 0.1) !important;
 }
 
 /* 选中模型亮色边框 */
@@ -567,10 +610,11 @@ export default {
 /* 卡片头部 */
 .card-header {
   padding: 16px 20px;
-  border-bottom: 1px solid #edf2f7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
   display: flex;
   align-items: center;
   position: relative;
+  background: transparent !important;
 }
 
 .provider-avatar {
@@ -608,7 +652,7 @@ export default {
   margin: 0 0 4px 0;
   font-size: 16px;
   font-weight: 700;
-  color: #2d3748;
+  color: #ffffff !important;
   white-space: nowrap;
   text-overflow: ellipsis;
   overflow: hidden;

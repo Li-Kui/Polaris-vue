@@ -56,21 +56,21 @@
 
               <!-- 卡片主体：模型、温度、工具与提示词 -->
               <div class="card-body">
-                <div class="param-row">
+                <div class="param-row" style="margin-bottom: 12px;">
                   <span class="param-label"><i class="el-icon-cpu"></i> 选用底座</span>
                   <el-tag size="mini" effect="plain" type="primary">{{ item.modelName }}</el-tag>
                 </div>
 
-                <div class="param-row">
+                <div class="param-row" style="margin-bottom: 12px;">
                   <span class="param-label"><i class="el-icon-odometer"></i> 随机温度</span>
-                  <div class="temp-indicator" style="flex: 1; display: flex; align-items: center; gap: 8px;">
-                    <el-progress :percentage="item.temperature * 100" :show-text="false" :stroke-width="6" style="flex: 1;" color="#8b5cf6" />
+                  <div class="temp-indicator" style="flex: 1; display: flex; align-items: center; gap: 8px; margin-left: 10px;">
+                    <el-progress :percentage="item.temperature * 100" :show-text="false" :stroke-width="6" style="flex: 1; margin: 0 !important;" color="#8b5cf6" />
                     <span class="temp-text" style="font-size: 12px; font-weight: bold; color: #6d28d9;">{{ item.temperature }}</span>
                   </div>
                 </div>
 
                 <!-- 绑定系统工具 pill tags -->
-                <div class="tools-section">
+                <div class="tools-section" style="margin-bottom: 14px;">
                   <span class="param-label" style="margin-bottom: 6px;"><i class="el-icon-folder-opened"></i> 绑定系统工具</span>
                   <div v-if="!item.tools" class="no-tools-text">未绑定任何工具</div>
                   <div v-else class="tool-pills-list">
@@ -423,16 +423,18 @@ export default {
 
 <style scoped>
 .ai-agent-manager {
-  background-color: #fafbfe;
+  background-color: transparent !important;
   min-height: 100vh;
 }
 .filter-container {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.02) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
   border-radius: 12px;
   padding: 16px 20px 4px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
-  border: 1px solid #edf2f7;
   margin-bottom: 24px;
+  box-shadow: none !important;
 }
 .btn-gradient-success {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -452,12 +454,13 @@ export default {
   margin-bottom: 24px;
 }
 .agent-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
   border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15) !important;
   transition: all 0.3s ease;
   overflow: hidden;
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 .agent-card:hover {
   transform: translateY(-4px);
@@ -465,16 +468,16 @@ export default {
   border-color: rgba(139, 92, 246, 0.3);
 }
 .agent-card.is-disabled {
-  opacity: 0.65;
-  background: #f8fafc;
+  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.01) !important;
 }
 .card-header {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 16px 20px;
-  border-bottom: 1px solid #f1f5f9;
-  background: linear-gradient(135deg, #ffffff 0%, #fafafd 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  background: transparent !important;
 }
 .agent-avatar {
   width: 40px;
@@ -495,7 +498,7 @@ export default {
 .agent-title-text {
   font-size: 15px;
   font-weight: 700;
-  color: #1e293b;
+  color: #ffffff !important;
   margin: 0 0 4px;
 }
 .agent-code-tag {
@@ -507,7 +510,7 @@ export default {
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 .param-row {
   display: flex;
@@ -529,6 +532,7 @@ export default {
 .tools-section {
   display: flex;
   flex-direction: column;
+  margin-top: 2px;
 }
 .no-tools-text {
   font-size: 12px;
@@ -778,16 +782,48 @@ export default {
 .empty-state {
   text-align: center;
   padding: 80px 20px;
-  background: #fff;
+  background: rgba(30, 41, 59, 0.45) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-radius: 16px;
-  border: 1px dashed #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  width: 100%;
+  margin-top: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.empty-state::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  pointer-events: none;
 }
 .empty-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 56px;
+  margin-bottom: 20px;
+  display: inline-block;
+  animation: float-icon 3s ease-in-out infinite;
 }
 .empty-state p {
-  color: #64748b;
-  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6) !important;
+  font-size: 14.5px;
+  margin: 0;
+  line-height: 1.6;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+@keyframes float-icon {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+  }
+  50% {
+    transform: translateY(-8px) scale(1.05);
+    filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.2));
+  }
 }
 </style>

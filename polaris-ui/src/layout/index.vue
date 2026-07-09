@@ -1,5 +1,15 @@
 <template>
-  <div :class="classObj" :style="{'--current-color': theme, '--current-color-light': theme + '1a', '--current-color-dark-bg': theme + '33'}" class="app-wrapper">
+  <div :class="[classObj, 'polaris-theme-' + polarisTheme, 'polaris-layout-' + polarisLayout]" :style="{'--current-color': theme, '--current-color-light': theme + '1a', '--current-color-dark-bg': theme + '33'}" class="app-wrapper">
+    <!-- 全局极光背景层 -->
+    <div v-if="polarisTheme === 'A' || polarisTheme === 'C'" class="polaris-mesh-bg">
+      <div class="orb orb-1"></div>
+      <div class="orb orb-2"></div>
+      <div class="orb orb-3"></div>
+      <div class="orb orb-4"></div>
+    </div>
+    <div v-if="polarisTheme === 'B'" class="polaris-cyber-bg"></div>
+    <div v-if="polarisTheme !== 'default'" class="polaris-stars-layer"></div>
+
     <div v-if="device==='mobile'&&sidebar.opened" class="drawer-bg" @click="handleClickOutside"/>
     <sidebar v-if="!sidebar.hide" class="sidebar-container"/>
     <div :class="{hasTagsView:needTagsView,sidebarHide:sidebar.hide}" class="main-container">
@@ -40,7 +50,9 @@ export default {
       sidebar: state => state.app.sidebar,
       device: state => state.app.device,
       needTagsView: state => state.settings.tagsView,
-      fixedHeader: state => state.settings.fixedHeader
+      fixedHeader: state => state.settings.fixedHeader,
+      polarisTheme: state => state.settings.polarisTheme,
+      polarisLayout: state => state.settings.polarisLayout
     }),
     classObj() {
       return {
@@ -54,12 +66,35 @@ export default {
       return variables
     }
   },
+  mounted() {
+    console.log("Polaris Debug - Vuex Layout:", this.polarisLayout, "Theme:", this.polarisTheme)
+    this.$nextTick(() => {
+      const el = document.querySelector('.app-wrapper')
+      if (el) {
+        console.log("Polaris Debug - DOM wrapper classes:", el.className)
+      } else {
+        console.log("Polaris Debug - DOM element .app-wrapper not found!")
+      }
+    })
+  },
   methods: {
     handleClickOutside() {
       this.$store.dispatch('app/closeSideBar', { withoutAnimation: false })
     },
     setLayout() {
       this.$refs.settingRef.openSetting()
+    }
+  },
+  watch: {
+    polarisTheme: {
+      immediate: true,
+      handler(val) {
+        // 先移除已有的 polaris-body-theme- 前缀类名
+        document.body.className = document.body.className.replace(/\bpolaris-body-theme-\S+/g, '').trim()
+        if (val) {
+          document.body.classList.add('polaris-body-theme-' + val)
+        }
+      }
     }
   }
 }

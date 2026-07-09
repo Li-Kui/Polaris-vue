@@ -5,6 +5,7 @@
       :show-close="false"
       :visible.sync="show"
       append-to-body
+      custom-class="polaris-search-dialog"
       width="600px"
       @close="close"
       @opened="onDialogOpened"

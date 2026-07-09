@@ -12,7 +12,8 @@ CREATE TABLE `ai_knowledge_base` (
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
-  PRIMARY KEY (`id`)
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI知识库表';
 
 -- ----------------------------
@@ -29,6 +30,9 @@ CREATE TABLE `ai_document` (
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`id`),
   KEY `idx_kb_id` (`knowledge_base_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='知识库文档表';
