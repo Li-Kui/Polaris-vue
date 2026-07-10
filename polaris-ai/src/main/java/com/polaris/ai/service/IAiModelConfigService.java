@@ -35,12 +35,12 @@ public interface IAiModelConfigService extends IService<AiModelConfig>
     /**
      * 获取默认的聊天对话模型配置
      */
-    AiModelConfig selectDefaultChatModel();
+    AiModelConfig selectDefaultChatModel(Long userDeptId, String dataScopeSql);
 
     /**
      * 获取默认的向量模型配置
      */
-    AiModelConfig selectDefaultEmbeddingModel();
+    AiModelConfig selectDefaultEmbeddingModel(Long userDeptId, String dataScopeSql);
 
     /**
      * 新增模型配置
@@ -55,12 +55,12 @@ public interface IAiModelConfigService extends IService<AiModelConfig>
     /**
      * 重置所有模型配置的默认聊天模型状态
      */
-    int cleanDefaultChatStatus();
+    int cleanDefaultChatStatus(Long deptId);
 
     /**
      * 重置所有模型配置的默认向量模型状态
      */
-    int cleanDefaultEmbeddingStatus();
+    int cleanDefaultEmbeddingStatus(Long deptId);
 
     /**
      * 根据 ID 删除模型配置

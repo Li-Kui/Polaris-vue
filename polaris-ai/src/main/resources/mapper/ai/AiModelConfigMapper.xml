@@ -70,13 +70,41 @@
 
     <select id="selectDefaultChatModel" resultMap="AiModelConfigResult">
         <include refid="selectAiModelConfigVo"/>
-        WHERE is_default = '1' AND status = '1' AND del_flag = '0'
+        <where>
+            AND is_default = '1' AND status = '1' AND del_flag = '0'
+            <if test="dataScopeSql != null and dataScopeSql != ''">
+                ${dataScopeSql}
+            </if>
+        </where>
+        ORDER BY 
+            (CASE 
+                <if test="userDeptId != null">
+                    WHEN dept_id = #{userDeptId} THEN 2
+                </if>
+                WHEN dept_id IS NULL THEN 0
+                ELSE 1 
+            END) DESC,
+            id DESC
         LIMIT 1
     </select>
 
     <select id="selectDefaultEmbeddingModel" resultMap="AiModelConfigResult">
         <include refid="selectAiModelConfigVo"/>
-        WHERE is_default_embedding = '1' AND status = '1' AND del_flag = '0'
+        <where>
+            AND is_default_embedding = '1' AND status = '1' AND del_flag = '0'
+            <if test="dataScopeSql != null and dataScopeSql != ''">
+                ${dataScopeSql}
+            </if>
+        </where>
+        ORDER BY 
+            (CASE 
+                <if test="userDeptId != null">
+                    WHEN dept_id = #{userDeptId} THEN 2
+                </if>
+                WHEN dept_id IS NULL THEN 0
+                ELSE 1 
+            END) DESC,
+            id DESC
         LIMIT 1
     </select>
 
@@ -154,11 +182,31 @@
 
 
     <update id="cleanDefaultChatStatus">
-        UPDATE ai_model_config SET is_default = '0' WHERE is_default = '1'
+        UPDATE ai_model_config 
+        SET is_default = '0' 
+        WHERE is_default = '1'
+        <choose>
+            <when test="deptId != null">
+                AND dept_id = #{deptId}
+            </when>
+            <otherwise>
+                AND dept_id IS NULL
+            </otherwise>
+        </choose>
     </update>
 
     <update id="cleanDefaultEmbeddingStatus">
-        UPDATE ai_model_config SET is_default_embedding = '0' WHERE is_default_embedding = '1'
+        UPDATE ai_model_config 
+        SET is_default_embedding = '0' 
+        WHERE is_default_embedding = '1'
+        <choose>
+            <when test="deptId != null">
+                AND dept_id = #{deptId}
+            </when>
+            <otherwise>
+                AND dept_id IS NULL
+            </otherwise>
+        </choose>
     </update>
 
     <select id="selectAvailableModelConfigs" resultMap="AiModelConfigResult">

@@ -92,12 +92,12 @@ public class AiModelConfigController extends BaseController
         if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
             config.setSearchKey(null);
         }
-        // 如果新增配置时指定为默认，则先清空其他默认状态
+        // 如果新增配置时指定为默认，则先清空同部门（或全局）的其他默认状态
         if ("1".equals(config.getIsDefault())) {
-            modelConfigService.cleanDefaultChatStatus();
+            modelConfigService.cleanDefaultChatStatus(config.getDeptId());
         }
         if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigService.cleanDefaultEmbeddingStatus();
+            modelConfigService.cleanDefaultEmbeddingStatus(config.getDeptId());
         }
         
         int result = modelConfigService.insertModelConfig(config);
@@ -120,12 +120,12 @@ public class AiModelConfigController extends BaseController
         if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
             config.setSearchKey(null);
         }
-        // 如果更新为默认，先清空其他默认状态
+        // 如果更新为默认，先清空同部门（或全局）的其他默认状态
         if ("1".equals(config.getIsDefault())) {
-            modelConfigService.cleanDefaultChatStatus();
+            modelConfigService.cleanDefaultChatStatus(config.getDeptId());
         }
         if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigService.cleanDefaultEmbeddingStatus();
+            modelConfigService.cleanDefaultEmbeddingStatus(config.getDeptId());
         }
 
         int result = modelConfigService.updateModelConfig(config);
@@ -155,7 +155,11 @@ public class AiModelConfigController extends BaseController
     @PutMapping("/{id}/default")
     public ResultData setDefaultChat(@PathVariable Long id)
     {
-        modelConfigService.cleanDefaultChatStatus();
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+        modelConfigService.cleanDefaultChatStatus(existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
         config.setIsDefault("1");
@@ -173,7 +177,11 @@ public class AiModelConfigController extends BaseController
     @PutMapping("/{id}/defaultEmbedding")
     public ResultData setDefaultEmbedding(@PathVariable Long id)
     {
-        modelConfigService.cleanDefaultEmbeddingStatus();
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+        modelConfigService.cleanDefaultEmbeddingStatus(existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
         config.setIsDefaultEmbedding("1");

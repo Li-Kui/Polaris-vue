@@ -47,39 +47,43 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
     }
 
     @Override
-    public AiModelConfig selectDefaultChatModel()
+    public AiModelConfig selectDefaultChatModel(Long userDeptId, String dataScopeSql)
     {
-        return modelConfigMapper.selectDefaultChatModel();
+        return modelConfigMapper.selectDefaultChatModel(userDeptId, dataScopeSql);
     }
 
     @Override
-    public AiModelConfig selectDefaultEmbeddingModel()
+    public AiModelConfig selectDefaultEmbeddingModel(Long userDeptId, String dataScopeSql)
     {
-        return modelConfigMapper.selectDefaultEmbeddingModel();
+        return modelConfigMapper.selectDefaultEmbeddingModel(userDeptId, dataScopeSql);
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public int insertModelConfig(AiModelConfig config)
     {
         return modelConfigMapper.insertModelConfig(config);
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public int updateModelConfig(AiModelConfig config)
     {
         return modelConfigMapper.updateModelConfig(config);
     }
 
     @Override
-    public int cleanDefaultChatStatus()
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public int cleanDefaultChatStatus(Long deptId)
     {
-        return modelConfigMapper.cleanDefaultChatStatus();
+        return modelConfigMapper.cleanDefaultChatStatus(deptId);
     }
 
     @Override
-    public int cleanDefaultEmbeddingStatus()
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public int cleanDefaultEmbeddingStatus(Long deptId)
     {
-        return modelConfigMapper.cleanDefaultEmbeddingStatus();
+        return modelConfigMapper.cleanDefaultEmbeddingStatus(deptId);
     }
 
     @Override

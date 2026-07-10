@@ -2,15 +2,21 @@ package com.polaris.ai.pivot;
 
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.service.IAiModelConfigService;
+import com.polaris.common.core.domain.entity.SysRole;
+import com.polaris.common.core.domain.entity.SysUser;
+import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -35,9 +41,10 @@ public class AiModelFactory
     // 配置对象缓存，用以实现全流程零数据库 I/O
     private final Map<Long, AiModelConfig> configCache = new ConcurrentHashMap<>();
 
-    // 默认模型缓存，避免重复查询数据库
-    private volatile StreamingChatModel defaultStreamingModel;
-    private volatile EmbeddingModel defaultEmbeddingModel;
+    // 默认模型缓存从单例变量重构为部门隔离多实例映射，支持并发安全
+    private final Map<String, StreamingChatModel> defaultChatCache = new ConcurrentHashMap<>();
+    private final Map<String, EmbeddingModel> defaultEmbeddingCache = new ConcurrentHashMap<>();
+
     @Autowired
     private IAiModelConfigService modelConfigService;
     @Autowired
@@ -52,8 +59,67 @@ public class AiModelFactory
         chatCache.clear();
         embeddingCache.clear();
         configCache.clear();
-        defaultStreamingModel = null;
-        defaultEmbeddingModel = null;
+        defaultChatCache.clear();
+        defaultEmbeddingCache.clear();
+    }
+
+    /**
+     * 编程式动态拼接角色关联的数据权限 SQL 过滤片段
+     */
+    private String buildDataScopeSql(SysUser user, String deptAlias, String deptField)
+    {
+        if (user == null) {
+            return " AND " + deptAlias + "." + deptField + " IS NULL"; // 未登录或无上下文只看全局共享
+        }
+        if (user.isAdmin()) {
+            return ""; // 超级管理员直接返回空，拥有一切权限
+        }
+
+        StringBuilder sqlString = new StringBuilder();
+        List<String> conditions = new ArrayList<>();
+        List<String> scopeCustomIds = new ArrayList<>();
+        
+        user.getRoles().forEach(role -> {
+            if ("2".equals(role.getDataScope()) && "0".equals(role.getStatus())) {
+                scopeCustomIds.add(String.valueOf(role.getRoleId()));
+            }
+        });
+
+        for (SysRole role : user.getRoles()) {
+            String dataScope = role.getDataScope();
+            if (conditions.contains(dataScope) || "1".equals(role.getStatus())) {
+                continue;
+            }
+            if ("1".equals(dataScope)) { // 全部数据权限
+                sqlString = new StringBuilder();
+                conditions.add(dataScope);
+                break;
+            } else if ("2".equals(dataScope)) { // 自定义数据权限
+                if (scopeCustomIds.size() > 1) {
+                    sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_role_dept WHERE role_id in (%s) ) ", deptAlias, deptField, String.join(",", scopeCustomIds)));
+                } else {
+                    sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_role_dept WHERE role_id = %d ) ", deptAlias, deptField, role.getRoleId()));
+                }
+            } else if ("3".equals(dataScope)) { // 本部门数据权限
+                sqlString.append(String.format(" OR %s.%s = %d ", deptAlias, deptField, user.getDeptId()));
+            } else if ("4".equals(dataScope)) { // 本部门及以下数据权限
+                sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_dept WHERE dept_id = %d or find_in_set( %d , ancestors ) )", deptAlias, deptField, user.getDeptId(), user.getDeptId()));
+            } else if ("5".equals(dataScope)) { // 仅本人数据权限
+                sqlString.append(String.format(" OR %s.%s = 0 ", deptAlias, deptField));
+            }
+            conditions.add(dataScope);
+        }
+
+        if (conditions.isEmpty()) {
+            return " AND " + deptAlias + "." + deptField + " = 0";
+        }
+
+        if (sqlString.length() > 0) {
+            // 将全局共享模型(dept_id IS NULL)融入数据权限白名单中
+            return " AND (" + sqlString.substring(4) + " OR " + deptAlias + "." + deptField + " IS NULL)";
+        }
+        
+        return "";
     }
 
     /**
@@ -61,24 +127,73 @@ public class AiModelFactory
      */
     public StreamingChatModel getDefaultStreamingModel()
     {
-        if (defaultStreamingModel == null) {
-            synchronized (this) {
-                if (defaultStreamingModel == null) {
-                    try {
-                        AiModelConfig config = modelConfigService.selectDefaultChatModel();
-                        if (config != null) {
-                            defaultStreamingModel = getChatModelInstance(config);
-                        }
-                    } catch (Exception e) {
-                        log.error("从数据库加载默认聊天模型失败，尝试回退到本地配置文件配置", e);
-                    }
-                    if (defaultStreamingModel == null) {
-                        defaultStreamingModel = getFallbackChatModel();
-                    }
+        SysUser user = null;
+        Long userDeptId = null;
+        try {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+                user = SecurityUtils.getLoginUser().getUser();
+                userDeptId = user.getDeptId();
+            }
+        } catch (Exception e) {
+            // 正常捕获，说明无Web请求登录上下文
+        }
+
+        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
+        String cacheKey = "default_chat_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        
+        StreamingChatModel cachedModel = defaultChatCache.get(cacheKey);
+        if (cachedModel != null) {
+            return cachedModel;
+        }
+
+        synchronized (this) {
+            cachedModel = defaultChatCache.get(cacheKey);
+            if (cachedModel != null) {
+                return cachedModel;
+            }
+
+            try {
+                AiModelConfig config = modelConfigService.selectDefaultChatModel(userDeptId, dataScopeSql);
+                if (config != null) {
+                    cachedModel = getChatModelInstance(config);
+                    defaultChatCache.put(cacheKey, cachedModel);
+                    return cachedModel;
                 }
+            } catch (Exception e) {
+                log.error("从数据库加载角色数据权限关联的默认聊天模型失败，userDeptId={}", userDeptId, e);
+            }
+
+            if (cachedModel == null) {
+                cachedModel = getFallbackChatModel();
+                defaultChatCache.put(cacheKey, cachedModel);
             }
         }
-        return defaultStreamingModel;
+        return cachedModel;
+    }
+
+    /**
+     * 获取当前有权访问的默认聊天对话模型配置对象
+     */
+    public AiModelConfig getDefaultChatModelConfig()
+    {
+        SysUser user = null;
+        Long userDeptId = null;
+        try {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+                user = SecurityUtils.getLoginUser().getUser();
+                userDeptId = user.getDeptId();
+            }
+        } catch (Exception e) {
+            // 正常捕获，无Web登录上下文
+        }
+
+        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
+        try {
+            return modelConfigService.selectDefaultChatModel(userDeptId, dataScopeSql);
+        } catch (Exception e) {
+            log.error("从数据库加载默认聊天模型配置失败，userDeptId={}", userDeptId, e);
+        }
+        return null;
     }
 
     /**
@@ -94,7 +209,7 @@ public class AiModelFactory
         }
         return configCache.computeIfAbsent(modelConfigId, id -> {
             log.info(">>> [AiModelFactory] 首次加载模型配置对象并装载本地内存缓存, ID={}", id);
-            return modelConfigService.getById(id);
+            return modelConfigService.selectModelConfigById(id);
         });
     }
 
@@ -141,24 +256,48 @@ public class AiModelFactory
      */
     public EmbeddingModel getEmbeddingModel()
     {
-        if (defaultEmbeddingModel == null) {
-            synchronized (this) {
-                if (defaultEmbeddingModel == null) {
-                    try {
-                        AiModelConfig config = modelConfigService.selectDefaultEmbeddingModel();
-                        if (config != null) {
-                            defaultEmbeddingModel = getEmbeddingModelInstance(config);
-                        }
-                    } catch (Exception e) {
-                        log.error("从数据库加载默认向量模型失败，回退到本地文件默认向量配置", e);
-                    }
-                    if (defaultEmbeddingModel == null) {
-                        defaultEmbeddingModel = getFallbackEmbeddingModel();
-                    }
+        SysUser user = null;
+        Long userDeptId = null;
+        try {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+                user = SecurityUtils.getLoginUser().getUser();
+                userDeptId = user.getDeptId();
+            }
+        } catch (Exception e) {
+            // 正常捕获，无Web登录上下文
+        }
+
+        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
+        String cacheKey = "default_embed_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        
+        EmbeddingModel cachedModel = defaultEmbeddingCache.get(cacheKey);
+        if (cachedModel != null) {
+            return cachedModel;
+        }
+
+        synchronized (this) {
+            cachedModel = defaultEmbeddingCache.get(cacheKey);
+            if (cachedModel != null) {
+                return cachedModel;
+            }
+
+            try {
+                AiModelConfig config = modelConfigService.selectDefaultEmbeddingModel(userDeptId, dataScopeSql);
+                if (config != null) {
+                    cachedModel = getEmbeddingModelInstance(config);
+                    defaultEmbeddingCache.put(cacheKey, cachedModel);
+                    return cachedModel;
                 }
+            } catch (Exception e) {
+                log.error("从数据库加载角色数据权限关联的默认向量模型失败，userDeptId={}", userDeptId, e);
+            }
+
+            if (cachedModel == null) {
+                cachedModel = getFallbackEmbeddingModel();
+                defaultEmbeddingCache.put(cacheKey, cachedModel);
             }
         }
-        return defaultEmbeddingModel;
+        return cachedModel;
     }
 
     // ================================================================

@@ -37,12 +37,16 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
     /**
      * 获取默认的聊天对话模型配置 (is_default = '1')
      */
-    AiModelConfig selectDefaultChatModel();
+    AiModelConfig selectDefaultChatModel(
+            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
+            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
 
     /**
      * 获取默认的向量模型配置 (is_default_embedding = '1')
      */
-    AiModelConfig selectDefaultEmbeddingModel();
+    AiModelConfig selectDefaultEmbeddingModel(
+            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
+            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
 
     /**
      * 新增模型配置
@@ -59,10 +63,10 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
     /**
      * 重置所有模型配置的默认聊天模型状态 (将 is_default 置为 '0')
      */
-    int cleanDefaultChatStatus();
+    int cleanDefaultChatStatus(@org.apache.ibatis.annotations.Param("deptId") Long deptId);
 
     /**
      * 重置所有模型配置的默认向量模型状态 (将 is_default_embedding 置为 '0')
      */
-    int cleanDefaultEmbeddingStatus();
+    int cleanDefaultEmbeddingStatus(@org.apache.ibatis.annotations.Param("deptId") Long deptId);
 }

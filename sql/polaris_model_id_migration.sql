@@ -8,6 +8,9 @@ ALTER TABLE ai_conversation ADD COLUMN model_config_id BIGINT DEFAULT NULL COMME
 -- 智能体表（ai_agent）增加大模型配置外键 ID
 ALTER TABLE ai_agent ADD COLUMN model_config_id BIGINT DEFAULT NULL COMMENT '所选大模型配置ID';
 
+-- 模型配置表（ai_model_config）增加备注字段
+ALTER TABLE ai_model_config ADD COLUMN remark VARCHAR(500) DEFAULT NULL COMMENT '备注';
+
 -- ----------------------------------------------------------------
 -- 2. 历史数据 DML 刷数迁移：根据旧的模型名关联匹配已启用的模型配置主键并补充 ID
 -- ----------------------------------------------------------------

@@ -10,11 +10,8 @@ import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.service.IAiChatService;
-import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
-import com.polaris.system.service.ISysConfigService;
-import com.polaris.system.service.ISysRoleService;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -78,15 +75,6 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     private AiChatMapper aiChatMapper;
 
     @Autowired
-    private ISysRoleService roleService;
-
-    @Autowired
-    private ISysConfigService configService;
-
-    @Autowired
-    private IAiModelConfigService modelConfigService;
-
-    @Autowired
     private com.polaris.ai.pivot.AiModelFactory modelFactory;
 
     @Autowired
@@ -113,10 +101,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         AiConversation conv = new AiConversation();
         conv.setUserId(userId);
         conv.setTitle("新对话");
-        
+
         if (modelConfigId == null) {
             try {
-                com.polaris.ai.domain.AiModelConfig defaultCfg = modelConfigService.selectDefaultChatModel();
+                com.polaris.ai.domain.AiModelConfig defaultCfg = modelFactory.getDefaultChatModelConfig();
                 if (defaultCfg != null) {
                     conv.setModelConfigId(defaultCfg.getId());
                     conv.setModel(defaultCfg.getModelName());
@@ -133,7 +121,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 conv.setModel(cfg.getModelName());
             }
         }
-        
+
         conv.setKnowledgeBaseId(knowledgeBaseId);
         conv.setCreateBy(SecurityUtils.getUsername());
         aiChatMapper.insertConversation(conv);
