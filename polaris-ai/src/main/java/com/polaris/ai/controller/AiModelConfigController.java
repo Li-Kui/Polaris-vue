@@ -113,6 +113,20 @@ public class AiModelConfigController extends BaseController
     @PutMapping
     public ResultData edit(@RequestBody AiModelConfig config)
     {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(config.getId());
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可编辑
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
         config.setUpdateBy(SecurityUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
@@ -141,6 +155,20 @@ public class AiModelConfigController extends BaseController
     @DeleteMapping("/{id}")
     public ResultData remove(@PathVariable Long id)
     {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可删除
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者删除");
+            }
+        }
+
         int result = modelConfigService.deleteModelConfigById(id);
         modelFactory.clearCache(); // 清除工厂缓存
         return toAjaxResult(result);
@@ -159,6 +187,16 @@ public class AiModelConfigController extends BaseController
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
         }
+
+        // 公共模型权限校验：仅超管或创建者可操作
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
         modelConfigService.cleanDefaultChatStatus(existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
@@ -181,6 +219,16 @@ public class AiModelConfigController extends BaseController
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
         }
+
+        // 公共模型权限校验：仅超管或创建者可操作
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
         modelConfigService.cleanDefaultEmbeddingStatus(existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
