@@ -4364,25 +4364,458 @@ body.polaris-body-theme-C {
 // 2.1 暗黑系统 Dialog 样式 (A 与 B 主题)
 .polaris-body-theme-A, .polaris-body-theme-B {
   .el-dialog {
-    background: rgba(30, 30, 45, 0.85) !important;
-    backdrop-filter: blur(20px) !important;
-    -webkit-backdrop-filter: blur(20px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(30, 30, 45, 0.95) !important;
+    backdrop-filter: blur(25px) !important;
+    -webkit-backdrop-filter: blur(25px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 16px !important;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5) !important;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6) !important;
 
     .el-dialog__title {
       color: #ffffff !important;
       font-weight: 700 !important;
     }
     .el-dialog__body {
-      color: rgba(255, 255, 255, 0.8) !important;
+      color: rgba(255, 255, 255, 0.85) !important;
+      padding: 20px 30px 10px !important;
     }
     .el-dialog__headerbtn .el-dialog__close {
       color: rgba(255, 255, 255, 0.5) !important;
     }
     .el-dialog__headerbtn .el-dialog__close:hover {
       color: #ffffff !important;
+    }
+
+    /* 🏷️ 表单 Label 文字颜色 */
+    .el-form-item__label {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+
+    /* ✍️ 输入框与多行文本域 */
+    .el-input__inner, .el-textarea__inner {
+      background-color: rgba(255, 255, 255, 0.05) !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      color: #f8fafc !important;
+      border-radius: 8px;
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.35) !important;
+      }
+
+      &:focus {
+        border-color: rgba(165, 180, 252, 0.8) !important;
+        box-shadow: 0 0 0 3px rgba(129, 140, 248, 0.25) !important;
+      }
+
+      &:disabled {
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border-color: rgba(255, 255, 255, 0.05) !important;
+        color: rgba(255, 255, 255, 0.4) !important;
+      }
+    }
+
+    /* 🏷️ 输入框附加挂载槽（如“生成表达式”按钮容器） */
+    .el-input-group__append, .el-input-group__prepend {
+      background-color: rgba(255, 255, 255, 0.06) !important;
+      border-color: rgba(255, 255, 255, 0.12) !important;
+      color: rgba(255, 255, 255, 0.85) !important;
+
+      .el-button {
+        background-color: transparent !important;
+        border: 0 !important;
+        color: rgba(255, 255, 255, 0.85) !important;
+        margin: -10px -20px !important;
+        border-radius: 0 !important;
+
+        &:hover {
+          background-color: rgba(255, 255, 255, 0.04) !important;
+          color: #ffffff !important;
+        }
+      }
+    }
+
+    /* 🔘 单选按钮组（RadioButton）暗色自适应 */
+    .el-radio-button {
+      .el-radio-button__inner {
+        background: rgba(255, 255, 255, 0.04) !important;
+        border-color: rgba(255, 255, 255, 0.12) !important;
+        color: rgba(255, 255, 255, 0.8) !important;
+        box-shadow: none !important;
+        transition: all 0.2s ease;
+
+        &:hover {
+          color: #ffffff !important;
+          background: rgba(255, 255, 255, 0.08) !important;
+        }
+      }
+
+      &.is-active {
+        .el-radio-button__inner {
+          background-color: #1890ff !important;
+          border-color: #1890ff !important;
+          color: #ffffff !important;
+          box-shadow: -1px 0 0 0 #1890ff !important;
+        }
+      }
+
+      &:first-child {
+        .el-radio-button__inner {
+          border-radius: 8px 0 0 8px !important;
+        }
+      }
+      &:last-child {
+        .el-radio-button__inner {
+          border-radius: 0 8px 8px 0 !important;
+        }
+      }
+    }
+
+    /* 🌲 Cron 表达式生成器 (el-tabs--border-card / 结果表格) 深度暗黑重构 */
+    .el-tabs--border-card {
+      background: rgba(30, 30, 45, 0.95) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      border-radius: 8px !important;
+      overflow: hidden;
+
+      .el-tabs__header {
+        background-color: rgba(255, 255, 255, 0.03) !important;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      }
+
+      .el-tabs__item {
+        color: rgba(255, 255, 255, 0.7) !important;
+        border-right-color: rgba(255, 255, 255, 0.08) !important;
+
+        &:hover {
+          color: #ffffff !important;
+        }
+
+        &.is-active {
+          background-color: rgba(30, 30, 45, 0.95) !important;
+          color: #818cf8 !important;
+          border-right-color: rgba(255, 255, 255, 0.1) !important;
+          border-left-color: rgba(255, 255, 255, 0.1) !important;
+        }
+      }
+
+      .el-tabs__content {
+        background-color: transparent !important;
+        color: rgba(255, 255, 255, 0.85) !important;
+      }
+    }
+
+    /* select 下拉多选 tag */
+    .el-select__tags {
+      .el-tag {
+        background-color: rgba(255, 255, 255, 0.08) !important;
+        border-color: rgba(255, 255, 255, 0.15) !important;
+        color: rgba(255, 255, 255, 0.85) !important;
+
+        .el-tag__close {
+          background-color: rgba(255, 255, 255, 0.15) !important;
+          color: #ffffff !important;
+        }
+      }
+    }
+
+    /* cron 单选框内的输入框排版微调 */
+    .el-form-item {
+      .el-radio {
+        color: rgba(255, 255, 255, 0.85) !important;
+        display: inline-flex;
+        align-items: center;
+
+        .el-radio__label {
+          color: rgba(255, 255, 255, 0.85) !important;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+      }
+    }
+
+    /* cron 结果表格 */
+    .popup-result {
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      background-color: rgba(255, 255, 255, 0.02) !important;
+      border-radius: 8px !important;
+
+      .title {
+        background: rgba(30, 30, 45, 0.98) !important;
+        color: #ffffff !important;
+      }
+
+      table {
+        th {
+          color: rgba(255, 255, 255, 0.9) !important;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+        td span {
+          background-color: rgba(255, 255, 255, 0.03) !important;
+          border: 1px solid rgba(255, 255, 255, 0.08) !important;
+          color: #f1f5f9 !important;
+          border-radius: 4px;
+        }
+      }
+
+      /* 🕒 最近5次运行时间滚动列表 */
+      ul.popup-result-scroll {
+        background-color: rgba(255, 255, 255, 0.02) !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        border-radius: 8px !important;
+        padding: 8px 12px !important;
+        color: rgba(255, 255, 255, 0.8) !important;
+
+        li {
+          color: rgba(255, 255, 255, 0.8) !important;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+          padding: 6px 0 !important;
+
+          &:last-child {
+            border-bottom: 0 !important;
+          }
+        }
+      }
+    }
+
+    /* 📦 popup-main (表达式下方的面板包围容器) */
+    .popup-main {
+      background: transparent !important;
+      color: rgba(255, 255, 255, 0.85) !important;
+      
+      .pop_btn {
+        background: transparent !important;
+
+        .el-button:not(.el-button--primary):not(.el-button--warning) {
+          background: rgba(255, 255, 255, 0.05) !important;
+          border: 1px solid rgba(255, 255, 255, 0.12) !important;
+          color: rgba(255, 255, 255, 0.8) !important;
+
+          &:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+            color: #ffffff !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+          }
+        }
+      }
+    }
+
+    /* 🔢 数字输入框控制按钮 */
+    .el-input-number__decrease, .el-input-number__increase {
+      background-color: rgba(255, 255, 255, 0.06) !important;
+      border-color: rgba(255, 255, 255, 0.12) !important;
+      color: rgba(255, 255, 255, 0.7) !important;
+      
+      &:hover {
+        color: #ffffff !important;
+      }
+    }
+    .el-input-number.is-controls-right .el-input-number__increase {
+      border-bottom-color: rgba(255, 255, 255, 0.12) !important;
+    }
+
+    /* 🌲 树形权限展示容器 */
+    .el-tree {
+      background: rgba(255, 255, 255, 0.03) !important;
+      color: rgba(255, 255, 255, 0.8) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      border-radius: 8px;
+      padding: 10px !important;
+
+      .el-tree-node__content {
+        height: 32px !important;
+        border-radius: 4px;
+        background: transparent !important;
+        color: rgba(255, 255, 255, 0.75) !important;
+
+        &:hover {
+          background: rgba(255, 255, 255, 0.06) !important;
+          color: #ffffff !important;
+        }
+      }
+
+      .el-tree-node.is-current > .el-tree-node__content {
+        background: rgba(99, 102, 241, 0.25) !important;
+        color: #c4b5fd !important;
+        font-weight: 600;
+      }
+      
+      .el-checkbox__inner {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+      }
+      .el-checkbox__input.is-checked .el-checkbox__inner {
+        background-color: #1890ff !important;
+        border-color: #1890ff !important;
+      }
+    }
+
+    /* 🔘 单选框 & 复选框的文字配色 */
+    .el-radio, .el-checkbox {
+      color: rgba(255, 255, 255, 0.75) !important;
+      
+      .el-checkbox__inner {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+      }
+      &.is-checked, &.is-active {
+        .el-radio__label, .el-checkbox__label {
+          color: #818cf8 !important;
+        }
+        .el-checkbox__inner {
+          background-color: #1890ff !important;
+          border-color: #1890ff !important;
+        }
+      }
+    }
+
+    /* 📌 下拉框选择容器 (数据权限 Dialog) */
+    .el-select {
+      width: 100%;
+      .el-input .el-select__caret {
+        color: rgba(255, 255, 255, 0.5) !important;
+      }
+    }
+
+    /* 🔘 脚部取消按钮暗黑自适应 */
+    .dialog-footer .el-button:not(.el-button--primary) {
+      background: rgba(255, 255, 255, 0.05) !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      color: rgba(255, 255, 255, 0.8) !important;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.1) !important;
+        color: #ffffff !important;
+        border-color: rgba(255, 255, 255, 0.2) !important;
+      }
+    }
+  }
+
+  /* 🌳 vue-treeselect (部门选择器) 全局暗黑深度适配 */
+  .vue-treeselect__control {
+    background: rgba(255, 255, 255, 0.05) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    color: #f8fafc !important;
+    border-radius: 8px;
+    height: 36px !important;
+
+    .vue-treeselect__single-value {
+      color: #f8fafc !important;
+      line-height: 34px !important;
+    }
+    .vue-treeselect__placeholder {
+      color: rgba(255, 255, 255, 0.35) !important;
+      line-height: 34px !important;
+    }
+    .vue-treeselect__value-container {
+      color: #f8fafc !important;
+    }
+    .vue-treeselect__input-container {
+      .vue-treeselect__input {
+        color: #f8fafc !important;
+      }
+    }
+  }
+
+  .vue-treeselect__menu-container {
+    .vue-treeselect__menu {
+      background: rgba(30, 30, 45, 0.98) !important;
+      backdrop-filter: blur(25px) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6) !important;
+      color: rgba(255, 255, 255, 0.8) !important;
+    }
+
+    .vue-treeselect__option--highlight {
+      background: rgba(255, 255, 255, 0.06) !important;
+    }
+
+    .vue-treeselect__option--selected {
+      background: rgba(99, 102, 241, 0.25) !important;
+      color: #c4b5fd !important;
+    }
+
+    .vue-treeselect__label {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+
+    .vue-treeselect__option-arrow-container .vue-treeselect__option-arrow {
+      color: rgba(255, 255, 255, 0.5) !important;
+    }
+    
+    .vue-treeselect__list-item {
+      background: transparent !important;
+    }
+  }
+
+  /* 📥 el-drawer (侧边抽屉组件) 全局暗黑深度适配 */
+  .el-drawer {
+    background: rgba(30, 30, 45, 0.98) !important;
+    border-left: 1px solid rgba(255, 255, 255, 0.1) !important;
+    box-shadow: -16px 0 48px rgba(0, 0, 0, 0.6) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+
+    .el-drawer__header {
+      color: #ffffff !important;
+      font-weight: 700 !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      padding: 16px 24px !important;
+      margin-bottom: 16px !important;
+
+      span {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+      }
+      .el-drawer__close-btn {
+        &:hover {
+          color: #ffffff !important;
+        }
+      }
+    }
+
+    /* 📊 统计小卡片覆写 */
+    .stat-card {
+      background: rgba(255, 255, 255, 0.04) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      border-radius: 8px !important;
+    }
+    .stat-num {
+      color: #ffffff !important;
+      &.success { color: #2ecc71 !important; }
+      &.danger { color: #e74c3c !important; }
+    }
+    .stat-label {
+      color: rgba(255, 255, 255, 0.5) !important;
+    }
+
+    /* 🏷️ 数据展示栅格条目覆写 */
+    .dict-item {
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      background: rgba(255, 255, 255, 0.01) !important;
+      border-radius: 8px !important;
+    }
+    .dict-cell {
+      border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+      
+      &:last-child {
+        border-right: 0 !important;
+      }
+    }
+    .dict-cell-key {
+      background: rgba(255, 255, 255, 0.03) !important;
+      border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+      color: rgba(255, 255, 255, 0.6) !important;
+    }
+    .dict-cell-val {
+      color: rgba(255, 255, 255, 0.85) !important;
+    }
+    
+    .drawer-loading {
+      color: rgba(255, 255, 255, 0.5) !important;
+    }
+    .drawer-empty {
+      color: rgba(255, 255, 255, 0.4) !important;
     }
   }
 }

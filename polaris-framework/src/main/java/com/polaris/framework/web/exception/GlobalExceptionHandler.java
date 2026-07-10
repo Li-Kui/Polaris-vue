@@ -1,5 +1,12 @@
 package com.polaris.framework.web.exception;
 
+import com.polaris.common.constant.HttpStatus;
+import com.polaris.common.core.domain.AjaxResult;
+import com.polaris.common.core.text.Convert;
+import com.polaris.common.exception.DemoModeException;
+import com.polaris.common.exception.ServiceException;
+import com.polaris.common.utils.StringUtils;
+import com.polaris.common.utils.html.EscapeUtil;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,13 +18,6 @@ import org.springframework.web.bind.MissingPathVariableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
-import com.polaris.common.constant.HttpStatus;
-import com.polaris.common.core.domain.AjaxResult;
-import com.polaris.common.core.text.Convert;
-import com.polaris.common.exception.DemoModeException;
-import com.polaris.common.exception.ServiceException;
-import com.polaris.common.utils.StringUtils;
-import com.polaris.common.utils.html.EscapeUtil;
 
 /**
  * 全局异常处理器
@@ -84,13 +84,32 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 拦截数据库异常
+     */
+    @ExceptionHandler(org.springframework.dao.DataAccessException.class)
+    public AjaxResult handleDataAccessException(org.springframework.dao.DataAccessException e, HttpServletRequest request) {
+        String requestURI = request.getRequestURI();
+        log.error("请求地址'{}',发生数据库异常.", requestURI, e);
+        return AjaxResult.error("数据库操作异常，请联系管理员");
+    }
+
+    /**
+     * 客户端主动断开连接异常（流式大模型输出时用户取消或关闭网页）
+     */
+    @ExceptionHandler(org.apache.catalina.connector.ClientAbortException.class)
+    public void handleClientAbortException(org.apache.catalina.connector.ClientAbortException e, HttpServletRequest request) {
+        String requestURI = request.getRequestURI();
+        log.warn("客户端已主动断开连接，请求地址'{}'", requestURI);
+    }
+
+    /**
      * 拦截未知的运行时异常
      */
     @ExceptionHandler(RuntimeException.class)
     public AjaxResult handleRuntimeException(RuntimeException e, HttpServletRequest request) {
         String requestURI = request.getRequestURI();
         log.error("请求地址'{}',发生未知异常.", requestURI, e);
-        return AjaxResult.error(e.getMessage());
+        return AjaxResult.error("系统执行异常，请稍后重试");
     }
 
     /**
@@ -100,7 +119,7 @@ public class GlobalExceptionHandler {
     public AjaxResult handleException(Exception e, HttpServletRequest request) {
         String requestURI = request.getRequestURI();
         log.error("请求地址'{}',发生系统异常.", requestURI, e);
-        return AjaxResult.error(e.getMessage());
+        return AjaxResult.error("系统内部异常，请联系管理员");
     }
 
     /**
