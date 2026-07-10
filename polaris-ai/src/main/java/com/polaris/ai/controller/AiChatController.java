@@ -80,10 +80,10 @@ public class AiChatController extends BaseController {
     @PostMapping("/conversations")
     @ResponseBody
     public ResultData createConversation(
-            @RequestParam(required = false) String model,
+            @RequestParam(required = false) Long modelConfigId,
             @RequestParam(required = false) Long knowledgeBaseId) {
         Long userId = SecurityUtils.getUserId();
-        AiConversation conv = aiChatService.createConversation(userId, model, knowledgeBaseId);
+        AiConversation conv = aiChatService.createConversation(userId, modelConfigId, knowledgeBaseId);
         return ok(conv);
     }
 
@@ -113,10 +113,10 @@ public class AiChatController extends BaseController {
     @ResponseBody
     public ResultData updateConversationConfig(
             @PathVariable Long id,
-            @RequestParam(required = false) String model,
+            @RequestParam(required = false) Long modelConfigId,
             @RequestParam(required = false) Long knowledgeBaseId) {
         Long userId = SecurityUtils.getUserId();
-        aiChatService.updateConversationConfig(id, model, knowledgeBaseId, userId);
+        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, userId);
         return ok();
     }
 

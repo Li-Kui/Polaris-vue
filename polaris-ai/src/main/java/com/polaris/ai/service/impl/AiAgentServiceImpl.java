@@ -20,6 +20,30 @@ import java.util.List;
 @Service
 public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> implements IAiAgentService {
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.polaris.ai.pivot.AiModelFactory modelFactory;
+
+    private void fillModelName(AiAgent entity) {
+        if (entity != null && entity.getModelConfigId() != null) {
+            com.polaris.ai.domain.AiModelConfig config = modelFactory.getModelConfig(entity.getModelConfigId());
+            if (config != null) {
+                entity.setModelName(config.getModelName());
+            }
+        }
+    }
+
+    @Override
+    public boolean save(AiAgent entity) {
+        fillModelName(entity);
+        return super.save(entity);
+    }
+
+    @Override
+    public boolean updateById(AiAgent entity) {
+        fillModelName(entity);
+        return super.updateById(entity);
+    }
+
     @Override
     public AiAgent selectAgentByCode(String agentCode) {
         if (StringUtils.isEmpty(agentCode)) {

@@ -10,6 +10,7 @@
         <result property="title"           column="title"         />
         <result property="userId"          column="user_id"       />
         <result property="model"           column="model"         />
+        <result property="modelConfigId"   column="model_config_id" />
         <result property="delFlag"         column="del_flag"      />
         <result property="knowledgeBaseId" column="knowledge_base_id" />
         <result property="createTime"      column="create_time"   />
@@ -32,8 +33,8 @@
 
     <insert id="insertConversation" parameterType="com.polaris.ai.domain.AiConversation"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_conversation(title, user_id, model, del_flag, knowledge_base_id, create_by, create_time, update_time)
-        VALUES (#{title}, #{userId}, #{model}, '0', #{knowledgeBaseId}, #{createBy}, NOW(), NOW())
+        INSERT INTO ai_conversation(title, user_id, model, model_config_id, del_flag, knowledge_base_id, create_by, create_time, update_time)
+        VALUES (#{title}, #{userId}, #{model}, #{modelConfigId}, '0', #{knowledgeBaseId}, #{createBy}, NOW(), NOW())
     </insert>
 
     <update id="updateConversationTitle">
@@ -45,6 +46,7 @@
         UPDATE ai_conversation
         <set>
             <if test="model != null and model != ''">model = #{model},</if>
+            <if test="modelConfigId != null">model_config_id = #{modelConfigId},</if>
             knowledge_base_id = #{knowledgeBaseId},
             update_time = NOW()
         </set>

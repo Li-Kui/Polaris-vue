@@ -39,6 +39,10 @@ public class AiConversation extends BaseEntity
     @Schema(description = "本次会话使用的 AI 模型名称，例如：qwen-plus / qwen-turbo / deepseek-chat / gpt-4o-mini")
     private String model;
 
+    /** 本次会话使用的大模型配置ID */
+    @Schema(description = "本次会话使用的大模型配置ID")
+    private Long modelConfigId;
+
     /** 删除标志（0代表存在 2代表删除） */
     @Schema(description = "删除标志（0代表存在 2代表删除）")
     private String delFlag;

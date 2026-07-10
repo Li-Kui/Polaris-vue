@@ -142,12 +142,12 @@ public class WorkflowEngine {
         sendSse(emitter, "node_start", nodeCode + "|" + agent.getAgentName());
 
         // 2. 动态加载该智能体配置的底座模型
-        StreamingChatModel chatModel = modelFactory.getStreamingModel(agent.getModelName());
+        StreamingChatModel chatModel = modelFactory.getStreamingModel(agent.getModelConfigId());
 
         // 3. 根据智能体绑定的工具清单，过滤并反射装载工具 Bean，传递线程上下文
         String searchKey = null;
         try {
-            AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(agent.getModelName());
+            AiModelConfig modelConfig = modelFactory.getModelConfig(agent.getModelConfigId());
             if (modelConfig != null) {
                 searchKey = modelConfig.getSearchKey();
             }

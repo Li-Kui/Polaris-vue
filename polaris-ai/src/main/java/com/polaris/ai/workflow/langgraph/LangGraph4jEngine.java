@@ -476,11 +476,11 @@ public class LangGraph4jEngine {
             try {
                 SecurityContextHolder.setContext(securityContext);
 
-                StreamingChatModel chatModel = modelFactory.getStreamingModel(agent.getModelName());
+                StreamingChatModel chatModel = modelFactory.getStreamingModel(agent.getModelConfigId());
 
                 String searchKey = null;
                 try {
-                    AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(agent.getModelName());
+                    AiModelConfig modelConfig = modelFactory.getModelConfig(agent.getModelConfigId());
                     if (modelConfig != null) {
                         searchKey = modelConfig.getSearchKey();
                     }

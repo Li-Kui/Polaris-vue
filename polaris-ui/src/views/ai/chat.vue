@@ -104,7 +104,7 @@
             <div class="setup-item">
               <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><i class="el-icon-cpu" style="color: #3b82f6;"></i> 选择 AI 大模型</label>
               <el-select
-                v-model="selectedModelName"
+                v-model="selectedModelConfigId"
                 placeholder="请选择要使用的大语言模型"
                 size="medium"
                 style="width: 100%;"
@@ -114,7 +114,7 @@
                   v-for="item in models"
                   :key="item.id"
                   :label="item.name + ' (' + item.modelName + ')'"
-                  :value="item.modelName"
+                  :value="item.id"
                 />
               </el-select>
             </div>
@@ -495,12 +495,12 @@
                   <div
                     v-for="item in models"
                     :key="item.id"
-                    :class="['popper-selector-item', { 'is-active': selectedModelName === item.modelName }]"
-                    @click="selectedModelName = item.modelName; handleModelOrKbChange(); showModelPopover = false"
+                    :class="['popper-selector-item', { 'is-active': selectedModelConfigId === item.id }]"
+                    @click="selectedModelConfigId = item.id; handleModelOrKbChange(); showModelPopover = false"
                   >
                     <i class="el-icon-cpu item-icon"></i>
                     <span class="item-name">{{ item.name }}</span>
-                    <i v-if="selectedModelName === item.modelName" class="el-icon-check check-icon"></i>
+                    <i v-if="selectedModelConfigId === item.id" class="el-icon-check check-icon"></i>
                   </div>
                 </div>
                 <button slot="reference" :disabled="isStreaming" class="config-pill-btn pill-model">
@@ -741,9 +741,10 @@ export default {
 
       // 可选大模型与当前选择
       models: [],
-      selectedModelName: null,
+      selectedModelConfigId: null,
       selectedWorkflowCode: '',
       workflows: [],
+      toolDictionary: {},
       currentWorkflowThreadId: null,
       showModelPopover: false,
       showKbPopover: false,
@@ -806,11 +807,15 @@ export default {
     currentConvModel() {
       if (!this.currentConvId || this.conversations.length === 0) return ''
       const c = this.conversations.find(conv => conv.id === this.currentConvId)
-      return c ? c.model : ''
+      if (c && c.modelConfigId) {
+        const m = this.models.find(item => item.id === c.modelConfigId)
+        return m ? m.name : (c.model || '')
+      }
+      return c ? (c.model || '') : ''
     },
     currentModelSupportsSearch() {
-      if (!this.selectedModelName) return false
-      const m = this.models.find(item => item.modelName === this.selectedModelName)
+      if (!this.selectedModelConfigId) return false
+      const m = this.models.find(item => item.id === this.selectedModelConfigId)
       return m && m.enableSearch === '1'
     },
     canStop() {
@@ -826,6 +831,7 @@ export default {
     this.loadKnowledgeBases()
     this.loadModels()
     this.loadWorkflows()
+    this.loadToolDictionary()
     // 读取联网搜索的偏好设置
     const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
     this.enableWebSearch = savedPreference === 'true'
@@ -841,6 +847,9 @@ export default {
   },
   methods: {
     getStepName(message, code) {
+      if (this.toolDictionary && this.toolDictionary[code]) {
+        return this.toolDictionary[code];
+      }
       const localMap = {
         'intent_router': '意图分发员',
         'sys_user_analyst': '系统用户审计师',
@@ -853,6 +862,9 @@ export default {
     },
     translateToolName(toolName) {
       if (!toolName) return '';
+      if (this.toolDictionary && this.toolDictionary[toolName]) {
+        return this.toolDictionary[toolName];
+      }
       const map = {
         'queryUserList': '查询系统用户列表',
         'querySystemUser': '查询系统用户列表',
@@ -1081,17 +1093,17 @@ export default {
           if (this.models.length === 0) {
             const defaultModelName = process.env.VUE_APP_DEFAULT_MODEL || 'deepseek-chat'
             this.models = [{
-              id: 'default',
+              id: null,
               name: '默认模型',
               modelName: defaultModelName
             }]
-            this.selectedModelName = defaultModelName
+            this.selectedModelConfigId = null
           } else {
             const defModel = this.models.find(m => m.isDefault === '1')
             if (defModel) {
-              this.selectedModelName = defModel.modelName
+              this.selectedModelConfigId = defModel.id
             } else if (this.models.length > 0) {
-              this.selectedModelName = this.models[0].modelName
+              this.selectedModelConfigId = this.models[0].id
             }
           }
         }
@@ -1099,11 +1111,11 @@ export default {
         console.error('加载大模型列表失败', e)
         const defaultModelName = process.env.VUE_APP_DEFAULT_MODEL || 'deepseek-chat'
         this.models = [{
-          id: 'default',
+          id: null,
           name: '默认模型',
           modelName: defaultModelName
         }]
-        this.selectedModelName = defaultModelName
+        this.selectedModelConfigId = null
       }
     },
 
@@ -1118,11 +1130,32 @@ export default {
       }
     },
 
+    async loadToolDictionary() {
+      try {
+        const baseUrl = process.env.VUE_APP_BASE_API || ''
+        const token = getToken()
+        const response = await fetch(`${baseUrl}/ai/agent/tools/dictionary`, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        })
+        if (response.ok) {
+          const res = await response.json()
+          if (res.code === 200 && res.data) {
+            this.toolDictionary = res.data
+          }
+        }
+      } catch (err) {
+        console.error('加载工具翻译字典失败:', err)
+      }
+    },
+
     async handleNewConversation() {
       if (this.isStreaming) return
       this.creatingConv = true
       try {
-        const res = await createConversation(this.selectedModelName, this.selectedKbId)
+        const res = await createConversation(this.selectedModelConfigId, this.selectedKbId)
         if (res.code === 200) {
           this.currentConvId = res.data.id
           this.messages = []
@@ -1147,16 +1180,19 @@ export default {
       this.currentConvId = id
       const c = this.conversations.find(conv => conv.id === id)
       if (c) {
-        this.selectedModelName = c.model || null
+        this.selectedModelConfigId = c.modelConfigId || null
         this.selectedKbId = c.knowledgeBaseId || null
       }
       await this.loadMessageList(id)
     },
 
     getSelectedModelLabel() {
-      if (!this.selectedModelName) return '选择 AI 模型';
-      const found = this.models.find(m => m.modelName === this.selectedModelName);
-      return found ? found.name : this.selectedModelName;
+      if (!this.selectedModelConfigId) {
+        const def = this.models.find(m => m.id === null || m.isDefault === '1')
+        return def ? def.name : '选择 AI 模型';
+      }
+      const found = this.models.find(m => m.id === this.selectedModelConfigId);
+      return found ? found.name : '选择 AI 模型';
     },
     getSelectedKbLabel() {
       if (!this.selectedKbId) return '关联知识库';
@@ -1173,7 +1209,7 @@ export default {
       // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库配置
       if (this.currentConvId) {
         try {
-          const res = await updateConversationConfig(this.currentConvId, this.selectedModelName, this.selectedKbId)
+          const res = await updateConversationConfig(this.currentConvId, this.selectedModelConfigId, this.selectedKbId)
           if (res.code === 200) {
             // 重新刷新会话列表以更新顶部状态条等数据的显示
             await this.loadConvList()
@@ -1585,12 +1621,18 @@ export default {
     renderMarkdown(text) {
       if (!text) return ''
       
-      // 全局英文字符方法名替换为更友好的业务中文
+      // 全局工具/节点/智能体英文方法名动态自动识别与替换为中文名称
       let cleanText = text
-        .replace(/queryUserList/g, '查询系统用户列表')
-        .replace(/querySystemUser/g, '查询系统用户列表')
-        .replace(/auditUserRole/g, '审计用户角色权限')
-        .replace(/getUserAuditReport/g, '获取用户审计报告');
+      if (this.toolDictionary && Object.keys(this.toolDictionary).length > 0) {
+        // 对 key 长度由长到短排序，防止长词的子串被部分替换发生混乱
+        const keys = Object.keys(this.toolDictionary).sort((a, b) => b.length - a.length)
+        keys.forEach(key => {
+          if (key && key.trim()) {
+            const regex = new RegExp(key, 'g')
+            cleanText = cleanText.replace(regex, this.toolDictionary[key])
+          }
+        })
+      }
 
       let html = this.escapeHtml(cleanText)
 
@@ -2313,8 +2355,8 @@ body.ai-chat-page .copyright {
 /* ===== 整体布局 ===== */
 .ai-chat-wrapper {
   display: flex;
-  /* 适配 RuoYi-Vue3 的 layout：顶部 navbar 50px + tabs-nav 34px + 内边距 */
-  height: calc(100vh - 84px);
+  /* 适配 RuoYi-Vue3 布局，并减去外部页面边距（上下内边距等），防止底部卡片被视口裁剪 */
+  height: calc(100vh - 120px) !important;
   background: transparent !important;
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
@@ -3128,10 +3170,14 @@ body.ai-chat-page .copyright {
 
 /* ===== 输入区域 ===== */
 .input-area {
-  padding: 10px 44px 14px;
-  background: rgba(255,255,255,0.02);
+  padding: 12px 44px 26px; /* 增加底部内边距，抬高卡片高度以防止浏览器底边缘裁切 */
+  background: transparent; /* 去掉冗余底色 */
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.08);
+  /* 只保留精致的顶部分割线，完全取消极易切断且不美观的左、右、底三面边框 */
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  border-right: none !important;
   flex-shrink: 0;
 }
 
@@ -3139,22 +3185,22 @@ body.ai-chat-page .copyright {
 .input-box-modern {
   position: relative; /* 配合语音输入绝对定位浮层 */
   max-width: 812px;
-  margin: 0 auto;
-  background: #ffffff;
-  border: 1.5px solid #dcdfe6;
-  border-radius: 16px;
-  padding: 12px 14px 10px 18px;
+  margin: 0 auto 4px; /* 增加底部 margin 4px，将圆角框轻轻撑起，确保底部圆弧和线条高保真完全闭环展示 */
+  background: rgba(255, 255, 255, 0.03) !important; /* 带有微弱透明度的淡色，完美适应暗黑主题 */
+  border: 1px solid rgba(255, 255, 255, 0.12) !important; /* 高亮晶莹反差边框 */
+  border-radius: 12px;
+  padding: 12px 16px 12px 18px; /* 均衡 padding 结构 */
   display: flex;
   flex-direction: column;
   gap: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.35); /* 强烈现代感的浮空悬影 */
   transition: border-color 0.2s, box-shadow 0.2s;
   box-sizing: border-box;
 }
 
 .input-box-modern.focused {
-  border-color: #409eff;
-  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.08);
+  border-color: #3b82f6 !important; /* 激活时亮蓝色 */
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25) !important;
 }
 
 .input-modern-text-wrapper {

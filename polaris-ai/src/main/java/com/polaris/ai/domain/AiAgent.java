@@ -34,6 +34,10 @@ public class AiAgent extends BaseEntity {
     @Schema(description = "底座大模型名称")
     private String modelName;
 
+    /** 底座大模型配置ID */
+    @Schema(description = "底座大模型配置ID")
+    private Long modelConfigId;
+
     /** 系统角色提示词 */
     @Schema(description = "系统角色提示词")
     private String systemPrompt;

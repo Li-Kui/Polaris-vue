@@ -109,11 +109,31 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      * 新建会话 model 参数为空时，取 application.yml 中配置 of 默认模型名
      */
     @Override
-    public AiConversation createConversation(Long userId, String model, Long knowledgeBaseId) {
+    public AiConversation createConversation(Long userId, Long modelConfigId, Long knowledgeBaseId) {
         AiConversation conv = new AiConversation();
         conv.setUserId(userId);
         conv.setTitle("新对话");
-        conv.setModel(model == null ? modelProps.getModelName() : model);
+        
+        if (modelConfigId == null) {
+            try {
+                com.polaris.ai.domain.AiModelConfig defaultCfg = modelConfigService.selectDefaultChatModel();
+                if (defaultCfg != null) {
+                    conv.setModelConfigId(defaultCfg.getId());
+                    conv.setModel(defaultCfg.getModelName());
+                } else {
+                    conv.setModel(modelProps.getModelName());
+                }
+            } catch (Exception e) {
+                conv.setModel(modelProps.getModelName());
+            }
+        } else {
+            conv.setModelConfigId(modelConfigId);
+            com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
+            if (cfg != null) {
+                conv.setModel(cfg.getModelName());
+            }
+        }
+        
         conv.setKnowledgeBaseId(knowledgeBaseId);
         conv.setCreateBy(SecurityUtils.getUsername());
         aiChatMapper.insertConversation(conv);
@@ -146,8 +166,15 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     }
 
     @Override
-    public int updateConversationConfig(Long id, String model, Long knowledgeBaseId, Long userId) {
-        return aiChatMapper.updateConversationConfig(id, model, knowledgeBaseId, userId);
+    public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId) {
+        String modelName = null;
+        if (modelConfigId != null) {
+            com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
+            if (cfg != null) {
+                modelName = cfg.getModelName();
+            }
+        }
+        return aiChatMapper.updateConversationConfig(id, modelName, modelConfigId, knowledgeBaseId, userId);
     }
 
     /**
@@ -236,7 +263,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         SecurityContext securityContext = SecurityContextHolder.getContext();
         String searchKey = null;
         try {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelFactory.getModelConfig(conv.getModelConfigId());
             if (modelConfig != null) {
                 searchKey = modelConfig.getSearchKey();
             }
@@ -245,8 +272,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
         Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, Boolean.TRUE.equals(enableSearch), searchKey);
 
-        // 动态根据当前会话绑定的模型名称，获取对应的执行模型实例
-        StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModel());
+        // 动态根据当前会话绑定的模型ID，获取对应的执行模型实例
+        StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModelConfigId());
 
         AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
                 .streamingChatModel(targetChatModel)
@@ -336,8 +363,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         int max = modelProps.getMaxHistoryMessages();
 
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
-        if (conv != null && conv.getModel() != null) {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
+        if (conv != null && conv.getModelConfigId() != null) {
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelFactory.getModelConfig(conv.getModelConfigId());
             if (modelConfig != null) {
                 // 获取模型专属提示词
                 if (modelConfig.getSystemPrompt() != null && !modelConfig.getSystemPrompt().trim().isEmpty()) {

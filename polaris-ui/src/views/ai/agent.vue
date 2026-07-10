@@ -58,7 +58,7 @@
               <div class="card-body">
                 <div class="param-row" style="margin-bottom: 12px;">
                   <span class="param-label"><i class="el-icon-cpu"></i> 选用底座</span>
-                  <el-tag size="mini" effect="plain" type="primary">{{ item.modelName }}</el-tag>
+                  <el-tag size="mini" effect="plain" type="primary">{{ getModelLabel(item.modelConfigId, item.modelName) }}</el-tag>
                 </div>
 
                 <div class="param-row" style="margin-bottom: 12px;">
@@ -137,13 +137,13 @@
                 <el-input :disabled="!!form.id" v-model="form.agentCode" placeholder="如: sys_user_analyst" />
               </el-form-item>
 
-              <el-form-item label="选用底座大模型" prop="modelName">
-                <el-select v-model="form.modelName" placeholder="请选择绑定的底座大模型" style="width: 100%;">
+              <el-form-item label="选用底座大模型" prop="modelConfigId">
+                <el-select v-model="form.modelConfigId" placeholder="请选择绑定的底座大模型" style="width: 100%;">
                   <el-option
                     v-for="item in models"
                     :key="item.id"
                     :label="item.name"
-                    :value="item.modelName"
+                    :value="item.id"
                   />
                 </el-select>
               </el-form-item>
@@ -328,6 +328,7 @@ export default {
         agentCode: null,
         agentName: null,
         modelName: null,
+        modelConfigId: null,
         systemPrompt: null,
         temperature: 0.2,
         tools: null,
@@ -416,6 +417,11 @@ export default {
           this.$message.error(res.msg || "删除失败");
         }
       }).catch(() => {});
+    },
+    getModelLabel(modelConfigId, fallbackName) {
+      if (!modelConfigId) return fallbackName || '未配置';
+      const found = this.models.find(m => m.id === modelConfigId);
+      return found ? found.name : (fallbackName || '未配置');
     }
   }
 };

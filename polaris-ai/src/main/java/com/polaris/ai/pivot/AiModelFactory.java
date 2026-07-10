@@ -6,8 +6,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
@@ -21,10 +20,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * 
  * @author polaris
  */
+@Slf4j
 @Component
 public class AiModelFactory
 {
-    private static final Logger log = LoggerFactory.getLogger(AiModelFactory.class);
 
     // 阿里通义 OpenAI 兼容地址
     private static final String DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -33,6 +32,8 @@ public class AiModelFactory
     // 模型实例缓存，避免频繁从数据库查询及构建
     private final Map<String, StreamingChatModel> chatCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> embeddingCache = new ConcurrentHashMap<>();
+    // 配置对象缓存，用以实现全流程零数据库 I/O
+    private final Map<Long, AiModelConfig> configCache = new ConcurrentHashMap<>();
 
     // 默认模型缓存，避免重复查询数据库
     private volatile StreamingChatModel defaultStreamingModel;
@@ -50,6 +51,7 @@ public class AiModelFactory
         log.info(">>> 清空动态大模型与向量模型缓存");
         chatCache.clear();
         embeddingCache.clear();
+        configCache.clear();
         defaultStreamingModel = null;
         defaultEmbeddingModel = null;
     }
@@ -80,30 +82,57 @@ public class AiModelFactory
     }
 
     /**
-     * 根据模型名称动态获取聊天模型
+     * 获取大模型配置对象（带本地 ConcurrentHashMap 缓存，达成 0 物理库查询）
+     *
+     * @param modelConfigId 模型配置ID
+     * @return 缓存中或新加载的模型配置，为 null 时代表参数无效
      */
-    public StreamingChatModel getStreamingModel(String modelName)
+    public AiModelConfig getModelConfig(Long modelConfigId)
     {
-        if (modelName == null || modelName.trim().isEmpty()) {
+        if (modelConfigId == null) {
+            return null;
+        }
+        return configCache.computeIfAbsent(modelConfigId, id -> {
+            log.info(">>> [AiModelFactory] 首次加载模型配置对象并装载本地内存缓存, ID={}", id);
+            return modelConfigService.getById(id);
+        });
+    }
+
+    /**
+     * 根据模型配置 ID 动态获取聊天模型（带本地缓存，实现 0 次数据库查询）
+     *
+     * @param modelConfigId 模型配置ID
+     * @return 聊天模型实例
+     */
+    public StreamingChatModel getStreamingModel(Long modelConfigId)
+    {
+        if (modelConfigId == null) {
             return getDefaultStreamingModel();
         }
 
-        try {
-            AiModelConfig config = modelConfigService.selectModelConfigByModelName(modelName);
-            if (config != null) {
-                return getChatModelInstance(config);
+        String cacheKey = "chat_" + modelConfigId;
+        StreamingChatModel cachedModel = chatCache.get(cacheKey);
+        if (cachedModel != null) {
+            return cachedModel;
+        }
+
+        synchronized (this) {
+            cachedModel = chatCache.get(cacheKey);
+            if (cachedModel != null) {
+                return cachedModel;
             }
-            log.warn(">>> 从数据库未检索到名称为 [{}] 且已启用的模型配置，将回退至默认聊天模型", modelName);
-        } catch (Exception e) {
-            log.error("从数据库检索模型 {} 失败，尝试回退", modelName, e);
+
+            try {
+                AiModelConfig config = getModelConfig(modelConfigId);
+                if (config != null) {
+                    return getChatModelInstance(config);
+                }
+                log.warn(">>> 从数据库未检索到主键ID为 [{}] 的模型配置，将回退至默认聊天模型", modelConfigId);
+            } catch (Exception e) {
+                log.error("从数据库检索模型ID {} 失败，尝试回退", modelConfigId, e);
+            }
         }
-        
-        // 若数据库中无此模型名称，且与文件配置相同，回退至文件默认
-        if (modelName.equalsIgnoreCase(fileProps.getModelName())) {
-            return getFallbackChatModel();
-        }
-        
-        // 极限制兜底：如果完全查不到且非文件默认，尝试将当前传入名称作为默认模型的备用名重新获取
+
         return getDefaultStreamingModel();
     }
 

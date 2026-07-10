@@ -9,11 +9,11 @@ export function listConversations() {
 }
 
 // 新建会话
-export function createConversation(model, knowledgeBaseId) {
+export function createConversation(modelConfigId, knowledgeBaseId) {
   return request({
     url: '/ai/chat/conversations',
     method: 'post',
-    params: { model, knowledgeBaseId }
+    params: { modelConfigId, knowledgeBaseId }
   })
 }
 
@@ -27,11 +27,11 @@ export function renameConversation(id, title) {
 }
 
 // 更新会话的大模型和知识库配置
-export function updateConversationConfig(id, model, knowledgeBaseId) {
+export function updateConversationConfig(id, modelConfigId, knowledgeBaseId) {
   return request({
     url: `/ai/chat/conversations/${id}/config`,
     method: 'put',
-    params: { model, knowledgeBaseId }
+    params: { modelConfigId, knowledgeBaseId }
   })
 }
 
