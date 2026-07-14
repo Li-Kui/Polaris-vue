@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.annotation.Sensitive;
 import com.polaris.common.core.domain.BaseEntity;
@@ -23,6 +25,7 @@ public class AiModelConfig extends BaseEntity
 
     /** 主键ID */
     @Schema(description = "主键ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 配置名称 */

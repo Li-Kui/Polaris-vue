@@ -177,6 +177,36 @@ public class AiWorkflowController extends BaseController {
     }
 
     /**
+     * 根据实时提供的 graphJson 草稿生成 Mermaid 拓扑图，并触发安全与环路校验
+     * POST /ai/workflow/preview-mermaid
+     */
+    @Operation(summary = "预览工作流实时 Mermaid 拓扑图")
+    @PostMapping("/preview-mermaid")
+    public ResultData<String> previewMermaid(@RequestBody java.util.Map<String, String> body) {
+        String graphJson = body.get("graphJson");
+        if (graphJson == null || graphJson.trim().isEmpty()) {
+            return ok("graph TD\n  START((Start)) --> END((End))");
+        }
+        try {
+            com.polaris.ai.workflow.langgraph.GraphTopology topology = 
+                new com.fasterxml.jackson.databind.ObjectMapper().readValue(graphJson, com.polaris.ai.workflow.langgraph.GraphTopology.class);
+            
+            // 触发安全和环路检查
+            topology.validate();
+            
+            String mermaid = langGraph4jEngine.buildMermaid(topology);
+            return ok(mermaid);
+        } catch (IllegalArgumentException e) {
+            log.error(">>> 拓扑排序校验失败", e);
+            // 将拓扑排序校验报错优雅显示在预览界面中
+            return ok("graph TD\n  ERROR[\"配置异常: " + e.getMessage().replace("\"", "\\\"") + "\"]");
+        } catch (Exception e) {
+            log.error(">>> 实时生成预览 Mermaid 失败", e);
+            return ok("graph TD\n  ERROR[\"拓扑格式损坏，无法渲染图表\"]");
+        }
+    }
+
+    /**
      * 审批流恢复流式执行接口
      * POST /ai/workflow/resume
      *

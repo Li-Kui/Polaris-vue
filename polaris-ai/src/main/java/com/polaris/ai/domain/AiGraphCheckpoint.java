@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -22,6 +24,7 @@ public class AiGraphCheckpoint extends BaseEntity {
     private static final long serialVersionUID = 1L;
 
     @Schema(description = "主键ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     @Schema(description = "会话线程ID")

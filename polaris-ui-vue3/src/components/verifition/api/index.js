@@ -1,0 +1,28 @@
+/**
+ * 引入项目封装好的 axios 配合后端联调
+ */
+import request from '@/utils/request'
+
+// 获取验证图片 以及token
+export function reqGet(data) {
+  return request({
+    url: '/captcha/get',
+    method: 'post',
+    headers: {
+      repeatSubmit: false
+    },
+    data
+  })
+}
+
+// 滑动或者点选验证
+export function reqCheck(data) {
+  return request({
+    url: '/captcha/check',
+    method: 'post',
+    headers: {
+      repeatSubmit: false
+    },
+    data
+  })
+}

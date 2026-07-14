@@ -16,6 +16,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
         <spring-boot.version>4.0.6</spring-boot.version>
         <mybatis-spring-boot.version>4.0.1</mybatis-spring-boot.version>
         <druid.version>1.2.28</druid.version>
@@ -185,13 +187,21 @@
                 <version>${polaris.version}</version>
             </dependency>
 
-            <!-- LangGraph4j 图工作流引擎 BOM -->
+            <!-- LangGraph4j 依赖管理 (精准声明，防止 BOM 污染全局通用 Jackson 版本) -->
             <dependency>
                 <groupId>org.bsc.langgraph4j</groupId>
-                <artifactId>langgraph4j-bom</artifactId>
+                <artifactId>langgraph4j-core</artifactId>
                 <version>${langgraph4j.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.bsc.langgraph4j</groupId>
+                <artifactId>langgraph4j-langchain4j</artifactId>
+                <version>${langgraph4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.bsc.langgraph4j</groupId>
+                <artifactId>langgraph4j-mysql-saver</artifactId>
+                <version>${langgraph4j.version}</version>
             </dependency>
 
         </dependencies>

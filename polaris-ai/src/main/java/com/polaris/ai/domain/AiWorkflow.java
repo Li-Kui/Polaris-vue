@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -20,6 +22,7 @@ public class AiWorkflow extends BaseEntity {
 
     /** 主键ID */
     @Schema(description = "主键ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 工作流唯一编码 */

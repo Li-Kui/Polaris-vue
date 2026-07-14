@@ -444,6 +444,8 @@ public class LangGraph4jEngine {
 
         if ("agent".equals(nodeType)) {
             return createAgentNodeAction(ref, timeoutSeconds, securityContext, emitter);
+        } else if ("classifier".equals(nodeType)) {
+            return createClassifierNodeAction(nodeDef, securityContext, emitter);
         } else if ("java".equals(nodeType)) {
             WorkflowNodeExecutor executor = findJavaExecutor(ref);
             if (executor == null) {
@@ -561,10 +563,162 @@ public class LangGraph4jEngine {
                     throw streamError[0];
                 }
 
+                String replyText = fullReply.toString().trim();
+                String decision = "";
+                String output = replyText;
+                if (!replyText.isEmpty()) {
+                    int firstNewLine = replyText.indexOf('\n');
+                    if (firstNewLine != -1) {
+                        decision = replyText.substring(0, firstNewLine).trim();
+                        output = replyText.substring(firstNewLine + 1).trim();
+                    } else {
+                        decision = replyText;
+                        output = "";
+                    }
+                }
+                
+                // 仅保留纯单词和基础连字符，过滤其它标点
+                decision = decision.replaceAll("[\\p{Punct}&&[^_-]]", "").trim();
+
+                // 容错防呆：大模型有时会自作聪明地在 /profile 前面加上奇奇怪怪的外部域名（如 https://www.klingai.com），或者把 /profile 翻译成 /pro文档生成 等，在此自动将其纠正
+                if (output != null) {
+                    output = output.replaceAll("https?://[^/]+(?=/profile/upload/|/pro[^/]*/upload/)", "")
+                                   .replaceAll("\\(/pro[^/]*/upload/", "(/profile/upload/")
+                                   .replaceAll("\"/pro[^/]*/upload/", "\"/profile/upload/");
+                }
+
                 Map<String, Object> updates = new HashMap<>();
-                updates.put(PolarisAgentState.LATEST_OUTPUT, fullReply.toString());
+                String currentLatest = state.latestOutput();
+                String newOutput = currentLatest;
+                if (output != null && !output.trim().isEmpty()) {
+                    newOutput = currentLatest.isEmpty() ? output : (currentLatest + "\n\n" + output);
+                }
+                updates.put(PolarisAgentState.LATEST_OUTPUT, newOutput);
                 updates.put(PolarisAgentState.ITERATION_COUNT, state.iterationCount() + 1);
-                updates.put(PolarisAgentState.ROUTE_DECISION, ""); // 运行完毕后自动重置上一轮路由决策残留，防止污染其它条件路由
+                updates.put(PolarisAgentState.ROUTE_DECISION, decision);
+
+                Map<String, Object> vars = new HashMap<>(state.variables());
+                vars.put(nodeCode + "_output", output);
+                updates.put(PolarisAgentState.VARIABLES, vars);
+
+                if (!decision.isEmpty()) {
+                    log.info(">>> [LangGraph4j] 智能体节点 [{}] 路由决策提取成功: '{}'", nodeCode, decision);
+                    try {
+                        sseHelper.sendSse(emitter, "node_route", nodeCode + "|" + decision);
+                    } catch (Exception ignored) {}
+                }
+
+                return updates;
+
+            } finally {
+                SecurityContextHolder.setContext(previousContext);
+            }
+        };
+    }
+
+    /**
+     * 创建分类路由节点的 NodeAction
+     * <p>
+     * 用一次受约束的 LLM 调用，从用户定义的分支中选出最匹配的一个，输出 slug 作为路由决策。
+     * 分类节点不产出业务正文，latestOutput 透传保持不变，避免污染下游业务节点的输入。
+     */
+    private NodeAction<PolarisAgentState> createClassifierNodeAction(
+            GraphTopology.NodeDef nodeDef, SecurityContext securityContext, SseEmitter emitter) {
+
+        return state -> {
+            String nodeId = nodeDef.getId();
+            List<GraphTopology.BranchDef> branches = nodeDef.getBranches();
+            log.info(">>> [LangGraph4j] 执行分类路由节点: {}", nodeId);
+
+            sseHelper.sendSse(emitter, "node_start", nodeId + "|意图分类");
+
+            if (branches == null || branches.isEmpty()) {
+                throw new RuntimeException("分类节点 " + nodeId + " 未定义任何分支出口");
+            }
+
+            SecurityContext previousContext = SecurityContextHolder.getContext();
+            try {
+                SecurityContextHolder.setContext(securityContext);
+
+                // 1. 选模型：指定了 modelConfigId 用指定的，否则用系统默认聊天模型
+                StreamingChatModel chatModel = (nodeDef.getModelConfigId() != null)
+                        ? modelFactory.getStreamingModel(nodeDef.getModelConfigId())
+                        : modelFactory.getDefaultStreamingModel();
+
+                // 2. 构造系统固定的分类指令（用户不可见）
+                StringBuilder optionsText = new StringBuilder();
+                for (GraphTopology.BranchDef b : branches) {
+                    optionsText.append("- ").append(b.getSlug()).append("：").append(b.getLabel()).append("\n");
+                }
+                String classifierSystemPrompt =
+                        "你是一个严格的意图分类器。请根据用户输入，从下列选项中选择唯一最匹配的一个。\n" +
+                        "只允许输出选项的标识符本身（即冒号前的英文标识），不要输出任何解释、标点或多余文字。\n\n" +
+                        "可选分类：\n" + optionsText;
+
+                // 3. 分类的输入：原始用户请求 +（若有）上游输出
+                String classifyInput = !state.latestOutput().isEmpty()
+                        ? ("用户请求：" + state.userInput() + "\n上游信息：" + state.latestOutput())
+                        : ("用户请求：" + state.userInput());
+
+                AiAssistant assistant = AiServices.builder(AiAssistant.class)
+                        .streamingChatModel(chatModel)
+                        .systemMessageProvider(ctx -> classifierSystemPrompt)
+                        .build();
+
+                List<ChatMessage> history = new ArrayList<>();
+                history.add(UserMessage.from(classifyInput));
+
+                CountDownLatch latch = new CountDownLatch(1);
+                StringBuilder reply = new StringBuilder();
+                final Exception[] err = {null};
+
+                assistant.chat(history)
+                        .onPartialResponse(reply::append)
+                        .onCompleteResponse(r -> latch.countDown())
+                        .onError(e -> {
+                            err[0] = (Exception) e;
+                            latch.countDown();
+                        })
+                        .start();
+
+                if (!latch.await(60, TimeUnit.SECONDS)) {
+                    throw new RuntimeException("分类节点 " + nodeId + " 执行超时");
+                }
+                if (err[0] != null) {
+                    throw err[0];
+                }
+
+                // 4. 清洗输出为纯标识，并匹配已定义的分支 slug
+                String raw = reply.toString().trim().replaceAll("[\\p{Punct}&&[^_-]]", "").trim();
+                String decision = "";
+                for (GraphTopology.BranchDef b : branches) {
+                    if (raw.equals(b.getSlug())) {
+                        decision = b.getSlug();
+                        break;
+                    }
+                }
+                // 精确匹配失败时做一次包含匹配兜底
+                if (decision.isEmpty()) {
+                    for (GraphTopology.BranchDef b : branches) {
+                        if (b.getSlug() != null && raw.contains(b.getSlug())) {
+                            decision = b.getSlug();
+                            break;
+                        }
+                    }
+                }
+
+                log.info(">>> [LangGraph4j] 分类节点 [{}] 判定结果: raw='{}', decision='{}'", nodeId, raw, decision);
+
+                Map<String, Object> updates = new HashMap<>();
+                // 关键：不覆盖 latestOutput，透传给下游业务节点；仅写路由决策
+                updates.put(PolarisAgentState.ROUTE_DECISION, decision);
+                updates.put(PolarisAgentState.ITERATION_COUNT, state.iterationCount() + 1);
+
+                try {
+                    sseHelper.sendSse(emitter, "node_route", nodeId + "|" + decision);
+                    sseHelper.sendSse(emitter, "node_done", nodeId);
+                } catch (Exception ignored) {
+                }
                 return updates;
 
             } finally {
@@ -715,26 +869,45 @@ public class LangGraph4jEngine {
         return null;
     }
 
-    private String buildMermaid(GraphTopology topology) {
+    public String buildMermaid(GraphTopology topology) {
         StringBuilder sb = new StringBuilder("graph TD\n");
 
         for (GraphTopology.NodeDef node : topology.getNodes()) {
-            String shape = "agent".equals(node.getType()) ? "([" + node.getId() + "])" : "[" + node.getId() + "]";
-            sb.append("  ").append(node.getId()).append(shape).append("\n");
+            String nodeId = cleanForMermaid(node.getId());
+            String shape;
+            if ("classifier".equals(node.getType())) {
+                shape = "{" + nodeId + "}";        // 菱形 = 分类决策节点
+            } else if ("agent".equals(node.getType())) {
+                shape = "([" + nodeId + "])";      // 圆角 = 智能体
+            } else {
+                shape = "[" + nodeId + "]";        // 方形 = Java 节点
+            }
+            sb.append("  ").append(nodeId).append(shape).append("\n");
         }
 
         for (GraphTopology.EdgeDef edge : topology.getEdges()) {
-            String from = "__start__".equals(edge.getFrom()) ? "START((Start))" : edge.getFrom();
-            String to = "__end__".equals(edge.getTo()) ? "END((End))" : edge.getTo();
+            String from = "__start__".equals(edge.getFrom()) ? "START((Start))" : cleanForMermaid(edge.getFrom());
+            String to = "__end__".equals(edge.getTo()) ? "END((End))" : cleanForMermaid(edge.getTo());
+            String cond = cleanCondition(edge.getCondition());
 
-            if (edge.getCondition() != null && !edge.getCondition().isEmpty()) {
-                sb.append("  ").append(from).append(" -->|").append(edge.getCondition()).append("| ").append(to).append("\n");
+            if (!cond.isEmpty()) {
+                sb.append("  ").append(from).append(" -->|").append(cond).append("| ").append(to).append("\n");
             } else {
                 sb.append("  ").append(from).append(" --> ").append(to).append("\n");
             }
         }
 
         return sb.toString();
+    }
+
+    private String cleanForMermaid(String val) {
+        if (val == null) return "";
+        return val.replaceAll("[^a-zA-Z0-9_.-]", "");
+    }
+
+    private String cleanCondition(String cond) {
+        if (cond == null) return "";
+        return cond.replaceAll("[;\"'()|\\{\\}\\[\\]<>#`+*]", "").trim();
     }
 
     /**

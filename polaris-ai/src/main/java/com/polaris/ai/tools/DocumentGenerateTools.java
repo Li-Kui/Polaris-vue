@@ -3,6 +3,7 @@ package com.polaris.ai.tools;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.common.config.PolarisConfig;
 import com.polaris.common.constant.Constants;
@@ -33,6 +34,7 @@ import java.io.IOException;
  */
 @Slf4j
 @Component
+@AiAgentTool("文档生成工具")
 public class DocumentGenerateTools implements AiTool {
 
     /**

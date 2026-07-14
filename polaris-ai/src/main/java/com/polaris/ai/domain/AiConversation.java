@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -22,6 +24,7 @@ public class AiConversation extends BaseEntity
 
     /** 会话主键 ID */
     @Schema(description = "会话主键 ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 会话标题（首条消息自动截取前15字，也可手动重命名） */

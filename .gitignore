@@ -9,6 +9,10 @@ target/
 !.mvn/wrapper/maven-wrapper.jar
 
 ######################################################################
+# Brainstorm visual companion (transient design drafts)
+.superpowers/brainstorm/
+
+######################################################################
 # IDE
 
 ### STS ###

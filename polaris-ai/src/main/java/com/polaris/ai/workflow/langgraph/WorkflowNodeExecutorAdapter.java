@@ -49,13 +49,22 @@ public class WorkflowNodeExecutorAdapter {
             executor.execute(legacyContext);
 
             Map<String, Object> updates = new HashMap<>();
-            if (legacyContext.getOutput() != null) {
-                updates.put(PolarisAgentState.LATEST_OUTPUT, legacyContext.getOutput());
+            String currentLatest = state.latestOutput();
+            String newOutput = currentLatest;
+            if (legacyContext.getOutput() != null && !legacyContext.getOutput().trim().isEmpty()) {
+                String nodeOutput = legacyContext.getOutput();
+                newOutput = currentLatest.isEmpty() ? nodeOutput : (currentLatest + "\n\n" + nodeOutput);
             }
+            updates.put(PolarisAgentState.LATEST_OUTPUT, newOutput);
             if (legacyContext.getRouteDecision() != null) {
                 updates.put(PolarisAgentState.ROUTE_DECISION, legacyContext.getRouteDecision());
             }
-            updates.put(PolarisAgentState.VARIABLES, legacyContext.getVariables());
+
+            Map<String, Object> vars = new HashMap<>(legacyContext.getVariables());
+            if (legacyContext.getOutput() != null) {
+                vars.put(nodeCode + "_output", legacyContext.getOutput());
+            }
+            updates.put(PolarisAgentState.VARIABLES, vars);
 
             return updates;
         };

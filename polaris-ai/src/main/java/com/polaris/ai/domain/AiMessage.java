@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -18,6 +20,7 @@ public class AiMessage
 {
     /** 消息主键 ID */
     @Schema(description = "消息主键 ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 所属会话 ID，关联 ai_conversation 表 */

@@ -1,0 +1,4359 @@
+<template>
+  <div class="ai-chat-wrapper">
+
+    <!-- ========== 左侧会话栏 ========== -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <el-button
+          :disabled="isStreaming"
+          :loading="creatingConv"
+          class="btn-new-chat"
+          @click="handleNewConversation"
+        >
+          <el-icon v-if="!creatingConv"><edit /></el-icon>
+          新对话
+        </el-button>
+      </div>
+
+      <div
+        v-loading="loadingConvs"
+        class="conv-list"
+        element-loading-text="加载中..."
+      >
+        <div v-if="!loadingConvs && conversations.length === 0" class="conv-empty">
+          暂无对话记录
+        </div>
+
+        <transition-group name="conv-fade" tag="div">
+          <div
+            v-for="conv in conversations"
+            :key="conv.id"
+            :class="{ active: currentConvId === conv.id }"
+            class="conv-item"
+            @click="handleSelectConversation(conv.id)"
+          >
+            <el-icon class="conv-icon"><chat-dot-round /></el-icon>
+            <span class="conv-title">{{ conv.title }}</span>
+            <div class="conv-actions" @click.stop>
+              <el-tooltip :open-delay="300" content="重命名" placement="top">
+                <el-button
+                  class="conv-action-btn"
+                  link
+                  @click="openRenameDialog(conv)"
+                >
+                  <el-icon><edit /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip :open-delay="300" content="删除" placement="top">
+                <el-button
+                  class="conv-action-btn danger"
+                  link
+                  @click="handleDeleteConversation(conv.id)"
+                >
+                  <el-icon><delete /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
+          </div>
+        </transition-group>
+      </div>
+    </aside>
+
+    <!-- ========== 主聊天区 ========== -->
+    <main class="chat-main">
+      <!-- 顶部知识库关联与模型指示栏 -->
+      <div v-if="currentConvId" class="chat-header-bar" style="padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+        <span class="chat-header-indicator" style="font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+          <el-icon><chat-line-round /></el-icon>
+          AI 助手对话中
+        </span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <el-tag
+            v-if="currentConvModel"
+            class="model-indicator-tag"
+            effect="plain"
+            size="default"
+            style="font-weight: 600; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; height: 28px; line-height: 28px; padding: 0 10px;"
+            type="info"
+          >
+            <el-icon style="margin: 0; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;"><cpu /></el-icon>
+            <span style="vertical-align: middle;">模型: {{ currentConvModel }}</span>
+          </el-tag>
+          <el-tag
+            v-if="currentKbName"
+            class="kb-indicator-tag"
+            effect="dark"
+            size="default"
+            style="font-weight: 600; border: none; background: linear-gradient(135deg, var(--el-color-success) 0%, var(--el-color-success-dark-2) 100%); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; height: 28px; line-height: 28px; padding: 0 10px;"
+            type="success"
+          >
+            <el-icon style="margin: 0; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;"><collection /></el-icon>
+            <span style="vertical-align: middle;">知识库: {{ currentKbName }}</span>
+          </el-tag>
+        </div>
+      </div>
+
+      <!-- 欢迎页 -->
+      <transition name="fade">
+        <div v-if="!currentConvId" class="welcome-screen">
+          <div class="welcome-glow"></div>
+          <div class="welcome-avatar">✦</div>
+          <h2 class="welcome-title">你好，我是 AI 助手</h2>
+          <p class="welcome-subtitle">请配置或选择您要使用的模型及知识库，随时开启智能对话</p>
+
+          <!-- 初始化配置启动卡片 -->
+          <div class="welcome-setup-card" style="margin-top: 30px; width: 480px; padding: 25px; background: rgba(255, 255, 255, 0.03); border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15); border: 1px solid rgba(255, 255, 255, 0.08); display: flex; flex-direction: column; gap: 16px; text-align: left; backdrop-filter: blur(20px);">
+            <div class="setup-item">
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><el-icon style="color: #3b82f6;"><cpu /></el-icon> 选择 AI 大模型</label>
+              <el-select
+                v-model="selectedModelConfigId"
+                placeholder="请选择要使用的大语言模型"
+                size="default"
+                style="width: 100%;"
+                @change="handleModelOrKbChange"
+              >
+                <el-option
+                  v-for="item in models"
+                  :key="item.id"
+                  :label="item.name + ' (' + item.modelName + ')'"
+                  :value="item.id"
+                />
+              </el-select>
+            </div>
+
+            <div class="setup-item">
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><el-icon style="color: #10b981;"><collection /></el-icon> 关联知识库 (可选)</label>
+              <el-select
+                v-model="selectedKbId"
+                clearable
+                placeholder="未关联知识库"
+                size="default"
+                style="width: 100%;"
+                @change="handleModelOrKbChange"
+              >
+                <el-option
+                  v-for="item in knowledgeBases"
+                  :key="item.id"
+                  :label="item.name"
+                  :value="item.id"
+                />
+              </el-select>
+            </div>
+
+            <div class="setup-item">
+              <label style="font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85); margin-bottom: 6px; display: block;"><el-icon style="color: #8b5cf6;"><operation /></el-icon> 选用智能体工作流 (可选)</label>
+              <el-select
+                v-model="selectedWorkflowCode"
+                clearable
+                placeholder="常规对话模式"
+                size="default"
+                style="width: 100%;"
+              >
+                <el-option
+                  v-for="item in workflows"
+                  :key="item.workflowCode"
+                  :label="item.workflowName"
+                  :value="item.workflowCode"
+                />
+              </el-select>
+            </div>
+
+            <el-button
+              icon="ChatDotRound"
+              style="margin-top: 10px; width: 100%; height: 42px; font-size: 14px; font-weight: 600; border-radius: 8px; border: none; background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%); box-shadow: 0 4px 12px var(--el-color-primary-light-7); color: #fff;"
+              type="primary"
+              @click="handleNewConversation"
+            >
+              开启新对话
+            </el-button>
+          </div>
+        </div>
+      </transition>
+
+      <!-- 消息列表 -->
+      <div v-show="currentConvId" ref="messagesAreaRef" class="messages-area">
+        <div v-if="loadingMessages" class="messages-loading">
+          <el-icon class="is-loading"><loading /></el-icon>
+          <span>加载消息中...</span>
+        </div>
+
+        <template v-else>
+          <transition-group class="messages-inner" name="msg-slide" tag="div">
+            <div
+              v-for="(msg, index) in messages"
+              :key="index"
+              :class="msg.role"
+              class="msg-row"
+            >
+              <!-- AI 头像 -->
+              <div v-if="msg.role === 'assistant'" class="avatar ai-av">✦</div>
+
+              <!-- 气泡 -->
+              <div
+                :class="[msg.role + '-bubble', { 'has-error': msg.error }]"
+                class="bubble"
+              >
+                <!-- AI：loading 三点 -->
+                <div v-if="msg.loading" class="loading-container">
+                  <div class="loading-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div v-if="msg.statusMsg" class="loading-status-text">
+                    {{ msg.statusMsg }}
+                  </div>
+                </div>
+                <!-- AI：错误状态 -->
+                <div v-else-if="msg.error" class="error-msg">
+                  <el-icon><warning /></el-icon>
+                  {{ msg.error }}
+                </div>
+                <!-- AI：正常内容 -->
+                <div v-else-if="msg.role === 'assistant'">
+                  <div v-if="msg.statusMsg" class="loading-status-text" style="margin-bottom: 8px;">
+                    <el-icon class="is-loading"><loading /></el-icon> {{ msg.statusMsg }}
+                  </div>
+                  <!-- 智能体工作流执行步骤 -->
+                  <div v-if="msg.workflowSteps && msg.workflowSteps.length > 0" class="workflow-steps-container">
+                    <div class="workflow-header">
+                      <el-icon><operation /></el-icon>
+                      <span>智能体工作流执行链路</span>
+                    </div>
+                    <div class="workflow-steps-list">
+                      <div 
+                        v-for="(step, stepIdx) in msg.workflowSteps" 
+                        :key="stepIdx"
+                        :class="['workflow-step-item', step.status]"
+                      >
+                        <div class="step-icon">
+                          <el-icon v-if="step.status === 'running'" class="is-loading"><loading /></el-icon>
+                          <el-icon v-else-if="step.status === 'success'"><circle-check /></el-icon>
+                          <el-icon v-else-if="step.status === 'error'"><circle-close /></el-icon>
+                          <el-icon v-else><clock /></el-icon>
+                        </div>
+                        <div class="step-content">
+                          <div class="step-title">
+                            <span class="step-name">{{ step.name }}</span>
+                          </div>
+                          <!-- 正在调用的系统工具展示 -->
+                          <div v-if="step.activeTool" class="step-tool-badge">
+                            <el-icon><folder-opened /></el-icon> 正在调用系统工具: <span class="tool-name">{{ translateToolName(step.activeTool) }}</span>
+                          </div>
+                          <!-- 节点输出的思考过程 -->
+                          <div v-if="step.thinking" class="step-thinking-box">
+                            <div class="thinking-title">思考过程：</div>
+                            <div class="thinking-text">{{ step.thinking }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- 高端科技感思考过程展示 -->
+                  <div v-if="msg.reasoningContent" class="thinking-container">
+                    <div
+                      class="thinking-header"
+                      @click="msg.thinkingExpanded = msg.thinkingExpanded === undefined ? false : !msg.thinkingExpanded"
+                    >
+                      <div class="thinking-title-left">
+                        <el-icon class="thinking-icon"><cpu /></el-icon>
+                        <span class="thinking-title-text">
+                          {{ !msg.content ? '深度思考推理中...' : '深度思维链推演完毕' }}
+                        </span>
+                      </div>
+                      <div class="thinking-title-right">
+                        <span v-if="msg.streaming && !msg.content" class="thinking-status">
+                          <el-icon class="is-loading"><loading /></el-icon> 正在生成步骤
+                        </span>
+                        <el-icon :class="['collapse-arrow', { 'is-active': (msg.thinkingExpanded === undefined ? !msg.content : msg.thinkingExpanded) }]"><arrow-down /></el-icon>
+                      </div>
+                    </div>
+                    <el-collapse-transition>
+                      <div v-show="msg.thinkingExpanded === undefined ? !msg.content : msg.thinkingExpanded" class="thinking-content-wrapper">
+                        <div class="thinking-left-line"></div>
+                        <div class="markdown-body mini-markdown thinking-markdown" v-html="renderMarkdown(msg.reasoningContent)"></div>
+                      </div>
+                    </el-collapse-transition>
+                  </div>
+                  <div
+                    :class="{ 'typing-cursor': msg.streaming }"
+                    class="markdown-body"
+                    v-html="renderMarkdown(msg.content)"
+                  ></div>
+                  <!-- 报告操作工具栏 -->
+                  <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="msg-tools">
+                    <el-button
+                      class="tool-btn report-btn"
+                      icon="Document"
+                      link
+                      @click="openReportView(msg.content)"
+                    >
+                      以精美报告形式查看
+                    </el-button>
+                  </div>
+                  <!-- 审批控制面板 -->
+                  <div v-if="msg.requireApproval && msg.approved === null" class="approval-card-panel">
+                    <div class="approval-title-box">
+                      <div class="approval-title-text">
+                        <el-icon class="approval-warning-icon"><warning /></el-icon>
+                        <span>工作流已挂起，等待您的人工审核</span>
+                      </div>
+                      <div class="approval-node-badge">
+                        <span class="badge-label">挂起节点</span>
+                        <span class="badge-value">{{ getStepName(msg, msg.currentNodeCode) }}</span>
+                      </div>
+                    </div>
+                    
+                    <div class="approval-input-wrapper">
+                      <el-input
+                        type="textarea"
+                        v-model="msg.approvalFeedback"
+                        placeholder="请输入您的审核意见或调优反馈（非必填）"
+                        rows="2"
+                        class="approval-textarea"
+                      ></el-input>
+                    </div>
+
+                    <div class="approval-action-bar">
+                      <el-button 
+                        class="approval-btn btn-reject"
+                        size="default" 
+                        icon="Close" 
+                        :disabled="msg.status === 'resuming'"
+                        @click="submitApproval(msg, false)"
+                      >驳回审批</el-button>
+                      <el-button 
+                        class="approval-btn btn-approve"
+                        size="default" 
+                        icon="Check" 
+                        :loading="msg.status === 'resuming'"
+                        @click="submitApproval(msg, true)"
+                      >同意执行</el-button>
+                    </div>
+                  </div>
+                  <!-- 已审批状态展示 -->
+                  <div v-else-if="msg.requireApproval && msg.approved !== null" class="approval-status-panel">
+                    <div class="status-header">
+                      <el-icon class="status-icon"><circle-check /></el-icon>
+                      <span>已于 {{ msg.approvalTime }} 处理完毕。决策：<strong>{{ msg.approved ? '同意通过' : '驳回申请' }}</strong></span>
+                    </div>
+                    <div v-if="msg.approvalFeedback" class="status-feedback">
+                      <span class="feedback-label">审核意见:</span>
+                      <span class="feedback-value">“{{ msg.approvalFeedback }}”</span>
+                    </div>
+                  </div>
+                </div>
+                <!-- 用户消息包装（支持附件卡片展现） -->
+                <div v-else class="user-bubble-wrapper">
+                  <div v-if="msg.fileName" class="msg-attachment-card-wrapper">
+                    <!-- 如果是图片附件 -->
+                    <div v-if="isImageFile(msg.fileName)" class="msg-image-attachment">
+                      <el-image
+                        :preview-src-list="[msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : '']"
+                        :src="msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : ''"
+                        class="chat-inline-image"
+                        fit="cover"
+                      >
+                        <template #placeholder>
+                          <div class="image-slot">
+                            加载中<span class="dot">...</span>
+                          </div>
+                        </template>
+                      </el-image>
+                      <div class="image-name-badge">{{ msg.fileName }}</div>
+                    </div>
+                    <!-- 其他普通文档/PDF 附件 -->
+                    <div v-else class="msg-attachment-card">
+                      <el-icon class="attachment-card-icon"><document /></el-icon>
+                      <div class="attachment-card-info">
+                        <span :title="msg.fileName" class="attachment-card-name">{{ msg.fileName }}</span>
+                        <span class="attachment-card-desc">
+                          {{ msg.fileName.toLowerCase().endsWith('.pdf') ? '已成功关联 PDF 多模态图文解析' : '已成功关联此对话解析' }}
+                        </span>
+                      </div>
+                      <el-link
+                        v-if="msg.fileUrl"
+                        :href="msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)"
+                        :underlined="false"
+                        class="attachment-card-download"
+                        icon="Download"
+                        target="_blank"
+                        type="primary"
+                      ></el-link>
+                    </div>
+                  </div>
+                  <span class="user-text">{{ msg.content }}</span>
+                </div>
+              </div>
+
+              <!-- 用户头像 -->
+              <div v-if="msg.role === 'user'" class="avatar user-av">我</div>
+            </div>
+          </transition-group>
+        </template>
+      </div>
+
+      <!-- 输入区域 -->
+      <div v-show="currentConvId" class="input-area">
+        <!-- 待发送附件预览栏 -->
+        <div v-if="attachment" class="attachment-preview-bar">
+          <div class="attachment-tag">
+            <template v-if="isImageFile(attachment.name)">
+              <el-image
+                :src="attachment.url ? (attachment.url.startsWith('http') ? attachment.url : (uploadUrl.replace('/common/upload', '') + attachment.url)) : ''"
+                class="preview-inline-image"
+                fit="cover"
+              />
+            </template>
+            <el-icon v-else><document /></el-icon>
+            <span :title="attachment.name" class="file-name">{{ attachment.name }}</span>
+            <el-icon class="remove-btn" @click="handleRemoveAttachment"><close /></el-icon>
+          </div>
+        </div>
+
+        <!-- 现代化极简输入框（上下分层设计，内置模型/知识库配置工具栏） -->
+        <div :class="{ focused: inputFocused }" class="input-box-modern">
+          <!-- 语音录制浮层 -->
+          <transition name="fade">
+            <div v-if="isListening" class="voice-listening-overlay">
+              <div class="voice-wave-container">
+                <span class="wave-bar bar-1"></span>
+                <span class="wave-bar bar-2"></span>
+                <span class="wave-bar bar-3"></span>
+                <span class="wave-bar bar-4"></span>
+                <span class="wave-bar bar-5"></span>
+              </div>
+              <div class="voice-listening-text">
+                <span class="listening-pulse"></span>
+                正在倾听中：{{ voiceTempText || '请说话...' }}
+              </div>
+              <div class="voice-listening-actions">
+                <el-button circle icon="Close" size="small" title="取消并清空本段语音" type="danger" @click="cancelVoiceInput"></el-button>
+                <el-button circle icon="Check" size="small" title="完成识别" type="success" @click="stopVoiceInput"></el-button>
+              </div>
+            </div>
+          </transition>
+          <!-- 上层：文本输入区域 -->
+          <div class="input-modern-text-wrapper">
+            <el-input
+              ref="inputRef"
+              v-model="inputText"
+              :autosize="{ minRows: 2, maxRows: 6 }"
+              :disabled="isStreaming"
+              placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+              resize="none"
+              type="textarea"
+              @blur="inputFocused = false"
+              @focus="inputFocused = true"
+              @keydown="handleKeyDown"
+            />
+          </div>
+
+          <!-- 下层：操作工具栏 -->
+          <div class="input-modern-tools-wrapper">
+            <div class="tools-left">
+              <!-- 附件上传按钮 -->
+              <el-upload
+                :action="uploadUrl"
+                :before-upload="beforeAttachmentUpload"
+                :disabled="isStreaming || uploadingAttachment"
+                :headers="uploadHeaders"
+                :on-error="handleAttachmentError"
+                :on-success="handleAttachmentSuccess"
+                :show-file-list="false"
+                class="attachment-uploader-modern"
+              >
+                <el-button
+                  :disabled="isStreaming || uploadingAttachment"
+                  :loading="uploadingAttachment"
+                  class="btn-attach-modern"
+                  link
+                >
+                  <el-icon v-if="!uploadingAttachment"><paperclip /></el-icon>
+                </el-button>
+              </el-upload>
+
+              <!-- 麦克风语音输入按钮 -->
+              <el-button
+                :disabled="isStreaming || uploadingAttachment"
+                class="btn-voice-modern"
+                title="语音输入"
+                link
+                @click="startVoiceInput"
+              >
+                <el-icon><mic /></el-icon>
+              </el-button>
+
+              <!-- 模型选择药丸 -->
+              <el-popover
+                v-model:visible="showModelPopover"
+                placement="top-start"
+                title="选择 AI 核心大脑"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-model"
+              >
+                <template #reference>
+                  <button :disabled="isStreaming" class="config-pill-btn pill-model">
+                    <el-icon><cpu /></el-icon>
+                    <span class="pill-label">{{ getSelectedModelLabel() }}</span>
+                    <el-icon class="pill-arrow"><arrow-down /></el-icon>
+                  </button>
+                </template>
+                <div class="popper-selector-list">
+                  <div
+                    v-for="item in models"
+                    :key="item.id"
+                    :class="['popper-selector-item', { 'is-active': selectedModelConfigId === item.id }]"
+                    @click="selectedModelConfigId = item.id; handleModelOrKbChange(); showModelPopover = false"
+                  >
+                    <el-icon class="item-icon"><cpu /></el-icon>
+                    <span class="item-name">{{ item.name }}</span>
+                    <el-icon v-if="selectedModelConfigId === item.id" class="check-icon"><check /></el-icon>
+                  </div>
+                </div>
+              </el-popover>
+
+              <!-- 知识库选择药丸 -->
+              <el-popover
+                v-model:visible="showKbPopover"
+                placement="top-start"
+                title="关联专属知识库"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-kb"
+              >
+                <template #reference>
+                  <button :disabled="isStreaming" :class="['config-pill-btn pill-kb', { 'is-active': selectedKbId }]">
+                    <el-icon><collection /></el-icon>
+                    <span class="pill-label">{{ getSelectedKbLabel() }}</span>
+                    <el-icon class="pill-arrow"><arrow-down /></el-icon>
+                  </button>
+                </template>
+                <div class="popper-selector-list">
+                  <div
+                    :class="['popper-selector-item', { 'is-active': !selectedKbId }]"
+                    @click="selectedKbId = null; handleModelOrKbChange(); showKbPopover = false"
+                  >
+                    <el-icon class="item-icon"><folder-delete /></el-icon>
+                    <span class="item-name">不挂载任何知识库</span>
+                    <el-icon v-if="!selectedKbId" class="check-icon"><check /></el-icon>
+                  </div>
+                  <div
+                    v-for="item in knowledgeBases"
+                    :key="item.id"
+                    :class="['popper-selector-item', { 'is-active': selectedKbId === item.id }]"
+                    @click="selectedKbId = item.id; handleModelOrKbChange(); showKbPopover = false"
+                  >
+                    <el-icon class="item-icon"><collection /></el-icon>
+                    <span class="item-name">{{ item.name }}</span>
+                    <el-icon v-if="selectedKbId === item.id" class="check-icon"><check /></el-icon>
+                  </div>
+                </div>
+              </el-popover>
+
+              <!-- 工作流选择药丸 -->
+              <el-popover
+                v-model:visible="showWorkflowPopover"
+                placement="top-start"
+                title="选用智能体工作流"
+                width="240"
+                trigger="click"
+                popper-class="pill-selector-popper popper-workflow"
+              >
+                <template #reference>
+                  <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode }]">
+                    <el-icon><connection /></el-icon>
+                    <span class="pill-label">{{ getSelectedWorkflowLabel() }}</span>
+                    <el-icon class="pill-arrow"><arrow-down /></el-icon>
+                  </button>
+                </template>
+                <div class="popper-selector-list">
+                  <div
+                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode }]"
+                    @click="selectedWorkflowCode = ''; showWorkflowPopover = false"
+                  >
+                    <el-icon class="item-icon"><chat-dot-round /></el-icon>
+                    <span class="item-name">直接常规提问</span>
+                    <el-icon v-if="!selectedWorkflowCode" class="check-icon"><check /></el-icon>
+                  </div>
+                  <div
+                    v-for="item in workflows"
+                    :key="item.workflowCode"
+                    :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
+                    @click="selectedWorkflowCode = item.workflowCode; showWorkflowPopover = false"
+                  >
+                    <el-icon class="item-icon"><connection /></el-icon>
+                    <span class="item-name">{{ item.workflowName }}</span>
+                    <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                  </div>
+                </div>
+              </el-popover>
+
+              <!-- 联网搜索快速切换按钮 -->
+              <button
+                v-if="currentModelSupportsSearch"
+                :class="['config-pill-btn pill-search', { 'is-active': enableWebSearch }]"
+                :disabled="isStreaming"
+                @click="toggleWebSearch"
+              >
+                <el-icon><search /></el-icon>
+                <span class="pill-label">联网搜索</span>
+              </button>
+            </div>
+
+            <div class="tools-right">
+              <!-- 停止生成/终止等待按钮 -->
+              <el-button
+                v-if="canStop"
+                class="btn-send-modern btn-stop-modern"
+                type="danger"
+                @click="handleStopMessage"
+              >
+                <el-icon><video-pause /></el-icon>
+              </el-button>
+              <!-- 发送按钮 -->
+              <el-button
+                v-else
+                :disabled="canStop || !inputText.trim() || uploadingAttachment"
+                class="btn-send-modern"
+                @click="handleSendMessage"
+              >
+                <svg fill="currentColor" height="15" viewBox="0 0 24 24" width="15">
+                  <path d="M2.01 3L2 10l15 2-15 2 .01 7L23 12 2.01 3z"/>
+                </svg>
+              </el-button>
+            </div>
+          </div>
+        </div>
+        <p class="input-hint">AI 生成内容仅供参考，请注意甄别</p>
+      </div>
+    </main>
+
+    <!-- ========== 精美报告预览弹窗 ========== -->
+    <el-dialog
+      :append-to-body="true"
+      :fullscreen="true"
+      v-model="reportVisible"
+      class="pretty-report-dialog"
+      title="AI 智能报告生成器"
+      @close="handleReportClose"
+    >
+      <div class="report-toolbar">
+        <el-button icon="Printer" size="small" type="primary" @click="handlePrintReport">打印报告 / 导出 PDF</el-button>
+        <el-button icon="Download" size="small" type="success" @click="handleDownloadHtmlReport">导出静态 HTML</el-button>
+        <el-button icon="DocumentCopy" size="small" @click="handleCopyHtmlReport">复制 HTML 源码</el-button>
+        <el-button icon="Close" size="small" @click="reportVisible = false">关闭</el-button>
+      </div>
+
+      <div id="report-print-area" class="report-preview-page">
+        <div class="report-paper">
+          <!-- 页眉装点 -->
+          <div class="paper-header">
+            <span class="confidential-tag">内部绝密 / AI 智能分析</span>
+            <span class="report-serial">编号：AI-REP-{{ currentReportId }}</span>
+          </div>
+
+          <div class="paper-title-area">
+            <div class="paper-badge">
+              <el-icon><document-checked /></el-icon> REPORT
+            </div>
+            <h1 class="paper-title">{{ reportTitle }}</h1>
+            <div class="paper-meta">
+              <span><strong>生成人：</strong>{{ currentUserName }}</span>
+              <span><strong>生成时间：</strong>{{ formatReportTime() }}</span>
+              <span><strong>会话来源：</strong>{{ conversationTitle }}</span>
+            </div>
+          </div>
+
+          <div class="paper-divider">
+            <span class="divider-circle"></span>
+          </div>
+
+          <!-- ECharts 可视化数据分析对比图表 -->
+          <div v-if="hasChartData" class="report-chart-section">
+            <div class="section-top-bar">
+              <div class="section-title">
+                <el-icon class="chart-icon-accent"><data-line /></el-icon> 数据对比可视化直观分析
+              </div>
+              <div class="chart-options">
+                <el-radio-group v-model="activeChartType" size="small" @change="switchChartType">
+                  <el-radio-button label="bar"><el-icon><data-analysis /></el-icon> 对比柱状图</el-radio-button>
+                  <el-radio-button label="line"><el-icon><share /></el-icon> 趋势折线图</el-radio-button>
+                </el-radio-group>
+              </div>
+            </div>
+            <div id="pretty-report-chart" class="pretty-chart-box"></div>
+          </div>
+
+          <div class="paper-content markdown-body" v-html="renderMarkdown(reportContent)"></div>
+
+          <div class="paper-footer">
+            <p>※ 本报告由 RuoYi-AI 大模型内容引擎分析生成，其内容仅供参考，不构成任何最终决策 and 操作建议。 ※</p>
+            <p class="footer-page-num">Page 1 of 1</p>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- ========== 重命名弹窗 ========== -->
+    <el-dialog
+      :close-on-click-modal="false"
+      v-model="renameDialogVisible"
+      title="重命名会话"
+      width="400px"
+      @opened="focusRenameInput"
+    >
+      <el-input
+        ref="renameInputRef"
+        v-model="renameTitle"
+        maxlength="50"
+        placeholder="请输入新名称"
+        show-word-limit
+        @keyup.enter="submitRename"
+      />
+      <template #footer>
+        <el-button @click="renameDialogVisible = false">取 消</el-button>
+        <el-button
+          :disabled="!renameTitle.trim()"
+          type="primary"
+          @click="submitRename"
+        >确 认</el-button>
+      </template>
+    </el-dialog>
+
+  </div>
+</template>
+
+<script>
+import * as echarts from 'echarts'
+import {getToken} from '@/utils/auth'
+import {
+  createConversation,
+  deleteConversation,
+  listConversations,
+  listMessages,
+  renameConversation,
+  updateConversationConfig
+} from '@/api/ai/chat'
+import {listKnowledge} from '@/api/ai/knowledge'
+import {listAvailableModel} from '@/api/ai/model'
+import {listActiveWorkflows} from '@/api/ai/workflow'
+
+export default {
+  name: 'AiChat',
+  data() {
+    return {
+      // 知识库选项与当前选择
+      knowledgeBases: [],
+      selectedKbId: null,
+
+      // 可选大模型与当前选择
+      models: [],
+      selectedModelConfigId: null,
+      selectedWorkflowCode: '',
+      workflows: [],
+      toolDictionary: {},
+      currentWorkflowThreadId: null,
+      showModelPopover: false,
+      showKbPopover: false,
+      showWorkflowPopover: false,
+
+      conversations: [],
+      loadingConvs: false,
+      creatingConv: false,
+      currentConvId: null,
+      messages: [],
+      loadingMessages: false,
+      inputText: '',
+      inputFocused: false,
+      isStreaming: false,
+      renameDialogVisible: false,
+      renameTitle: '',
+      renameTargetId: null,
+      // 附件上传相关
+      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
+      uploadHeaders: { Authorization: "Bearer " + getToken() },
+      attachment: null,
+      uploadingAttachment: false,
+      // 报告预览相关
+      reportVisible: false,
+      reportContent: '',
+      reportTitle: '',
+      currentReportId: '',
+      hasChartData: false,
+      activeChartType: 'bar',
+      chartConfig: null,
+      reportChartInstance: null,
+      enableWebSearch: false,
+      // 语音输入相关
+      isListening: false,
+      voiceTempText: '',
+      voiceBaseText: ''
+    }
+  },
+  computed: {
+    currentUserName() {
+      try {
+        return this.$store.state.user.nickName || this.$store.state.user.name || '系统用户'
+      } catch (e) {
+        return '系统用户'
+      }
+    },
+    conversationTitle() {
+      const c = this.conversations.find(conv => conv.id === this.currentConvId)
+      return c ? c.title : '默认会话'
+    },
+    currentKbName() {
+      if (!this.currentConvId || this.conversations.length === 0) return ''
+      const c = this.conversations.find(conv => conv.id === this.currentConvId)
+      if (c && c.knowledgeBaseId) {
+        const kb = this.knowledgeBases.find(k => k.id === c.knowledgeBaseId)
+        return kb ? kb.name : ''
+      }
+      return ''
+    },
+    currentConvModel() {
+      if (!this.currentConvId || this.conversations.length === 0) return ''
+      const c = this.conversations.find(conv => conv.id === this.currentConvId)
+      if (c && c.modelConfigId) {
+        const m = this.models.find(item => item.id === c.modelConfigId)
+        return m ? m.name : (c.model || '')
+      }
+      return c ? (c.model || '') : ''
+    },
+    currentModelSupportsSearch() {
+      if (!this.selectedModelConfigId) return false
+      const m = this.models.find(item => item.id === this.selectedModelConfigId)
+      return m && m.enableSearch === '1'
+    },
+    canStop() {
+      if (this.isStreaming) return true
+      if (!this.messages || this.messages.length === 0) return false
+      const lastMsg = this.messages[this.messages.length - 1]
+      return lastMsg.role === 'assistant' && (lastMsg.loading || lastMsg.streaming || (lastMsg.statusMsg && !lastMsg.content))
+    }
+  },
+  created() {
+    this.currentReader = null
+    this.sseEventBuffer = null
+    this.loadKnowledgeBases()
+    this.loadModels()
+    this.loadWorkflows()
+    this.loadToolDictionary()
+    // 读取联网搜索的偏好设置
+    const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
+    this.enableWebSearch = savedPreference === 'true'
+  },
+  mounted() {
+    this.loadConvList(true)
+    document.body.classList.add('ai-chat-page')
+  },
+  beforeUnmount() {
+    this.abortStream()
+    this.cleanupVoiceInput()
+    document.body.classList.remove('ai-chat-page')
+  },
+  methods: {
+    getStepName(message, code) {
+      if (this.toolDictionary && this.toolDictionary[code]) {
+        return this.toolDictionary[code];
+      }
+      const localMap = {
+        'intent_router': '意图分发员',
+        'sys_user_analyst': '系统用户审计师',
+        'sys_user_query': '系统用户查询员',
+        'sys_user_audit': '系统用户审计师'
+      };
+      if (localMap[code]) return localMap[code];
+      const step = (message.workflowSteps || []).find(s => s.code === code);
+      return step ? step.name : code;
+    },
+    translateToolName(toolName) {
+      if (!toolName) return '';
+      if (this.toolDictionary && this.toolDictionary[toolName]) {
+        return this.toolDictionary[toolName];
+      }
+      const map = {
+        'queryUserList': '查询系统用户列表',
+        'querySystemUser': '查询系统用户列表',
+        'auditUserRole': '审计用户角色权限',
+        'getUserAuditReport': '获取用户审计报告'
+      };
+      return map[toolName] || toolName;
+    },
+    generateUuid() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    },
+
+    async submitApproval(message, approve) {
+      const feedback = (message.approvalFeedback || '').trim()
+      message.status = 'resuming'
+      
+      const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
+      const url = `${baseUrl}/ai/workflow/resume?workflowCode=${message.workflowCode}&threadId=${message.threadId}&conversationId=${this.currentConvId}`
+      const token = getToken()
+      
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({
+            approve: approve,
+            feedback: feedback
+          })
+        })
+        
+        if (!response.ok) {
+          const text = await response.text()
+          throw new Error(text || `HTTP ${response.status}`)
+        }
+        
+        message.approved = approve
+        message.approvalTime = new Date().toLocaleTimeString()
+        message.status = ''
+        
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        let currentEvent = ''
+        
+        this.isStreaming = true
+        message.streaming = true
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+          
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim()
+            } else if (line.startsWith('data:')) {
+              let data = ''
+              if (line.startsWith('data: ')) {
+                data = line.slice(6)
+              } else {
+                data = line.slice(5)
+              }
+              const event = currentEvent || 'message'
+              
+              if (event === 'node_start') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const nodeName = parts[1] || nodeCode
+                steps.push({
+                  code: nodeCode,
+                  name: nodeName,
+                  status: 'running',
+                  content: '',
+                  thinking: ''
+                })
+                message.workflowSteps = steps
+                message.content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
+                message.statusMsg = `智能体「${nodeName}」正在处理...`
+              } else if (event === 'node_tool') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const toolName = parts[1] || ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.activeTool = toolName
+                }
+                message.workflowSteps = steps
+                message.statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
+              } else if (event === 'node_thinking') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.thinking = (step.thinking || '') + chunk
+                }
+                message.workflowSteps = steps
+              } else if (event === 'node_chunk') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.content = (step.content || '') + chunk
+                }
+                const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
+                const isJson = step && step.content && step.content.trim().startsWith('{');
+                if (!isRouter && !isJson) {
+                  message.content = step ? step.content : (message.content + chunk)
+                } else {
+                  message.content = ''
+                }
+                message.workflowSteps = steps
+              } else if (event === 'node_done') {
+                const steps = message.workflowSteps || []
+                const nodeCode = data.trim()
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'success'
+                  step.activeTool = null
+                }
+                message.workflowSteps = steps
+                message.statusMsg = ''
+              } else if (event === 'node_error') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const errMsg = parts[1] || '执行异常'
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'error'
+                  step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
+                }
+                message.workflowSteps = steps
+              } else if (event === 'node_interrupt') {
+                const steps = message.workflowSteps || []
+                const parts = data.split('|')
+                const nodeCode = parts[0]
+                const step = steps.find(s => s.code === nodeCode)
+                if (step) {
+                  step.status = 'paused'
+                }
+                message.workflowSteps = steps
+                message.statusMsg = ''
+                message.requireApproval = true
+                message.currentNodeCode = nodeCode
+                message.approved = null
+                message.approvalFeedback = ''
+                
+                this.isStreaming = false
+                message.streaming = false
+                if (reader) {
+                  reader.cancel()
+                }
+                return
+              } else if (event === 'workflow_done') {
+                message.streaming = false
+                this.isStreaming = false
+                this.loadConvList()
+                return
+              } else if (event === 'error') {
+                throw new Error(data.trim() || '工作流执行失败')
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('恢复审批流失败', err)
+        this.$message.error('流式恢复失败：' + err.message)
+        message.status = 'error'
+        this.isStreaming = false
+        message.streaming = false
+      }
+    },
+
+    // ──────────────────────────────────────────
+    // 会话管理
+    // ──────────────────────────────────────────
+    async loadConvList(autoSelect = false) {
+      this.loadingConvs = true
+      try {
+        const res = await listConversations()
+        if (res.code === 200) {
+          this.conversations = res.data || []
+          if (autoSelect && this.conversations.length > 0 && !this.currentConvId) {
+            await this.selectConversation(this.conversations[0].id)
+          }
+        }
+      } catch (error) {
+        this.$message.error('加载会话列表失败')
+      } finally {
+        this.loadingConvs = false
+      }
+    },
+
+    async loadKnowledgeBases() {
+      try {
+        const res = await listKnowledge()
+        if (res.code === 200) {
+          this.knowledgeBases = res.data.rows || []
+        }
+      } catch (e) {
+        console.error('加载知识库失败', e)
+      }
+    },
+
+    async loadModels() {
+      try {
+        const res = await listAvailableModel()
+        if (res.code === 200) {
+          this.models = (res.data.rows || res.data || []).filter(m => m.isDefaultEmbedding !== '1' && !m.modelName.toLowerCase().includes('embed'))
+          if (this.models.length === 0) {
+            const defaultModelName = import.meta.env.VITE_APP_DEFAULT_MODEL || 'deepseek-chat'
+            this.models = [{
+              id: null,
+              name: '默认模型',
+              modelName: defaultModelName
+            }]
+            this.selectedModelConfigId = null
+          } else {
+            const defModel = this.models.find(m => m.isDefault === '1')
+            if (defModel) {
+              this.selectedModelConfigId = defModel.id
+            } else if (this.models.length > 0) {
+              this.selectedModelConfigId = this.models[0].id
+            }
+          }
+        }
+      } catch (e) {
+        console.error('加载大模型列表失败', e)
+        const defaultModelName = import.meta.env.VITE_APP_DEFAULT_MODEL || 'deepseek-chat'
+        this.models = [{
+          id: null,
+          name: '默认模型',
+          modelName: defaultModelName
+        }]
+        this.selectedModelConfigId = null
+      }
+    },
+
+    async loadWorkflows() {
+      try {
+        const res = await listActiveWorkflows()
+        if (res.code === 200) {
+          this.workflows = res.data || []
+        }
+      } catch (e) {
+        console.error('加载工作流列表失败', e)
+      }
+    },
+
+    async loadToolDictionary() {
+      try {
+        const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
+        const token = getToken()
+        const response = await fetch(`${baseUrl}/ai/agent/tools/dictionary`, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        })
+        if (response.ok) {
+          const res = await response.json()
+          if (res.code === 200 && res.data) {
+            this.toolDictionary = res.data
+          }
+        }
+      } catch (err) {
+        console.error('加载工具翻译字典失败:', err)
+      }
+    },
+
+    async handleNewConversation() {
+      if (this.isStreaming) return
+      this.creatingConv = true
+      try {
+        const res = await createConversation(this.selectedModelConfigId, this.selectedKbId)
+        if (res.code === 200) {
+          this.currentConvId = res.data.id
+          this.messages = []
+          await this.loadConvList()
+          this.$nextTick(() => this.focusInput())
+        } else {
+          this.$message.error('新建失败：' + (res.msg || res.code))
+        }
+      } catch (error) {
+        this.$message.error('新建失败，请重试')
+      } finally {
+        this.creatingConv = false
+      }
+    },
+
+    async handleSelectConversation(id) {
+      if (this.isStreaming || id === this.currentConvId) return
+      await this.selectConversation(id)
+    },
+
+    async selectConversation(id) {
+      this.currentConvId = id
+      const c = this.conversations.find(conv => conv.id === id)
+      if (c) {
+        this.selectedModelConfigId = c.modelConfigId || null
+        this.selectedKbId = c.knowledgeBaseId || null
+      }
+      await this.loadMessageList(id)
+    },
+
+    getSelectedModelLabel() {
+      if (!this.selectedModelConfigId) {
+        const def = this.models.find(m => m.id === null || m.isDefault === '1')
+        return def ? def.name : '选择 AI 模型';
+      }
+      const found = this.models.find(m => m.id === this.selectedModelConfigId);
+      return found ? found.name : '选择 AI 模型';
+    },
+    getSelectedKbLabel() {
+      if (!this.selectedKbId) return '关联知识库';
+      const found = this.knowledgeBases.find(k => k.id === this.selectedKbId);
+      return found ? found.name : '已关联知识库';
+    },
+    getSelectedWorkflowLabel() {
+      if (!this.selectedWorkflowCode) return '常规对话';
+      const found = this.workflows.find(w => w.workflowCode === this.selectedWorkflowCode);
+      return found ? found.workflowName : '已选工作流';
+    },
+
+    async handleModelOrKbChange() {
+      // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库配置
+      if (this.currentConvId) {
+        try {
+          const res = await updateConversationConfig(this.currentConvId, this.selectedModelConfigId, this.selectedKbId)
+          if (res.code === 200) {
+            // 重新刷新会话列表以更新顶部状态条等数据的显示
+            await this.loadConvList()
+          } else {
+            this.$message.error('切换失败：' + (res.msg || res.code))
+          }
+        } catch (e) {
+          console.error(e)
+          this.$message.error('会话配置切换失败，请重试')
+        }
+      }
+    },
+
+    handleWebSearchChange(val) {
+      localStorage.setItem('ai_chat_enable_web_search', val ? 'true' : 'false')
+    },
+
+    toggleWebSearch() {
+      if (this.isStreaming) return
+      this.enableWebSearch = !this.enableWebSearch
+      this.handleWebSearchChange(this.enableWebSearch)
+    },
+
+    async loadMessageList(convId) {
+      this.loadingMessages = true
+      this.messages = []
+      try {
+        const res = await listMessages(convId)
+        if (res.code === 200) {
+          this.messages = (res.data || []).map(m => ({
+            role: m.role,
+            content: m.content,
+            loading: false,
+            streaming: false,
+            error: null
+          }))
+          this.$nextTick(() => {
+            this.scrollToBottom()
+            this.focusInput()
+          })
+        }
+      } catch (error) {
+        this.$message.error('加载消息失败')
+      } finally {
+        this.loadingMessages = false
+      }
+    },
+
+    openRenameDialog(conv) {
+      this.renameTargetId = conv.id
+      this.renameTitle = conv.title
+      this.renameDialogVisible = true
+    },
+
+    async submitRename() {
+      const title = this.renameTitle.trim()
+      if (!title) return
+      try {
+        const res = await renameConversation(this.renameTargetId, title)
+        if (res.code === 200) {
+          this.renameDialogVisible = false
+          await this.loadConvList()
+          this.$message.success('重命名成功')
+        } else {
+          this.$message.error('重命名失败：' + (res.msg || res.code))
+        }
+      } catch (error) {
+        this.$message.error('重命名失败，请重试')
+      }
+    },
+
+    async handleDeleteConversation(id) {
+      try {
+        await this.$confirm('确认删除该对话及所有消息？', '提示', {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+      } catch (error) {
+        return  // 用户取消
+      }
+      try {
+        const res = await deleteConversation(id)
+        if (res.code === 200) {
+          if (this.currentConvId === id) {
+            this.currentConvId = null
+            this.messages = []
+          }
+          await this.loadConvList()
+          this.$message.success('删除成功')
+        } else {
+          this.$message.error('删除失败：' + (res.msg || res.code))
+        }
+      } catch (error) {
+        this.$message.error('删除失败，请重试')
+      }
+    },
+
+    // ──────────────────────────────────────────
+    // 发送消息 —— Fetch SSE（携带 JWT）
+    // ──────────────────────────────────────────
+    handleKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        this.handleSendMessage()
+      }
+    },
+
+    async handleSendMessage() {
+      if (this.isStreaming || !this.currentConvId || this.uploadingAttachment) return
+      const text = this.inputText.trim()
+      if (!text) return
+
+      const attachedFile = this.attachment
+      this.inputText = ''
+      this.attachment = null
+      this.isStreaming = true
+
+      // 追加用户气泡
+      const displayContent = attachedFile ? `${text}\n\n📎 附件: ${attachedFile.name}` : text
+      this.messages.push({ role: 'user', content: displayContent, loading: false, streaming: false, error: null })
+
+      // 追加 AI loading 占位
+      const aiIndex = this.messages.length
+      this.messages.push({ role: 'assistant', content: '', reasoningContent: '', loading: true, streaming: false, error: null })
+      this.$nextTick(() => this.scrollToBottom())
+
+      const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
+      const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
+      
+      const isWorkflowMode = !!this.selectedWorkflowCode
+      let url = ''
+      if (isWorkflowMode) {
+        const threadId = this.currentWorkflowThreadId || this.generateUuid()
+        this.currentWorkflowThreadId = threadId
+        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
+      } else {
+        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+        if (attachedFile) {
+          url += `&fileUrl=${encodeURIComponent(attachedFile.url)}`
+        }
+      }
+      const token = getToken()
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: { Authorization: 'Bearer ' + token }
+        })
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+
+        const reader = response.body.getReader()
+        this.currentReader = reader
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        this.sseEventBuffer = null
+
+        // loading → streaming
+        this.messages[aiIndex].loading = false
+        this.messages[aiIndex].streaming = true
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop()
+
+          for (const line of lines) {
+            if (line.startsWith('event:')) {
+              this.sseEventBuffer = line.slice(6).trim()
+            } else if (line.startsWith('data:')) {
+              let data = ''
+              if (line.startsWith('data: ')) {
+                data = line.slice(6)
+              } else {
+                data = line.slice(5)
+              }
+              const event = this.sseEventBuffer || 'message'
+
+              if (isWorkflowMode) {
+                // --- 智能体工作流模式专属解析 ---
+                if (event === 'node_start') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const nodeName = parts[1] || nodeCode
+                  steps.push({
+                    code: nodeCode,
+                    name: nodeName,
+                    status: 'running',
+                    content: '',
+                    thinking: ''
+                  })
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.messages[aiIndex].content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
+                  this.messages[aiIndex].statusMsg = `智能体「${nodeName}」正在处理...`
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_tool') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const toolName = parts[1] || ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.activeTool = toolName
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.messages[aiIndex].statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_thinking') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.thinking = (step.thinking || '') + chunk
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_chunk') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.content = (step.content || '') + chunk
+                  }
+                  const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
+                  const isJson = step && step.content && step.content.trim().startsWith('{');
+                  if (!isRouter && !isJson) {
+                    this.messages[aiIndex].content = step ? step.content : (cur.content + chunk)
+                  } else {
+                    this.messages[aiIndex].content = ''
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_done') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const nodeCode = data.trim()
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'success'
+                    step.activeTool = null
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.messages[aiIndex].statusMsg = ''
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_error') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const errMsg = parts[1] || '执行异常'
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'error'
+                    step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'node_interrupt') {
+                  const cur = this.messages[aiIndex]
+                  const steps = cur.workflowSteps || []
+                  const parts = data.split('|')
+                  const nodeCode = parts[0]
+                  const step = steps.find(s => s.code === nodeCode)
+                  if (step) {
+                    step.status = 'paused'
+                  }
+                  this.messages[aiIndex].workflowSteps = steps
+                  this.messages[aiIndex].statusMsg = ''
+                  this.messages[aiIndex].requireApproval = true
+                  this.messages[aiIndex].threadId = this.currentWorkflowThreadId
+                  this.messages[aiIndex].workflowCode = this.selectedWorkflowCode
+                  this.messages[aiIndex].currentNodeCode = nodeCode
+                  this.messages[aiIndex].approved = null
+                  this.messages[aiIndex].approvalFeedback = ''
+
+                  this.isStreaming = false
+                  this.messages[aiIndex].streaming = false
+                  this.currentWorkflowThreadId = null // 重置，下次新发时新起
+                  if (this.currentReader) {
+                    this.currentReader.cancel()
+                  }
+                  this.currentReader = null
+                  return
+                } else if (event === 'workflow_done') {
+                  this.messages[aiIndex].streaming = false
+                  this.isStreaming = false
+                  this.currentReader = null
+                  this.loadConvList()
+                  return
+                } else if (event === 'error') {
+                  throw new Error(data.trim() || '工作流执行失败')
+                }
+              } else {
+                // --- 常规聊天问答模式 ---
+                if (event === 'message') {
+                  const cur = this.messages[aiIndex]
+                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  this.messages[aiIndex].content = cur.content + processedData
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'reasoning') {
+                  const cur = this.messages[aiIndex]
+                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                  this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
+                  this.$nextTick(() => this.scrollToBottom())
+                } else if (event === 'status') {
+                  this.messages[aiIndex].statusMsg = data || ''
+                } else if (event === 'done') {
+                  this.messages[aiIndex].streaming = false
+                  this.isStreaming = false
+                  this.currentReader = null
+                  this.loadConvList()
+                  return
+                } else if (event === 'error') {
+                  throw new Error(data.trim() || 'AI 服务异常')
+                }
+              }
+            } else if (line.trim() === '') {
+              this.sseEventBuffer = null
+            }
+          }
+        }
+
+      } catch (e) {
+        if (e.name === 'AbortError') return
+        const errMsg = e.message || '服务异常，请重试'
+        this.messages[aiIndex].role = 'assistant'
+        this.messages[aiIndex].content = ''
+        this.messages[aiIndex].loading = false
+        this.messages[aiIndex].streaming = false
+        this.messages[aiIndex].error = errMsg
+        this.$message.error('AI 响应失败：' + errMsg)
+      } finally {
+        this.isStreaming = false
+        this.currentReader = null
+        this.$nextTick(() => this.focusInput())
+      }
+    },
+
+    handleStopMessage() {
+      this.abortStream()
+      this.isStreaming = false
+      if (this.messages.length > 0) {
+        const lastMsg = this.messages[this.messages.length - 1]
+        if (lastMsg.role === 'assistant') {
+          lastMsg.streaming = false
+          lastMsg.loading = false
+          lastMsg.statusMsg = ''
+          lastMsg.content = lastMsg.content || '（已停止生成/终止等待）'
+        }
+      }
+    },
+
+    abortStream() {
+      if (this.currentReader) {
+        try {
+          this.currentReader.cancel()
+        } catch (_) {}
+        this.currentReader = null
+      }
+      this.isStreaming = false
+    },
+
+    // ──────────────────────────────────────────
+    // Markdown 轻量渲染
+    // ──────────────────────────────────────────
+    escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+    },
+
+    renderMarkdown(text) {
+      if (!text) return ''
+      
+      // 全局工具/节点/智能体英文方法名动态自动识别与替换为中文名称
+      let cleanText = text
+      if (this.toolDictionary && Object.keys(this.toolDictionary).length > 0) {
+        // 对 key 长度由长到短排序，防止长词的子串被部分替换发生混乱
+        const keys = Object.keys(this.toolDictionary).sort((a, b) => b.length - a.length)
+        keys.forEach(key => {
+          if (key && key.trim()) {
+            const regex = new RegExp(key, 'g')
+            cleanText = cleanText.replace(regex, this.toolDictionary[key])
+          }
+        })
+      }
+
+      let html = this.escapeHtml(cleanText)
+
+      // 1. 代码块
+      html = html.replace(
+        /```[\w]*\n?([\s\S]*?)```/g,
+        '<pre class="code-block"><code>$1</code></pre>'
+      )
+
+      // 2. 行内代码
+      html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
+
+      // 3. 标题 (Markdown #, ##, ###, ####)
+      html = html.replace(/^#\s*(.*?)$/gm, '<h1>$1</h1>')
+      html = html.replace(/^##\s*(.*?)$/gm, '<h2>$1</h2>')
+      html = html.replace(/^###\s*(.*?)$/gm, '<h3>$1</h3>')
+      html = html.replace(/^####\s*(.*?)$/gm, '<h4>$1</h4>')
+
+      // 4. 粗体
+      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      // 5. 斜体
+      html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+
+      // 5.5 超链接
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+        let href = url
+        // 自动纠错一：剥离外部域名，防范大模型幻想拼凑 klingai.com 或其他无关域名等情况
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          if (url.includes('/upload/') && (url.includes('/profile/') || url.includes('/pro'))) {
+            url = url.replace(/^https?:\/\/[^\/]+/, '')
+          }
+        }
+        // 自动纠错二：将错改的 /proXXX/upload/ 路径还原回系统的 /profile/upload/
+        if (url.includes('/upload/') && !url.startsWith('/profile/')) {
+          url = url.replace(/^\/pro[^\/]*\/upload\//, '/profile/upload/')
+        }
+        if (url.startsWith('/profile')) {
+          const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
+          href = baseUrl + url
+        }
+        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+      })
+
+      // 6. 简单的 Markdown 表格解析逻辑
+      const lines = html.split('\n')
+      let inTable = false
+      let tableHtml = ''
+      for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim()
+        if (line.startsWith('|') && line.endsWith('|')) {
+          if (line.match(/^\|[\s-|-]*\|$/)) {
+            lines[i] = ''
+            continue
+          }
+          const cells = line.split('|').slice(1, -1).map(c => c.trim())
+          if (!inTable) {
+            inTable = true
+            tableHtml += '<table class="report-table"><thead><tr>'
+            cells.forEach(c => { tableHtml += `<th>${c}</th>` })
+            tableHtml += '</tr></thead><tbody>'
+          } else {
+            tableHtml += '<tr>'
+            cells.forEach(c => { tableHtml += `<td>${c}</td>` })
+            tableHtml += '</tr>'
+          }
+          lines[i] = ''
+        } else {
+          if (inTable) {
+            inTable = false
+            tableHtml += '</tbody></table>'
+            lines[i] = tableHtml + '\n' + lines[i]
+            tableHtml = ''
+          }
+        }
+      }
+      if (inTable) {
+        tableHtml += '</tbody></table>'
+        lines.push(tableHtml)
+      }
+      html = lines.join('\n')
+
+      // 7. 无序列表与有序列表
+      html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`)
+      html = html.replace(/<\/ul>\s*<ul>/g, '')
+
+      html = html.replace(/^\d+\. (.+)$/gm, '<ol-li>$1</ol-li>')
+      html = html.replace(/(<ol-li>[\s\S]*?<\/ol-li>)/g, m => `<ol>${m}</ol>`)
+      html = html.replace(/<\/ol>\s*<ol>/g, '')
+      html = html.replace(/ol-li/g, 'li')
+
+      // 8. 引用块
+      html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+      html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>')
+
+      // 9. 水平线与换行
+      html = html.replace(/^---+$/gm, '<hr>')
+
+      // 合并三个及以上的换行，压缩多余空行
+      html = html.replace(/\n{3,}/g, '\n\n')
+      html = html.replace(/\n/g, '<br>')
+
+      // 清除表格、标题、列表等块级 HTML 标签前后的 br 换行，防止由于 br 堆积引起的排版空隙
+      html = html.replace(/<br>\s*(<\/?(table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|h4|blockquote|hr))/gi, '$1')
+      html = html.replace(/(<\/(table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|h4|blockquote|hr)>)\s*<br>/gi, '$1')
+
+      return html
+    },
+
+    // ──────────────────────────────────────────
+    // 报告相关处理方法
+    // ──────────────────────────────────────────
+    // 智能识别是否为报告类型消息
+    isReportMessage(content) {
+      if (!content || content.length < 300) return false
+
+      const highWeightKeywords = ['分析报告', '竞品分析', '竞品对比', '对比报告', '分析总结', '报告摘要', '对比分析', '比价报告', '数据报告']
+      for (const kw of highWeightKeywords) {
+        if (content.includes(kw)) return true
+      }
+
+      const midWeightKeywords = ['竞品', '对比', '分析', '报告', '价格', '毛重', 'sku', '属性']
+      let count = 0
+      for (const kw of midWeightKeywords) {
+        if (content.includes(kw)) {
+          count++
+        }
+      }
+      return count >= 3
+    },
+
+    // 解析 Markdown 数值对比表格
+    parseTablesForCharts(content) {
+      if (!content) return null
+
+      const lines = content.split('\n')
+      const tables = []
+      let currentTable = null
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim()
+        if (line.startsWith('|') && line.endsWith('|')) {
+          const cells = line.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1)
+          if (cells.length > 0) {
+            if (!currentTable) {
+              currentTable = { headers: cells, rows: [], isSeparatorNext: false }
+            } else {
+              const isSeparator = cells.every(cell => /^:?-+:?$/.test(cell) || cell === '')
+              if (isSeparator) {
+                currentTable.isSeparatorNext = true
+              } else {
+                currentTable.rows.push(cells)
+              }
+            }
+          }
+        } else {
+          if (currentTable) {
+            if (currentTable.rows.length > 0) {
+              tables.push(currentTable)
+            }
+            currentTable = null
+          }
+        }
+      }
+      if (currentTable && currentTable.rows.length > 0) {
+        tables.push(currentTable)
+      }
+
+      if (tables.length === 0) return null
+
+      const validTables = tables.filter(t => {
+        return t.rows.some(row => {
+          return row.slice(1).some(cell => {
+            const num = parseFloat(cell.replace(/[^\d.-]/g, ''))
+            return !isNaN(num)
+          })
+        })
+      })
+
+      if (validTables.length === 0) return null
+      const target = validTables[0]
+
+      const xAxisData = target.rows.map(row => row[0])
+      const seriesNames = target.headers.slice(1)
+
+      const seriesDataList = seriesNames.map((name, sIdx) => {
+        const data = target.rows.map(row => {
+          const cellVal = row[sIdx + 1] || '0'
+          const num = parseFloat(cellVal.replace(/[^\d.-]/g, ''))
+          return isNaN(num) ? 0 : num
+        })
+        return {
+          name: name,
+          type: 'bar',
+          data: data,
+          barMaxWidth: 30,
+          itemStyle: {
+            borderRadius: [4, 4, 0, 0]
+          }
+        }
+      })
+
+      return {
+        xAxisData,
+        series: seriesDataList,
+        legendData: seriesNames
+      }
+    },
+
+    openReportView(content) {
+      this.reportContent = content
+
+      // 尝试自动提取报告大标题
+      const titleMatch = content.match(/^#+\s+(.+)$/m)
+      if (titleMatch && titleMatch[1]) {
+        this.reportTitle = titleMatch[1].trim()
+      } else {
+        const currentConv = this.conversations.find(c => c.id === this.currentConvId)
+        this.reportTitle = currentConv ? currentConv.title : '智能数据分析报告'
+      }
+
+      this.currentReportId = Math.random().toString(36).substring(2, 10).toUpperCase()
+      this.reportVisible = true
+
+      // 解析表格数据并初始化图表
+      const parsed = this.parseTablesForCharts(content)
+      if (parsed) {
+        this.hasChartData = true
+        this.chartConfig = parsed
+        this.activeChartType = 'bar'
+        this.$nextTick(() => {
+          this.initReportChart()
+        })
+      } else {
+        this.hasChartData = false
+        this.chartConfig = null
+      }
+    },
+
+    initReportChart() {
+      if (!this.chartConfig) return
+      this.$nextTick(() => {
+        const chartDom = document.getElementById('pretty-report-chart')
+        if (!chartDom) return
+
+        if (this.reportChartInstance) {
+          this.reportChartInstance.dispose()
+        }
+
+        this.reportChartInstance = echarts.init(chartDom)
+
+        const option = {
+          tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' }
+          },
+          legend: {
+            data: this.chartConfig.legendData,
+            bottom: 0,
+            icon: 'roundRect'
+          },
+          grid: {
+            left: '3%',
+            right: '4%',
+            bottom: '12%',
+            top: '8%',
+            containLabel: true
+          },
+          xAxis: {
+            type: 'category',
+            data: this.chartConfig.xAxisData,
+            axisLabel: { interval: 0, rotate: 15, color: '#6b7280' },
+            axisLine: { lineStyle: { color: '#e5e7eb' } }
+          },
+          yAxis: {
+            type: 'value',
+            axisLabel: { color: '#6b7280' },
+            splitLine: { lineStyle: { type: 'dashed', color: '#f3f4f6' } }
+          },
+          color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
+          series: this.chartConfig.series.map(s => ({
+            ...s,
+            type: this.activeChartType
+          }))
+        }
+
+        this.reportChartInstance.setOption(option)
+        window.addEventListener('resize', this.resizeReportChart)
+      })
+    },
+
+    switchChartType() {
+      this.initReportChart()
+    },
+
+    resizeReportChart() {
+      if (this.reportChartInstance) {
+        this.reportChartInstance.resize()
+      }
+    },
+
+    handleReportClose() {
+      window.removeEventListener('resize', this.resizeReportChart)
+      if (this.reportChartInstance) {
+        this.reportChartInstance.dispose()
+        this.reportChartInstance = null
+      }
+      this.reportVisible = false
+    },
+
+    formatReportTime() {
+      const d = new Date()
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+    },
+
+    handlePrintReport() {
+      this.$nextTick(() => {
+        window.print()
+      })
+    },
+
+    handleCopyHtmlReport() {
+      const reportElement = document.querySelector('#report-print-area .report-paper')
+      if (!reportElement) {
+        this.$message.warning('报告渲染失败，无法复制')
+        return
+      }
+
+      const styleTag = '<style>\n' +
+        '  .report-paper { padding: 40px; font-family: sans-serif; color: #1f2937; line-height: 1.8; max-width: 800px; margin: 0 auto; background: #fff; }\n' +
+        '  h1 { font-size: 2rem; color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; }\n' +
+        '  h2 { font-size: 1.5rem; color: #1e40af; margin-top: 30px; }\n' +
+        '  table { width:100%; border-collapse:collapse; margin:20px 0; }\n' +
+        '  th, td { padding: 12px; border: 1px solid #e5e7eb; text-align: left; }\n' +
+        '  th { background: #f9fafb; font-weight: bold; }\n' +
+        '  blockquote { padding: 10px 20px; background: #f3f4f6; border-left: 4px solid #3b82f6; color: #4b5563; }\n' +
+        '</style>'
+
+      const fullHtml = '<html><head><meta charset="utf-8">' + styleTag + '</head><body>' + reportElement.innerHTML + '</body></html>'
+
+      const textarea = document.createElement('textarea')
+      textarea.value = fullHtml
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        this.$message.success('已将精美 HTML 报告源码复制到剪贴板！')
+      } catch (err) {
+        this.$message.error('复制失败，请重试')
+      }
+      document.body.removeChild(textarea)
+    },
+
+    handleDownloadHtmlReport() {
+      const reportElement = document.querySelector('#report-print-area .report-paper')
+      if (!reportElement) {
+        this.$message.warning('报告渲染失败')
+        return
+      }
+
+      let prettyHtml = '<!DOCTYPE html>\n' +
+        '<html lang="zh-CN">\n' +
+        '<head>\n' +
+        '  <meta charset="UTF-8">\n' +
+        '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n' +
+        '  <title>' + (this.reportTitle || 'AI智能报告') + '</title>\n' +
+        '  <style>\n' +
+        '    body {\n' +
+        '      background: #f0f2f5;\n' +
+        '      margin: 0;\n' +
+        '      padding: 40px 20px;\n' +
+        '      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;\n' +
+        '      color: #1f2937;\n' +
+        '    }\n' +
+        '    .report-paper {\n' +
+        '      max-width: 850px;\n' +
+        '      margin: 0 auto;\n' +
+        '      background: #ffffff;\n' +
+        '      padding: 50px;\n' +
+        '      border-radius: 12px;\n' +
+        '      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);\n' +
+        '      border: 1px solid rgba(0, 0, 0, 0.05);\n' +
+        '    }\n' +
+        '    .paper-header {\n' +
+        '      display: flex;\n' +
+        '      justify-content: space-between;\n' +
+        '      font-size: 0.8rem;\n' +
+        '      color: #9ca3af;\n' +
+        '      border-bottom: 1px solid #f3f4f6;\n' +
+        '      padding-bottom: 10px;\n' +
+        '      margin-bottom: 30px;\n' +
+        '    }\n' +
+        '    .paper-title-area {\n' +
+        '      margin-bottom: 30px;\n' +
+        '    }\n' +
+        '    .paper-badge {\n' +
+        '      display: inline-block;\n' +
+        '      padding: 4px 12px;\n' +
+        '      font-size: 0.75rem;\n' +
+        '      font-weight: bold;\n' +
+        '      color: #fff;\n' +
+        '      background: #2563eb;\n' +
+        '      border-radius: 4px;\n' +
+        '      margin-bottom: 12px;\n' +
+        '    }\n' +
+        '    .paper-title {\n' +
+        '      font-size: 2.2rem;\n' +
+        '      font-weight: 800;\n' +
+        '      color: #111827;\n' +
+        '      margin: 0 0 15px 0;\n' +
+        '    }\n' +
+        '    .paper-meta {\n' +
+        '      display: flex;\n' +
+        '      flex-wrap: wrap;\n' +
+        '      gap: 20px;\n' +
+        '      font-size: 0.85rem;\n' +
+        '      color: #6b7280;\n' +
+        '      background: #f9fafb;\n' +
+        '      padding: 12px 16px;\n' +
+        '      border-radius: 6px;\n' +
+        '    }\n' +
+        '    .paper-divider {\n' +
+        '      height: 2px;\n' +
+        '      background: #e5e7eb;\n' +
+        '      margin: 30px 0;\n' +
+        '      position: relative;\n' +
+        '    }\n' +
+        '    .divider-circle {\n' +
+        '      position: absolute;\n' +
+        '      left: 50%;\n' +
+        '      top: 50%;\n' +
+        '      transform: translate(-50%, -50%);\n' +
+        '      width: 10px;\n' +
+        '      height: 10px;\n' +
+        '      background: #2563eb;\n' +
+        '      border-radius: 50%;\n' +
+        '      border: 4px solid #fff;\n' +
+        '    }\n' +
+        '    .paper-content {\n' +
+        '      line-height: 1.8;\n' +
+        '      font-size: 1.05rem;\n' +
+        '    }\n' +
+        '    .paper-content h1, .paper-content h2, .paper-content h3 {\n' +
+        '      color: #1e3a8a;\n' +
+        '      margin-top: 30px;\n' +
+        '      margin-bottom: 15px;\n' +
+        '    }\n' +
+        '    .paper-content h2 {\n' +
+        '      border-bottom: 2px solid #eff6ff;\n' +
+        '      padding-bottom: 8px;\n' +
+        '    }\n' +
+        '    .paper-content p {\n' +
+        '      margin: 0 0 16px 0;\n' +
+        '    }\n' +
+        '    .paper-content table {\n' +
+        '      width: 100%;\n' +
+        '      border-collapse: collapse;\n' +
+        '      margin: 24px 0;\n' +
+        '      border-radius: 6px;\n' +
+        '      overflow: hidden;\n' +
+        '      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);\n' +
+        '    }\n' +
+        '    .paper-content th {\n' +
+        '      background: #f8fafc;\n' +
+        '      color: #475569;\n' +
+        '      font-weight: 600;\n' +
+        '      padding: 12px 16px;\n' +
+        '      border-bottom: 2px solid #e2e8f0;\n' +
+        '      text-align: left;\n' +
+        '    }\n' +
+        '    .paper-content td {\n' +
+        '      padding: 12px 16px;\n' +
+        '      border-bottom: 1px solid #f1f5f9;\n' +
+        '    }\n' +
+        '    .paper-content tr:hover {\n' +
+        '      background: #f8fafc;\n' +
+        '    }\n' +
+        '    .paper-content blockquote {\n' +
+        '      margin: 20px 0;\n' +
+        '      padding: 16px 20px;\n' +
+        '      background: #eff6ff;\n' +
+        '      border-left: 4px solid #3b82f6;\n' +
+        '      border-radius: 0 6px 6px 0;\n' +
+        '      color: #1e40af;\n' +
+        '    }\n' +
+        '    .paper-footer {\n' +
+        '      margin-top: 50px;\n' +
+        '      border-top: 1px solid #f3f4f6;\n' +
+        '      padding-top: 20px;\n' +
+        '      text-align: center;\n' +
+        '      font-size: 0.8rem;\n' +
+        '      color: #9ca3af;\n' +
+        '    }\n' +
+        '    .footer-page-num {\n' +
+        '      margin-top: 8px;\n' +
+        '      font-weight: bold;\n' +
+        '    }\n' +
+        '    @media print {\n' +
+        '      body { background: #fff; padding: 0; }\n' +
+        '      .report-paper { box-shadow: none; border: none; padding: 0; }\n' +
+        '    }\n' +
+        '  </style>\n' +
+        '</head>\n' +
+        '<body>\n' +
+        '  <div class="report-paper">\n' +
+        reportElement.innerHTML +
+        '  </div>\n' +
+        '</body>\n' +
+        '</html>'
+
+      const blob = new Blob([prettyHtml], { type: 'text/html;charset=utf-8' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = (this.reportTitle || 'AI智能报告') + '.html'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      this.$message.success('精美 HTML 报告下载成功！')
+    },
+
+    // ──────────────────────────────────────────
+    // 工具
+    // ──────────────────────────────────────────
+    scrollToBottom() {
+      const el = this.$refs.messagesAreaRef
+      if (el) el.scrollTop = el.scrollHeight
+    },
+
+    focusInput() {
+      if (this.$refs.inputRef && this.$refs.inputRef.$el) {
+        const textarea = this.$refs.inputRef.$el.querySelector('textarea')
+        if (textarea) {
+          textarea.focus()
+        }
+      }
+    },
+
+    focusRenameInput() {
+      if (this.$refs.renameInputRef) {
+        this.$refs.renameInputRef.focus()
+      }
+    },
+
+    // ──────────────────────────────────────────
+    // 附件上传逻辑
+    // ──────────────────────────────────────────
+    beforeAttachmentUpload(file) {
+      if (this.isStreaming) {
+        this.$message.warning('正在对话中，暂不支持上传附件')
+        return false
+      }
+      if (this.attachment) {
+        this.$message.warning('请先删除已有附件，再上传新附件')
+        return false
+      }
+
+      // 校验文件名中不能有逗号
+      if (file.name.includes(',')) {
+        this.$message.error('文件名不正确，不能包含英文逗号!')
+        return false
+      }
+
+      // 限制 10MB
+      const isLt10M = file.size / 1024 / 1024 < 10
+      if (!isLt10M) {
+        this.$message.error('附件大小不能超过 10MB!')
+        return false
+      }
+
+      // 校验文件格式
+      const allowedExts = ['pdf', 'docx', 'xlsx', 'xls', 'txt', 'md', 'json', 'xml', 'csv', 'html', 'java', 'py', 'js', 'ts', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
+      const nameParts = file.name.split('.')
+      const ext = nameParts[nameParts.length - 1].toLowerCase()
+      if (!allowedExts.includes(ext)) {
+        this.$message.error('暂不支持该类型的文件解析，目前仅支持：' + allowedExts.join(', '))
+        return false
+      }
+
+      this.uploadingAttachment = true
+      return true
+    },
+
+    isImageFile(fileName) {
+      if (!fileName) return false
+      const ext = fileName.split('.').pop().toLowerCase()
+      return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)
+    },
+
+    handleAttachmentSuccess(res, file) {
+      this.uploadingAttachment = false
+      if (res.code === 200) {
+        this.attachment = {
+          name: file.name,
+          url: res.fileName
+        }
+        this.$message.success('文件上传成功')
+      } else {
+        this.$message.error(res.msg || '文件上传失败')
+      }
+    },
+
+    handleAttachmentError() {
+      this.uploadingAttachment = false
+      this.$message.error('文件上传接口调用失败')
+    },
+
+    handleRemoveAttachment() {
+      this.attachment = null
+    },
+
+    // ──────────────────────────────────────────
+    // 语音输入（Web Speech API）逻辑
+    // ──────────────────────────────────────────
+    startVoiceInput() {
+      if (this.isStreaming) return
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition || window.msSpeechRecognition
+      if (!SpeechRecognition) {
+        this.$message.warning('您的浏览器暂不支持原生语音识别，建议使用 Chrome、Edge 或 Safari 浏览器。')
+        return
+      }
+
+      this.voiceBaseText = this.inputText // 暂存当前的输入框内容
+      this.voiceTempText = ''
+      this.isListening = true
+
+      try {
+        const recognition = new SpeechRecognition()
+        recognition.continuous = true
+        recognition.interimResults = true
+        recognition.lang = 'zh-CN'
+
+        recognition.onstart = () => {
+          console.log('Speech recognition started')
+        }
+
+        recognition.onresult = (event) => {
+          let interimTranscript = ''
+          let finalTranscript = ''
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript
+            } else {
+              interimTranscript += event.results[i][0].transcript
+            }
+          }
+          const newlyRecognized = finalTranscript + interimTranscript
+          this.voiceTempText = newlyRecognized
+          // 实时将已识别的内容拼接到输入框中
+          this.inputText = this.voiceBaseText + newlyRecognized
+        }
+
+        recognition.onerror = (event) => {
+          console.error('Speech recognition error', event.error)
+          if (event.code === 'not-allowed' || event.error === 'not-allowed') {
+            this.$message.error('麦克风权限被拒绝，请在浏览器设置中开启麦克风权限！')
+          } else if (event.error === 'network') {
+            this.$message.error('语音识别网络连接超时，请检查网络（Chrome 语音识别可能需要连接谷歌服务器）')
+          } else if (event.error === 'no-speech') {
+            // 没检测到说话，不作为错误抛出，保持状态或提示
+          } else {
+            this.$message.error('语音识别异常：' + event.error)
+          }
+          this.cleanupVoiceInput()
+        }
+
+        recognition.onend = () => {
+          console.log('Speech recognition ended')
+          this.cleanupVoiceInput()
+        }
+
+        this.$options.recognitionInstance = recognition
+        recognition.start()
+      } catch (err) {
+        console.error('Failed to start speech recognition', err)
+        this.$message.error('无法启动语音识别：' + (err.message || err))
+        this.cleanupVoiceInput()
+      }
+    },
+
+    stopVoiceInput() {
+      if (this.$options.recognitionInstance) {
+        try {
+          this.$options.recognitionInstance.stop()
+        } catch (e) {
+          console.error(e)
+        }
+      }
+      this.isListening = false
+    },
+
+    cancelVoiceInput() {
+      if (this.$options.recognitionInstance) {
+        try {
+          this.$options.recognitionInstance.abort()
+        } catch (e) {
+          console.error(e)
+        }
+      }
+      this.inputText = this.voiceBaseText // 恢复之前的文本
+      this.isListening = false
+    },
+
+    cleanupVoiceInput() {
+      this.isListening = false
+      if (this.$options.recognitionInstance) {
+        this.$options.recognitionInstance.onstart = null
+        this.$options.recognitionInstance.onresult = null
+        this.$options.recognitionInstance.onerror = null
+        this.$options.recognitionInstance.onend = null
+        this.$options.recognitionInstance = null
+      }
+    }
+  }
+}
+</script>
+
+<style scoped>
+/* 针对 AI 对话页面，取消外层滚动条，隐藏版权信息 */
+:global(.app-main:has(.ai-chat-wrapper)) {
+  overflow: hidden !important;
+}
+:global(.app-main:has(.ai-chat-wrapper) .copyright) {
+  display: none !important;
+}
+
+/* ===== 整体布局 ===== */
+.ai-chat-wrapper {
+  display: flex;
+  /* 适配 RuoYi-Vue3 布局，并减去外部页面边距（上下内边距等），防止底部卡片被视口裁剪 */
+  height: calc(100vh - 120px) !important;
+  background: transparent !important;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+               'Microsoft YaHei', sans-serif;
+}
+
+/* ===== 侧边栏 ===== */
+.sidebar {
+  width: 226px;
+  min-width: 226px;
+  background: var(--el-bg-color) !important;
+  border-right: 1px solid var(--el-border-color-light) !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 14px 12px 10px;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.btn-new-chat {
+  width: 100% !important;
+  background: var(--el-fill-color-light) !important;
+  border: 1.5px dashed var(--el-border-color) !important;
+  color: var(--el-text-color-regular) !important;
+  border-radius: 9px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  gap: 6px !important;
+  height: 38px !important;
+  transition: all 0.2s !important;
+}
+.btn-new-chat:hover:not(:disabled) {
+  background: var(--el-fill-color) !important;
+  border-color: var(--el-color-primary) !important;
+  color: var(--el-color-primary) !important;
+}
+
+.conv-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px 8px;
+  min-height: 0;
+}
+
+.conv-empty {
+  text-align: center;
+  color: var(--el-text-color-placeholder);
+  font-size: 13px;
+  padding: 28px 0;
+}
+
+/* 会话条目 */
+.conv-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  gap: 7px;
+  margin-bottom: 2px;
+  position: relative;
+}
+.conv-item:hover {
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+}
+.conv-item.active {
+  background: var(--el-color-primary-light-9) !important;
+  color: var(--el-color-primary) !important;
+  font-weight: 500;
+  box-shadow: none !important;
+}
+
+.conv-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.conv-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.conv-actions {
+  display: none;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+.conv-item:hover .conv-actions,
+.conv-item.active .conv-actions {
+  display: flex;
+}
+
+.conv-action-btn {
+  padding: 3px 4px !important;
+  height: auto !important;
+  color: #909399 !important;
+  font-size: 13px !important;
+}
+.conv-action-btn:hover { color: #409eff !important; }
+.conv-action-btn.danger:hover { color: #f56c6c !important; }
+
+/* 侧栏列表过渡 */
+.conv-fade-enter-active,
+.conv-fade-leave-active { transition: all 0.2s; }
+.conv-fade-enter-from  { opacity: 0; transform: translateX(-8px); }
+.conv-fade-leave-to    { opacity: 0; transform: translateX(-8px); }
+
+/* 高端 AI 思考块容器 */
+.thinking-container {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15) !important;
+  transition: all 0.3s ease;
+}
+
+.thinking-container:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* 思考框头部 */
+.thinking-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.04) !important;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  transition: background 0.3s ease;
+}
+
+.thinking-header:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.thinking-title-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 科技感大脑图标 */
+.thinking-icon {
+  font-size: 16px;
+  color: #dfb889;
+  text-shadow: 0 0 8px rgba(223, 184, 137, 0.3);
+  animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+.thinking-title-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: #dfb889;
+  letter-spacing: 0.5px;
+}
+
+.thinking-title-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thinking-status {
+  font-size: 12px;
+  color: #dfb889;
+}
+
+/* 旋转箭头动画 */
+.collapse-arrow {
+  font-size: 13px;
+  color: #dfb889;
+  transition: transform 0.3s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.collapse-arrow.is-active {
+  transform: rotate(-180deg);
+}
+
+/* 思考内容区包装 */
+.thinking-content-wrapper {
+  display: flex;
+  padding: 14px 16px;
+  background-color: transparent !important;
+  position: relative;
+}
+
+/* 左侧设计感推演竖线 */
+.thinking-left-line {
+  width: 2px;
+  background: linear-gradient(to bottom, rgba(223, 184, 137, 0.6) 0%, rgba(223, 184, 137, 0.05) 100%);
+  margin-right: 14px;
+  flex-shrink: 0;
+  border-radius: 1px;
+}
+
+/* 思考 Markdown 样式细化 */
+.thinking-markdown {
+  flex-grow: 1;
+  font-size: 12px !important;
+  line-height: 1.625 !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+/* 让 Markdown 中的列表和引用在思考区更加清秀 */
+.thinking-markdown p {
+  margin: 0 0 10px 0 !important;
+}
+.thinking-markdown p:last-child {
+  margin-bottom: 0 !important;
+}
+
+/* ===== 主聊天区 ===== */
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+  background: transparent !important;
+  position: relative;
+}
+
+/* 欢迎页 */
+.welcome-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 1;
+}
+
+.welcome-glow {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(64, 158, 255, 0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.welcome-avatar {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--el-color-primary-dark-2) 0%, var(--el-color-primary) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  color: #fff;
+  box-shadow: 0 8px 32px var(--el-color-primary-light-5);
+  margin-bottom: 6px;
+}
+
+.welcome-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+
+.welcome-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0;
+}
+
+.welcome-tips {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.tip-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+.tip-card:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  box-shadow: 0 2px 12px rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+/* 欢迎页过渡 */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.25s; }
+.fade-enter-from, .fade-leave-to       { opacity: 0; }
+
+/* ===== 消息列表 ===== */
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 0 30px;
+  min-height: 0;
+}
+
+.messages-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.messages-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #909399;
+  font-size: 13px;
+  padding: 48px 0;
+}
+
+/* 消息行过渡 */
+.msg-slide-enter-active { transition: all 0.22s ease; }
+.msg-slide-enter-from   { opacity: 0; transform: translateY(10px); }
+
+/* 消息行 */
+.msg-row {
+  display: flex;
+  align-items: flex-start;
+  padding: 12px 44px;
+  gap: 16px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+.msg-row.user {
+  justify-content: flex-end;
+}
+
+/* 头像 */
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease;
+}
+.avatar:hover {
+  transform: scale(1.05);
+}
+.user-av {
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+  color: #fff;
+  font-size: 11px;
+}
+.ai-av {
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-light-3) 100%);
+  color: #fff;
+  font-size: 16px;
+  box-shadow: 0 0 12px var(--el-color-primary-light-5);
+}
+
+/* 气泡 */
+.bubble {
+  max-width: 75%;
+  padding: 12px 18px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.7;
+  word-break: break-word;
+  box-sizing: border-box;
+}
+.user-bubble {
+  background: linear-gradient(135deg, var(--el-color-primary-dark-2) 0%, var(--el-color-primary) 100%);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+  box-shadow: 0 4px 14px var(--el-color-primary-light-7);
+  border: 1px solid var(--el-color-primary-light-8);
+}
+.assistant-bubble {
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #1e293b;
+  border-bottom-left-radius: 4px;
+  border: 1px solid #f1f5f9;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+}
+
+.user-bubble-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.msg-attachment-card {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  gap: 10px;
+  max-width: 280px;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 2px;
+  text-align: left;
+}
+
+.attachment-card-icon {
+  font-size: 22px;
+  color: #ffffff;
+  opacity: 0.95;
+}
+
+.attachment-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.attachment-card-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-card-desc {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.8);
+  margin-top: 1px;
+}
+
+.attachment-card-download {
+  color: #ffffff !important;
+  opacity: 0.85;
+  font-size: 14px;
+  transition: opacity 0.2s;
+}
+
+.attachment-card-download:hover {
+  opacity: 1;
+}
+.assistant-bubble {
+  max-width: 85% !important;
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: #303133;
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.06);
+}
+.has-error {
+  background: rgba(255,255,255,0.02);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border: 1px solid #fde2e2;
+}
+
+/* 打字光标 */
+.typing-cursor::after {
+  content: '▋';
+  font-size: 12px;
+  animation: blink 0.8s step-start infinite;
+  margin-left: 2px;
+  color: #409eff;
+  vertical-align: baseline;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 三点加载 */
+.loading-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+}
+.loading-dots span {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: #c0c4cc;
+  border-radius: 50%;
+  animation: dotBounce 1.2s infinite ease-in-out;
+}
+.loading-dots span:nth-child(2) { animation-delay: 0.18s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes dotBounce {
+  0%, 60%, 100% { transform: translateY(0);    }
+  30%           { transform: translateY(-7px); }
+}
+
+/* 错误提示 */
+.error-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #f56c6c;
+  font-size: 13px;
+}
+
+/* Markdown 样式 */
+.markdown-body :deep(pre.code-block) {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  padding: 14px 18px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: 8px 0;
+  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  line-height: 1.65;
+}
+.markdown-body :deep(code.inline-code) {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #a5b4fc !important;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Fira Code', 'Courier New', monospace;
+}
+.markdown-body :deep(ul) {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+.markdown-body :deep(li) { margin: 3px 0; }
+.markdown-body :deep(strong) { font-weight: 600; color: inherit !important; }
+.markdown-body :deep(em) { font-style: italic; color: inherit !important; opacity: 0.85; }
+.markdown-body :deep(a) {
+  color: var(--el-color-primary, #409eff) !important;
+  text-decoration: underline;
+  font-weight: 600;
+}
+.markdown-body :deep(a:hover) {
+  color: var(--el-color-primary-light-3, #66b1ff) !important;
+}
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--el-border-color-light, #ebeef5);
+  margin: 10px 0;
+}
+
+/* ===== 输入框底部配置气泡药丸 (Config Pills) ===== */
+.config-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid var(--el-border-color-light) !important;
+  background: var(--el-fill-color-light) !important;
+  color: var(--el-text-color-regular) !important;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+  margin-right: 6px;
+}
+.config-pill-btn:hover {
+  background: var(--el-fill-color) !important;
+  border-color: var(--el-border-color) !important;
+  color: var(--el-text-color-primary) !important;
+  transform: translateY(-1px);
+}
+.config-pill-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 药丸小 icon 与文字 */
+.config-pill-btn el-icon {
+  font-size: 13px;
+  color: #94a3b8;
+  transition: color 0.2s ease;
+}
+.config-pill-btn .pill-label {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.config-pill-btn .pill-arrow {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* 模型大脑药丸 (自适应主题色) */
+.pill-model {
+  background: var(--el-color-primary-light-9) !important;
+  border-color: var(--el-color-primary-light-5) !important;
+  color: var(--el-color-primary) !important;
+}
+.pill-model el-icon {
+  color: var(--el-color-primary) !important;
+}
+.pill-model:hover {
+  background: var(--el-color-primary-light-8) !important;
+  border-color: var(--el-color-primary-light-3) !important;
+}
+
+/* 知识库药丸 (自适应成功色) */
+.pill-kb.is-active {
+  background: var(--el-color-success-light-9) !important;
+  border-color: var(--el-color-success-light-5) !important;
+  color: var(--el-color-success) !important;
+}
+.pill-kb.is-active el-icon {
+  color: var(--el-color-success) !important;
+}
+.pill-kb.is-active:hover {
+  background: var(--el-color-success-light-8) !important;
+  border-color: var(--el-color-success-light-3) !important;
+}
+
+/* 工作流药丸 (自适应警告色) */
+.pill-workflow.is-active {
+  background: var(--el-color-warning-light-9) !important;
+  border-color: var(--el-color-warning-light-5) !important;
+  color: var(--el-color-warning) !important;
+}
+.pill-workflow.is-active el-icon {
+  color: var(--el-color-warning) !important;
+}
+.pill-workflow.is-active:hover {
+  background: var(--el-color-warning-light-8) !important;
+  border-color: var(--el-color-warning-light-3) !important;
+}
+
+/* 联网搜索药丸 (自适应主题色) */
+.pill-search.is-active {
+  background: var(--el-color-primary-light-9) !important;
+  border-color: var(--el-color-primary-light-5) !important;
+  color: var(--el-color-primary) !important;
+  box-shadow: 0 2px 8px var(--el-color-primary-light-8) !important;
+}
+.pill-search.is-active el-icon {
+  color: var(--el-color-primary) !important;
+}
+.pill-search.is-active:hover {
+  background: var(--el-color-primary-light-8) !important;
+  border-color: var(--el-color-primary-light-3) !important;
+}
+
+/* 弹出层全局统一定制 */
+:global(.pill-selector-popper) {
+  border-radius: 16px !important;
+  background: var(--el-bg-color-overlay) !important;
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  box-shadow: var(--el-box-shadow-dark) !important;
+  border: 1px solid var(--el-border-color-light) !important;
+  padding: 10px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+:global(.pill-selector-popper .el-popover__title) {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--el-text-color-secondary) !important;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--el-border-color-lighter) !important;
+}
+
+.popper-selector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+  overflow-x: hidden; /* 防止 hover translateX 时触发横向滚动条 */
+}
+
+/* 美化列表的滚动条，适应暗色毛玻璃弹窗 */
+.popper-selector-list::-webkit-scrollbar {
+  width: 4px;
+  height: 0px;
+}
+.popper-selector-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.popper-selector-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-radius: 2px;
+}
+.popper-selector-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
+
+.popper-selector-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  transform: translateX(0);
+  box-sizing: border-box;
+  color: var(--el-text-color-regular) !important;
+}
+
+/* 柔和侧滑 Hover 动效，让选择充满质感 */
+.popper-selector-item:hover {
+  background: var(--el-fill-color-light) !important;
+  color: var(--el-text-color-primary) !important;
+  transform: translateX(4px);
+}
+
+.popper-selector-item:active {
+  transform: scale(0.97);
+}
+
+.popper-selector-item .item-icon {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+  transition: color 0.2s ease;
+}
+
+.popper-selector-item .item-name {
+  font-size: 13px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popper-selector-item .check-icon {
+  font-size: 13px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+/* === 核心大脑激活态 (自适应主题色) === */
+.popper-model .popper-selector-item.is-active {
+  background: var(--el-color-primary-light-9) !important;
+  color: var(--el-color-primary) !important;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--el-color-primary-light-5) !important;
+}
+.popper-model .popper-selector-item.is-active .item-icon {
+  color: var(--el-color-primary) !important;
+}
+.popper-model .popper-selector-item.is-active .check-icon {
+  color: var(--el-color-primary) !important;
+}
+
+/* === 专属知识库激活态 (自适应成功色) === */
+.popper-kb .popper-selector-item.is-active {
+  background: var(--el-color-success-light-9) !important;
+  color: var(--el-color-success) !important;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--el-color-success-light-5) !important;
+}
+.popper-kb .popper-selector-item.is-active .item-icon {
+  color: var(--el-color-success) !important;
+}
+.popper-kb .popper-selector-item.is-active .check-icon {
+  color: var(--el-color-success) !important;
+}
+
+/* === 智能体工作流激活态 (自适应警告色) === */
+.popper-workflow .popper-selector-item.is-active {
+  background: var(--el-color-warning-light-9) !important;
+  color: var(--el-color-warning) !important;
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--el-color-warning-light-5) !important;
+}
+.popper-workflow .popper-selector-item.is-active .item-icon {
+  color: var(--el-color-warning) !important;
+}
+.popper-workflow .popper-selector-item.is-active .check-icon {
+  color: var(--el-color-warning-dark-2);
+}
+
+/* ===== 输入区域 ===== */
+.input-area {
+  padding: 12px 44px 26px; /* 增加底部内边距，抬高卡片高度以防止浏览器底边缘裁切 */
+  background: transparent; /* 去掉冗余底色 */
+  backdrop-filter: blur(20px);
+  /* 只保留精致的顶部分割线，完全取消极易切断且不美观的左、右、底三面边框 */
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-bottom: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  flex-shrink: 0;
+}
+
+/* ===== 现代化极简输入框（上下分层设计） ===== */
+.input-box-modern {
+  position: relative; /* 配合语音输入绝对定位浮层 */
+  max-width: 812px;
+  margin: 0 auto 4px; /* 增加底部 margin 4px，将圆角框轻轻撑起，确保底部圆弧和线条高保真完全闭环展示 */
+  background: rgba(255, 255, 255, 0.03) !important; /* 带有微弱透明度的淡色，完美适应暗黑主题 */
+  border: 1px solid rgba(255, 255, 255, 0.12) !important; /* 高亮晶莹反差边框 */
+  border-radius: 12px;
+  padding: 12px 16px 12px 18px; /* 均衡 padding 结构 */
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35), 0 8px 10px -6px rgba(0, 0, 0, 0.35); /* 强烈现代感的浮空悬影 */
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+
+.input-box-modern.focused {
+  border-color: #3b82f6 !important; /* 激活时亮蓝色 */
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25) !important;
+}
+
+.input-modern-text-wrapper {
+  width: 100%;
+}
+
+/* 覆盖 textarea 默认样式，实现 zero 边框透明背景 */
+.input-modern-text-wrapper :deep(.el-textarea__inner) {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: 14px !important;
+  line-height: 1.65 !important;
+  color: var(--el-text-color-primary) !important;
+  font-family: inherit !important;
+  resize: none !important;
+}
+
+.input-modern-text-wrapper :deep(.el-textarea__inner::placeholder) {
+  color: #c0c4cc;
+}
+
+/* 下层工具栏 */
+.input-modern-tools-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid #f1f3f7;
+  padding-top: 10px;
+}
+
+.tools-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tools-right {
+  display: flex;
+  align-items: center;
+}
+
+/* 附件上传按钮 */
+.btn-attach-modern {
+  font-size: 16px !important;
+  color: #606266 !important;
+  padding: 0 !important;
+  margin: 0 4px 0 0 !important;
+  transition: color 0.2s !important;
+}
+.btn-attach-modern:hover {
+  color: #409eff !important;
+}
+
+/* 语音输入按钮 */
+.btn-voice-modern {
+  font-size: 16px !important;
+  color: #606266 !important;
+  padding: 0 !important;
+  margin: 0 4px 0 0 !important;
+  transition: color 0.2s !important;
+}
+.btn-voice-modern:hover {
+  color: #409eff !important;
+}
+
+/* ===== 语音识别浮层 ===== */
+.voice-listening-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(64, 158, 255, 0.2);
+}
+
+.voice-wave-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  width: 60px;
+}
+
+.wave-bar {
+  display: inline-block;
+  width: 3px;
+  height: 8px;
+  background-color: #409eff;
+  border-radius: 2px;
+  animation: wave-pulse 1.2s ease-in-out infinite;
+}
+
+.wave-bar.bar-1 { animation-delay: 0.1s; }
+.wave-bar.bar-2 { animation-delay: 0.3s; height: 16px; }
+.wave-bar.bar-3 { animation-delay: 0.6s; height: 24px; }
+.wave-bar.bar-4 { animation-delay: 0.2s; height: 14px; }
+.wave-bar.bar-5 { animation-delay: 0.4s; height: 8px; }
+
+@keyframes wave-pulse {
+  0%, 100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(2.2);
+  }
+}
+
+.voice-listening-text {
+  flex: 1;
+  margin: 0 15px;
+  font-size: 13px;
+  color: #606266;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.listening-pulse {
+  width: 8px;
+  height: 8px;
+  background-color: #e6a23c;
+  border-radius: 50%;
+  animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+}
+
+.voice-listening-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* 内置极简透明下拉框 */
+.tool-select-modern :deep(.el-input__inner) {
+  border: 1px solid #e2e8f0 !important;
+  background-color: #f8fafc !important;
+  padding: 0 10px !important;
+  height: 26px !important;
+  line-height: 26px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #4a5568 !important;
+  border-radius: 12px !important;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tool-select-modern :deep(.el-input__inner:hover) {
+  border-color: #cbd5e0 !important;
+  background-color: #f1f5f9 !important;
+}
+
+.tool-select-modern :deep(.el-input__icon) {
+  line-height: 26px !important;
+  font-size: 11px !important;
+}
+
+/* 发送按钮 */
+.btn-send-modern {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  background: #409eff !important;
+  border-color: #409eff !important;
+  color: #fff !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 0.2s !important;
+}
+
+.btn-send-modern:hover:not(:disabled) {
+  background: #66b1ff !important;
+  box-shadow: 0 2px 8px rgba(64, 158, 255, 0.25) !important;
+  transform: translateY(-1px);
+}
+
+.btn-send-modern:active:not(:disabled) {
+  transform: scale(0.95) !important;
+}
+
+.btn-send-modern:disabled {
+  background: #f1f3f7 !important;
+  border-color: #e2e8f0 !important;
+  color: #cbd5e0 !important;
+  cursor: not-allowed !important;
+}
+
+.btn-stop-modern {
+  background: #ff4d4f !important;
+  border-color: #ff4d4f !important;
+}
+
+.btn-stop-modern:hover:not(:disabled) {
+  background: #ff7875 !important;
+  box-shadow: 0 2px 8px rgba(255, 77, 79, 0.25) !important;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* ===== 智能工作流人工审批控制面板高品质设计 ===== */
+/* ===== 智能工作流人工审批控制面板高品质设计 ===== */
+.approval-card-panel {
+  margin-top: 18px;
+  padding: 16px 20px;
+  background: var(--el-bg-color-overlay, #ffffff) !important; /* 跟随系统卡片/弹窗背景色 */
+  border-radius: 12px;
+  border: 1px solid var(--el-border-color-light, #e2e8f0) !important; /* 跟随系统轻量边框 */
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.05), 0 4px 12px -2px rgba(0, 0, 0, 0.03);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.approval-card-panel:hover {
+  box-shadow: 0 20px 35px -3px rgba(0, 0, 0, 0.08), 0 8px 20px -2px rgba(0, 0, 0, 0.04);
+  border-color: var(--el-border-color, #cbd5e1) !important;
+}
+
+.approval-title-box {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.approval-title-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--el-text-color-primary, #1e293b) !important; /* 跟随系统主文字色 */
+}
+
+.approval-warning-icon {
+  color: #f59e0b; /* 鲜明暖黄色 */
+  font-size: 17px;
+  font-weight: bold;
+  animation: warningPulse 2s infinite ease-in-out;
+}
+
+@keyframes warningPulse {
+  0% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+
+.approval-node-badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--el-fill-color-light, #f1f5f9);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 11px;
+  border: 1px solid var(--el-border-color-light, #e2e8f0);
+}
+
+.approval-node-badge .badge-label {
+  background: var(--el-fill-color-dark, #cbd5e1);
+  color: var(--el-text-color-regular, #475569) !important;
+  padding: 2px 6px;
+  font-weight: 600;
+}
+
+.approval-node-badge .badge-value {
+  color: var(--el-text-color-primary, #1e293b) !important;
+  padding: 2px 8px;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+}
+
+.approval-input-wrapper {
+  margin-bottom: 14px;
+}
+
+.approval-textarea :deep(.el-textarea__inner) {
+  border-radius: 8px;
+  border: 1px solid var(--el-input-border-color, var(--el-border-color)) !important;
+  background-color: var(--el-input-bg-color, var(--el-fill-color-blank)) !important; /* 跟随系统输入框背景 */
+  font-size: 13px;
+  color: var(--el-input-text-color, var(--el-text-color-regular)) !important; /* 跟随系统输入字色 */
+  padding: 8px 12px;
+  transition: all 0.2s ease;
+}
+
+.approval-textarea :deep(.el-textarea__inner::placeholder) {
+  color: var(--el-text-color-placeholder, #94a3b8) !important; /* 跟随系统占位符颜色 */
+}
+
+.approval-textarea :deep(.el-textarea__inner:focus) {
+  border-color: var(--el-color-primary, #3b82f6) !important;
+  background-color: var(--el-input-bg-color, var(--el-fill-color-blank)) !important;
+  box-shadow: 0 0 0 3px var(--el-color-primary-light-8, rgba(59, 130, 246, 0.2));
+}
+
+.approval-action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.approval-btn {
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-reject {
+  background-color: var(--el-fill-color-light, #f1f5f9) !important; /* 跟随系统淡色背景 */
+  border-color: var(--el-border-color-light, #e2e8f0) !important;
+  color: var(--el-text-color-regular, #475569) !important; /* 深灰色文字 */
+}
+
+.btn-reject:hover {
+  background-color: #ef4444 !important; /* hover时变红，警告清晰 */
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+  transform: translateY(-1px);
+}
+
+.btn-reject:active {
+  transform: translateY(0);
+}
+
+.btn-approve {
+  background-color: #10b981 !important;
+  border-color: #10b981 !important;
+  color: #ffffff !important; /* 强制纯白字 */
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.2);
+}
+
+.btn-approve:hover {
+  background-color: #059669 !important;
+  border-color: #059669 !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-approve:active {
+  transform: translateY(0);
+}
+
+.approval-status-panel {
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: rgba(16, 185, 129, 0.1) !important;
+  border-radius: 8px;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+  font-size: 13px;
+  color: #10b981 !important; /* 鲜明绿色字 */
+  box-shadow: 0 2px 8px -1px rgba(0, 0, 0, 0.2);
+}
+
+.approval-status-panel .status-header strong {
+  font-weight: 600;
+  color: #34d399 !important;
+}
+
+.approval-status-panel .status-feedback {
+  margin-top: 6px;
+  padding-left: 21px;
+  font-size: 12px;
+  color: #a7f3d0 !important;
+  display: flex;
+  gap: 4px;
+}
+
+.loading-status-text {
+  font-size: 13px;
+  color: #909399;
+  animation: statusPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes statusPulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.input-hint {
+  max-width: 812px;
+  margin: 5px auto 0;
+  font-size: 11px;
+  color: #c0c4cc;
+  text-align: center;
+}
+
+/* ===== 多模态图片预览与展示样式 ===== */
+.msg-attachment-card-wrapper {
+  margin-bottom: 10px;
+}
+
+.msg-image-attachment {
+  position: relative;
+  display: inline-block;
+  max-width: 260px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #e4e7ed;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  background-color: #f5f7fa;
+}
+
+.msg-image-attachment:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.chat-inline-image {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  cursor: zoom-in;
+}
+
+.image-name-badge {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #606266;
+  background: #f0f2f5;
+  border-top: 1px solid #e4e7ed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+.preview-inline-image {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid #dcdfe6;
+  object-fit: cover;
+}
+
+.image-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 120px;
+  background: #f5f7fa;
+  color: #909399;
+  font-size: 12px;
+}
+
+/* ===== 待发送附件预览栏 ===== */
+.attachment-preview-bar {
+  max-width: 812px;
+  margin: 0 auto 6px;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.attachment-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #eef5fe;
+  border: 1px solid #d9ecff;
+  border-radius: 8px;
+  color: #409eff;
+  font-size: 13px;
+  max-width: 300px;
+}
+
+.attachment-tag .file-name {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  flex: 1;
+}
+
+.attachment-tag .remove-btn {
+  cursor: pointer;
+  color: #a0cfff;
+  transition: color 0.2s;
+}
+
+.attachment-tag .remove-btn:hover {
+  color: #f56c6c;
+}
+
+/* ===== 附件上传按钮 ===== */
+.attachment-uploader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+}
+
+.btn-attach {
+  font-size: 20px !important;
+  color: #909399 !important;
+  padding: 0 !important;
+  height: 36px;
+  width: 36px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s !important;
+}
+
+.btn-attach:hover:not(:disabled) {
+  color: #409eff !important;
+}
+
+.btn-attach:disabled {
+  color: #c0c4cc !important;
+  cursor: not-allowed !important;
+}
+
+/* ===== 滚动条 ===== */
+.conv-list::-webkit-scrollbar,
+.messages-area::-webkit-scrollbar {
+  width: 4px;
+}
+.conv-list::-webkit-scrollbar-track,
+.messages-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.conv-list::-webkit-scrollbar-thumb,
+.messages-area::-webkit-scrollbar-thumb {
+  background: #e4e7ed;
+  border-radius: 4px;
+}
+
+/* ===== 报告查看器 & 气泡工具栏样式 ===== */
+.msg-tools {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px dashed #ebeef5;
+  padding-top: 6px;
+}
+
+.report-btn {
+  color: #409eff !important;
+  font-weight: 500;
+  font-size: 13px !important;
+  padding: 4px 8px !important;
+  border-radius: 4px;
+  background: #ecf5ff;
+}
+
+.report-btn:hover {
+  background: #d9ecff;
+  color: #66b1ff !important;
+}
+
+/* 全屏报告 Dialog */
+.pretty-report-dialog {
+  background: #f3f4f6 !important;
+}
+
+.pretty-report-dialog .el-dialog__header {
+  background: #ffffff;
+  border-bottom: 1px solid #e4e7ed;
+  padding: 16px 20px;
+}
+
+.pretty-report-dialog .el-dialog__title {
+  font-weight: 600;
+  color: #303133;
+}
+
+.pretty-report-dialog .el-dialog__body {
+  padding: 0 !important;
+  height: calc(100vh - 55px);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 工具栏 */
+.report-toolbar {
+  background: #ffffff;
+  padding: 12px 24px;
+  border-bottom: 1px solid #e4e7ed;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+  z-index: 10;
+}
+
+/* 预览区页面 */
+.report-preview-page {
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px 20px;
+  background: #f3f4f6;
+  display: flex;
+  justify-content: center;
+}
+
+/* 仿纸张设计 */
+.report-paper {
+  background: #ffffff;
+  width: 100%;
+  max-width: 820px;
+  min-height: 1000px;
+  padding: 60px 50px;
+  box-sizing: border-box;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 页眉装点 */
+.paper-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #909399;
+  border-bottom: 1px solid #f2f6fc;
+  padding-bottom: 8px;
+  margin-bottom: 40px;
+}
+
+.confidential-tag {
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: #e6a23c;
+}
+
+.report-serial {
+  font-family: monospace;
+}
+
+/* 标题区 */
+.paper-title-area {
+  margin-bottom: 30px;
+}
+
+.paper-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: bold;
+  border-radius: 4px;
+  margin-bottom: 16px;
+  letter-spacing: 0.05em;
+  box-shadow: 0 4px 10px var(--el-color-primary-light-5);
+}
+
+.paper-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: #1f2d3d;
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.paper-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  font-size: 13px;
+  color: #606266;
+  background: #f8fafc;
+  padding: 12px 20px;
+  border-radius: 6px;
+  border-left: 3px solid #1890ff;
+}
+
+.paper-meta span strong {
+  color: #303133;
+}
+
+/* 漂亮的分割线 */
+.paper-divider {
+  height: 1px;
+  background: #e4e7ed;
+  margin: 40px 0;
+  position: relative;
+}
+
+.divider-circle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: #1890ff;
+  border-radius: 50%;
+  border: 4px solid #ffffff;
+  box-shadow: 0 0 0 1px #e4e7ed;
+}
+
+/* 主内容正文 */
+.paper-content {
+  flex: 1;
+  font-size: 15px;
+  color: #2c3e50;
+  line-height: 1.8;
+}
+
+.paper-content :deep(h1),
+.paper-content :deep(h2),
+.paper-content :deep(h3),
+.paper-content :deep(h4) {
+  color: #1a1a2e;
+  margin-top: 32px;
+  margin-bottom: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.paper-content :deep(h1) {
+  font-size: 22px;
+  border-bottom: 2px solid #f0f2f5;
+  padding-bottom: 10px;
+}
+
+.paper-content :deep(h2) {
+  font-size: 18px;
+  border-bottom: 2px solid #eff6ff;
+  padding-bottom: 6px;
+  position: relative;
+}
+
+.paper-content :deep(h2::after) {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 40px;
+  height: 2px;
+  background: #1890ff;
+}
+
+.paper-content :deep(h3) {
+  font-size: 16px;
+}
+
+.paper-content :deep(p) {
+  margin: 0 0 16px;
+}
+
+/* 表格定制 */
+.paper-content :deep(table) {
+  width: 100% !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  margin: 28px 0 !important;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02) !important;
+}
+
+.paper-content :deep(th) {
+  background: linear-gradient(135deg, var(--el-color-primary-dark-2) 0%, var(--el-color-primary) 100%) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  padding: 14px 18px !important;
+  border: none !important;
+  text-align: left !important;
+  font-size: 14px !important;
+}
+
+.paper-content :deep(td) {
+  padding: 13px 18px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  border-right: 1px solid #f1f5f9 !important;
+  font-size: 14px !important;
+  color: #334155 !important;
+}
+
+.paper-content :deep(tr:last-child td) {
+  border-bottom: none !important;
+}
+
+.paper-content :deep(tr td:last-child) {
+  border-right: none !important;
+}
+
+.paper-content :deep(tr:nth-child(even)) {
+  background-color: #f8fafc !important;
+}
+
+.paper-content :deep(tr:hover) {
+  background: #f1f5f9 !important;
+}
+
+/* 引用块 */
+.paper-content :deep(blockquote) {
+  margin: 20px 0;
+  padding: 16px 20px;
+  background: #eef5fe;
+  border-left: 4px solid #1890ff;
+  border-radius: 0 8px 8px 0;
+  color: #1e3a8a;
+}
+
+/* 页脚声明 */
+.paper-footer {
+  margin-top: 60px;
+  border-top: 1px solid #f2f6fc;
+  padding-top: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.footer-page-num {
+  margin-top: 6px;
+  font-weight: bold;
+}
+
+/* ECharts 可视化数据分析对比图表 */
+.report-chart-section {
+  margin: 32px 0;
+  padding: 24px;
+  background: #fcfcfd;
+  border: 1px solid #eef2f6;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.015);
+}
+
+.section-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 12px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-icon-accent {
+  color: #3b82f6;
+  font-size: 17px;
+  text-shadow: 0 0 8px rgba(59, 130, 246, 0.2);
+}
+
+.pretty-chart-box {
+  width: 100%;
+  height: 380px;
+  background: transparent;
+  transition: all 0.3s ease;
+}
+
+/* ──────────────────────────────────────────
+   打印专属媒体查询
+   ────────────────────────────────────────── */
+@media print {
+  /* 隐藏非打印区域 */
+  body * {
+    visibility: hidden;
+  }
+  /* 只让打印区可见，且其内部的所有元素可见 */
+  #report-print-area, #report-print-area * {
+    visibility: visible;
+  }
+  /* 打印区域定位于页面最上角 */
+  #report-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+  .report-paper {
+    box-shadow: none;
+    border: none;
+    padding: 0;
+    width: 100%;
+  }
+  .report-toolbar, .el-dialog__header, .el-dialog__close {
+    display: none !important;
+  }
+}
+
+/* 联网搜索按钮切换器样式 */
+.web-search-btn-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 20px;
+  cursor: pointer;
+  outline: none;
+  background-color: #f3f4f6;
+  border: 1px dashed #cbd5e0;
+  color: #718096;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.web-search-btn-modern:hover:not(:disabled) {
+  background-color: #e5e7eb;
+  border-color: #a0aec0;
+  color: #4a5568;
+}
+
+.web-search-btn-modern.is-active {
+  background: linear-gradient(135deg, var(--el-color-primary-light-9) 0%, var(--el-color-primary-light-8) 100%);
+  border: 1px solid var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+  box-shadow: 0 2px 6px var(--el-color-primary-light-7);
+}
+
+.web-search-btn-modern.is-active:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--el-color-primary-light-8) 0%, var(--el-color-primary-light-7) 100%);
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary-dark-2);
+}
+
+.web-search-btn-modern:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 智能体工作流流转高级样式 */
+.workflow-steps-container {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px -2px rgba(148, 163, 184, 0.08), 0 2px 8px -1px rgba(148, 163, 184, 0.04);
+  transition: all 0.3s ease;
+}
+.workflow-steps-container:hover {
+  box-shadow: 0 10px 30px -3px rgba(148, 163, 184, 0.12), 0 4px 12px -2px rgba(148, 163, 184, 0.08);
+  border-color: #cbd5e1;
+}
+.workflow-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #334155;
+}
+.workflow-header i {
+  color: #64748b;
+  font-size: 15px;
+}
+.workflow-steps-list {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #ffffff;
+}
+.workflow-step-item {
+  display: flex;
+  gap: 12px;
+  position: relative;
+}
+.workflow-step-item:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 9px;
+  top: 22px;
+  bottom: -22px;
+  width: 2px;
+  background: #f1f5f9;
+}
+.workflow-step-item.running:not(:last-child)::after {
+  background: linear-gradient(to bottom, var(--el-color-primary), var(--el-color-primary-light-8), var(--el-color-primary));
+  background-size: 100% 200%;
+  animation: lineFlow 1.5s infinite linear;
+}
+@keyframes lineFlow {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 0% 200%; }
+}
+.workflow-step-item.success:not(:last-child)::after {
+  background: #0d9488; /* 雅致的莫兰迪蓝绿色连线 */
+}
+.step-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 2px solid #cbd5e1;
+  z-index: 1;
+  font-size: 11px;
+  color: #64748b;
+  transition: all 0.3s;
+}
+.workflow-step-item.running .step-icon {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+  box-shadow: 0 0 0 0 var(--el-color-primary-light-5), 
+              0 0 0 4px var(--el-color-primary-light-8);
+  animation: pulseGlow 1.8s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0 0 var(--el-color-primary-light-5), 0 0 0 0 var(--el-color-primary-light-8); }
+  100% { box-shadow: 0 0 0 6px var(--el-color-primary-light-9), 0 0 0 12px var(--el-color-primary-light-9); }
+}
+.workflow-step-item.success .step-icon {
+  border-color: #0d9488;
+  background: #0d9488;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(13, 148, 136, 0.2);
+}
+.workflow-step-item.error .step-icon {
+  border-color: #ef4444;
+  background: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.2);
+}
+.step-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.step-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #334155;
+}
+.workflow-step-item.running .step-name {
+  color: #2563eb;
+  font-weight: 700;
+}
+.step-code {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 400;
+}
+.step-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  background: #f0fdf4; /* 清爽淡绿底 */
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  color: #166534;
+  margin-top: 4px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(16, 101, 52, 0.02);
+}
+.step-tool-badge el-icon {
+  color: #10b981;
+}
+.step-tool-badge .tool-name {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-weight: 600;
+}
+.step-thinking-box {
+  background: #fafaf9; /* 无尘灰 */
+  border-left: 3px solid #e2e8f0;
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin-top: 6px;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.01);
+}
+.step-thinking-box .thinking-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #78716c;
+  margin-bottom: 3px;
+}
+.step-thinking-box .thinking-text {
+  font-size: 12px;
+  color: #575249;
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.step-content-box {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.01);
+}
+.step-content-box .content-text {
+  font-size: 12px;
+  color: #334155;
+  line-height: 1.6;
+}
+</style>
