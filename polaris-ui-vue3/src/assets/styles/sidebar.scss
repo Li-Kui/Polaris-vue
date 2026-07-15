@@ -5,7 +5,7 @@
   .main-container {
     min-height: 100%;
     transition: margin-left .28s;
-    margin-left: vars.$base-sidebar-width;
+    margin-left: 0;
     position: relative;
   }
 
@@ -15,16 +15,15 @@
 
   .sidebar-container {
     transition: width 0.28s;
-    width: vars.$base-sidebar-width !important;
+    width: var(--sidebar-width, 260px) !important;
     height: 100%;
-    position: fixed;
-    font-size: 0px;
+    position: relative;
+    font-size: 14px;
     top: 0;
     bottom: 0;
     left: 0;
     z-index: 1001;
-    overflow: hidden;
-    -webkit-box-shadow: 2px 0 6px rgba(0,21,41,.35);
+    overflow: visible;
     box-shadow: 0px 0px 8px 0px rgba(0, 0, 0, 0.1);
 
     // reset element-ui css
@@ -61,7 +60,7 @@
     }
 
     .svg-icon {
-      margin-right: 10px !important;
+      margin-right: 0px !important;
     }
 
     .el-menu {
@@ -203,11 +202,11 @@
 
   .hideSidebar {
     .sidebar-container {
-      width: 54px !important;
+      width: 76px !important;
     }
 
     .main-container {
-      margin-left: 54px;
+      margin-left: 0;
     }
 
     .sub-menu-title-noDropdown {

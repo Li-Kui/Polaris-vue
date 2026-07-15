@@ -1,23 +1,32 @@
 <template>
-  <div class="navbar" :class="'nav' + settingsStore.navType">
-    <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" />
-    <breadcrumb v-if="settingsStore.navType == 1" id="breadcrumb-container" class="breadcrumb-container" />
-    <top-nav v-if="settingsStore.navType == 2" id="topmenu-container" class="topmenu-container" />
-    <template v-if="settingsStore.navType == 3">
-      <logo v-show="settingsStore.sidebarLogo" :collapse="false"></logo>
-      <top-bar id="topbar-container" class="topbar-container" />
-    </template>
+  <div class="navbar" :class="['nav' + settingsStore.navType, `theme-${isDark ? 'dark' : 'light'}`]">
+    <!-- 左侧区域：面包屑和安全加密徽章 -->
+    <div class="header-left">
+      <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" v-if="settingsStore.navType != 3" />
+      <breadcrumb v-if="settingsStore.navType == 1" id="breadcrumb-container" class="breadcrumb-container" />
+      <top-nav v-if="settingsStore.navType == 2" id="topmenu-container" class="topmenu-container" />
+      
+      <!-- 🪐 极客 HUD 状态区 -->
+      <div class="header-hud hide-mobile" v-if="appStore.device !== 'mobile'">
+        <span class="hud-security-badge">
+          <span class="shield-icon">🛡️</span>
+          <span class="shield-text">安全通道已加密</span>
+        </span>
+      </div>
+    </div>
 
+    <!-- 右侧区域 -->
     <div class="right-menu">
       <template v-if="appStore.device !== 'mobile'">
         <header-search id="header-search" class="right-menu-item" />
 
         <screenfull id="screenfull" class="right-menu-item hover-effect" />
 
+        <!-- 主题切换 -->
         <el-tooltip content="主题模式" effect="dark" placement="bottom">
           <div class="right-menu-item hover-effect theme-switch-wrapper" @click="toggleTheme">
-            <svg-icon v-if="settingsStore.isDark" icon-class="sunny" />
-            <svg-icon v-if="!settingsStore.isDark" icon-class="moon" />
+            <svg-icon v-if="isDark" icon-class="sunny" class="theme-icon" />
+            <svg-icon v-if="!isDark" icon-class="moon" class="theme-icon" />
           </div>
         </el-tooltip>
 
@@ -30,24 +39,26 @@
         </el-tooltip>
       </template>
 
-      <el-dropdown @command="handleCommand" class="avatar-container right-menu-item hover-effect" trigger="hover">
-        <div class="avatar-wrapper">
-          <img :src="userStore.avatar" class="user-avatar" />
-          <span class="user-nickname"> {{ userStore.nickName }} </span>
+      <!-- 用户下拉菜单，升级为圆角 modern dropdown -->
+      <el-dropdown @command="handleCommand" class="avatar-container right-menu-item hover-effect" trigger="hover" teleported>
+        <div class="user-avatar-wrap">
+          <img v-if="userStore.avatar" :src="userStore.avatar" class="user-avatar" />
+          <div v-else class="avatar-circle">{{ userStore.nickName ? userStore.nickName.substring(0, 2).toUpperCase() : 'AD' }}</div>
+          <span class="username hide-mobile"> {{ userStore.nickName }} </span>
         </div>
         <template #dropdown>
-          <el-dropdown-menu>
+          <el-dropdown-menu class="modern-dropdown-menu">
             <router-link to="/user/profile">
-              <el-dropdown-item>个人中心</el-dropdown-item>
+              <el-dropdown-item command="profile">👤 个人中心</el-dropdown-item>
             </router-link>
             <el-dropdown-item command="setLayout" v-if="settingsStore.showSettings">
-                <span>布局设置</span>
+              ⚙️ 布局设置
             </el-dropdown-item>
             <el-dropdown-item command="lockScreen">
-                <span>锁定屏幕</span>
+              🔒 锁定屏幕
             </el-dropdown-item>
-            <el-dropdown-item divided command="logout">
-              <span>退出登录</span>
+            <el-dropdown-item divided command="logout" class="color-danger">
+              🚪 退出安全令牌
             </el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -57,11 +68,10 @@
 </template>
 
 <script setup>
+import {computed, nextTick} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import Breadcrumb from '@/components/Breadcrumb'
 import TopNav from './TopNav'
-import TopBar from './TopBar'
-import Logo from './Sidebar/Logo'
 import Hamburger from '@/components/Hamburger'
 import Screenfull from '@/components/Screenfull'
 import SizeSelect from '@/components/SizeSelect'
@@ -78,6 +88,8 @@ const appStore = useAppStore()
 const userStore = useUserStore()
 const lockStore = useLockStore()
 const settingsStore = useSettingsStore()
+
+const isDark = computed(() => settingsStore.isDark)
 
 function toggleSideBar() {
   appStore.toggleSideBar()
@@ -163,7 +175,69 @@ async function toggleTheme(event) {
 }
 </script>
 
-<style lang='scss' scoped>
+<style lang="scss">
+/* 全局 popper 样式覆盖，解决 Teleport 状态下的下拉框毛玻璃视觉 */
+.modern-dropdown-menu {
+  background: transparent !important;
+  padding: 6px !important;
+  border-radius: 14px !important;
+  border: none !important;
+
+  .el-dropdown-menu__item {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    padding: 8px 16px !important;
+    border-radius: 8px !important;
+    transition: all 0.2s !important;
+    
+    html:not(.dark) & {
+      color: #475569 !important;
+      
+      &:hover, &:focus, &.is-focus {
+        background-color: rgba(79, 70, 229, 0.06) !important;
+        color: #4f46e5 !important;
+      }
+    }
+    
+    .dark &, &.dark {
+      color: #cbd5e1 !important;
+      
+      &:hover, &:focus, &.is-focus {
+        background-color: rgba(255, 255, 255, 0.06) !important;
+        color: #38bdf8 !important;
+      }
+    }
+
+    &.color-danger {
+      color: #ef4444 !important;
+      
+      &:hover, &:focus, &.is-focus {
+        html:not(.dark) & {
+          background-color: rgba(239, 68, 68, 0.06) !important;
+          color: #ef4444 !important;
+        }
+        .dark & {
+          background-color: rgba(239, 68, 68, 0.15) !important;
+          color: #fca5a5 !important;
+        }
+      }
+    }
+  }
+
+  .el-dropdown-menu__item--divided {
+    margin: 6px 0 !important;
+    
+    html:not(.dark) & {
+      border-top-color: rgba(0, 0, 0, 0.05) !important;
+    }
+    .dark & {
+      border-top-color: rgba(255, 255, 255, 0.08) !important;
+    }
+  }
+}
+</style>
+
+<style lang="scss" scoped>
 .navbar.nav3 {
   .hamburger-container {
     display: none !important;
@@ -174,123 +248,178 @@ async function toggleTheme(event) {
   height: 50px;
   overflow: hidden;
   position: relative;
-  background: var(--navbar-bg);
-  box-shadow: 0 1px 4px rgba(0, 21, 41, 0.08);
   display: flex;
   align-items: center;
-  // padding: 0 8px;
+  justify-content: space-between;
+  padding: 0 24px;
   box-sizing: border-box;
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid transparent;
+  transition: all 0.3s;
+
+  &.theme-light {
+    background-color: rgba(255, 255, 255, 0.35);
+    border-bottom-color: rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
+  }
+
+  &.theme-dark {
+    background-color: rgba(15, 23, 42, 0.25);
+    border-bottom-color: rgba(255, 255, 255, 0.03);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 100%;
 
   .hamburger-container {
-    line-height: 46px;
     height: 100%;
     cursor: pointer;
     transition: background 0.3s;
-    -webkit-tap-highlight-color: transparent;
     display: flex;
     align-items: center;
     flex-shrink: 0;
-    margin-right: 8px;
 
     &:hover {
       background: rgba(0, 0, 0, 0.025);
     }
   }
+}
 
-  .breadcrumb-container {
-    flex-shrink: 0;
+.header-hud {
+  display: flex;
+  align-items: center;
+}
+
+.hud-security-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(5px);
+  
+  .theme-light & {
+    background-color: rgba(16, 185, 129, 0.05);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.1);
+  }
+  .theme-dark & {
+    background-color: rgba(16, 185, 129, 0.08);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.15);
+  }
+}
+
+.right-menu {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  &:focus {
+    outline: none;
   }
 
-  .topmenu-container {
-    position: absolute;
-    left: 50px;
-  }
-
-  .topbar-container {
-    flex: 1;
-    min-width: 0;
-    display: flex;
+  .right-menu-item {
+    display: inline-flex;
     align-items: center;
-    overflow: hidden;
-    margin-left: 8px;
-  }
-
-  .right-menu {
+    padding: 0 8px;
     height: 100%;
-    line-height: 50px;
+    font-size: 16px;
+    color: #5a5e66;
+    vertical-align: text-bottom;
+    transition: background 0.3s;
+
+    &.hover-effect {
+      cursor: pointer;
+
+      &:hover {
+        background: rgba(0, 0, 0, 0.025);
+        
+        .theme-dark & {
+          background: rgba(255, 255, 255, 0.025);
+        }
+      }
+    }
+
+    &.theme-switch-wrapper {
+      .theme-icon {
+        font-size: 15px;
+        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        
+        &:hover {
+          transform: scale(1.15) rotate(15deg);
+        }
+      }
+    }
+  }
+
+  .avatar-container {
+    margin-right: 0px;
+    padding-right: 0px;
+  }
+}
+
+.user-avatar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  height: 100%;
+
+  .user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    
+    .theme-dark & {
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+  }
+
+  .avatar-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
-    margin-left: auto;
-
-    &:focus {
-      outline: none;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+    
+    .theme-light & {
+      background-color: #4f46e5;
+      color: #ffffff;
     }
-
-    .right-menu-item {
-      display: inline-block;
-      padding: 0 8px;
-      height: 100%;
-      font-size: 18px;
-      color: #5a5e66;
-      vertical-align: text-bottom;
-
-      &.hover-effect {
-        cursor: pointer;
-        transition: background 0.3s;
-
-        &:hover {
-          background: rgba(0, 0, 0, 0.025);
-        }
-      }
-
-      &.theme-switch-wrapper {
-        display: flex;
-        align-items: center;
-
-        svg {
-          transition: transform 0.3s;
-          
-          &:hover {
-            transform: scale(1.15);
-          }
-        }
-      }
+    .theme-dark & {
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #0f172a;
     }
+  }
 
-    .avatar-container {
-      margin-right: 0px;
-      padding-right: 0px;
+  .username {
+    font-size: 12px;
+    font-weight: 700;
+    
+    .theme-light & { color: #334155; }
+    .theme-dark & { color: #cbd5e1; }
+  }
+}
 
-      .avatar-wrapper {
-        margin-top: 10px;
-        right: 8px;
-        position: relative;
-
-        .user-avatar {
-          cursor: pointer;
-          width: 30px;
-          height: 30px;
-          margin-right: 8px;
-          border-radius: 50%;
-        }
-
-        .user-nickname{
-          position: relative;
-          left: 0px;
-          bottom: 10px;
-          font-size: 14px;
-          font-weight: bold;
-        }
-
-        i {
-          cursor: pointer;
-          position: absolute;
-          right: -20px;
-          top: 25px;
-          font-size: 12px;
-        }
-      }
-    }
+@media (max-width: 768px) {
+  .hide-mobile {
+    display: none !important;
   }
 }
 </style>
+
