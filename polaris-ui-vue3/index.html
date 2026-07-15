@@ -16,13 +16,7 @@
       height: 100%;
       margin: 0px;
       padding: 0px;
-    }
-
-    .chromeframe {
-      margin: 0.2em 0;
-      background: #ccc;
-      color: #000;
-      padding: 0.2em 0;
+      background-color: #05060b;
     }
 
     #loader-wrapper {
@@ -31,171 +25,140 @@
       left: 0;
       width: 100%;
       height: 100%;
+      background: radial-gradient(circle at center, #0c101d 0%, #05060b 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
       z-index: 999999;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
-    #loader {
-      display: block;
+    /* 🪐 极光星轨扫描环 */
+    .polaris-loader-orbit {
       position: relative;
-      left: 50%;
-      top: 50%;
-      width: 150px;
-      height: 150px;
-      margin: -75px 0 0 -75px;
-      border-radius: 50%;
-      border: 3px solid transparent;
-      border-top-color: #FFF;
-      -webkit-animation: spin 2s linear infinite;
-      -ms-animation: spin 2s linear infinite;
-      -moz-animation: spin 2s linear infinite;
-      -o-animation: spin 2s linear infinite;
-      animation: spin 2s linear infinite;
-      z-index: 1001;
+      width: 120px;
+      height: 120px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 32px;
     }
 
-    #loader:before {
-      content: "";
+    .loader-ring {
       position: absolute;
-      top: 5px;
-      left: 5px;
-      right: 5px;
-      bottom: 5px;
       border-radius: 50%;
-      border: 3px solid transparent;
-      border-top-color: #FFF;
-      -webkit-animation: spin 3s linear infinite;
-      -moz-animation: spin 3s linear infinite;
-      -o-animation: spin 3s linear infinite;
-      -ms-animation: spin 3s linear infinite;
-      animation: spin 3s linear infinite;
+      border: 1.5px solid transparent;
     }
 
-    #loader:after {
-      content: "";
-      position: absolute;
-      top: 15px;
-      left: 15px;
-      right: 15px;
-      bottom: 15px;
-      border-radius: 50%;
-      border: 3px solid transparent;
-      border-top-color: #FFF;
-      -moz-animation: spin 1.5s linear infinite;
-      -o-animation: spin 1.5s linear infinite;
-      -ms-animation: spin 1.5s linear infinite;
-      -webkit-animation: spin 1.5s linear infinite;
-      animation: spin 1.5s linear infinite;
+    .loader-ring.ring-1 {
+      width: 70px;
+      height: 70px;
+      border-color: rgba(56, 189, 248, 0.25);
+      border-top-color: #38bdf8;
+      animation: rotateRing 2s linear infinite;
     }
 
-
-    @-webkit-keyframes spin {
-      0% {
-        -webkit-transform: rotate(0deg);
-        -ms-transform: rotate(0deg);
-        transform: rotate(0deg);
-      }
-
-      100% {
-        -webkit-transform: rotate(360deg);
-        -ms-transform: rotate(360deg);
-        transform: rotate(360deg);
-      }
+    .loader-ring.ring-2 {
+      width: 95px;
+      height: 95px;
+      border-color: rgba(168, 85, 247, 0.25);
+      border-bottom-color: #a855f7;
+      animation: rotateRingCounter 2.5s linear infinite;
     }
 
-    @keyframes spin {
-      0% {
-        -webkit-transform: rotate(0deg);
-        -ms-transform: rotate(0deg);
-        transform: rotate(0deg);
-      }
-
-      100% {
-        -webkit-transform: rotate(360deg);
-        -ms-transform: rotate(360deg);
-        transform: rotate(360deg);
-      }
+    .loader-ring.ring-3 {
+      width: 120px;
+      height: 120px;
+      border-color: rgba(129, 140, 248, 0.15);
+      border-left-color: #818cf8;
+      animation: rotateRing 3s linear infinite;
     }
 
-
-    #loader-wrapper .loader-section {
-      position: fixed;
-      top: 0;
-      width: 51%;
-      height: 100%;
-      background: #7171C6;
-      z-index: 1000;
-      -webkit-transform: translateX(0);
-      -ms-transform: translateX(0);
-      transform: translateX(0);
+    .loader-star {
+      font-size: 32px;
+      color: #38bdf8;
+      text-shadow: 0 0 15px rgba(56, 189, 248, 0.85);
+      z-index: 2;
+      font-weight: bold;
+      animation: starBreath 2s infinite alternate ease-in-out;
+      user-select: none;
     }
 
-    #loader-wrapper .loader-section.section-left {
-      left: 0;
-    }
-
-    #loader-wrapper .loader-section.section-right {
-      right: 0;
-    }
-
-
-    .loaded #loader-wrapper .loader-section.section-left {
-      -webkit-transform: translateX(-100%);
-      -ms-transform: translateX(-100%);
-      transform: translateX(-100%);
-      -webkit-transition: all 0.7s 0.3s cubic-bezier(0.645, 0.045, 0.355, 1.000);
-      transition: all 0.7s 0.3s cubic-bezier(0.645, 0.045, 0.355, 1.000);
-    }
-
-    .loaded #loader-wrapper .loader-section.section-right {
-      -webkit-transform: translateX(100%);
-      -ms-transform: translateX(100%);
-      transform: translateX(100%);
-      -webkit-transition: all 0.7s 0.3s cubic-bezier(0.645, 0.045, 0.355, 1.000);
-      transition: all 0.7s 0.3s cubic-bezier(0.645, 0.045, 0.355, 1.000);
-    }
-
-    .loaded #loader {
-      opacity: 0;
-      -webkit-transition: all 0.3s ease-out;
-      transition: all 0.3s ease-out;
-    }
-
-    .loaded #loader-wrapper {
-      visibility: hidden;
-      -webkit-transform: translateY(-100%);
-      -ms-transform: translateY(-100%);
-      transform: translateY(-100%);
-      -webkit-transition: all 0.3s 1s ease-out;
-      transition: all 0.3s 1s ease-out;
-    }
-
-    .no-js #loader-wrapper {
-      display: none;
-    }
-
-    .no-js h1 {
-      color: #222222;
-    }
-
+    /* 🌌 品牌名称与载入提示 */
     #loader-wrapper .load_title {
-      font-family: 'Open Sans';
-      color: #FFF;
-      font-size: 19px;
-      width: 100%;
       text-align: center;
-      z-index: 9999999999999;
-      position: absolute;
-      top: 60%;
-      opacity: 1;
-      line-height: 30px;
+      margin-bottom: 24px;
+      width: 100%;
     }
 
-    #loader-wrapper .load_title span {
-      font-weight: normal;
-      font-style: italic;
+    #loader-wrapper .brand-text {
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      background: linear-gradient(90deg, #38bdf8, #818cf8, #a855f7, #38bdf8);
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+      animation: shineText 4s linear infinite;
+      text-transform: uppercase;
+    }
+
+    #loader-wrapper .subtitle-text {
       font-size: 13px;
-      color: #FFF;
-      opacity: 0.5;
+      color: rgba(255, 255, 255, 0.55);
+      letter-spacing: 0.05em;
+      font-weight: 500;
+      animation: fadePulse 1.5s infinite alternate ease-in-out;
+    }
+
+    /* 🚀 底层微光流光进度条 */
+    .progress-bar-indicator {
+      width: 140px;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .indicator-fill {
+      height: 100%;
+      width: 45%;
+      background: linear-gradient(90deg, #38bdf8, #818cf8, #a855f7);
+      border-radius: 99px;
+      animation: progressLoading 2.2s infinite ease-in-out;
+    }
+
+    /* 动画关键帧 */
+    @keyframes rotateRing {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes rotateRingCounter {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(-360deg); }
+    }
+
+    @keyframes starBreath {
+      0% { transform: scale(0.9) rotate(0deg); opacity: 0.75; }
+      100% { transform: scale(1.15) rotate(45deg); opacity: 1; }
+    }
+
+    @keyframes shineText {
+      to { background-position: 200% center; }
+    }
+
+    @keyframes fadePulse {
+      0% { opacity: 0.5; }
+      100% { opacity: 0.9; }
+    }
+
+    @keyframes progressLoading {
+      0% { transform: translateX(-100%); }
+      50% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
     }
   </style>
 </head>
@@ -203,10 +166,22 @@
 <body>
   <div id="app">
     <div id="loader-wrapper">
-      <div id="loader"></div>
-      <div class="loader-section section-left"></div>
-      <div class="loader-section section-right"></div>
-      <div class="load_title">正在加载系统资源，请耐心等待</div>
+      <!-- 🪐 极光星轨扫描环 -->
+      <div class="polaris-loader-orbit">
+        <div class="loader-ring ring-1"></div>
+        <div class="loader-ring ring-2"></div>
+        <div class="loader-ring ring-3"></div>
+        <span class="loader-star">✦</span>
+      </div>
+      <!-- 🌌 品牌名称与载入提示 -->
+      <div class="load_title">
+        <div class="brand-text">北辰 · Polaris</div>
+        <div class="subtitle-text">正在加载系统资源，请耐心等待</div>
+      </div>
+      <!-- 🚀 底层微光流光进度条 -->
+      <div class="progress-bar-indicator">
+        <div class="indicator-fill"></div>
+      </div>
     </div>
   </div>
   <script type="module" src="/src/main.js"></script>
