@@ -1,5 +1,5 @@
 <template>
-  <el-dialog :title="type === 'log' ? '调度日志详细' : '任务详细'" v-model="dialogVisible" width="780px" append-to-body>
+  <el-dialog :title="type === 'log' ? '调度日志详细' : '任务详细'" v-model="dialogVisible" width="780px" append-to-body class="polaris-glass-dialog">
     <div class="detail-wrap">
       <template v-if="type === 'log'">
         <!-- 基本信息 -->
@@ -210,8 +210,164 @@ const costTime = computed(() => {
 })
 </script>
 
-<style scoped>
-.detail-label {
-  width: 80px;
+<style lang="scss">
+/* 定时任务详情弹窗局部重写（全局样式，但限定在 .polaris-glass-dialog 中以隔离保护） */
+.polaris-glass-dialog {
+  .detail-wrap {
+    padding: 4px 8px;
+  }
+
+  .detail-card {
+    background: rgba(255, 255, 255, 0.45) !important;
+    border: 1px solid rgba(226, 232, 240, 0.5) !important;
+    border-radius: 12px !important;
+    margin-bottom: 18px !important;
+    backdrop-filter: blur(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.02);
+  }
+
+  .detail-card-title {
+    background: rgba(247, 249, 251, 0.5) !important;
+    color: #1e293b !important;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.5) !important;
+    font-size: 13.5px !important;
+    padding: 10px 16px !important;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    .el-icon {
+      color: #4f46e5 !important;
+      font-size: 15px !important;
+      margin-right: 0 !important;
+    }
+
+    &.error-title {
+      color: #ef4444 !important;
+      .el-icon {
+        color: #ef4444 !important;
+      }
+    }
+  }
+
+  .detail-row {
+    padding: 4px 8px !important;
+  }
+
+  .detail-item {
+    border-bottom: 1px solid rgba(241, 245, 249, 0.6) !important;
+    padding: 12px 10px !important;
+    display: flex;
+    align-items: center;
+  }
+
+  .detail-label {
+    color: #64748b !important;
+    font-weight: 500;
+    width: 90px !important;
+    flex-shrink: 0;
+  }
+
+  .detail-value {
+    color: #1e293b !important;
+    word-break: break-all;
+    
+    &.mono {
+      font-family: Consolas, Monaco, monospace;
+      font-size: 12.5px;
+      color: #0f172a !important;
+    }
+  }
+
+  /* 参数 JSON 代码框美化 */
+  .code-body {
+    padding: 12px 16px !important;
+  }
+
+  .code-wrap {
+    background: rgba(248, 250, 252, 0.5) !important;
+    border: 1px solid rgba(226, 232, 240, 0.6) !important;
+    border-radius: 8px !important;
+  }
+
+  .code-pre {
+    color: #334155 !important;
+    font-size: 12.5px !important;
+    line-height: 1.65 !important;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* 异常体美化 */
+  .error-body {
+    padding: 12px 16px !important;
+    background: rgba(254, 242, 242, 0.4) !important;
+    border-top: 1px solid rgba(239, 68, 68, 0.1) !important;
+    border-radius: 0 0 12px 12px;
+  }
+  
+  .error-msg {
+    color: #dc2626 !important;
+    font-family: Consolas, monospace !important;
+    font-size: 12.5px !important;
+    line-height: 1.6 !important;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+}
+
+/* 暗色模式适配 */
+.dark {
+  .polaris-glass-dialog {
+    .detail-card {
+      background: rgba(255, 255, 255, 0.03) !important;
+      border-color: rgba(255, 255, 255, 0.05) !important;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    }
+
+    .detail-card-title {
+      background: rgba(255, 255, 255, 0.02) !important;
+      color: #f1f5f9 !important;
+      border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+      
+      .el-icon {
+        color: #818cf8 !important;
+      }
+    }
+
+    .detail-item {
+      border-bottom-color: rgba(255, 255, 255, 0.02) !important;
+    }
+
+    .detail-label {
+      color: #94a3b8 !important;
+    }
+
+    .detail-value {
+      color: #e2e8f0 !important;
+      
+      &.mono {
+        color: #cbd5e1 !important;
+      }
+    }
+
+    .code-wrap {
+      background: rgba(15, 23, 42, 0.25) !important;
+      border-color: rgba(255, 255, 255, 0.05) !important;
+    }
+
+    .code-pre {
+      color: #cbd5e1 !important;
+    }
+
+    .error-body {
+      background: rgba(239, 68, 68, 0.05) !important;
+      border-top-color: rgba(239, 68, 68, 0.08) !important;
+    }
+    
+    .error-msg {
+      color: #f87171 !important;
+    }
+  }
 }
 </style>

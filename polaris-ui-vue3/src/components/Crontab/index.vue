@@ -251,12 +251,15 @@ onMounted(() => {
 <style lang="scss" scoped>
 .pop_btn {
     text-align: center;
-    margin-top: 20px;
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
 }
 .popup-main {
     position: relative;
-    margin: 10px auto;
-    border-radius: 5px;
+    margin: 16px auto 0;
+    border-radius: 8px;
     font-size: 12px;
     overflow: hidden;
 }
@@ -264,51 +267,211 @@ onMounted(() => {
     overflow: hidden;
     line-height: 34px;
     padding-top: 6px;
-    background: #f2f2f2;
+    background: transparent;
 }
 .popup-result {
     box-sizing: border-box;
     line-height: 24px;
-    margin: 25px auto;
-    padding: 15px 10px 10px;
-    border: 1px solid #ccc;
+    margin: 32px auto 16px;
+    padding: 20px 16px 16px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background-color: rgba(0, 0, 0, 0.02);
+    border-radius: 12px;
     position: relative;
+    backdrop-filter: blur(4px);
+
+    .dark & {
+        border-color: rgba(255, 255, 255, 0.08);
+        background-color: rgba(255, 255, 255, 0.02);
+    }
 }
 .popup-result .title {
     position: absolute;
-    top: -28px;
-    left: 50%;
-    width: 140px;
-    font-size: 14px;
-    margin-left: -70px;
+    top: -15px;
+    left: 20px;
+    width: auto;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 10px;
     text-align: center;
-    line-height: 30px;
-    background: #fff;
+    line-height: 20px;
+    background: rgba(79, 70, 229, 0.1);
+    color: #4f46e5;
+    border-radius: 6px;
+    border: 1px solid rgba(79, 70, 229, 0.15);
+
+    .dark & {
+        background: rgba(56, 189, 248, 0.15);
+        color: #38bdf8;
+        border-color: rgba(56, 189, 248, 0.2);
+    }
 }
 .popup-result table {
     text-align: center;
     width: 100%;
     margin: 0 auto;
+    border-collapse: separate;
+    border-spacing: 4px 6px;
+}
+.popup-result table th {
+    font-weight: 600;
+    color: #64748b;
+    font-size: 11px;
+    padding-bottom: 4px;
+    .dark & {
+        color: #94a3b8;
+    }
 }
 .popup-result table td:not(.result) {
-    width: 3.5rem;
-    min-width: 3.5rem;
-    max-width: 3.5rem;
+    width: 4rem;
+    min-width: 4rem;
+    max-width: 4rem;
 }
 .popup-result table span {
     display: block;
     width: 100%;
-    font-family: arial;
-    line-height: 30px;
-    height: 30px;
+    font-family: Consolas, Monaco, monospace;
+    font-size: 12px;
+    line-height: 28px;
+    height: 28px;
     white-space: nowrap;
     overflow: hidden;
-    border: 1px solid #e8e8e8;
+    text-overflow: ellipsis;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background-color: rgba(255, 255, 255, 0.6);
+    border-radius: 6px;
+    color: #334155;
+    transition: all 0.2s ease;
+
+    .dark & {
+        border-color: rgba(255, 255, 255, 0.06);
+        background-color: rgba(15, 23, 42, 0.4);
+        color: #cbd5e1;
+    }
+}
+.popup-result table td.result span {
+    border-color: rgba(79, 70, 229, 0.25);
+    background-color: rgba(79, 70, 229, 0.05);
+    color: #4f46e5;
+    font-weight: 700;
+
+    .dark & {
+        border-color: rgba(56, 189, 248, 0.3);
+        background-color: rgba(56, 189, 248, 0.1);
+        color: #38bdf8;
+    }
 }
 .popup-result-scroll {
     font-size: 12px;
     line-height: 24px;
     height: 10em;
     overflow-y: auto;
+}
+</style>
+
+<style lang="scss">
+/* 针对 Cron 表达式生成器的全局组件样式重塑 */
+.polaris-glass-dialog {
+  /* 隐藏 Cron 生成器弹窗里 tabs 组件多余的边框和生硬白卡底色 */
+  .el-tabs--border-card {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    
+    .el-tabs__header {
+      background: rgba(0, 0, 0, 0.02) !important;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+      border-radius: 8px 8px 0 0;
+      
+      .dark & {
+        background: rgba(255, 255, 255, 0.02) !important;
+        border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+      }
+    }
+    
+    .el-tabs__item {
+      border: none !important;
+      color: #64748b !important;
+      font-weight: 600;
+      transition: all 0.25s ease;
+      font-size: 13px !important;
+      padding: 0 16px !important;
+      
+      &.is-active {
+        background-color: rgba(79, 70, 229, 0.08) !important;
+        color: #4f46e5 !important;
+        border-radius: 6px;
+        
+        .dark & {
+          background-color: rgba(56, 189, 248, 0.12) !important;
+          color: #38bdf8 !important;
+        }
+      }
+      
+      &:hover:not(.is-active) {
+        color: #0f172a !important;
+        .dark & {
+          color: #f1f5f9 !important;
+        }
+      }
+    }
+    
+    .el-tabs__content {
+      padding: 16px 8px !important;
+      background: transparent !important;
+    }
+  }
+
+  /* 对齐 tabpane 内部的单选行与其数字输入框 */
+  .el-tab-pane {
+    .el-form-item {
+      margin-bottom: 14px !important;
+    }
+    
+    .el-form-item__content {
+      align-items: center !important;
+      
+      .el-radio {
+        display: inline-flex !important;
+        align-items: center !important;
+        height: auto !important;
+        white-space: normal !important;
+        line-height: 1.8 !important;
+        margin-right: 0 !important;
+        width: 100%;
+        
+        .el-radio__label {
+          display: inline-flex !important;
+          align-items: center !important;
+          flex-wrap: wrap !important;
+          gap: 6px !important;
+          padding-left: 10px !important;
+          color: #334155;
+          font-weight: 500;
+          font-size: 13px !important;
+          
+          .dark & {
+            color: #cbd5e1;
+          }
+        }
+      }
+      
+      /* 数字微调框与多选下拉框的样式规范 */
+      .el-input-number {
+        margin: 0 4px !important;
+        width: 110px !important;
+        
+        .el-input__wrapper {
+          padding-left: 28px !important;
+          padding-right: 28px !important;
+        }
+      }
+      
+      .el-select {
+        margin: 0 4px !important;
+        width: 240px !important;
+      }
+    }
+  }
 }
 </style>
