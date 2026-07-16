@@ -1,107 +1,119 @@
 <template>
-   <div class="app-container">
-      <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch">
-         <el-form-item label="菜单名称" prop="menuName">
-            <el-input
-               v-model="queryParams.menuName"
-               placeholder="请输入菜单名称"
-               clearable
-               style="width: 200px"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="状态" prop="status">
-            <el-select v-model="queryParams.status" placeholder="菜单状态" clearable style="width: 200px">
-               <el-option
-                  v-for="dict in sys_normal_disable"
-                  :key="dict.value"
-                  :label="dict.label"
-                  :value="dict.value"
-               />
-            </el-select>
-         </el-form-item>
-         <el-form-item>
-            <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-            <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-         </el-form-item>
-      </el-form>
+   <div class="app-container no-sidebar-manage-wrap">
+      <div class="content-inner">
+         <!-- 搜索过滤器玻璃卡片 -->
+         <div class="polaris-filter-card" v-show="showSearch">
+            <el-form :model="queryParams" ref="queryRef" :inline="true" class="polaris-filter-form">
+               <el-form-item label="菜单名称" prop="menuName">
+                  <el-input
+                     v-model="queryParams.menuName"
+                     placeholder="请输入菜单名称"
+                     clearable
+                     style="width: 240px"
+                     @keyup.enter="handleQuery"
+                  />
+               </el-form-item>
+               <el-form-item label="状态" prop="status">
+                  <el-select v-model="queryParams.status" placeholder="菜单状态" clearable style="width: 240px">
+                     <el-option
+                        v-for="dict in sys_normal_disable"
+                        :key="dict.value"
+                        :label="dict.label"
+                        :value="dict.value"
+                     />
+                  </el-select>
+               </el-form-item>
+               <el-form-item>
+                  <el-button type="primary" icon="Search" @click="handleQuery" class="polaris-query-btn">搜索</el-button>
+                  <el-button icon="Refresh" @click="resetQuery" class="polaris-reset-btn">重置</el-button>
+               </el-form-item>
+            </el-form>
+         </div>
 
-      <el-row :gutter="10" class="mb8">
-         <el-col :span="1.5">
-            <el-button
-               type="primary"
-               plain
-               icon="Plus"
-               @click="handleAdd"
-               v-hasPermi="['system:menu:add']"
-            >新增</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="warning"
-               plain
-               icon="Check"
-               @click="handleSaveSort"
-               v-hasPermi="['system:menu:edit']"
-            >保存排序</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button 
-               type="info"
-               plain
-               icon="Sort"
-               @click="toggleExpandAll"
-            >展开/折叠</el-button>
-         </el-col>
-         <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
-      </el-row>
+         <!-- 数据表格玻璃卡片 -->
+         <div class="polaris-table-card">
+            <div class="polaris-action-row">
+               <div class="actions-left">
+                  <el-button
+                     type="primary"
+                     icon="Plus"
+                     @click="handleAdd"
+                     v-hasPermi="['system:menu:add']"
+                     class="action-btn-primary"
+                  >新增</el-button>
+                  <el-button
+                     icon="Check"
+                     @click="handleSaveSort"
+                     v-hasPermi="['system:menu:edit']"
+                     class="action-btn-secondary"
+                  >保存排序</el-button>
+                  <el-button 
+                     icon="Sort"
+                     @click="toggleExpandAll"
+                     class="action-btn-secondary"
+                  >展开/折叠</el-button>
+               </div>
+               <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
+            </div>
 
-      <el-table
-         v-if="refreshTable"
-         v-loading="loading"
-         :data="menuList"
-         row-key="menuId"
-         :default-expand-all="isExpandAll"
-         :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
-      >
-         <el-table-column prop="menuName" label="菜单名称" :show-overflow-tooltip="true" width="220">
-            <template #default="scope">
-               <svg-icon :icon-class="scope.row.icon" />
-               <span class="ml5">{{ scope.row.menuName }}</span>
-            </template>
-         </el-table-column>
-         <el-table-column prop="menuName" label="类型" :show-overflow-tooltip="true" width="100">
-            <template #default="scope">
-               <el-tag v-if="scope.row.menuType === 'M' && scope.row.isFrame === '0'" type="danger" size="small">外链</el-tag>
-               <el-tag v-else-if="scope.row.menuType === 'M'" type="primary" size="small">目录</el-tag>
-               <el-tag v-else-if="scope.row.menuType === 'C' && scope.row.isFrame === '0'" type="danger" size="small">外链</el-tag>
-               <el-tag v-else-if="scope.row.menuType === 'C'" type="success" size="small">菜单</el-tag>
-               <el-tag v-else-if="scope.row.menuType === 'F'" type="warning" size="small">按钮</el-tag>
-            </template>
-         </el-table-column>
-         <el-table-column prop="orderNum" label="排序" width="200">
-            <template #default="scope">
-               <el-input-number v-model="scope.row.orderNum" controls-position="right" :min="0" style="width: 88px" />
-            </template>
-         </el-table-column>
-         <el-table-column prop="perms" label="权限标识" :show-overflow-tooltip="true" />
-         <el-table-column prop="component" label="组件路径" :show-overflow-tooltip="true" />
-         <el-table-column prop="status" label="状态" width="80">
-            <template #default="scope">
-               <dict-tag :options="sys_normal_disable" :value="scope.row.status" />
-            </template>
-         </el-table-column>
-         <el-table-column label="操作" align="center" width="210" class-name="small-padding fixed-width">
-            <template #default="scope">
-               <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['system:menu:edit']">修改</el-button>
-               <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['system:menu:add']">新增</el-button>
-               <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['system:menu:remove']">删除</el-button>
-            </template>
-         </el-table-column>
-      </el-table>
+            <el-table
+               v-if="refreshTable"
+               v-loading="loading"
+               :data="menuList"
+               row-key="menuId"
+               :default-expand-all="tableExpandAll"
+               :tree-props="{ children: 'children', hasChildren: 'hasChildren' }"
+               class="polaris-el-table"
+            >
+               <el-table-column prop="menuName" label="菜单名称" :show-overflow-tooltip="true" width="220">
+                  <template #default="scope">
+                     <svg-icon :icon-class="scope.row.icon" />
+                     <span class="ml5">{{ scope.row.menuName }}</span>
+                  </template>
+               </el-table-column>
+               <el-table-column prop="menuType" label="类型" width="100">
+                  <template #default="scope">
+                     <el-tag v-if="scope.row.menuType === 'M' && scope.row.isFrame === '0'" type="danger" size="small">外链</el-tag>
+                     <el-tag v-else-if="scope.row.menuType === 'M'" type="primary" size="small">目录</el-tag>
+                     <el-tag v-else-if="scope.row.menuType === 'C' && scope.row.isFrame === '0'" type="danger" size="small">外链</el-tag>
+                     <el-tag v-else-if="scope.row.menuType === 'C'" type="success" size="small">菜单</el-tag>
+                     <el-tag v-else-if="scope.row.menuType === 'F'" type="warning" size="small">按钮</el-tag>
+                  </template>
+               </el-table-column>
+               <el-table-column prop="orderNum" label="排序" width="200">
+                  <template #default="scope">
+                     <el-input-number v-model="scope.row.orderNum" controls-position="right" :min="0" style="width: 88px" />
+                  </template>
+               </el-table-column>
+               <el-table-column prop="perms" label="权限标识" :show-overflow-tooltip="true" />
+               <el-table-column prop="component" label="组件路径" :show-overflow-tooltip="true" />
+               <el-table-column prop="status" label="状态" width="100" align="center">
+                  <template #default="scope">
+                     <div class="status-cell">
+                        <span :class="['pulse-light-ripple', scope.row.status === '0' ? 'pulse-active' : 'pulse-error']"></span>
+                        <span class="status-label" :class="scope.row.status === '0' ? 'text-active' : 'text-error'">{{ scope.row.status === '0' ? '正常' : '停用' }}</span>
+                     </div>
+                  </template>
+               </el-table-column>
+               <el-table-column label="操作" align="center" width="150" class-name="small-padding fixed-width">
+                  <template #default="scope">
+                     <el-tooltip content="修改" placement="top">
+                        <el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['system:menu:edit']"></el-button>
+                     </el-tooltip>
+                     <el-tooltip content="新增" placement="top">
+                        <el-button link type="primary" icon="Plus" @click="handleAdd(scope.row)" v-hasPermi="['system:menu:add']"></el-button>
+                     </el-tooltip>
+                     <el-tooltip content="删除" placement="top">
+                        <el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['system:menu:remove']"></el-button>
+                     </el-tooltip>
+                  </template>
+               </el-table-column>
+            </el-table>
+         </div>
+      </div>
 
       <!-- 添加或修改菜单对话框 -->
-      <el-dialog :title="title" v-model="open" width="680px" append-to-body>
+      <el-dialog :title="title" v-model="open" width="680px" append-to-body class="polaris-glass-dialog">
          <el-form ref="menuRef" :model="form" :rules="rules" label-width="100px">
             <el-row>
                <el-col :span="24">
@@ -320,6 +332,7 @@ const showSearch = ref(true)
 const title = ref("")
 const menuOptions = ref([])
 const isExpandAll = ref(false)
+const tableExpandAll = ref(false)
 const refreshTable = ref(true)
 const iconSelectRef = ref(null)
 const originalOrders = ref({})
@@ -346,6 +359,11 @@ function getList() {
     menuList.value = proxy.handleTree(response.data, "menuId")
     recordOriginalOrders(menuList.value)
     loading.value = false
+    tableExpandAll.value = isExpandAll.value
+    nextTick(() => {
+      // 挂载后重置控制变量为 false，阻断由于 orderNum 等属性修改导致重绘而触发的强制展开行为
+      tableExpandAll.value = false
+    })
   })
 }
 
@@ -420,8 +438,13 @@ function handleAdd(row) {
 function toggleExpandAll() {
   refreshTable.value = false
   isExpandAll.value = !isExpandAll.value
+  tableExpandAll.value = isExpandAll.value
   nextTick(() => {
     refreshTable.value = true
+    nextTick(() => {
+      // 重建完成后再次重置为 false，保障后续属性变动不触发强制展开
+      tableExpandAll.value = false
+    })
   })
 }
 
@@ -506,3 +529,126 @@ function handleDelete(row) {
 
 getList()
 </script>
+
+<style lang="scss" scoped>
+/* 覆盖全局 .app-container 的 padding: 20px */
+.app-container.no-sidebar-manage-wrap {
+  padding: 16px !important;
+}
+
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+</style>
+
+<style lang="scss">
+/* 针对北辰表格的公共组件覆盖（全局非 scoped，但仅对 .polaris-el-table 生效以起隔离保护作用） */
+.polaris-el-table {
+  /* 强行隐藏表格核心容器的横向溢出，在完全保留原有平移+放大悬浮动效的同时，彻底消除横向滚动条与左右滑动 */
+  .el-table__inner-wrapper,
+  .el-table__body-wrapper,
+  .el-scrollbar__wrap {
+    overflow-x: hidden !important;
+  }
+
+  /* 彻底屏蔽表格内部可能生成的横向滚动条组件，防范一切滚动条闪烁与左右滑动 */
+  .el-scrollbar__bar.is-horizontal {
+    display: none !important;
+  }
+
+  .el-tag {
+    font-weight: 700;
+    border-radius: 8px;
+    padding: 2px 8px;
+  }
+  .el-tag--danger {
+    color: #ef4444 !important;
+    background-color: rgba(239, 68, 68, 0.08) !important;
+    border-color: rgba(239, 68, 68, 0.15) !important;
+  }
+  .el-tag--primary {
+    color: #4f46e5 !important;
+    background-color: rgba(79, 70, 229, 0.08) !important;
+    border-color: rgba(79, 70, 229, 0.15) !important;
+  }
+  .el-tag--success {
+    color: #10b981 !important;
+    background-color: rgba(16, 185, 129, 0.08) !important;
+    border-color: rgba(16, 185, 129, 0.15) !important;
+  }
+  .el-tag--warning {
+    color: #d97706 !important;
+    background-color: rgba(217, 119, 6, 0.08) !important;
+    border-color: rgba(217, 119, 6, 0.15) !important;
+  }
+
+  /* 局部重写数字输入框的增减按钮，保证箭头在任何状态下都高对比度且清晰可见 */
+  .el-input-number {
+    .el-input-number__increase,
+    .el-input-number__decrease {
+      background-color: #f8fafc !important;
+      border-color: rgba(0, 0, 0, 0.05) !important;
+      color: #64748b !important;
+
+      &:hover {
+        color: #4f46e5 !important;
+        background-color: rgba(79, 70, 229, 0.05) !important;
+      }
+      
+      &.is-disabled {
+        color: #cbd5e1 !important;
+        background-color: #f1f5f9 !important;
+      }
+    }
+  }
+}
+
+/* 暗黑模式样式覆盖 */
+.dark {
+  .polaris-el-table {
+    .el-tag--danger {
+      color: #f87171 !important;
+      background-color: rgba(248, 113, 113, 0.15) !important;
+      border-color: rgba(248, 113, 113, 0.25) !important;
+    }
+    .el-tag--primary {
+      color: #38bdf8 !important;
+      background-color: rgba(56, 189, 248, 0.15) !important;
+      border-color: rgba(56, 189, 248, 0.25) !important;
+    }
+    .el-tag--success {
+      color: #34d399 !important;
+      background-color: rgba(52, 211, 153, 0.15) !important;
+      border-color: rgba(52, 211, 153, 0.25) !important;
+    }
+    .el-tag--warning {
+      color: #fbbf24 !important;
+      background-color: rgba(251, 191, 36, 0.15) !important;
+      border-color: rgba(251, 191, 36, 0.25) !important;
+    }
+
+    .el-input-number {
+      .el-input-number__increase,
+      .el-input-number__decrease {
+        background-color: rgba(255, 255, 255, 0.03) !important;
+        border-color: rgba(255, 255, 255, 0.08) !important;
+        color: #94a3b8 !important;
+
+        &:hover {
+          color: #38bdf8 !important;
+          background-color: rgba(56, 189, 248, 0.1) !important;
+        }
+
+        &.is-disabled {
+          color: #475569 !important;
+          background-color: rgba(255, 255, 255, 0.01) !important;
+        }
+      }
+    }
+  }
+}
+</style>
