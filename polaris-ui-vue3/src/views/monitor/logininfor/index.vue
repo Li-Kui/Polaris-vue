@@ -1,127 +1,128 @@
 <template>
-   <div class="app-container">
-      <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px">
-         <el-form-item label="登录地址" prop="ipaddr">
-            <el-input
-               v-model="queryParams.ipaddr"
-               placeholder="请输入登录地址"
-               clearable
-               style="width: 240px;"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="用户名称" prop="userName">
-            <el-input
-               v-model="queryParams.userName"
-               placeholder="请输入用户名称"
-               clearable
-               style="width: 240px;"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="状态" prop="status">
-            <el-select
-               v-model="queryParams.status"
-               placeholder="登录状态"
-               clearable
-               style="width: 240px"
-            >
-               <el-option
-                  v-for="dict in sys_common_status"
-                  :key="dict.value"
-                  :label="dict.label"
-                  :value="dict.value"
+   <div class="app-container no-sidebar-manage-wrap">
+      <div class="content-inner">
+         <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px" class="polaris-filter-card polaris-filter-form">
+            <el-form-item label="登录地址" prop="ipaddr">
+               <el-input
+                  v-model="queryParams.ipaddr"
+                  placeholder="请输入登录地址"
+                  clearable
+                  style="width: 240px;"
+                  @keyup.enter="handleQuery"
                />
-            </el-select>
-         </el-form-item>
-         <el-form-item label="登录时间" style="width: 308px">
-            <el-date-picker
-               v-model="dateRange"
-               value-format="YYYY-MM-DD HH:mm:ss"
-               type="daterange"
-               range-separator="-"
-               start-placeholder="开始日期"
-               end-placeholder="结束日期"
-               :default-time="[new Date(2000, 1, 1, 0, 0, 0), new Date(2000, 1, 1, 23, 59, 59)]"
-            ></el-date-picker>
-         </el-form-item>
-         <el-form-item>
-            <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-            <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-         </el-form-item>
-      </el-form>
+            </el-form-item>
+            <el-form-item label="用户名称" prop="userName">
+               <el-input
+                  v-model="queryParams.userName"
+                  placeholder="请输入用户名称"
+                  clearable
+                  style="width: 240px;"
+                  @keyup.enter="handleQuery"
+               />
+            </el-form-item>
+            <el-form-item label="状态" prop="status">
+               <el-select
+                  v-model="queryParams.status"
+                  placeholder="登录状态"
+                  clearable
+                  style="width: 240px"
+               >
+                  <el-option
+                     v-for="dict in sys_common_status"
+                     :key="dict.value"
+                     :label="dict.label"
+                     :value="dict.value"
+                  />
+               </el-select>
+            </el-form-item>
+            <el-form-item label="登录时间" style="width: 308px">
+               <el-date-picker
+                  v-model="dateRange"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  type="daterange"
+                  range-separator="-"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  :default-time="[new Date(2000, 1, 1, 0, 0, 0), new Date(2000, 1, 1, 23, 59, 59)]"
+               ></el-date-picker>
+            </el-form-item>
+            <el-form-item>
+               <el-button type="primary" icon="Search" @click="handleQuery" class="polaris-query-btn">搜索</el-button>
+               <el-button icon="Refresh" @click="resetQuery" class="polaris-reset-btn">重置</el-button>
+            </el-form-item>
+         </el-form>
 
-      <el-row :gutter="10" class="mb8">
-         <el-col :span="1.5">
-            <el-button
-               type="danger"
-               plain
-               icon="Delete"
-               :disabled="multiple"
-               @click="handleDelete"
-               v-hasPermi="['monitor:logininfor:remove']"
-            >删除</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="danger"
-               plain
-               icon="Delete"
-               @click="handleClean"
-               v-hasPermi="['monitor:logininfor:remove']"
-            >清空</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="primary"
-               plain
-               icon="Unlock"
-               :disabled="single"
-               @click="handleUnlock"
-               v-hasPermi="['monitor:logininfor:unlock']"
-            >解锁</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="warning"
-               plain
-               icon="Download"
-               @click="handleExport"
-               v-hasPermi="['monitor:logininfor:export']"
-            >导出</el-button>
-         </el-col>
-         <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
-      </el-row>
+      <div class="polaris-table-card">
+         <div class="polaris-action-row">
+            <div class="actions-left">
+               <el-button
+                  type="danger"
+                  icon="Delete"
+                  :disabled="multiple"
+                  @click="handleDelete"
+                  v-hasPermi="['monitor:logininfor:remove']"
+                  class="action-btn-danger"
+               >删除</el-button>
+               <el-button
+                  type="danger"
+                  icon="Delete"
+                  @click="handleClean"
+                  v-hasPermi="['monitor:logininfor:remove']"
+                  class="action-btn-danger"
+               >清空</el-button>
+               <el-button
+                  type="primary"
+                  icon="Unlock"
+                  :disabled="single"
+                  @click="handleUnlock"
+                  v-hasPermi="['monitor:logininfor:unlock']"
+                  class="action-btn-secondary"
+               >解锁</el-button>
+               <el-button
+                  type="warning"
+                  icon="Download"
+                  @click="handleExport"
+                  v-hasPermi="['monitor:logininfor:export']"
+                  class="action-btn-secondary"
+               >导出</el-button>
+            </div>
+            <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
+         </div>
 
-      <el-table ref="logininforRef" v-loading="loading" :data="logininforList" @selection-change="handleSelectionChange" :default-sort="defaultSort" @sort-change="handleSortChange">
-         <el-table-column type="selection" width="55" align="center" />
-         <el-table-column label="访问编号" align="center" prop="infoId" />
-         <el-table-column label="用户名称" align="center" prop="userName" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']" />
-         <el-table-column label="地址" align="center" prop="ipaddr" :show-overflow-tooltip="true" />
-         <el-table-column label="登录地点" align="center" prop="loginLocation" :show-overflow-tooltip="true" />
-         <el-table-column label="操作系统" align="center" prop="os" :show-overflow-tooltip="true" />
-         <el-table-column label="浏览器" align="center" prop="browser" :show-overflow-tooltip="true" />
-         <el-table-column label="登录状态" align="center" prop="status">
-            <template #default="scope">
-               <dict-tag :options="sys_common_status" :value="scope.row.status" />
-            </template>
-         </el-table-column>
-         <el-table-column label="描述" align="center" prop="msg" :show-overflow-tooltip="true" />
-         <el-table-column label="访问时间" align="center" prop="loginTime" sortable="custom" :sort-orders="['descending', 'ascending']" width="180">
-            <template #default="scope">
-               <span>{{ parseTime(scope.row.loginTime) }}</span>
-            </template>
-         </el-table-column>
-      </el-table>
+         <el-table ref="logininforRef" v-loading="loading" :data="logininforList" @selection-change="handleSelectionChange" :default-sort="defaultSort" @sort-change="handleSortChange" class="polaris-el-table">
+            <el-table-column type="selection" width="55" align="center" />
+            <el-table-column label="访问编号" align="center" prop="infoId" width="100" />
+            <el-table-column label="用户名称" align="center" prop="userName" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']" min-width="120" />
+            <el-table-column label="地址" align="center" prop="ipaddr" :show-overflow-tooltip="true" min-width="120" />
+            <el-table-column label="登录地点" align="center" prop="loginLocation" :show-overflow-tooltip="true" min-width="120" />
+            <el-table-column label="操作系统" align="center" prop="os" :show-overflow-tooltip="true" min-width="100" />
+            <el-table-column label="浏览器" align="center" prop="browser" :show-overflow-tooltip="true" min-width="100" />
+            <el-table-column label="登录状态" align="center" prop="status" width="100">
+               <template #default="scope">
+                  <div class="status-cell">
+                     <span :class="['pulse-light-ripple', scope.row.status === '0' ? 'pulse-active' : 'pulse-error']"></span>
+                     <span class="status-label" :class="scope.row.status === '0' ? 'text-active' : 'text-error'">{{ scope.row.status === '0' ? '成功' : '失败' }}</span>
+                  </div>
+               </template>
+            </el-table-column>
+            <el-table-column label="描述" align="center" prop="msg" :show-overflow-tooltip="true" min-width="150" />
+            <el-table-column label="访问时间" align="center" prop="loginTime" sortable="custom" :sort-orders="['descending', 'ascending']" width="180">
+               <template #default="scope">
+                  <span>{{ parseTime(scope.row.loginTime) }}</span>
+               </template>
+            </el-table-column>
+         </el-table>
 
-      <pagination
-         v-show="total > 0"
-         :total="total"
-         v-model:page="queryParams.pageNum"
-         v-model:limit="queryParams.pageSize"
-         @pagination="getList"
-      />
+         <pagination
+            v-show="total > 0"
+            :total="total"
+            v-model:page="queryParams.pageNum"
+            v-model:limit="queryParams.pageSize"
+            @pagination="getList"
+         />
+      </div>
    </div>
+</div>
 </template>
 
 <script setup name="Logininfor">
@@ -231,3 +232,42 @@ function handleExport() {
 
 getList()
 </script>
+
+<style lang="scss" scoped>
+/* 覆盖全局 .app-container 的 padding: 20px */
+.app-container.no-sidebar-manage-wrap {
+  padding: 16px !important;
+}
+
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+</style>
+
+<style lang="scss">
+/* 针对北辰登录日志表格的公共组件覆盖（全局非 scoped，但仅对 .polaris-el-table 生效以起隔离保护作用） */
+.polaris-el-table {
+  /* 强行隐藏表格核心容器的横向溢出，在完全保留原有平移+放大悬浮动效的同时，彻底消除横向滚动条与左右滑动 */
+  .el-table__inner-wrapper,
+  .el-table__body-wrapper,
+  .el-scrollbar__wrap {
+    overflow-x: hidden !important;
+  }
+
+  /* 彻底屏蔽表格内部可能生成的横向滚动条组件，防范一切滚动条闪烁与左右滑动 */
+  .el-scrollbar__bar.is-horizontal {
+    display: none !important;
+  }
+
+  /* 调整行高，加大行内间距，使行高看起来更加舒适美观 */
+  .el-table__row {
+    td.el-table__cell {
+      padding: 12px 0 !important;
+    }
+  }
+}
+</style>
