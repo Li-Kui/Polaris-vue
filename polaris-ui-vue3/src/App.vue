@@ -16,5 +16,5 @@ onMounted(() => {
 
 <style lang="scss">
 // 引入登录页设计 Token（5 套方案 × 亮/暗）
-@import "@/styles/login-tokens.scss";
+@use "@/styles/login-tokens.scss" as *;
 </style>

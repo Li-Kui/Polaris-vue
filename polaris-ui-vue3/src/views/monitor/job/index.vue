@@ -137,9 +137,8 @@
             />
          </div>
       </div>
-   </div>
-
-   <!-- 添加或修改定时任务对话框 -->
+   
+    <!-- 添加或修改定时任务对话框 -->
    <el-dialog :title="title" v-model="open" width="820px" append-to-body class="polaris-glass-dialog">
          <el-form ref="jobRef" :model="form" :rules="rules" label-width="120px">
             <el-row>
@@ -234,8 +233,9 @@
        <crontab ref="crontabRef" @hide="openCron=false" @fill="crontabFill" :expression="expression"></crontab>
      </el-dialog>
 
-      <!-- 任务详细 -->
-      <job-detail v-model:visible="openView" :row="form" type="job" />
+       <!-- 任务详细 -->
+       <job-detail v-model:visible="openView" :row="form" type="job" />
+    </div>
 </template>
 
 <script setup name="Job">

@@ -130,10 +130,9 @@
             />
          </div>
       </div>
+      <!-- 调度日志详细 -->
+      <job-detail v-model:visible="open" :row="form" type="log" />
    </div>
-
-   <!-- 调度日志详细 -->
-   <job-detail v-model:visible="open" :row="form" type="log" />
 </template>
 
 <script setup name="JobLog">
@@ -239,9 +238,14 @@ function handleExport() {
   const jobId = route.params && route.params.jobId
   if (jobId !== undefined && jobId != 0) {
     getJob(jobId).then(response => {
-      queryParams.value.jobName = response.data.jobName
-      queryParams.value.jobGroup = response.data.jobGroup
+      if (response && response.data) {
+        queryParams.value.jobName = response.data.jobName
+        queryParams.value.jobGroup = response.data.jobGroup
+      }
       getList()
+    }).catch(err => {
+      console.error(err)
+      getList() // 即使获取单个任务失败，也必须加载日志列表并结束 Loading
     })
   } else {
     getList()
