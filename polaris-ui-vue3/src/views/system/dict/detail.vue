@@ -1,5 +1,5 @@
 <template>
-  <el-drawer :model-value="visible" direction="rtl" size="700px" append-to-body @update:model-value="$emit('update:visible', $event)">
+  <el-drawer :model-value="visible" direction="rtl" size="700px" append-to-body @update:model-value="$emit('update:visible', $event)" class="polaris-glass-drawer">
     <!-- 自定义标题 -->
     <template #header>
       <div class="drawer-head">
@@ -198,5 +198,35 @@ function loadData() {
   word-break: break-all;
   display: flex;
   align-items: center;
+}
+</style>
+
+<style lang="scss">
+/* 磨砂半透明毛玻璃侧边抽屉（适配亮暗双主题） */
+.polaris-glass-drawer {
+  backdrop-filter: blur(40px) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.5) !important;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.05) !important;
+
+  .dark & {
+    background: rgba(15, 23, 42, 0.9) !important;
+    border-left-color: rgba(255, 255, 255, 0.06) !important;
+    box-shadow: -10px 0 40px rgba(0, 0, 0, 0.35) !important;
+  }
+
+  .el-drawer__header {
+    padding: 20px 24px 14px !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+    margin-bottom: 0 !important;
+
+    .dark & {
+      border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+    }
+  }
+
+  .el-drawer__body {
+    padding: 20px !important;
+  }
 }
 </style>
