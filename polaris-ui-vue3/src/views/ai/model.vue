@@ -1,165 +1,340 @@
 <template>
-  <div class="app-container ai-model-manager">
-    <!-- 顶部操作工具栏 -->
-    <div class="filter-container">
-      <el-form :inline="true" class="demo-form-inline">
-        <el-form-item label="模型名称">
-          <el-input v-model="queryParams.name" clearable placeholder="请输入配置名称" @keyup.enter="handleQuery"/>
-        </el-form-item>
-        <el-form-item label="提供商">
-          <el-select v-model="queryParams.provider" clearable placeholder="请选择提供商">
-            <el-option label="DeepSeek" value="deepseek"/>
-            <el-option label="阿里云通义" value="dashscope"/>
-            <el-option label="OpenAI" value="openai"/>
-            <el-option label="Ollama (本地)" value="ollama"/>
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button icon="Search" type="primary" @click="handleQuery">搜索</el-button>
-          <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-          <el-button class="btn-gradient-primary" icon="Plus" type="primary" @click="handleAdd">新增模型</el-button>
-        </el-form-item>
-      </el-form>
-    </div>
-
-    <!-- 卡片式模型列表 -->
-    <div v-loading="loading" class="card-list-container">
-      <div v-if="modelList.length === 0" class="empty-state">
-        <div class="empty-icon">🤖</div>
-        <p style="color: var(--el-text-color-primary) !important; font-weight: 600;">暂无模型配置，点击上方“新增模型”按钮开始配置您的 AI 模型吧！</p>
+  <div class="app-container ai-model-manager no-sidebar-manage-wrap">
+    <!-- 1. 列表模式/表格模式视图 -->
+    <div v-if="viewMode === 'card' || viewMode === 'table'" class="content-inner">
+      <!-- 顶部高效筛选与操作栏 -->
+      <div class="polaris-filter-card">
+        <el-form :model="queryParams" ref="queryForm" :inline="true" class="polaris-filter-form">
+          <el-form-item label="模型名称">
+            <el-input v-model="queryParams.name" placeholder="请输入配置名称" clearable @keyup.enter="handleQuery" style="width: 180px;"/>
+          </el-form-item>
+          <el-form-item label="提供商">
+            <el-select v-model="queryParams.provider" placeholder="请选择提供商" clearable style="width: 150px;">
+              <el-option label="DeepSeek" value="deepseek"/>
+              <el-option label="阿里云通义" value="dashscope"/>
+              <el-option label="OpenAI" value="openai"/>
+              <el-option label="Ollama (本地)" value="ollama"/>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" icon="Search" @click="handleQuery" class="polaris-query-btn">搜索</el-button>
+            <el-button icon="Refresh" @click="resetQuery" class="polaris-reset-btn">重置</el-button>
+          </el-form-item>
+        </el-form>
       </div>
 
-      <el-row v-else :gutter="20">
-        <el-col v-for="item in modelList" :key="item.id" :lg="8" :md="8" :sm="12" :xs="24" class="card-col">
-          <div :class="{ 'is-active-chat': item.isDefault === '1', 'is-active-embedding': item.isDefaultEmbedding === '1' }" class="model-card">
+      <!-- 中间操作行与数据容器 (被毛玻璃框包围起来) -->
+      <div class="synapse-card-grid-wrapper polaris-table-card">
+        <!-- 全局 SVG 线性渐变定义 -->
+        <svg style="width: 0; height: 0; position: absolute;" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="temp-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#8b5cf6" />
+              <stop offset="100%" stop-color="#ec4899" />
+            </linearGradient>
+            <linearGradient id="tool-gradient-active" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#10b981" />
+              <stop offset="100%" stop-color="#06b6d4" />
+            </linearGradient>
+            <linearGradient id="tool-gradient-error" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ef4444" />
+              <stop offset="100%" stop-color="#f97316" />
+            </linearGradient>
+          </defs>
+        </svg>
 
-            <!-- 卡片头部：提供商与基本名称 -->
-            <div class="card-header">
-              <div :class="'provider-' + item.provider" class="provider-avatar">
-                <span v-if="item.provider === 'deepseek'">🌀</span>
-                <span v-else-if="item.provider === 'dashscope'">✦</span>
-                <span v-else-if="item.provider === 'openai'">⚛</span>
-                <span v-else-if="item.provider === 'ollama'">🦙</span>
-                <span v-else>🤖</span>
-              </div>
-              <div class="header-info">
-                <h3 class="model-alias">{{ item.name }}</h3>
-                <span :class="'provider-' + item.provider" class="provider-badge">{{ getProviderLabel(item.provider) }}</span>
-              </div>
-              <div class="status-switch">
-                <el-switch
-                  v-model="item.status"
-                  active-value="1"
-                  inactive-value="0"
-                  @change="handleStatusChange(item)"
-                />
-              </div>
-            </div>
-
-            <!-- 卡片主体：主要配置参数 -->
-            <div class="card-body">
-              <div class="param-row">
-                <span class="param-label"><el-icon><cpu /></el-icon> 模型名称</span>
-                <span class="param-val code-text">{{ item.modelName }}</span>
-              </div>
-              <div class="param-row">
-                <span class="param-label"><el-icon><key /></el-icon> API Key</span>
-                <span class="param-val code-text mask-text">{{ item.apiKey ? '••••••••••••••••' : '未设置' }}</span>
-              </div>
-              <div v-if="item.baseUrl" class="param-row">
-                <span class="param-label"><el-icon><link /></el-icon> API 地址</span>
-                <span :title="item.baseUrl" class="param-val url-text">{{ item.baseUrl }}</span>
-              </div>
-              <div class="param-grid">
-                <div class="grid-item">
-                  <span class="grid-label">Max Tokens</span>
-                  <span class="grid-val">{{ item.maxTokens || 2048 }}</span>
-                </div>
-                <div class="grid-item">
-                  <span class="grid-label">温度</span>
-                  <span class="grid-val">{{ item.temperature || 0.7 }}</span>
-                </div>
-                <div class="grid-item">
-                  <span class="grid-label">历史消息数</span>
-                  <span class="grid-val">{{ item.maxHistoryMessages || 20 }}</span>
-                </div>
-              </div>
-              <div class="param-row">
-                <span class="param-label"><el-icon><chat-line-round /></el-icon> 思考模式</span>
-                <span class="param-val">
-                  <el-tag v-if="item.enableThinking === '1'" effect="plain" size="small" type="warning">
-                    开启 ({{ getReasoningEffortLabel(item.reasoningEffort) }})
-                  </el-tag>
-                  <el-tag v-else effect="plain" size="small" type="info">关闭</el-tag>
-                </span>
-              </div>
-              <div class="param-row">
-                <span class="param-label"><el-icon><connection /></el-icon> 联网搜索</span>
-                <span class="param-val">
-                  <el-tag v-if="item.enableSearch === '1'" effect="plain" size="small" type="success">开启</el-tag>
-                  <el-tag v-else effect="plain" size="small" type="info">关闭</el-tag>
-                </span>
-              </div>
-              <div class="param-row">
-                <span class="param-label"><el-icon><office-building /></el-icon> 归属部门</span>
-                <span class="param-val">
-                  <el-tag v-if="item.deptId" effect="plain" size="small" type="primary">
-                    {{ getDeptName(item.deptId) }}
-                  </el-tag>
-                  <el-tag v-else effect="plain" size="small" type="success">全局共享</el-tag>
-                </span>
-              </div>
-              <div v-if="item.systemPrompt" class="prompt-preview">
-                <span class="prompt-title">系统提示词:</span>
-                <p :title="item.systemPrompt" class="prompt-content">{{ item.systemPrompt }}</p>
-              </div>
-            </div>
-
-            <!-- 卡片页脚：默认控制与操作 -->
-            <div class="card-footer">
-              <div class="default-tags">
-                <template v-if="!isEmbeddingModel(item.modelName)">
-                  <el-tag v-if="item.isDefault === '1'" class="active-tag-chat" effect="dark" size="small" style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;" type="success">
-                    <el-icon style="margin: 0; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;"><chat-dot-round /></el-icon>
-                    <span style="vertical-align: middle; line-height: 1;">默认聊天</span>
-                  </el-tag>
-                  <el-button v-else class="footer-action-btn" link size="small" @click="handleSetDefaultChat(item)">
-                    设为默认聊天
-                  </el-button>
-                </template>
-
-                <template v-if="isEmbeddingModel(item.modelName)">
-                  <el-tag v-if="item.isDefaultEmbedding === '1'" class="active-tag-embed" effect="dark" size="small" style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;" type="primary">
-                    <el-icon style="margin: 0; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle;"><collection /></el-icon>
-                    <span style="vertical-align: middle; line-height: 1;">默认向量</span>
-                  </el-tag>
-                  <el-button v-else class="footer-action-btn color-primary" link size="small" @click="handleSetDefaultEmbedding(item)">
-                    设为默认向量
-                  </el-button>
-                </template>
-              </div>
-
-              <div class="action-buttons">
-                <el-button class="footer-icon-btn edit-btn" icon="Edit" link size="small" @click="handleUpdate(item)">编辑</el-button>
-                <el-button class="footer-icon-btn delete-btn" icon="Delete" link size="small" @click="handleDelete(item)">删除</el-button>
-              </div>
-            </div>
-
+        <!-- 中间共享操作行：新增模型按钮与视图切换器 -->
+        <div class="matrix-actions-bar" style="margin-top: 0; width: 100%;">
+          <div class="actions-left">
+            <el-button type="primary" class="action-btn-primary" icon="Plus" @click="handleAdd">
+              新增模型
+            </el-button>
           </div>
-        </el-col>
-      </el-row>
+          <div class="actions-right">
+            <div class="view-mode-toggle-row">
+              <button
+                :class="['toggle-view-btn', { active: viewMode === 'card' }]"
+                @click="viewMode = 'card'"
+              >
+                🧠 三维星图
+              </button>
+              <button
+                :class="['toggle-view-btn', { active: viewMode === 'table' }]"
+                @click="viewMode = 'table'"
+              >
+                📊 经典表格
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 动态视图包裹层 -->
+        <div v-loading="loading" class="model-view-dynamic-container">
+          <!-- 无模型数据空状态 -->
+          <div v-if="modelList.length === 0" class="empty-state">
+            <div class="empty-icon">🤖</div>
+            <p>暂无模型配置，点击上方“新增模型”按钮开始配置您的 AI 模型吧！</p>
+          </div>
+
+          <template v-else>
+            <!-- 🧠 三维北辰星图卡片视图 -->
+            <div v-if="viewMode === 'card'" class="synapse-card-grid">
+              <div
+                v-for="item in modelList"
+                :key="item.id"
+                :class="['synapse-glass-card', item.status === '1' ? (item.isDefault === '1' ? 'status-border-chat' : (item.isDefaultEmbedding === '1' ? 'status-border-embed' : 'status-border-active')) : 'status-border-inactive']"
+              >
+                <!-- 卡片流光反射 -->
+                <div class="card-shimmer-ray"></div>
+                
+                <div class="card-header-row">
+                  <span :class="['card-code', getProviderTagType(item.provider)]">
+                    <span v-if="item.provider === 'deepseek'">🌀 </span>
+                    <span v-else-if="item.provider === 'dashscope'">✦ </span>
+                    <span v-else-if="item.provider === 'openai'">⚛ </span>
+                    <span v-else-if="item.provider === 'ollama'">🦙 </span>
+                    {{ getProviderLabel(item.provider) }}
+                  </span>
+                  
+                  <!-- 雷达多层呼吸灯 -->
+                  <div class="status-cell clickable-status" @click="toggleStatus(item)">
+                    <span :class="['pulse-light-ripple', item.status === '1' ? 'pulse-active' : 'pulse-error']"></span>
+                    <span class="status-badge-text" :class="item.status === '1' ? 'text-active' : 'text-error'">
+                      {{ item.status === '1' ? '正常' : '禁用' }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="card-body">
+                  <h4 class="card-name" :title="item.name">{{ item.name }}</h4>
+                  <div class="card-model-chip-badge">
+                    <el-icon class="model-cpu-icon"><cpu /></el-icon>
+                    <span>{{ item.modelName }}</span>
+                  </div>
+                  
+                  <div class="param-row code-info-row">
+                    <span class="param-label"><el-icon><key /></el-icon> API Key</span>
+                    <span class="param-val code-text mask-text">{{ item.apiKey ? '••••••••••••••••' : '未设置' }}</span>
+                  </div>
+                  <div v-if="item.baseUrl" class="param-row code-info-row">
+                    <span class="param-label"><el-icon><link-icon /></el-icon> API 地址</span>
+                    <span :title="item.baseUrl" class="param-val url-text">{{ item.baseUrl }}</span>
+                  </div>
+
+                  <!-- 环形仪表盘 -->
+                  <div class="card-stats-gauges">
+                    <!-- 温度仪表 -->
+                    <div class="radial-gauge-item">
+                      <div class="radial-circle-box">
+                        <svg viewBox="0 0 36 36">
+                          <path
+                            class="circle-bg"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                          <path
+                            class="circle-fill"
+                            stroke="url(#temp-gradient)"
+                            :stroke-dasharray="`${(item.temperature || 0.7) * 50}, 100`"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                        </svg>
+                        <div class="radial-gauge-text">{{ item.temperature }}</div>
+                      </div>
+                      <span class="gauge-label">随机温度</span>
+                    </div>
+                    
+                    <!-- Max Tokens 载荷 -->
+                    <div class="radial-gauge-item">
+                      <div class="radial-circle-box">
+                        <svg viewBox="0 0 36 36">
+                          <path
+                            class="circle-bg"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                          <path
+                            class="circle-fill"
+                            stroke="url(#tool-gradient-active)"
+                            :stroke-dasharray="`${Math.min(((item.maxTokens || 2048) / 8192) * 100, 100)}, 100`"
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                          />
+                        </svg>
+                        <div class="radial-gauge-text" style="font-size: 9px;">{{ item.maxTokens }}</div>
+                      </div>
+                      <span class="gauge-label">Max Tokens</span>
+                    </div>
+                  </div>
+
+                  <!-- 技术参数 Pill 标签 -->
+                  <div class="param-pill-row">
+                    <el-tag v-if="item.enableThinking === '1'" effect="plain" size="small" type="warning" class="tech-pill">
+                      思考: {{ getReasoningEffortLabel(item.reasoningEffort) }}
+                    </el-tag>
+                    <el-tag v-if="item.enableSearch === '1'" effect="plain" size="small" type="success" class="tech-pill">
+                      联网搜索
+                    </el-tag>
+                    <el-tag v-if="item.deptId" effect="plain" size="small" type="primary" class="tech-pill">
+                      {{ getDeptName(item.deptId) }}
+                    </el-tag>
+                    <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
+                      全局共享
+                    </el-tag>
+                  </div>
+
+                  <!-- 系统提示词预览 (Mac 代码终端自适应风格) -->
+                  <div v-if="item.systemPrompt" class="prompt-preview-terminal">
+                    <div class="terminal-header">
+                      <div class="terminal-dots">
+                        <span class="dot-red"></span>
+                        <span class="dot-yellow"></span>
+                        <span class="dot-green"></span>
+                      </div>
+                      <span class="terminal-title">System Prompt</span>
+                      <button class="terminal-copy-btn" @click.stop="copyPrompt(item.systemPrompt)" title="复制系统提示词">
+                        <el-icon><document-copy /></el-icon>
+                      </button>
+                    </div>
+                    <div class="terminal-body">
+                      <p :title="item.systemPrompt" class="prompt-content-text">{{ item.systemPrompt }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 卡片底部默认状态与操作 -->
+                <div class="card-footer-row-actions">
+                  <div class="default-tags-area">
+                    <template v-if="!isEmbeddingModel(item.modelName)">
+                      <el-tag v-if="item.isDefault === '1'" class="active-tag-chat" effect="dark" size="small" type="success">
+                        <el-icon><chat-dot-round /></el-icon>
+                        <span>默认聊天</span>
+                      </el-tag>
+                      <el-button v-else class="footer-action-btn" link size="small" @click="handleSetDefaultChat(item)">
+                        设为默认聊天
+                      </el-button>
+                    </template>
+
+                    <template v-if="isEmbeddingModel(item.modelName)">
+                      <el-tag v-if="item.isDefaultEmbedding === '1'" class="active-tag-embed" effect="dark" size="small" type="primary">
+                        <el-icon><collection /></el-icon>
+                        <span>默认向量</span>
+                      </el-tag>
+                      <el-button v-else class="footer-action-btn color-primary" link size="small" @click="handleSetDefaultEmbedding(item)">
+                        设为默认向量
+                      </el-button>
+                    </template>
+                  </div>
+
+                  <div class="action-buttons-row">
+                    <el-button type="primary" link class="card-op-edit-pill" @click="handleUpdate(item)">
+                      <el-icon><edit /></el-icon>
+                      <span>编辑</span>
+                    </el-button>
+                    <el-button type="danger" link class="card-op-delete-pill" @click="handleDelete(item)">
+                      <el-icon><delete /></el-icon>
+                      <span>删除</span>
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 📊 经典数据表格视图 -->
+            <div v-else-if="viewMode === 'table'" class="polaris-table-card-table-wrap">
+              <el-table :data="modelList" class="polaris-el-table">
+                <el-table-column label="配置名称" prop="name" min-width="150" :show-overflow-tooltip="true" />
+                <el-table-column label="提供商" width="120">
+                  <template #default="{ row }">
+                    <span :class="['card-code', getProviderTagType(row.provider)]">{{ getProviderLabel(row.provider) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="模型名称" prop="modelName" width="160" :show-overflow-tooltip="true">
+                  <template #default="{ row }">
+                    <span class="model-badge">{{ row.modelName }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="最大 Tokens" prop="maxTokens" width="110" />
+                <el-table-column label="随机温度" prop="temperature" width="100" />
+                <el-table-column label="思考模式" width="120">
+                  <template #default="{ row }">
+                    <el-tag v-if="row.enableThinking === '1'" size="small" type="warning">开启 ({{ getReasoningEffortLabel(row.reasoningEffort) }})</el-tag>
+                    <el-tag v-else size="small" type="info">关闭</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="运行状态" width="110">
+                  <template #default="{ row }">
+                    <div class="status-cell clickable-status" @click="toggleStatus(row)">
+                      <span :class="['pulse-light-ripple', row.status === '1' ? 'pulse-active' : 'pulse-error']"></span>
+                      <span class="status-label" :class="row.status === '1' ? 'text-active' : 'text-error'">
+                        {{ row.status === '1' ? '正常' : '禁用' }}
+                      </span>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="系统默认" width="200">
+                  <template #default="{ row }">
+                    <div class="default-tags-cell">
+                      <template v-if="!isEmbeddingModel(row.modelName)">
+                        <el-tag v-if="row.isDefault === '1'" size="small" type="success">默认聊天</el-tag>
+                        <el-button v-else link size="small" class="op-btn-default-set" @click="handleSetDefaultChat(row)">设为默认聊天</el-button>
+                      </template>
+                      <template v-if="isEmbeddingModel(row.modelName)">
+                        <el-tag v-if="row.isDefaultEmbedding === '1'" size="small" type="primary">默认向量</el-tag>
+                        <el-button v-else link size="small" class="op-btn-default-set-embed" @click="handleSetDefaultEmbedding(row)">设为默认向量</el-button>
+                      </template>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="140" fixed="right">
+                  <template #default="{ row }">
+                    <div class="table-op-actions">
+                      <el-button type="primary" link class="op-btn-edit" @click="handleUpdate(row)">编辑</el-button>
+                      <el-button type="danger" link class="op-btn-delete" @click="handleDelete(row)">删除</el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </div>
+
+            <!-- 分页组件 -->
+            <pagination
+              v-show="total > 0"
+              :total="total"
+              v-model:page="queryParams.pageNum"
+              v-model:limit="queryParams.pageSize"
+              @pagination="getList"
+            />
+          </template>
+        </div>
+      </div>
     </div>
 
-    <!-- 添加或修改模型配置对话框 -->
-    <el-dialog :title="title" v-model="open" append-to-body class="ai-model-dialog" width="640px">
-      <el-form ref="form" :model="form" :rules="rules" label-width="110px">
-        <el-row>
-          <el-col :span="24">
+    <!-- 2. 独立整屏模型配置工作台 (取代原本的弹窗式配置，提供沉浸式极客面板) -->
+    <div v-else-if="viewMode === 'edit'" key="edit-view" class="agent-workbench-container">
+      <!-- 顶部控制 Header -->
+      <div class="workbench-header">
+        <div class="header-left">
+          <el-button icon="Back" size="small" circle @click="cancel" class="back-btn"></el-button>
+          <span class="workbench-title-text">{{ form.id ? '配置 AI 模型核心参数' : '创建全新 AI 模型配置' }}</span>
+        </div>
+        <div class="header-right">
+          <el-button size="small" icon="Close" @click="cancel" class="cancel-action-btn">取消返回</el-button>
+          <el-button type="primary" size="small" class="action-btn-primary" icon="CircleCheck" @click="submitForm">保存配置</el-button>
+        </div>
+      </div>
+
+      <!-- 双栏配置工作区 -->
+      <el-form ref="form" :model="form" :rules="rules" label-position="top" class="workbench-body">
+        <!-- 左栏：基础对接参数 (面板) -->
+        <div class="editor-left-pane">
+          <div class="pane-card">
+            <div class="pane-card-header">
+              <span class="header-dot"></span>
+              <h5>基础对接参数</h5>
+            </div>
+            
             <el-form-item label="配置名称" prop="name">
               <el-input v-model="form.name" placeholder="例如：DeepSeek官方对话、阿里云通用向量"/>
             </el-form-item>
-          </el-col>
-          <el-col :span="12">
+            
             <el-form-item label="提供商" prop="provider">
               <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%;">
                 <el-option label="DeepSeek" value="deepseek"/>
@@ -168,56 +343,19 @@
                 <el-option label="Ollama (本地部署)" value="ollama"/>
               </el-select>
             </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="模型名称" prop="modelName">
+
+            <el-form-item label="模型名称 (Model Identifier)" prop="modelName">
               <el-input v-model="form.modelName" placeholder="例如：deepseek-chat、text-embedding-v3"/>
             </el-form-item>
-          </el-col>
-          <el-col :span="24">
+
             <el-form-item label="API Key" prop="apiKey">
               <el-input v-model="form.apiKey" placeholder="输入大模型 API Key（脱敏存储）" show-password/>
             </el-form-item>
-          </el-col>
-          <el-col :span="24">
+
             <el-form-item label="API Base URL">
               <el-input v-model="form.baseUrl" placeholder="不填使用官方默认。Ollama 必须填写：http://localhost:11434"/>
             </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="启用联网搜索" prop="enableSearch">
-              <el-radio-group v-model="form.enableSearch">
-                <el-radio label="1">是</el-radio>
-                <el-radio label="0">否</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <el-col v-slot:default v-if="form.enableSearch === '1'" :span="24">
-            <el-form-item label="联网搜索 Key" prop="searchKey">
-              <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key（非必填，填入以实现模型端专属联网搜索）" show-password/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="Max Tokens" prop="maxTokens">
-              <el-input-number v-model="form.maxTokens" :max="32768" :min="256" controls-position="right" style="width: 100%;"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="随机温度" prop="temperature">
-              <el-input-number v-model="form.temperature" :max="2" :min="0" :step="0.1" controls-position="right" style="width: 100%;"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="最大历史数" prop="maxHistoryMessages">
-              <el-input-number v-model="form.maxHistoryMessages" :max="100" :min="1" controls-position="right" style="width: 100%;"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
-            <el-form-item label="系统提示词">
-              <el-input v-model="form.systemPrompt" :rows="3" placeholder="该模型专属系统提示词，设置后会覆盖全局兜底设置。" type="textarea"/>
-            </el-form-item>
-          </el-col>
-          <el-col :span="24">
+
             <el-form-item label="归属部门">
               <el-tree-select
                 v-model="form.deptId"
@@ -230,62 +368,162 @@
                 style="width: 100%;"
               />
             </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="思考模式">
-              <el-radio-group v-model="form.enableThinking">
-                <el-radio label="1">开启</el-radio>
-                <el-radio label="0">关闭</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <el-col v-slot:default v-if="form.enableThinking === '1'" :span="12">
-            <el-form-item label="思考强度">
-              <el-select v-model="form.reasoningEffort" clearable placeholder="请选择思考强度" style="width: 100%;">
-                <el-option label="默认" value=""/>
-                <el-option label="低强度 (low)" value="low"/>
-                <el-option label="中强度 (medium)" value="medium"/>
-                <el-option label="高强度 (high)" value="high"/>
-                <el-option label="极大强度 (max)" value="max"/>
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="默认聊天">
-              <el-radio-group v-model="form.isDefault">
-                <el-radio label="1">是</el-radio>
-                <el-radio label="0">否</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="默认向量">
-              <el-radio-group v-model="form.isDefaultEmbedding">
-                <el-radio label="1">是</el-radio>
-                <el-radio label="0">否</el-radio>
-              </el-radio-group>
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="cancel">取 消</el-button>
-          <el-button class="btn-gradient-primary" type="primary" @click="submitForm">确 定</el-button>
+          </div>
         </div>
-      </template>
-    </el-dialog>
+
+        <!-- 右栏：高级参数负载 -->
+        <div class="editor-right-pane">
+          <!-- 属性面板一：交互载荷 -->
+          <div class="pane-card card-space-margin">
+            <div class="pane-card-header">
+              <span class="header-dot purple-dot"></span>
+              <h5>基础交互载荷</h5>
+            </div>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="Max Tokens" prop="maxTokens">
+                  <el-input-number v-model="form.maxTokens" :max="32768" :min="256" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="最大历史消息数" prop="maxHistoryMessages">
+                  <el-input-number v-model="form.maxHistoryMessages" :max="100" :min="1" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="24" style="margin-top: 10px;">
+                <el-form-item label="随机温度 (Temperature)" prop="temperature">
+                  <div class="temp-slider-box">
+                    <el-slider
+                      v-model="form.temperature"
+                      :max="2"
+                      :step="0.05"
+                      show-input
+                      input-size="small"
+                    />
+                  </div>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+
+          <!-- 属性面板二：系统扩展特性 -->
+          <div class="pane-card card-space-margin">
+            <div class="pane-card-header">
+              <span class="header-dot teal-dot"></span>
+              <h5>高级扩展特性</h5>
+            </div>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="启用联网搜索" prop="enableSearch">
+                  <el-radio-group v-model="form.enableSearch">
+                    <el-radio label="1">开启</el-radio>
+                    <el-radio label="0">关闭</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+              </el-col>
+              <el-col v-if="form.enableSearch === '1'" :span="12">
+                <el-form-item label="联网搜索 Key" prop="searchKey">
+                  <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
+                </el-form-item>
+              </el-col>
+              
+              <el-col :span="12">
+                <el-form-item label="思考模式 (Reasoning)" prop="enableThinking">
+                  <el-radio-group v-model="form.enableThinking">
+                    <el-radio label="1">开启</el-radio>
+                    <el-radio label="0">关闭</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+              </el-col>
+              <el-col v-if="form.enableThinking === '1'" :span="12">
+                <el-form-item label="思考强度 (Effort)" prop="reasoningEffort">
+                  <el-select v-model="form.reasoningEffort" placeholder="请选择思考强度" style="width: 100%;">
+                    <el-option label="默认" value=""/>
+                    <el-option label="低强度 (low)" value="low"/>
+                    <el-option label="中强度 (medium)" value="medium"/>
+                    <el-option label="高强度 (high)" value="high"/>
+                    <el-option label="极大强度 (max)" value="max"/>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+
+              <el-col :span="12" style="margin-top: 10px;">
+                <el-form-item label="设为默认聊天模型" prop="isDefault">
+                  <el-radio-group v-model="form.isDefault">
+                    <el-radio label="1">是</el-radio>
+                    <el-radio label="0">否</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12" style="margin-top: 10px;">
+                <el-form-item label="设为默认向量模型" prop="isDefaultEmbedding">
+                  <el-radio-group v-model="form.isDefaultEmbedding">
+                    <el-radio label="1">是</el-radio>
+                    <el-radio label="0">否</el-radio>
+                  </el-radio-group>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+
+          <!-- 属性面板三：系统专属提示词指令 -->
+          <div class="pane-card">
+            <div class="pane-card-header">
+              <span class="header-dot orange-dot"></span>
+              <h5>专属系统提示词 (System Prompt Instructions)</h5>
+            </div>
+            <el-form-item label="系统提示词指令" prop="systemPrompt">
+              <el-input
+                v-model="form.systemPrompt"
+                :rows="6"
+                placeholder="该模型专属系统提示词，设置后会覆盖全局提示词配置。"
+                type="textarea"
+                class="tech-prompt-textarea"
+              />
+            </el-form-item>
+          </div>
+        </div>
+      </el-form>
+    </div>
   </div>
 </template>
 
 <script>
 import {addModel, delModel, getModel, listModel, setDefaultChat, setDefaultEmbedding, updateModel} from '@/api/ai/model'
 import {deptTreeSelect} from '@/api/system/user'
+import {
+  ChatDotRound,
+  ChatLineRound,
+  Collection,
+  Connection,
+  Cpu,
+  Delete,
+  DocumentCopy,
+  Edit,
+  Key,
+  Link as LinkIcon,
+  OfficeBuilding
+} from '@element-plus/icons-vue'
 
 export default {
   name: 'AiModelConfig',
+  components: {
+    LinkIcon,
+    Cpu,
+    Key,
+    ChatLineRound,
+    Connection,
+    OfficeBuilding,
+    ChatDotRound,
+    Collection,
+    Edit,
+    Delete,
+    DocumentCopy
+  },
   data() {
     return {
+      // 视图模式 card: 三维星图, table: 经典表格, edit: 独立整屏配置工作台
+      viewMode: 'card',
       // 部门树选项
       deptOptions: [],
       // 遮罩层
@@ -296,8 +534,12 @@ export default {
       title: '',
       // 是否显示弹出层
       open: false,
+      // 总条数
+      total: 0,
       // 查询参数
       queryParams: {
+        pageNum: 1,
+        pageSize: 10,
         name: undefined,
         provider: undefined
       },
@@ -330,7 +572,16 @@ export default {
     getList() {
       this.loading = true
       listModel(this.queryParams).then(response => {
-        this.modelList = response.data.rows
+        if (response.code === 200) {
+          this.modelList = response.data.rows || response.data || []
+          this.total = response.data.total || this.modelList.length
+        } else {
+          this.modelList = response.data.rows || response.data || []
+          this.total = response.total || this.modelList.length
+        }
+        this.loading = false
+      }).catch(err => {
+        console.error(err)
         this.loading = false
       })
     },
@@ -377,7 +628,7 @@ export default {
     },
     // 取消按钮
     cancel() {
-      this.open = false
+      this.viewMode = 'card'
       this.reset()
     },
     // 表单重置
@@ -411,6 +662,8 @@ export default {
     /** 重置按钮操作 */
     resetQuery() {
       this.queryParams = {
+        pageNum: 1,
+        pageSize: 10,
         name: undefined,
         provider: undefined
       }
@@ -419,7 +672,7 @@ export default {
     /** 新增按钮操作 */
     handleAdd() {
       this.reset()
-      this.open = true
+      this.viewMode = 'edit'
       this.title = '添加 AI 模型配置'
     },
     /** 修改按钮操作 */
@@ -427,7 +680,7 @@ export default {
       this.reset()
       getModel(row.id).then(response => {
         this.form = response.data
-        this.open = true
+        this.viewMode = 'edit'
         this.title = '修改 AI 模型配置'
       })
     },
@@ -438,13 +691,13 @@ export default {
           if (this.form.id != null) {
             updateModel(this.form).then(() => {
               this.$modal.msgSuccess('修改成功')
-              this.open = false
+              this.viewMode = 'card'
               this.getList()
             })
           } else {
             addModel(this.form).then(() => {
               this.$modal.msgSuccess('新增成功')
-              this.open = false
+              this.viewMode = 'card'
               this.getList()
             })
           }
@@ -459,6 +712,11 @@ export default {
         this.getList()
         this.$modal.msgSuccess('删除成功')
       }).catch(() => {})
+    },
+    /** 状态开启与禁用修改 */
+    toggleStatus(row) {
+      row.status = row.status === "1" ? "0" : "1";
+      this.handleStatusChange(row);
     },
     /** 状态修改操作 */
     handleStatusChange(row) {
@@ -489,364 +747,1254 @@ export default {
         this.$modal.msgSuccess('默认向量模型切换成功')
         this.getList()
       }).catch(() => {})
+    },
+    /** 获取提供商 pill 色彩类名 */
+    getProviderTagType(provider) {
+      if (!provider) return 'tag-slate';
+      const p = provider.toLowerCase();
+      if (p === 'deepseek') return 'tag-teal';
+      if (p === 'dashscope') return 'tag-purple';
+      if (p === 'openai') return 'tag-indigo';
+      if (p === 'ollama') return 'tag-amber';
+      return 'tag-slate';
+    },
+    /** 复制系统提示词 */
+    copyPrompt(text) {
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        this.$message.success("系统提示词已复制到剪贴板");
+      }).catch(err => {
+        console.error(err);
+        this.$message.error("复制失败，请手动复制");
+      });
     }
   }
 }
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .ai-model-manager {
   background: transparent !important;
   min-height: calc(100vh - 84px);
-  padding: 24px;
 }
 
-/* 顶部搜索栏 */
-.filter-container {
-  background: rgba(255, 255, 255, 0.02) !important;
-  backdrop-filter: blur(20px) !important;
-  -webkit-backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.06) !important;
-  border-radius: 12px;
-  padding: 18px 24px 4px 24px;
-  margin-bottom: 20px;
-  box-shadow: none !important;
+/* 页面内部容器 Flex 布局，使搜索栏与下方内容间距为 16px */
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
 }
 
-.btn-gradient-success {
-  background: linear-gradient(135deg, var(--el-color-success) 0%, var(--el-color-success-dark-2) 100%);
-  border: none;
-  font-weight: 500;
-  transition: all 0.3s;
-}
-.btn-gradient-success:hover {
-  opacity: 0.9;
-  transform: translateY(-1px);
+.model-view-dynamic-container {
+  width: 100%;
 }
 
-/* 空状态 (科技感暗色毛玻璃风格) */
+/* 极简空状态 */
 .empty-state {
   text-align: center;
   padding: 80px 20px;
-  background: var(--el-fill-color-blank) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-radius: 16px;
-  border: 1px dashed var(--el-border-color) !important;
-  box-shadow: var(--el-box-shadow-light);
+  background: rgba(255, 255, 255, 0.5) !important;
+  border-radius: 20px;
+  border: 1px dashed rgba(0, 0, 0, 0.1) !important;
   width: 100%;
   margin-top: 10px;
   position: relative;
   overflow: hidden;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.25) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
 }
-.empty-state::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, var(--el-color-primary-light-8) 0%, transparent 70%);
-  pointer-events: none;
-}
+
 .empty-icon {
-  font-size: 56px;
-  margin-bottom: 20px;
+  font-size: 48px;
+  margin-bottom: 16px;
   display: inline-block;
   animation: float-icon 3s ease-in-out infinite;
 }
+
 .empty-state p {
-  color: var(--el-text-color-primary) !important;
-  font-size: 14.5px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   margin: 0;
-  line-height: 1.6;
+  color: #64748b;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
 }
+
 @keyframes float-icon {
   0%, 100% {
     transform: translateY(0) scale(1);
-    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
   }
   50% {
-    transform: translateY(-8px) scale(1.05);
-    filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.2));
+    transform: translateY(-6px) scale(1.03);
   }
 }
 
-/* 卡片布局 */
-.card-list-container {
-  margin-top: 10px;
-}
-.card-col {
-  margin-bottom: 24px;
+/* ===== 🧠 三维北辰星图卡片视图布局 ===== */
+.synapse-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 20px;
+  width: 100%;
+  padding-bottom: 10px;
 }
 
-.model-card {
-  background: rgba(255, 255, 255, 0.03) !important;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15) !important;
+/* 三维玻璃卡片 */
+.synapse-glass-card {
+  border-radius: 24px;
+  padding: 24px;
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
   display: flex;
   flex-direction: column;
-  height: 430px;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.03);
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.3);
+  }
+  
+  &:hover {
+    transform: translateY(-6px) scale(1.02) !important;
+    
+    .card-shimmer-ray {
+      transform: skewX(-20deg) translateX(300px);
+    }
+    
+    .radial-gauge-item {
+      transform: translateY(-2px) scale(1.02);
+    }
+  }
+
+  /* 各种状态边框发光映射 */
+  &.status-border-chat {
+    border-color: rgba(16, 185, 129, 0.35);
+    &:hover {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(16, 185, 129, 0.2) !important;
+      .dark &, .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(16, 185, 129, 0.22) !important;
+      }
+    }
+  }
+  &.status-border-embed {
+    border-color: rgba(59, 130, 246, 0.35);
+    &:hover {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(59, 130, 246, 0.2) !important;
+      .dark &, .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(59, 130, 246, 0.22) !important;
+      }
+    }
+  }
+  &.status-border-active {
+    border-color: rgba(139, 92, 246, 0.3);
+    &:hover {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(139, 92, 246, 0.2) !important;
+      .dark &, .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(139, 92, 246, 0.22) !important;
+      }
+    }
+  }
+  &.status-border-inactive {
+    border-color: rgba(239, 68, 68, 0.35);
+    &:hover {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(239, 68, 68, 0.2) !important;
+      .dark &, .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(239, 68, 68, 0.22) !important;
+      }
+    }
+  }
+}
+
+.card-shimmer-ray {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80px;
+  width: 50px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: skewX(-20deg) translateX(-100px);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* 提供商药丸型芯片标签 */
+.card-code {
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 6px;
+
+  &.tag-purple {
+    background: rgba(139, 92, 246, 0.06);
+    color: #8b5cf6;
+    border: 1px solid rgba(139, 92, 246, 0.12);
+  }
+  &.tag-amber {
+    background: rgba(245, 158, 11, 0.06);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.12);
+  }
+  &.tag-teal {
+    background: rgba(20, 184, 166, 0.06);
+    color: #0d9488;
+    border: 1px solid rgba(20, 184, 166, 0.12);
+  }
+  &.tag-rose {
+    background: rgba(244, 63, 94, 0.06);
+    color: #e11d48;
+    border: 1px solid rgba(244, 63, 94, 0.12);
+  }
+  &.tag-indigo {
+    background: rgba(79, 70, 229, 0.06);
+    color: #4f46e5;
+    border: 1px solid rgba(79, 70, 229, 0.12);
+  }
+  &.tag-slate {
+    background: rgba(100, 116, 139, 0.06);
+    color: #475569;
+    border: 1px solid rgba(100, 116, 139, 0.12);
+  }
+
+  .dark &,
+  .theme-dark & {
+    &.tag-purple {
+      background: rgba(139, 92, 246, 0.12);
+      color: #a78bfa;
+      border-color: rgba(139, 92, 246, 0.2);
+    }
+    &.tag-amber {
+      background: rgba(245, 158, 11, 0.12);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.2);
+    }
+    &.tag-teal {
+      background: rgba(20, 184, 166, 0.12);
+      color: #2dd4bf;
+      border-color: rgba(20, 184, 166, 0.2);
+    }
+    &.tag-rose {
+      background: rgba(244, 63, 94, 0.12);
+      color: #fb7185;
+      border-color: rgba(244, 63, 94, 0.2);
+    }
+    &.tag-indigo {
+      background: rgba(99, 102, 241, 0.12);
+      color: #818cf8;
+      border-color: rgba(99, 102, 241, 0.2);
+    }
+    &.tag-slate {
+      background: rgba(148, 163, 184, 0.12);
+      color: #cbd5e1;
+      border-color: rgba(148, 163, 184, 0.2);
+    }
+  }
+}
+
+.status-badge-text {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 !important;
+}
+
+.card-name {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0;
+  color: #0f172a;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
-  position: relative;
-  color: rgba(255, 255, 255, 0.85) !important;
-}
-.model-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(99, 102, 241, 0.35) !important;
-  box-shadow: 0 12px 30px rgba(99, 102, 241, 0.1) !important;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
 }
 
-/* 选中模型亮色边框 */
-.model-card.is-active-chat {
-  border: 2px solid var(--el-color-success);
-}
-.model-card.is-active-embedding {
-  border: 2px solid var(--el-color-primary);
-}
-.model-card.is-active-chat.is-active-embedding {
-  border: 2px solid;
-  border-image: linear-gradient(135deg, var(--el-color-success) 0%, var(--el-color-primary) 100%) 1;
+/* 芯片化大模型名称徽章 */
+.card-model-chip-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  background: rgba(0, 0, 0, 0.03);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  transition: all 0.3s;
+
+  .model-cpu-icon {
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.05);
+    
+    .model-cpu-icon {
+      color: #94a3b8;
+    }
+  }
 }
 
-/* 卡片头部 */
-.card-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+.synapse-glass-card:hover .card-model-chip-badge {
+  background: rgba(139, 92, 246, 0.05);
+  border-color: rgba(139, 92, 246, 0.15);
+  color: #8b5cf6;
+  .model-cpu-icon { color: #8b5cf6; }
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(56, 189, 248, 0.05);
+    border-color: rgba(56, 189, 248, 0.15);
+    color: #38bdf8;
+    .model-cpu-icon { color: #38bdf8; }
+  }
+}
+
+/* 参数属性行 */
+.code-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12.5px;
+}
+.param-label {
+  color: #64748b;
   display: flex;
   align-items: center;
-  position: relative;
-  background: transparent !important;
+  gap: 6px;
+  font-weight: 600;
+  
+  .dark &, .theme-dark & { color: #94a3b8; }
 }
 
-.provider-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+.code-text {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  background: rgba(0,0,0,0.03);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  border: 1px solid rgba(0,0,0,0.04);
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #0f172a;
+
+  .dark &, .theme-dark & {
+    background: rgba(255,255,255,0.03);
+    border-color: rgba(255,255,255,0.05);
+    color: #cbd5e1;
+  }
+}
+
+.url-text {
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 150px;
+  
+  .dark &, .theme-dark & { color: #94a3b8; }
+}
+
+/* 环形参数仪表盘 */
+.card-stats-gauges {
+  display: flex;
+  justify-content: space-around;
+  margin: 6px 0;
+}
+
+.radial-gauge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  
+  .gauge-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+
+    .dark &,
+    .theme-dark & {
+      color: #94a3b8;
+    }
+  }
+}
+
+.radial-circle-box {
+  width: 54px;
+  height: 54px;
+  position: relative;
+  
+  svg {
+    width: 100%;
+    height: 100%;
+  }
+  
+  .circle-bg {
+    fill: none;
+    stroke-width: 2.8;
+    stroke: rgba(0, 0, 0, 0.04);
+
+    .dark &,
+    .theme-dark & {
+      stroke: rgba(255, 255, 255, 0.04);
+    }
+  }
+  
+  .circle-fill {
+    fill: none;
+    stroke-linecap: round;
+    stroke-width: 2.8;
+    transition: stroke-dasharray 0.3s ease, stroke 0.3s ease;
+  }
+}
+
+.radial-gauge-text {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
-  margin-right: 12px;
-}
-.provider-avatar.provider-deepseek {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
-}
-.provider-avatar.provider-dashscope {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-.provider-avatar.provider-openai {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
-}
-.provider-avatar.provider-ollama {
-  background: rgba(74, 85, 104, 0.1);
-  color: #4a5568;
-}
-
-.header-info {
-  flex-grow: 1;
-  overflow: hidden;
-}
-.model-alias {
-  margin: 0 0 4px 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--el-text-color-primary) !important;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-}
-
-.provider-badge {
-  display: inline-block;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-weight: 600;
-}
-.provider-badge.provider-deepseek {
-  background: rgba(59, 130, 246, 0.1);
-  color: #3b82f6;
-}
-.provider-badge.provider-dashscope {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
-}
-.provider-badge.provider-openai {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
-}
-.provider-badge.provider-ollama {
-  background: rgba(74, 85, 104, 0.1);
-  color: #4a5568;
-}
-
-/* 卡片主体 */
-.card-body {
-  padding: 16px 20px;
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.param-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 13px;
-}
-.param-label {
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.param-val {
-  color: var(--el-text-color-regular);
-  font-weight: 500;
-}
-.code-text {
-  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
-  background: var(--el-fill-color-light);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  border: 1px solid var(--el-border-color-light);
-  white-space: nowrap;
-  max-width: 160px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.url-text {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 160px;
-}
-
-/* 参数网格 */
-.param-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  background: var(--el-fill-color-light);
-  border-radius: 8px;
-  padding: 8px 12px;
-  gap: 8px;
-  border: 1px solid var(--el-border-color-light);
-  text-align: center;
-}
-.grid-item {
-  display: flex;
-  flex-direction: column;
-}
-.grid-label {
-  font-size: 10px;
-  color: var(--el-text-color-secondary);
-  margin-bottom: 2px;
-}
-.grid-val {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--el-text-color-primary);
-}
-
-/* 提示词预览 */
-.prompt-preview {
-  background: #fffaf0;
-  border: 1px solid #feebc8;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
-}
-.prompt-title {
-  color: #dd6b20;
-  font-weight: 600;
-  margin-bottom: 2px;
-  display: block;
-}
-.prompt-content {
-  color: #7b341e;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 1.4;
-}
-
-/* 卡片脚部 */
-.card-footer {
-  padding: 12px 20px;
-  background: #fafbfe;
-  border-top: 1px solid #edf2f7;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.default-tags {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-.footer-action-btn {
+  font-family: monospace;
   font-size: 11px;
-  font-weight: 600;
-  color: #10b981;
+  font-weight: 800;
+  color: #0f172a;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
+}
+
+.synapse-glass-card:hover .radial-circle-box svg {
+  filter: drop-shadow(0 0 3px rgba(139, 92, 246, 0.15));
+}
+
+/* 技术选项药丸 */
+.param-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tech-pill {
+  font-weight: 700;
+  border-radius: 20px;
+}
+
+/* Mac 极客终端风格系统提示词展示区 */
+.prompt-preview-terminal {
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100px;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  
+  /* 默认：亮色模式 */
+  background: #f8fafc;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02), 0 4px 10px rgba(0, 0, 0, 0.02);
+
+  &:hover {
+    border-color: rgba(139, 92, 246, 0.3);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02), 0 6px 15px rgba(139, 92, 246, 0.08);
+  }
+
+  /* 深色模式覆盖 */
+  .dark &,
+  .theme-dark & {
+    background: #0b0f19;
+    border-color: rgba(255, 255, 255, 0.03);
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.4);
+
+    &:hover {
+      border-color: rgba(56, 189, 248, 0.22);
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 6px 15px rgba(56, 189, 248, 0.08);
+    }
+  }
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 10px;
+  
+  /* 默认：亮色模式 */
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+
+  /* 深色模式覆盖 */
+  .dark &,
+  .theme-dark & {
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  }
+}
+
+.terminal-dots {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+
+  span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot-red { background-color: #ff5f56; }
+  .dot-yellow { background-color: #ffbd2e; }
+  .dot-green { background-color: #27c93f; }
+}
+
+.terminal-title {
+  font-family: monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  
+  /* 默认：亮色模式 */
+  color: rgba(0, 0, 0, 0.35);
+
+  /* 深色模式覆盖 */
+  .dark &,
+  .theme-dark & {
+    color: rgba(255, 255, 255, 0.35);
+  }
+}
+
+.terminal-copy-btn {
+  background: transparent;
+  border: none;
   padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  transition: all 0.2s;
+  
+  /* 默认：亮色模式 */
+  color: rgba(0, 0, 0, 0.4);
+
+  &:hover {
+    color: #8b5cf6;
+    transform: scale(1.1);
+  }
+
+  /* 深色模式覆盖 */
+  .dark &,
+  .theme-dark & {
+    color: rgba(255, 255, 255, 0.4);
+
+    &:hover {
+      color: #38bdf8;
+      transform: scale(1.1);
+    }
+  }
 }
-.footer-action-btn:hover {
-  text-decoration: underline;
+
+.terminal-body {
+  padding: 8px 12px;
+  flex: 1;
+  overflow-y: auto;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dark &,
+  .theme-dark & {
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+    }
+  }
 }
-.footer-action-btn.color-primary {
-  color: var(--el-color-primary);
+
+.terminal-body .prompt-content-text {
+  font-family: Menlo, Monaco, Consolas, "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  
+  /* 默认：亮色模式 */
+  color: #334155;
+
+  /* 深色模式覆盖 */
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
+}
+
+/* 卡片页脚布局 */
+.card-footer-row-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px dashed rgba(0, 0, 0, 0.06);
+  padding-top: 12px;
+  margin-top: auto;
+
+  .dark &,
+  .theme-dark & {
+    border-top-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.default-tags-area {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  
+  .el-tag {
+    font-weight: 700;
+    white-space: nowrap !important;
+    height: 24px !important;
+    padding: 0 8px !important;
+    border-radius: 6px !important;
+    
+    :deep(.el-tag__content) {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 4px;
+      height: 100%;
+      line-height: 1 !important;
+      
+      span {
+        line-height: 1 !important;
+        display: inline-block;
+      }
+    }
+  }
 }
 
 .active-tag-chat {
-  font-weight: 600;
-}
-.active-tag-embed {
-  font-weight: 600;
+  border: none !important;
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+  color: #ffffff !important;
 }
 
-.action-buttons {
+.active-tag-embed {
+  border: none !important;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8) !important;
+  box-shadow: 0 2px 6px rgba(59, 130, 246, 0.2);
+  color: #ffffff !important;
+}
+
+.footer-action-btn {
+  font-size: 11px;
+  font-weight: 700;
+  color: #10b981 !important;
+  padding: 0;
+  white-space: nowrap !important;
+
+  &.color-primary {
+    color: #4f46e5 !important;
+    white-space: nowrap !important;
+
+    .dark &, .theme-dark & { color: #38bdf8 !important; }
+  }
+}
+
+.action-buttons-row {
   display: flex;
   gap: 8px;
-}
-.footer-icon-btn {
-  font-size: 12px;
-  font-weight: 600;
-}
-.footer-icon-btn.edit-btn {
-  color: #4a5568;
-}
-.footer-icon-btn.edit-btn:hover {
-  color: #1a202c;
-}
-.footer-icon-btn.delete-btn {
-  color: #e53e3e;
-}
-.footer-icon-btn.delete-btn:hover {
-  color: #c53030;
+  flex-shrink: 0;
 }
 
-/* 渐变确定按钮 */
-.btn-gradient-primary {
-  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
-  border: none;
-  color: white;
+/* 精致药丸型卡片操作按钮 */
+.card-op-edit-pill,
+.card-op-delete-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px !important;
+  border-radius: 14px !important;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent !important;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  cursor: pointer;
+  background-color: transparent !important;
 }
-.btn-gradient-primary:hover {
-  opacity: 0.9;
+
+.card-op-edit-pill {
+  color: #4f46e5 !important;
+  
+  &:hover {
+    color: #4338ca !important;
+    background-color: rgba(79, 70, 229, 0.05) !important;
+    border-color: rgba(79, 70, 229, 0.15) !important;
+    transform: translateY(-1px);
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #38bdf8 !important;
+
+    &:hover {
+      color: #7dd3fc !important;
+      background-color: rgba(56, 189, 248, 0.08) !important;
+      border-color: rgba(56, 189, 248, 0.15) !important;
+    }
+  }
+}
+
+.card-op-delete-pill {
+  color: #ef4444 !important;
+
+  &:hover {
+    color: #dc2626 !important;
+    background-color: rgba(239, 68, 68, 0.05) !important;
+    border-color: rgba(239, 68, 68, 0.15) !important;
+    transform: translateY(-1px);
+  }
+
+  .dark &,
+  .theme-dark & {
+    &:hover {
+      color: #f87171 !important;
+      background-color: rgba(239, 68, 68, 0.08) !important;
+      border-color: rgba(239, 68, 68, 0.15) !important;
+    }
+  }
+}
+
+/* ===== 经典表格视图中的模型配置样式 ===== */
+.polaris-table-card-table-wrap {
+  width: 100%;
+}
+.op-btn-default-set {
+  color: #10b981 !important;
+  font-weight: 700;
+  font-size: 11px;
+}
+.op-btn-default-set-embed {
+  color: #4f46e5 !important;
+  font-weight: 700;
+  font-size: 11px;
+
+  .dark &, .theme-dark & { color: #38bdf8 !important; }
+}
+
+.default-tags-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  
+  .el-tag {
+    font-weight: 700;
+  }
+}
+
+/* ===== 聚合操作栏 (检索卡片正下方) ===== */
+.matrix-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0 16px; /* 增加适度外边距，形成舒适的呼吸感 */
+  padding: 0 4px;
+}
+
+.actions-left {
+  display: flex;
+  align-items: center;
+}
+
+.actions-right {
+  display: flex;
+  align-items: center;
+}
+
+/* 视图切换器按钮 */
+.view-mode-toggle-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.03);
+  height: 36px;
+  box-sizing: border-box;
+
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+}
+
+.toggle-view-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 12px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &.active {
+    background-color: #ffffff;
+    color: #4f46e5;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #94a3b8;
+
+    &.active {
+      background-color: rgba(255, 255, 255, 0.05);
+      color: #38bdf8;
+      box-shadow: none;
+    }
+  }
+}
+
+/* ===== 独立整屏大屏配置工作台 (Model Workbench) ===== */
+.agent-workbench-container {
+  animation: fadeIn 0.4s ease;
+  background-color: transparent;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.workbench-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 18px;
+  padding: 14px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.02);
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.35);
+    border-color: rgba(255, 255, 255, 0.05);
+    box-shadow: none;
+  }
+
+  .action-btn-primary {
+    .dark &,
+    .theme-dark & {
+      background: linear-gradient(135deg, #38bdf8, #818cf8) !important;
+      border-color: transparent !important;
+      color: #0f172a !important;
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);
+
+      &:hover {
+        background: linear-gradient(135deg, #7dd3fc, #93c5fd) !important;
+        box-shadow: 0 6px 18px rgba(56, 189, 248, 0.35);
+      }
+    }
+  }
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.workbench-title-text {
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
+}
+
+.cancel-action-btn {
+  border-radius: 10px !important;
+  font-size: 12px;
+  font-weight: 700;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  background-color: transparent !important;
+  color: #475569 !important;
+  height: 32px;
+  transition: all 0.3s;
+
+  &:hover {
+    background-color: rgba(0, 0, 0, 0.02) !important;
+    border-color: rgba(0, 0, 0, 0.15) !important;
+  }
+
+  .dark &,
+  .theme-dark & {
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    color: #cbd5e1 !important;
+    
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.04) !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+    }
+  }
+}
+
+.workbench-body {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.editor-left-pane {
+  width: 360px;
+  flex-shrink: 0;
+}
+
+.editor-right-pane {
+  flex: 1;
+}
+
+.pane-card {
+  border-radius: 20px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.01) !important;
+  backdrop-filter: blur(20px);
+  padding: 24px;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.3);
+    border-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.card-space-margin {
+  margin-bottom: 24px;
+}
+
+.pane-card-header {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.06);
+  padding-bottom: 12px;
+
+  .header-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #8b5cf6;
+    display: inline-block;
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+
+    &.purple-dot {
+      background-color: #a78bfa;
+      box-shadow: 0 0 8px rgba(167, 139, 250, 0.6);
+    }
+    &.teal-dot {
+      background-color: #14b8a6;
+      box-shadow: 0 0 8px rgba(20, 184, 166, 0.6);
+    }
+    &.orange-dot {
+      background-color: #f97316;
+      box-shadow: 0 0 8px rgba(249, 115, 22, 0.6);
+    }
+  }
+
+  h5 {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 800;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.temp-slider-box {
+  padding: 14px 20px;
+  background: rgba(0, 0, 0, 0.01);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(255, 255, 255, 0.01);
+    border-color: rgba(255, 255, 255, 0.02);
+  }
+}
+
+.tech-prompt-textarea :deep(.el-textarea__inner) {
+  font-family: Menlo, Monaco, Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  border-radius: 12px;
+  padding: 14px 16px;
+  line-height: 1.6;
+
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(0, 0, 0, 0.25) !important;
+    color: #cbd5e1 !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
+  }
+}
+
+.tech-prompt-textarea :deep(.el-textarea__inner:focus) {
+  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.15) !important;
+
+  .dark &,
+  .theme-dark & {
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
+  }
+}
+
+.back-btn {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+  transition: all 0.2s;
+  height: 28px;
+  width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    transform: scale(1.05);
+    border-color: #8b5cf6;
+    color: #8b5cf6;
+  }
+
+  .dark &,
+  .theme-dark & {
+    border-color: rgba(255, 255, 255, 0.08);
+    background-color: transparent;
+    color: #cbd5e1;
+    
+    &:hover {
+      border-color: #38bdf8;
+      color: #38bdf8;
+    }
+  }
+}
+
+/* ===== 智能体配置工作台表单元素及滑块、单选框高新科技化美化 (Model) ===== */
+.agent-workbench-container {
+  :deep(.el-form-item__label) {
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    padding-bottom: 6px !important;
+
+    .dark &,
+    .theme-dark & {
+      color: #94a3b8;
+    }
+  }
+
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    border-radius: 12px !important;
+    background-color: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow: none !important;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+
+    &:hover {
+      border-color: rgba(139, 92, 246, 0.3) !important;
+    }
+
+    &.is-focus {
+      border-color: #8b5cf6 !important;
+      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
+    }
+
+    .dark &,
+    .theme-dark & {
+      background-color: rgba(0, 0, 0, 0.25) !important;
+      border-color: rgba(255, 255, 255, 0.06) !important;
+
+      &:hover {
+        border-color: rgba(56, 189, 248, 0.3) !important;
+      }
+
+      &.is-focus {
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
+      }
+    }
+  }
+
+  :deep(.el-input__inner) {
+    font-size: 12.5px;
+    color: #0f172a;
+
+    .dark &,
+    .theme-dark & {
+      color: #cbd5e1;
+    }
+  }
+
+  /* 状态单选框美化 */
+  :deep(.el-radio) {
+    border-radius: 10px;
+    padding: 8px 16px;
+    border: 1px solid rgba(0, 0, 0, 0.06) !important;
+    background: #ffffff;
+    transition: all 0.3s;
+    margin-right: 12px;
+    height: auto;
+
+    &.is-checked {
+      border-color: #8b5cf6 !important;
+      background: rgba(139, 92, 246, 0.02) !important;
+      
+      .el-radio__label {
+        color: #8b5cf6 !important;
+      }
+      .el-radio__inner {
+        border-color: #8b5cf6 !important;
+        background: #8b5cf6 !important;
+      }
+    }
+
+    .dark &,
+    .theme-dark & {
+      background: rgba(255, 255, 255, 0.02);
+      border-color: rgba(255, 255, 255, 0.05) !important;
+
+      &.is-checked {
+        border-color: #38bdf8 !important;
+        background: rgba(56, 189, 248, 0.02) !important;
+
+        .el-radio__label {
+          color: #38bdf8 !important;
+        }
+        .el-radio__inner {
+          border-color: #38bdf8 !important;
+          background: #38bdf8 !important;
+        }
+      }
+    }
+  }
+
+  /* 随机温度滑块美化 */
+  :deep(.el-slider) {
+    .el-slider__runway {
+      background-color: rgba(0, 0, 0, 0.04) !important;
+      height: 5px;
+
+      .dark &,
+      .theme-dark & {
+        background-color: rgba(255, 255, 255, 0.04) !important;
+      }
+    }
+    .el-slider__bar {
+      height: 5px;
+      background-color: #8b5cf6 !important;
+
+      .dark &,
+      .theme-dark & {
+        background-color: #38bdf8 !important;
+      }
+    }
+    .el-slider__button {
+      border: 2px solid #8b5cf6 !important;
+      background-color: #ffffff !important;
+      width: 14px;
+      height: 14px;
+      box-shadow: 0 2px 6px rgba(139, 92, 246, 0.2);
+
+      .dark &,
+      .theme-dark & {
+        border-color: #38bdf8 !important;
+        background-color: #0f172a !important;
+        box-shadow: 0 2px 6px rgba(56, 189, 248, 0.3);
+      }
+    }
+    .el-input-number--small {
+      width: 90px;
+    }
+  }
 }
 </style>
