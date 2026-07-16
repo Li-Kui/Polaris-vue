@@ -560,6 +560,13 @@ getList()
     display: none !important;
   }
 
+  /* 调整行高，加大行内间距，使行高看起来更加舒适美观 */
+  .el-table__row {
+    td.el-table__cell {
+      padding: 12px 0 !important;
+    }
+  }
+
   .el-tag {
     font-weight: 700;
     border-radius: 8px;

@@ -383,6 +383,13 @@ getList()
     display: none !important;
   }
 
+  /* 调整行高，加大行内间距，使行高看起来更加舒适美观 */
+  .el-table__row {
+    td.el-table__cell {
+      padding: 12px 0 !important;
+    }
+  }
+
   /* 局部重写数字输入框的增减按钮，保证箭头在任何状态下都高对比度且清晰可见 */
   .el-input-number {
     .el-input-number__increase,
