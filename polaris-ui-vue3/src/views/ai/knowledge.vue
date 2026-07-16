@@ -6,7 +6,7 @@
         <h3 class="kb-title">知识库列表</h3>
         <el-button
           id="btn-add-kb"
-          class="btn-gradient"
+          class="action-btn-primary"
           icon="Plus"
           type="primary"
           @click="handleCreateKb"
@@ -108,7 +108,7 @@
         </section>
 
         <!-- 文档列表区 -->
-        <section class="kb-docs-section">
+        <section class="kb-docs-section polaris-table-card">
           <div class="docs-header">
             <h4>包含文档 ({{ docList.length }})</h4>
             <el-button
@@ -124,7 +124,7 @@
           <el-table
             v-loading="loadingDoc"
             :data="docList"
-            class="docs-table"
+            class="docs-table polaris-el-table"
             empty-text="此知识库下暂无文档，请在上方上传文件"
             style="width: 100%"
           >
@@ -154,21 +154,18 @@
             </el-table-column>
             <el-table-column align="center" label="操作" width="180">
               <template #default="scope">
-                <el-tooltip :open-delay="400" content="重新生成向量索引" placement="top">
-                  <el-button
-                    link
-                    icon="RefreshLeft"
-                    @click="handleRebuildDoc(scope.row)"
-                  />
-                </el-tooltip>
-                <el-tooltip :open-delay="400" content="删除文档" placement="top">
-                  <el-button
-                    link
-                    type="danger"
-                    icon="Delete"
-                    @click="handleDeleteDoc(scope.row)"
-                  />
-                </el-tooltip>
+                <el-button
+                  link
+                  class="op-btn-edit"
+                  icon="RefreshLeft"
+                  @click="handleRebuildDoc(scope.row)"
+                >重新生成</el-button>
+                <el-button
+                  link
+                  class="op-btn-delete"
+                  icon="Delete"
+                  @click="handleDeleteDoc(scope.row)"
+                >删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -181,18 +178,30 @@
       :title="dialogTitle"
       v-model="openDialog"
       append-to-body
-      class="kb-dialog"
+      class="polaris-glass-dialog"
       width="500px"
     >
-      <el-form ref="form" :model="form" :rules="rules" label-width="80px">
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" maxlength="50" placeholder="请输入知识库名称" show-word-limit />
+      <el-form ref="form" :model="form" :rules="rules" label-width="90px">
+        <el-form-item prop="name">
+          <template #label>
+            <span class="form-label-item">
+              <el-icon><folder /></el-icon>
+              <span>库名称</span>
+            </span>
+          </template>
+          <el-input v-model="form.name" maxlength="50" placeholder="例如：北辰大模型业务文档库" show-word-limit />
         </el-form-item>
-        <el-form-item label="描述" prop="description">
+        <el-form-item prop="description">
+          <template #label>
+            <span class="form-label-item">
+              <el-icon><document /></el-icon>
+              <span>库描述</span>
+            </span>
+          </template>
           <el-input
             v-model="form.description"
             maxlength="200"
-            placeholder="请输入知识库的业务背景或描述，便于维护..."
+            placeholder="请输入知识库的业务背景或用途，便于后续大模型做精准语义检索匹配..."
             rows="4"
             show-word-limit
             type="textarea"
@@ -201,8 +210,8 @@
       </el-form>
       <template #footer>
         <div class="dialog-footer">
-          <el-button @click="openDialog = false">取 消</el-button>
-          <el-button class="btn-gradient" type="primary" @click="submitForm">确 定</el-button>
+          <el-button class="action-btn-secondary" @click="openDialog = false">取 消</el-button>
+          <el-button class="action-btn-primary" type="primary" @click="submitForm">确 定</el-button>
         </div>
       </template>
     </el-dialog>
@@ -485,23 +494,33 @@ export default {
 };
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 /* 骨架与现代感布局 */
 .knowledge-wrapper {
   display: flex;
   height: calc(100vh - 84px); /* 减去北辰顶部 navbar 与 tagsView 高度 */
-  background: #f7f9fc;
+  background: var(--polaris-bg, #f1f5f9);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.5s ease;
 }
 
 /* 左侧知识库栏 */
 .kb-sidebar {
   width: 320px;
-  background: #ffffff;
-  border-right: 1px solid #eef2f7;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 8px rgba(165, 175, 186, 0.06);
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.01);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+
+  .dark & {
+    background: rgba(10, 15, 30, 0.45);
+    border-right-color: rgba(255, 255, 255, 0.04);
+    box-shadow: 2px 0 15px rgba(0, 0, 0, 0.15);
+  }
 }
 
 .kb-sidebar-header {
@@ -509,38 +528,75 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #f2f5f8;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+
+  .dark & {
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+  }
 }
 
 .kb-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #1a202c;
-}
-
-.btn-gradient {
-  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%) !important;
-  border: none !important;
-  color: white !important;
-  transition: all 0.3s ease;
-}
-
-.btn-gradient:hover {
-  opacity: 0.95;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px var(--el-color-primary-light-5);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
+  letter-spacing: 0.05em;
 }
 
 .kb-search-box {
   padding: 12px 20px;
-  border-bottom: 1px solid #f2f5f8;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+
+  .dark & {
+    border-bottom-color: rgba(255, 255, 255, 0.04);
+  }
+
+  :deep(.el-input__wrapper) {
+    border-radius: 10px !important;
+    background-color: #ffffff !important;
+    border: 1px solid rgba(0, 0, 0, 0.08) !important;
+    box-shadow: none !important;
+    transition: all 0.3s;
+
+    &:hover,
+    &.is-focus {
+      border-color: rgba(79, 70, 229, 0.4) !important;
+    }
+
+    .dark & {
+      background-color: rgba(0, 0, 0, 0.35) !important;
+      border-color: rgba(255, 255, 255, 0.08) !important;
+
+      &:hover,
+      &.is-focus {
+        border-color: rgba(56, 189, 248, 0.4) !important;
+      }
+    }
+  }
 }
 
 .kb-list-container {
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px;
+
+  /* 微型精致滚动条 */
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 4px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dark & {
+    &::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
 }
 
 .empty-state {
@@ -549,39 +605,58 @@ export default {
   align-items: center;
   justify-content: center;
   padding-top: 60px;
-  color: var(--el-text-color-primary);
+  color: var(--el-text-color-secondary);
 }
 
 .empty-icon {
-  font-size: 40px;
+  font-size: 36px;
   margin-bottom: 10px;
+  color: var(--el-text-color-placeholder);
 }
 
 /* 知识库卡片微动效与高光 */
 .kb-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 14px;
   padding: 14px 16px;
   margin-bottom: 12px;
   cursor: pointer;
   position: relative;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-}
 
-.kb-card:hover {
-  border-color: #3b82f6;
-  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.08);
-  transform: translateY(-2px);
-}
+  .dark & {
+    background: rgba(15, 23, 42, 0.2);
+    border-color: rgba(255, 255, 255, 0.04);
+  }
 
-.kb-card.active {
-  background: #eff6ff;
-  border-color: #3b82f6;
-  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.1);
+  &:hover {
+    transform: translateY(-2px);
+    background: #ffffff;
+    border-color: #4f46e5;
+    box-shadow: 0 8px 20px -4px rgba(79, 70, 229, 0.1);
+
+    .dark & {
+      background: rgba(15, 23, 42, 0.4);
+      border-color: #38bdf8;
+      box-shadow: 0 8px 24px -4px rgba(56, 189, 248, 0.15);
+    }
+  }
+
+  &.active {
+    background: rgba(79, 70, 229, 0.05);
+    border-color: #4f46e5;
+    box-shadow: 0 4px 16px -2px rgba(79, 70, 229, 0.12);
+
+    .dark & {
+      background: rgba(56, 189, 248, 0.06);
+      border-color: #38bdf8;
+      box-shadow: 0 4px 20px -2px rgba(56, 189, 248, 0.2);
+    }
+  }
 }
 
 .kb-card-info {
@@ -590,9 +665,9 @@ export default {
 }
 
 .kb-card-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: #2d3748;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--el-text-color-primary);
   display: block;
   margin-bottom: 4px;
   white-space: nowrap;
@@ -602,8 +677,8 @@ export default {
 
 .kb-card-desc {
   margin: 0;
-  font-size: 12px;
-  color: #718096;
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -617,6 +692,25 @@ export default {
   margin-left: 10px;
   opacity: 0;
   transition: opacity 0.2s ease;
+
+  :deep(.el-button) {
+    padding: 4px !important;
+    font-size: 14px;
+    height: auto;
+    color: var(--el-text-color-secondary);
+    
+    &:hover {
+      color: #4f46e5;
+      
+      .dark & {
+        color: #38bdf8;
+      }
+    }
+    
+    &.el-button--danger:hover {
+      color: #ef4444;
+    }
+  }
 }
 
 .kb-card:hover .kb-card-actions,
@@ -624,24 +718,10 @@ export default {
   opacity: 1;
 }
 
-.kb-action-btn {
-  padding: 4px;
-  font-size: 14px;
-  color: #718096;
-}
-
-.kb-action-btn:hover {
-  color: #3b82f6;
-}
-
-.kb-action-btn.danger:hover {
-  color: #ef4444;
-}
-
 /* 右侧内容主区 */
 .kb-main {
   flex: 1;
-  background: #f8fafc;
+  background: transparent;
   overflow-y: auto;
   position: relative;
   display: flex;
@@ -660,22 +740,31 @@ export default {
 
 .select-prompt-icon {
   font-size: 64px;
-  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
+  background: linear-gradient(135deg, #4f46e5 0%, #818cf8 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   margin-bottom: 24px;
+  filter: drop-shadow(0 4px 12px rgba(79, 70, 229, 0.15));
+
+  .dark & {
+    background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 15px rgba(56, 189, 248, 0.2));
+  }
 }
 
 .select-prompt h2 {
   font-size: 20px;
-  font-weight: 700;
-  color: #1e293b;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
   margin: 0 0 12px 0;
+  letter-spacing: 0.05em;
 }
 
 .select-prompt p {
-  font-size: 14px;
-  color: #64748b;
+  font-size: 13.5px;
+  color: var(--el-text-color-secondary);
   line-height: 1.6;
 }
 
@@ -684,20 +773,27 @@ export default {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 250px;
-  height: 250px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.1) 0%, rgba(255, 255, 255, 0) 70%);
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(79, 70, 229, 0.06) 0%, rgba(255, 255, 255, 0) 70%);
   z-index: -1;
-  filter: blur(20px);
+  filter: blur(25px);
+
+  .dark & {
+    background: radial-gradient(circle, rgba(56, 289, 248, 0.06) 0%, rgba(255, 255, 255, 0) 70%);
+  }
 }
 
 /* 知识库文档展示主区 */
 .kb-content {
   padding: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .kb-content-header {
-  margin-bottom: 24px;
+  margin-bottom: 4px;
 }
 
 .kb-detail-title {
@@ -710,31 +806,48 @@ export default {
 .kb-detail-title h2 {
   margin: 0;
   font-size: 22px;
-  font-weight: 700;
-  color: #0f172a;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
 }
 
 .kb-tag {
-  background-color: #f1f5f9;
-  border: none;
-  color: #475569;
+  background-color: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  color: var(--el-text-color-regular);
+  border-radius: 6px;
+  font-weight: bold;
+  height: 24px;
+  padding: 0 8px;
+
+  .dark & {
+    background-color: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
 }
 
 .kb-detail-desc {
   margin: 0;
-  font-size: 14px;
-  color: #64748b;
+  font-size: 13.5px;
+  color: var(--el-text-color-secondary);
   line-height: 1.6;
 }
 
 /* 上传板块设计 */
 .kb-upload-section {
-  background: #ffffff;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 22px;
   padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  margin-bottom: 24px;
-  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  transition: all 0.3s;
+
+  .dark & {
+    background: rgba(15, 23, 42, 0.45);
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .kb-uploader {
@@ -743,40 +856,69 @@ export default {
 
 :deep(.el-upload-dragger) {
   width: 100% !important;
-  height: 180px;
-  background: #f8fafc;
-  border: 1.5px dashed #cbd5e1;
-  border-radius: 8px;
+  height: 140px;
+  background: rgba(0, 0, 0, 0.01);
+  border: 1.5px dashed rgba(0, 0, 0, 0.1) !important;
+  border-radius: 14px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  padding: 0 20px;
+
+  .dark & {
+    background: rgba(255, 255, 255, 0.01);
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  &:hover {
+    border-color: #4f46e5 !important;
+    background: rgba(79, 70, 229, 0.02) !important;
+
+    .dark & {
+      border-color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.03) !important;
+    }
+  }
+
+  .el-icon--upload {
+    font-size: 40px;
+    color: var(--el-text-color-placeholder);
+    margin-bottom: 8px;
+    transition: color 0.3s;
+  }
+
+  &:hover .el-icon--upload {
+    color: #4f46e5;
+    .dark & { color: #38bdf8; }
+  }
+
+  .el-upload__text {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    font-weight: 600;
+
+    em {
+      color: #4f46e5;
+      font-style: normal;
+      font-weight: 700;
+      .dark & { color: #38bdf8; }
+    }
+  }
 }
 
-:deep(.el-upload-dragger:hover) {
-  border-color: #3b82f6;
-  background: #f0f7ff;
+:deep(.el-upload__tip) {
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+  margin-top: 8px;
+  text-align: center;
 }
 
-.kb-upload-icon {
-  font-size: 44px;
-  color: #94a3b8;
-  margin-bottom: 12px;
-  transition: color 0.3s ease;
-}
-
-:deep(.el-upload-dragger:hover) .kb-upload-icon {
-  color: #3b82f6;
-}
-
-/* 表格与文档列表 */
+/* 文档列表区 */
 .kb-docs-section {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  border: 1px solid #e2e8f0;
+  /* 基础继承自 .polaris-table-card */
+  transition: all 0.3s;
 }
 
 .docs-header {
@@ -784,18 +926,31 @@ export default {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 16px;
+  width: 100%;
 }
 
 .docs-header h4 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 700;
-  color: #1e293b;
+  font-size: 14.5px;
+  font-weight: 800;
+  color: var(--el-text-color-primary);
 }
 
 .btn-refresh {
-  color: #3b82f6;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f46e5 !important;
+  transition: all 0.2s;
+
+  &:hover {
+    color: #4338ca !important;
+    transform: scale(1.02);
+  }
+
+  .dark & {
+    color: #38bdf8 !important;
+    &:hover { color: #7dd3fc !important; }
+  }
 }
 
 .doc-name-cell {
@@ -806,34 +961,18 @@ export default {
 
 .doc-type-icon {
   font-size: 18px;
-  color: #64748b;
+  color: var(--el-text-color-secondary);
 }
 
 .status-tag {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 2px 8px;
   border: none;
-}
-
-.status-spin {
-  font-size: 12px;
-}
-
-.action-btn {
-  font-size: 16px;
-  padding: 4px;
-  color: #64748b;
-  margin: 0 6px;
-}
-
-.action-btn:hover {
-  color: #3b82f6;
-}
-
-.action-btn.danger:hover {
-  color: #ef4444;
 }
 
 /* 列表进入动画 */
@@ -845,21 +984,96 @@ export default {
   transform: translateX(-15px);
 }
 
-/* 弹窗设计 */
-:deep(.kb-dialog) {
-  border-radius: 12px;
-  overflow: hidden;
-}
-:deep(.kb-dialog .el-dialog__header) {
-  background: #f8fafc;
-  padding: 20px;
-  border-bottom: 1px solid #e2e8f0;
-}
-:deep(.kb-dialog .el-dialog__title) {
+/* 新建/编辑表单内 Label 精致排版与图标 */
+.form-label-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 700;
-  color: #1e293b;
+
+  .el-icon {
+    font-size: 14px;
+    color: #4f46e5;
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+    }
+  }
 }
-:deep(.kb-dialog .el-dialog__body) {
-  padding: 24px 30px;
+
+/* 弹窗内表单输入域聚焦发光增强 */
+:deep(.polaris-glass-dialog) {
+  .el-input__wrapper,
+  .el-textarea__inner {
+    border-radius: 10px !important;
+    background-color: var(--el-fill-color-blank) !important;
+    border: 1px solid var(--el-border-color-light) !important;
+    box-shadow: none !important;
+    transition: border-color 0.3s, box-shadow 0.3s !important;
+
+    &:focus,
+    &:focus-within {
+      border-color: #4f46e5 !important;
+      box-shadow: 0 0 8px rgba(79, 70, 229, 0.25) !important;
+
+      .dark &,
+      .theme-dark & {
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 10px rgba(56, 189, 248, 0.3) !important;
+      }
+    }
+  }
+  
+  .dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+  }
+}
+
+/* 表格内操作按钮样式补充，确保光暗兼容 */
+.op-btn-edit {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 0;
+  color: #4f46e5 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    color: #4338ca !important;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #38bdf8 !important;
+    &:hover {
+      color: #7dd3fc !important;
+    }
+  }
+}
+
+.op-btn-delete {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 0;
+  color: #ef4444 !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    color: #dc2626 !important;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #fca5a5 !important;
+    &:hover {
+      color: #f87171 !important;
+    }
+  }
 }
 </style>
