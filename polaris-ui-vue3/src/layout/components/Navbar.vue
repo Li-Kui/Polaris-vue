@@ -1,42 +1,39 @@
 <template>
   <div class="navbar" :class="['nav' + settingsStore.navType, `theme-${isDark ? 'dark' : 'light'}`]">
-    <!-- 左侧区域：面包屑和安全加密徽章 -->
+    <!-- 左侧区域：面包屑、搜索和安全加密徽章 -->
     <div class="header-left">
-      <hamburger id="hamburger-container" :is-active="appStore.sidebar.opened" class="hamburger-container" @toggleClick="toggleSideBar" v-if="settingsStore.navType != 3" />
+      <!-- 按照 Demo 隐藏顶栏折叠按钮 Hamburger -->
       <breadcrumb v-if="settingsStore.navType == 1" id="breadcrumb-container" class="breadcrumb-container" />
       <top-nav v-if="settingsStore.navType == 2" id="topmenu-container" class="topmenu-container" />
       
-      <!-- 🪐 极客 HUD 状态区 -->
-      <div class="header-hud hide-mobile" v-if="appStore.device !== 'mobile'">
-        <span class="hud-security-badge">
-          <span class="shield-icon">🛡️</span>
-          <span class="shield-text">安全通道已加密</span>
-        </span>
-      </div>
+      <!-- 搜索指令触发器移到左侧 -->
+      <header-search id="header-search" class="header-search-wrapper" />
     </div>
 
     <!-- 右侧区域 -->
     <div class="right-menu">
       <template v-if="appStore.device !== 'mobile'">
-        <header-search id="header-search" class="right-menu-item" />
+        <!-- 消息通知保留 -->
+        <header-notice id="header-notice" class="notice-menu-item" />
 
-        <screenfull id="screenfull" class="right-menu-item hover-effect" />
-
-        <!-- 主题切换 -->
-        <el-tooltip content="主题模式" effect="dark" placement="bottom">
-          <div class="right-menu-item hover-effect theme-switch-wrapper" @click="toggleTheme">
-            <svg-icon v-if="isDark" icon-class="sunny" class="theme-icon" />
-            <svg-icon v-if="!isDark" icon-class="moon" class="theme-icon" />
+        <!-- 🪐 极客极轨主题切换器 -->
+        <div class="header-theme-toggle">
+          <div class="mini-theme-track" @click="handleThemeToggleClick">
+            <div 
+              :class="['mini-opt', { active: !isDark }]" 
+              @click.stop="setTheme('light', $event)"
+            >
+              ☀️
+            </div>
+            <div 
+              :class="['mini-opt', { active: isDark }]" 
+              @click.stop="setTheme('dark', $event)"
+            >
+              🌙
+            </div>
+            <div :class="['mini-thumb', isDark ? 'dark' : 'light']"></div>
           </div>
-        </el-tooltip>
-
-        <el-tooltip content="布局大小" effect="dark" placement="bottom">
-          <size-select id="size-select" class="right-menu-item hover-effect" />
-        </el-tooltip>
-
-        <el-tooltip content="消息通知" effect="dark" placement="bottom">
-          <header-notice id="header-notice" class="right-menu-item hover-effect" />
-        </el-tooltip>
+        </div>
       </template>
 
       <!-- 用户下拉菜单，升级为圆角 modern dropdown -->
@@ -72,9 +69,6 @@ import {computed, nextTick} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import Breadcrumb from '@/components/Breadcrumb'
 import TopNav from './TopNav'
-import Hamburger from '@/components/Hamburger'
-import Screenfull from '@/components/Screenfull'
-import SizeSelect from '@/components/SizeSelect'
 import HeaderSearch from '@/components/HeaderSearch'
 import useAppStore from '@/store/modules/app'
 import useUserStore from '@/store/modules/user'
@@ -149,8 +143,7 @@ async function toggleTheme(event) {
 
   try {
     const transition = document.startViewTransition(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-      settingsStore.toggleTheme()
+      await settingsStore.toggleTheme()
       await nextTick()
     })
     await transition.ready
@@ -161,7 +154,7 @@ async function toggleTheme(event) {
       {
         clipPath: !wasDark ? [...clipPath].reverse() : clipPath
       }, {
-        duration: 650,
+        duration: 400,
         easing: "cubic-bezier(0.4, 0, 0.2, 1)",
         fill: "forwards",
         pseudoElement: !wasDark ? "::view-transition-old(root)" : "::view-transition-new(root)"
@@ -172,6 +165,17 @@ async function toggleTheme(event) {
     console.warn("View transition failed, falling back to immediate toggle:", error)
     settingsStore.toggleTheme()
   }
+}
+
+function setTheme(themeMode, event) {
+  const currentIsDark = isDark.value
+  if ((themeMode === 'dark' && !currentIsDark) || (themeMode === 'light' && currentIsDark)) {
+    toggleTheme(event)
+  }
+}
+
+function handleThemeToggleClick(event) {
+  toggleTheme(event)
 }
 </script>
 
@@ -245,8 +249,8 @@ async function toggleTheme(event) {
 }
 
 .navbar {
-  height: 50px;
-  overflow: hidden;
+  height: 64px;
+  overflow: visible;
   position: relative;
   display: flex;
   align-items: center;
@@ -258,15 +262,15 @@ async function toggleTheme(event) {
   transition: all 0.3s;
 
   &.theme-light {
-    background-color: rgba(255, 255, 255, 0.35);
+    background-color: rgba(255, 255, 255, 0.85);
     border-bottom-color: rgba(0, 0, 0, 0.03);
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.02);
   }
 
   &.theme-dark {
-    background-color: rgba(15, 23, 42, 0.25);
+    background-color: rgba(15, 23, 42, 0.85);
     border-bottom-color: rgba(255, 255, 255, 0.03);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
   }
 }
 
@@ -276,53 +280,19 @@ async function toggleTheme(event) {
   gap: 20px;
   height: 100%;
 
-  .hamburger-container {
-    height: 100%;
-    cursor: pointer;
-    transition: background 0.3s;
+  .header-search-wrapper {
     display: flex;
     align-items: center;
-    flex-shrink: 0;
-
-    &:hover {
-      background: rgba(0, 0, 0, 0.025);
-    }
   }
 }
 
-.header-hud {
-  display: flex;
-  align-items: center;
-}
 
-.hud-security-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 99px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(5px);
-  
-  .theme-light & {
-    background-color: rgba(16, 185, 129, 0.05);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.1);
-  }
-  .theme-dark & {
-    background-color: rgba(16, 185, 129, 0.08);
-    color: #10b981;
-    border: 1px solid rgba(16, 185, 129, 0.15);
-  }
-}
 
 .right-menu {
   height: 100%;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 20px;
 
   &:focus {
     outline: none;
@@ -349,16 +319,116 @@ async function toggleTheme(event) {
         }
       }
     }
+  }
 
-    &.theme-switch-wrapper {
-      .theme-icon {
-        font-size: 15px;
-        transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  .notice-menu-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    height: 32px;
+    width: 32px;
+    border-radius: 8px;
+    transition: background 0.3s;
+    
+    &:hover {
+      background: rgba(0, 0, 0, 0.035);
+      .theme-dark & {
+        background: rgba(255, 255, 255, 0.035);
+      }
+    }
+    
+    :deep(.notice-trigger) {
+      height: 100% !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 0 !important;
+      transform: none !important;
+      
+      .svg-icon {
+        width: 1.25em !important;
+        height: 1.25em !important;
+        color: #64748b;
         
-        &:hover {
-          transform: scale(1.15) rotate(15deg);
+        .theme-dark & {
+          color: #d0d0d0;
         }
       }
+    }
+  }
+
+  .header-theme-toggle {
+    display: flex;
+    align-items: center;
+  }
+
+  .mini-theme-track {
+    position: relative;
+    display: flex;
+    padding: 2px;
+    width: 72px;
+    height: 26px;
+    border-radius: 99px;
+    border: 1px solid;
+    cursor: pointer;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+    transition: all 0.3s;
+    box-sizing: border-box;
+    
+    .theme-light & {
+      background-color: rgba(0, 0, 0, 0.03);
+      border-color: rgba(0, 0, 0, 0.06);
+    }
+    
+    .theme-dark & {
+      background-color: rgba(0, 0, 0, 0.03);
+      border-color: rgba(255, 255, 255, 0.05);
+    }
+  }
+
+  .mini-opt {
+    flex: 1;
+    font-size: 11px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    user-select: none;
+    
+    &.active {
+      .theme-light & { color: #ffffff !important; }
+      .theme-dark & { color: #ffffff !important; }
+    }
+    
+    &:not(.active) {
+      opacity: 0.55;
+      &:hover { opacity: 0.85; }
+    }
+  }
+
+  .mini-thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    bottom: 1px;
+    width: 32px;
+    border-radius: 99px;
+    z-index: 1;
+    transition: transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.15);
+    
+    &.light {
+      transform: translateX(0);
+      background: linear-gradient(135deg, #4f46e5, #6366f1);
+      box-shadow: 0 1px 5px rgba(79, 70, 229, 0.3);
+    }
+    
+    &.dark {
+      transform: translateX(36px);
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      box-shadow: 0 1px 6px rgba(56, 189, 248, 0.4);
     }
   }
 
@@ -376,8 +446,8 @@ async function toggleTheme(event) {
   height: 100%;
 
   .user-avatar {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     object-fit: cover;
     border: 1px solid rgba(0, 0, 0, 0.05);
@@ -388,13 +458,13 @@ async function toggleTheme(event) {
   }
 
   .avatar-circle {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: bold;
     
     .theme-light & {
@@ -412,7 +482,7 @@ async function toggleTheme(event) {
     font-weight: 700;
     
     .theme-light & { color: #334155; }
-    .theme-dark & { color: #cbd5e1; }
+    .theme-dark & { color: #d0d0d0; }
   }
 }
 

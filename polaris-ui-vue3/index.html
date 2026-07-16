@@ -8,7 +8,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <link rel="icon" href="/favicon.ico">
   <title>%VITE_APP_TITLE%</title>
-  <!--[if lt IE 11]><script>window.location.href='/html/ie.html';</script><![endif]-->
+  <script>
+    (function () {
+      const localTheme = localStorage.getItem('vueuse-color-scheme') || 'auto';
+      const isDark = localTheme === 'auto'
+        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+        : localTheme === 'dark';
+      document.documentElement.classList.toggle('dark', isDark);
+      document.documentElement.classList.toggle('light', !isDark);
+    })();
+  </script>
   <style>
     html,
     body,
@@ -128,6 +137,30 @@
       background: linear-gradient(90deg, #38bdf8, #818cf8, #a855f7);
       border-radius: 99px;
       animation: progressLoading 2.2s infinite ease-in-out;
+    }
+
+    /* 🪐 极光星轨亮色模式自适应 */
+    html.light,
+    html.light body,
+    html.light #app {
+      background-color: #f8fafc;
+    }
+
+    html.light #loader-wrapper {
+      background: radial-gradient(circle at center, #ffffff 0%, #f1f5f9 100%);
+    }
+
+    html.light #loader-wrapper .subtitle-text {
+      color: rgba(15, 23, 42, 0.65);
+    }
+
+    html.light .progress-bar-indicator {
+      background: rgba(15, 23, 42, 0.08);
+    }
+
+    html.light .loader-star {
+      color: #0284c7;
+      text-shadow: 0 0 15px rgba(2, 132, 199, 0.35);
     }
 
     /* 动画关键帧 */

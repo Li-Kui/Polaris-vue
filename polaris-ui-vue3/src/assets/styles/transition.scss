@@ -51,6 +51,7 @@
 /* 黑暗模式下过渡效果 */
 ::view-transition-new(root), ::view-transition-old(root) {
   animation: none !important;
+  mix-blend-mode: normal !important;
   backface-visibility: hidden;
   position: fixed;
   top: 0;
@@ -60,21 +61,17 @@
 }
 
 .dark::view-transition-old(root) {
-  z-index: 2147483646;
-  background: var(--bg-color-dark); 
+  z-index: 9999;
 }
 
 .dark::view-transition-new(root) {
   z-index: 1;
-  background: var(--bg-color);
 }
 
 ::view-transition-old(root) {
   z-index: 1;
-  background: var(--bg-color);
 }
 
 ::view-transition-new(root) {
-  z-index: 2147483646;
-  background: var(--bg-color-dark);
+  z-index: 9999;
 }

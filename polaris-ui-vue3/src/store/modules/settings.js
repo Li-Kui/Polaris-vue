@@ -1,3 +1,4 @@
+import {nextTick} from 'vue'
 import defaultSettings from '@/settings'
 import {useDark, useToggle} from '@vueuse/core'
 import {useDynamicTitle} from '@/utils/dynamicTitle'
@@ -27,9 +28,11 @@ const useSettingsStore = defineStore(
       sidebarLogo: storageSetting.sidebarLogo === undefined ? sidebarLogo : storageSetting.sidebarLogo,
       dynamicTitle: storageSetting.dynamicTitle === undefined ? dynamicTitle : storageSetting.dynamicTitle,
       footerVisible: storageSetting.footerVisible === undefined ? footerVisible : storageSetting.footerVisible,
-      footerContent: footerContent,
-      isDark: isDark.value
+      footerContent: footerContent
     }),
+    getters: {
+      isDark: () => isDark.value
+    },
     actions: {
       // 修改布局设置
       changeSetting(data) {
@@ -44,12 +47,10 @@ const useSettingsStore = defineStore(
         useDynamicTitle()
       },
       // 切换暗黑模式
-      toggleTheme() {
-        this.isDark = !this.isDark
+      async toggleTheme() {
         toggleDark()
-        nextTick(() => {
-          handleThemeStyle(this.theme)
-        })
+        await nextTick()
+        handleThemeStyle(this.theme)
       }
     }
   })

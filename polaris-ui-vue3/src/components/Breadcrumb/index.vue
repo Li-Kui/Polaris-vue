@@ -2,8 +2,12 @@
   <el-breadcrumb class="app-breadcrumb" separator="/">
     <transition-group name="breadcrumb">
       <el-breadcrumb-item v-for="(item, index) in levelList" :key="item.path">
-        <span v-if="item.redirect === 'noRedirect' || index == levelList.length - 1" class="no-redirect">{{ item.meta.title }}</span>
-        <a v-else @click.prevent="handleLink(item)">{{ item.meta.title }}</a>
+        <span v-if="item.redirect === 'noRedirect' || index == levelList.length - 1" class="no-redirect" :class="{ 'bc-current': index > 0, 'bc-parent': index === 0 }">
+          {{ index === 0 ? 'SYSTEM' : item.meta.title }}
+        </span>
+        <a v-else @click.prevent="handleLink(item)" :class="{ 'bc-current': index > 0, 'bc-parent': index === 0 }">
+          {{ index === 0 ? 'SYSTEM' : item.meta.title }}
+        </a>
       </el-breadcrumb-item>
     </transition-group>
   </el-breadcrumb>
@@ -86,12 +90,49 @@ getBreadcrumb()
 <style lang='scss' scoped>
 .app-breadcrumb.el-breadcrumb {
   display: inline-block;
-  font-size: 14px;
-  line-height: 50px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 64px;
 
-  .no-redirect {
-    color: #97a8be;
-    cursor: text;
+  :deep(.el-breadcrumb__inner) {
+    font-weight: 700 !important;
+    
+    a, .no-redirect {
+      font-weight: 700 !important;
+    }
+  }
+
+  :deep(.el-breadcrumb__separator) {
+    color: #64748b !important;
+    opacity: 0.5;
+    font-weight: bold;
+    margin: 0 8px;
+  }
+
+  :deep(.bc-parent) {
+    color: #64748b !important;
+    cursor: pointer;
+    
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+
+  :deep(.bc-current) {
+    transition: color 0.2s;
+
+    html:not(.dark) & {
+      color: #4f46e5 !important;
+    }
+    
+    .dark & {
+      color: #38bdf8 !important;
+    }
+
+    &:hover {
+      opacity: 0.8;
+    }
   }
 }
 </style>

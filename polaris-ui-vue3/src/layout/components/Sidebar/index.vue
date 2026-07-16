@@ -453,7 +453,7 @@ nextTick(() => {
     white-space: nowrap;
     
     .theme-light & { color: #0f172a; }
-    .theme-dark & { color: #f8fafc; }
+    .theme-dark & { color: #ffffff; }
   }
 }
 
@@ -532,7 +532,7 @@ nextTick(() => {
     pointer-events: none;
     
     .theme-light & { background-color: rgba(0, 0, 0, 0.05); }
-    .theme-dark & { background-color: rgba(255, 255, 255, 0.05); }
+    .theme-dark & { background-color: rgba(255, 255, 255, 0.08); }
   }
 }
 
@@ -571,7 +571,7 @@ nextTick(() => {
     white-space: nowrap;
     
     .theme-light & { color: #475569; }
-    .theme-dark & { color: #94a3b8; }
+    .theme-dark & { color: #d0d0d0; }
   }
 
   .menu-arrow {
@@ -769,7 +769,7 @@ nextTick(() => {
     color: #475569;
   }
   .theme-dark & {
-    color: #94a3b8;
+    color: #d0d0d0;
   }
 }
 

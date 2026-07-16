@@ -1,9 +1,9 @@
 <template>
   <el-drawer v-model="showSettings" :withHeader="false" :lock-scroll="false" direction="rtl" size="300px">
-    <div class="setting-drawer-title">
+    <div class="setting-drawer-title" v-if="false">
       <h3 class="drawer-title">菜单导航设置</h3>
     </div>
-    <div class="nav-wrap">
+    <div class="nav-wrap" v-if="false">
       <el-tooltip content="左侧菜单" placement="bottom">
         <div class="item left" @click="handleNavType(1)" :class="{ activeItem: navType == 1 }">
           <b></b><b></b>
@@ -21,10 +21,10 @@
         </div>
       </el-tooltip>
     </div>
-    <div class="setting-drawer-title">
+    <div class="setting-drawer-title" v-if="false">
       <h3 class="drawer-title">主题风格设置</h3>
     </div>
-    <div class="setting-drawer-block-checbox">
+    <div class="setting-drawer-block-checbox" v-if="false">
       <div class="setting-drawer-block-checbox-item" @click="handleTheme('theme-dark')">
         <img src="@/assets/images/dark.svg" alt="dark" />
         <div v-if="sideTheme === 'theme-dark'" class="setting-drawer-block-checbox-selectIcon" style="display: block;">
@@ -46,7 +46,7 @@
         </div>
       </div>
     </div>
-    <div class="drawer-item">
+    <div class="drawer-item" v-if="false">
       <span>主题颜色</span>
       <span class="comp-style">
         <el-color-picker v-model="theme" :predefine="predefineColors" @change="themeChange"/>

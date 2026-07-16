@@ -157,7 +157,7 @@ function setLayout() {
   --polaris-brand-hover: rgba(79, 70, 229, 0.06);
 
   &.theme-dark {
-    // 深空暗色设计系统配置
+    // 深空暗色设计系统配置 - 匹配 Demo 高级配色
     --polaris-bg: #080a10;
     --polaris-card-bg: rgba(10, 15, 30, 0.55);
     --polaris-card-border: rgba(255, 255, 255, 0.05);
@@ -181,6 +181,11 @@ function setLayout() {
   overflow: hidden;
   z-index: 1;
   pointer-events: none;
+
+  // 暗黑模式下隐藏弥散渐变，避免颜色透出
+  .theme-dark & {
+    display: none;
+  }
 }
 
 .neural-network-svg {

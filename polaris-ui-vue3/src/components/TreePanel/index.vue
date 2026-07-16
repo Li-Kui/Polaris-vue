@@ -548,119 +548,175 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss" scoped>
+/* ==========================================================================
+   TreePanel 北辰 Polaris 设计系统样式 (参照 Demo AdminSidebar 风格)
+   ========================================================================== */
+
 .tree-sidebar {
   flex-shrink: 0;
   width: 220px;
-  background: #fff;
-  border-right: 1px solid #e8eaed;
+  backdrop-filter: blur(30px);
+  background: rgba(255, 255, 255, 0.7);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   position: relative;
   transition: width 0.25s ease;
-  
+  margin: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.02);
+  height: 100%;
+
   &.collapsed {
     width: 42px;
+    border-radius: 18px;
   }
-  
+
   &.resizing {
     transition: none;
     will-change: width;
-    
+
     * {
       pointer-events: none !important;
     }
   }
-  
+
   &.no-initial-transition {
     transition: none;
   }
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.45);
+    border-color: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  }
 }
 
+/* ===== 静态精致拖拽手柄边界线 ===== */
 .resize-handle {
   position: absolute;
   top: 0;
   right: 0;
-  width: 6px;
+  width: 2px;
   height: 100%;
   cursor: col-resize;
   z-index: 20;
-  background: transparent;
-  transition: background 0.2s;
-  
+  background: rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+
   &:hover {
-    background: rgba(64, 158, 255, 0.3);
+    width: 4px;
+    background: rgba(79, 70, 229, 0.3) !important;
+    box-shadow: 0 0 6px rgba(79, 70, 229, 0.4);
   }
-  
+
   &.active {
-    background: rgba(64, 158, 255, 0.5);
+    width: 4px;
+    background: rgba(79, 70, 229, 0.5) !important;
+    box-shadow: 0 0 8px rgba(79, 70, 229, 0.6);
   }
 }
 
+/* ===== 折叠按钮 ===== */
 .collapse-button-container {
   position: absolute;
   top: 50%;
-  right: 0;
+  right: -8px;
   transform: translateY(-50%);
   z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 20px;
-  background: #fff;
-  border-radius: 0 4px 4px 0;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  width: 16px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 0 8px 8px 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
   transition: all 0.2s ease;
-  
+
   .tree-sidebar.collapsed & {
-    right: 0;
-    background: #f7f8fa;
-    border-radius: 0 4px 4px 0;
+    right: -8px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 0 8px 8px 0;
   }
-  
+
   .tree-sidebar.resizing & {
     pointer-events: none;
+  }
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.95);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.3);
+    
+    .collapse-button {
+      color: #94a3b8;
+    }
   }
 }
 
 .collapse-button {
   font-size: 20px;
-  color: #909399;
+  color: #94a3b8;
   cursor: pointer;
   padding: 4px;
   border-radius: 4px;
   transition: all 0.2s;
-  
+
   &:hover {
-    color: #409eff;
-    background: #ecf5ff;
+    color: #4f46e5;
+    background: rgba(79, 70, 229, 0.06);
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+    }
   }
 }
 
+/* ===== 头部 ===== */
 .tree-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
-  height: 40px;
-  border-bottom: 1px solid #e8eaed;
-  background: #f7f8fa;
+  padding: 0 14px;
+  height: 44px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  background: transparent;
   flex-shrink: 0;
+
+  .dark &,
+  .theme-dark & {
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+  }
 
   .tree-title {
     font-size: 13px;
-    font-weight: 600;
-    color: #303133;
+    font-weight: 800;
+    color: #0f172a;
     white-space: nowrap;
     overflow: hidden;
     display: flex;
     align-items: center;
     gap: 5px;
+    letter-spacing: 0.02em;
+    
+    .dark &,
+    .theme-dark & {
+      color: #f8fafc;
+    }
 
     .el-icon {
-      color: #409eff;
+      color: #4f46e5;
       font-size: 16px;
+      
+      .dark &,
+      .theme-dark & {
+        color: #38bdf8;
+      }
     }
   }
 
@@ -674,28 +730,75 @@ onBeforeUnmount(() => {
 
 .tree-action-icon {
   font-size: 20px;
-  color: #909399;
+  color: #94a3b8;
   cursor: pointer;
   padding: 4px;
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: 6px;
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
 
   &:hover {
-    color: #409eff;
-    background: #ecf5ff;
+    color: #4f46e5;
+    background: rgba(79, 70, 229, 0.06);
+    transform: scale(1.05);
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+    }
   }
 }
 
+/* ===== 搜索框 ===== */
 .tree-search {
-  padding: 10px 10px 4px;
+  padding: 10px 12px 4px;
   flex-shrink: 0;
+
+  :deep(.el-input__wrapper) {
+    border-radius: 10px !important;
+    background-color: rgba(255, 255, 255, 0.8) !important;
+    border: 1px solid rgba(0, 0, 0, 0.06) !important;
+    box-shadow: none !important;
+    transition: border-color 0.3s;
+
+    &:hover,
+    &.is-focus {
+      border-color: rgba(79, 70, 229, 0.35) !important;
+    }
+    
+    .dark &,
+    .theme-dark & {
+      background-color: rgba(0, 0, 0, 0.35) !important;
+      border-color: rgba(255, 255, 255, 0.08) !important;
+      
+      &:hover,
+      &.is-focus {
+        border-color: rgba(56, 189, 248, 0.4) !important;
+      }
+    }
+  }
+
+  :deep(.el-input__inner) {
+    font-size: 12px;
+    color: #334155;
+    
+    .dark &,
+    .theme-dark & {
+      color: #cbd5e1;
+    }
+  }
+
+  :deep(.el-input__prefix) {
+    color: #94a3b8;
+  }
 }
 
+/* ===== 树节点区域 ===== */
 .tree-wrap {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 6px 12px;
-  
+  padding: 6px 8px 12px;
+
   .tree-sidebar.resizing & {
     overflow: hidden;
   }
@@ -705,35 +808,65 @@ onBeforeUnmount(() => {
   }
 
   &::-webkit-scrollbar-thumb {
-    background: #dcdfe6;
+    background: rgba(79, 70, 229, 0.15);
     border-radius: 4px;
-    
+
     &:hover {
-      background: #c0c4cc;
+      background: rgba(79, 70, 229, 0.25);
+    }
+    
+    .dark &,
+    .theme-dark & {
+      background: rgba(56, 189, 248, 0.15);
+      
+      &:hover {
+        background: rgba(56, 189, 248, 0.25);
+      }
     }
   }
 
   :deep(.el-tree-node__content) {
     height: 32px;
-    border-radius: 4px;
+    border-radius: 8px;
     margin-bottom: 1px;
+    transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
 
     &:hover {
-      background: #f0f7ff;
+      background: rgba(79, 70, 229, 0.04);
+      transform: translateX(2px);
+      
+      .dark &,
+      .theme-dark & {
+        background: rgba(56, 189, 248, 0.04);
+      }
     }
   }
 
   :deep(.el-tree-node.is-current > .el-tree-node__content) {
-    background: #e6f0fd;
-    color: #409eff;
+    background: rgba(79, 70, 229, 0.06);
+    color: #4f46e5;
     font-weight: 600;
+    box-shadow: inset 3px 0 0 0 #4f46e5;
+    
+    .dark &,
+    .theme-dark & {
+      background: rgba(56, 189, 248, 0.06);
+      color: #38bdf8;
+      box-shadow: inset 3px 0 0 0 #38bdf8;
+    }
 
     .node-icon {
-      color: #409eff !important;
+      color: #4f46e5 !important;
+      
+      .dark &,
+      .theme-dark & {
+        color: #38bdf8 !important;
+      }
     }
   }
 }
 
+/* ===== 树节点 ===== */
 .tree-node {
   display: flex;
   align-items: center;
@@ -743,14 +876,54 @@ onBeforeUnmount(() => {
 
   .node-icon {
     font-size: 14px;
-    color: #f5a623;
+    color: #4f46e5;
     flex-shrink: 0;
+    transition: transform 0.2s;
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+    }
   }
 
   .node-label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: #475569;
+    
+    .dark &,
+    .theme-dark & {
+      color: #cbd5e1;
+    }
+  }
+}
+
+/* 节点 hover 时图标微动 */
+:deep(.el-tree-node__content:hover) {
+  .node-icon {
+    transform: scale(1.1);
+  }
+  .node-label {
+    color: #4f46e5;
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+    }
+  }
+}
+
+/* 选中节点文字色 */
+:deep(.el-tree-node.is-current > .el-tree-node__content) {
+  .node-label {
+    color: #4f46e5;
+    
+    .dark &,
+    .theme-dark & {
+      color: #38bdf8;
+    }
   }
 }
 </style>
+

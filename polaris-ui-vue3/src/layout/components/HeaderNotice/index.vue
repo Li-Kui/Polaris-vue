@@ -126,59 +126,143 @@ function markAllRead() {
     pointer-events: none;
   }
 }
-.notice-popover { padding: 0 !important; }
-.notice-popover .notice-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  background: #f7f9fb;
-  border-bottom: 1px solid #eee;
-  font-size: 13px;
-  font-weight: 600;
-  color: #333;
-}
-.notice-popover .notice-mark-all {
-  font-size: 12px;
-  color: var(--el-color-primary);
-  font-weight: normal;
-  cursor: pointer;
-}
-.notice-popover .notice-mark-all:hover { color: #2b7cc1; }
-.notice-popover .notice-loading,
-.notice-popover .notice-empty {
-  padding: 24px;
-  text-align: center;
-  color: #bbb;
-  font-size: 12px;
-  line-height: 1.8;
-}
-.notice-popover .notice-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid #f5f5f5;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.notice-popover .notice-item:last-child { border-bottom: none; }
-.notice-popover .notice-item:hover { background: #f7f9fb; }
-.notice-popover .notice-item.is-read .notice-tag,
-.notice-popover .notice-item.is-read .notice-item-title,
-.notice-popover .notice-item.is-read .notice-item-date { opacity: 0.45; filter: grayscale(1); color: #999; }
-.notice-popover .notice-tag { flex-shrink: 0; }
-.notice-popover .notice-item-title {
-  flex: 1;
-  font-size: 12px;
-  color: #333;
+</style>
+
+<style lang="scss">
+/* 全局覆盖消息通知 Popover 样式，实现高级毛玻璃与亮暗色兼容 */
+.el-popover.notice-popover {
+  background: rgba(15, 23, 42, 0.65) !important;
+  backdrop-filter: blur(40px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 16px !important;
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.35) !important;
+  padding: 0 !important;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.notice-popover .notice-item-date {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: #bbb;
+  
+  html:not(.dark) & {
+    background: rgba(255, 255, 255, 0.75) !important;
+    border-color: rgba(79, 70, 229, 0.15) !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08) !important;
+  }
+
+  /* 头部区域 */
+  .notice-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: transparent !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    
+    html:not(.dark) & {
+      border-bottom-color: rgba(0, 0, 0, 0.05);
+    }
+    
+    .notice-title {
+      font-size: 13px;
+      font-weight: 700;
+      
+      html:not(.dark) & { color: #1e293b; }
+      .dark & { color: #f8fafc; }
+    }
+    
+    .notice-mark-all {
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      
+      html:not(.dark) & {
+        color: #4f46e5;
+      }
+      .dark & {
+        color: #38bdf8;
+      }
+      
+      &:hover {
+        opacity: 0.8;
+      }
+    }
+  }
+
+  /* 列表项 */
+  .notice-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    background: transparent;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    box-sizing: border-box;
+    
+    html:not(.dark) & {
+      border-bottom-color: rgba(0, 0, 0, 0.03);
+    }
+    
+    &:last-child {
+      border-bottom: none;
+    }
+    
+    &:hover {
+      transform: translateX(2px);
+      
+      html:not(.dark) & {
+        background: rgba(79, 70, 229, 0.04) !important;
+      }
+      .dark & {
+        background: rgba(56, 189, 248, 0.05) !important;
+      }
+    }
+    
+    .notice-item-title {
+      flex: 1;
+      font-size: 12px;
+      font-weight: 600;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      
+      html:not(.dark) & { color: #334155; }
+      .dark & { color: #cbd5e1; }
+    }
+    
+    .notice-item-date {
+      flex-shrink: 0;
+      font-size: 10.5px;
+      
+      html:not(.dark) & { color: #64748b; }
+      .dark & { color: #94a3b8; }
+    }
+
+    /* 已读状态微调 */
+    &.is-read {
+      opacity: 0.5;
+      
+      .notice-item-title, .notice-item-date {
+        color: #999 !important;
+      }
+    }
+  }
+
+  /* 空状态与加载中 */
+  .notice-loading,
+  .notice-empty {
+    padding: 30px 24px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    
+    html:not(.dark) & { color: #64748b; }
+    .dark & { color: #94a3b8; }
+    
+    .el-icon {
+      font-size: 26px;
+      display: block;
+      margin: 0 auto 8px;
+      opacity: 0.7;
+    }
+  }
 }
 </style>

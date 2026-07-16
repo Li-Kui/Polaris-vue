@@ -1,5 +1,5 @@
 <template>
-  <div class="lock-container">
+  <div class="lock-container" :class="isDark ? 'theme-dark' : 'theme-light'">
     <!-- 动态粒子背景 -->
     <canvas ref="particleCanvas" class="particle-bg"></canvas>
 
@@ -34,15 +34,20 @@
 </template>
 
 <script setup>
+import {computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue'
 import {useRouter} from 'vue-router'
 import useUserStore from '@/store/modules/user'
 import useLockStore from '@/store/modules/lock'
+import useSettingsStore from '@/store/modules/settings'
 import {unlockScreen} from '@/api/login'
 import defAva from '@/assets/images/profile.jpg'
 
 const router = useRouter()
 const userStore = useUserStore()
 const lockStore = useLockStore()
+const settingsStore = useSettingsStore()
+
+const isDark = computed(() => settingsStore.isDark)
 
 const password = ref('')
 const loading = ref(false)
@@ -130,10 +135,15 @@ const initParticles = () => {
 
   const draw = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+    
+    // 根据当前模式自适应粒子的颜色与线条透明度
+    const colorRGB = isDark.value ? '255,255,255' : '79,70,229'
+    const lineAlphaBase = isDark.value ? 0.15 : 0.22
+
     particles.forEach(p => {
       ctx.beginPath()
       ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
-      ctx.fillStyle = `rgba(255,255,255,${p.alpha})`
+      ctx.fillStyle = `rgba(${colorRGB},${p.alpha})`
       ctx.fill()
       p.x += p.dx
       p.y += p.dy
@@ -148,7 +158,7 @@ const initParticles = () => {
           ctx.beginPath()
           ctx.moveTo(a.x, a.y)
           ctx.lineTo(b.x, b.y)
-          ctx.strokeStyle = `rgba(255,255,255,${0.15 * (1 - dist / 120)})`
+          ctx.strokeStyle = `rgba(${colorRGB},${lineAlphaBase * (1 - dist / 120)})`
           ctx.lineWidth = 0.5
           ctx.stroke()
         }
@@ -172,11 +182,9 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 样式与原文件完全一致，无需改动 */
 .lock-container {
   position: fixed;
   inset: 0;
-  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -197,9 +205,7 @@ onBeforeUnmount(() => {
   z-index: 1;
   font-size: 72px;
   font-weight: 200;
-  color: #fff;
   letter-spacing: 4px;
-  text-shadow: 0 0 40px rgba(255,255,255,0.3);
   margin-bottom: 8px;
   font-variant-numeric: tabular-nums;
 }
@@ -208,7 +214,6 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 1;
   font-size: 15px;
-  color: rgba(255,255,255,0.6);
   margin-bottom: 48px;
   letter-spacing: 2px;
 }
@@ -216,17 +221,14 @@ onBeforeUnmount(() => {
 .lock-card {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 24px;
   padding: 40px 48px;
   width: 360px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  box-shadow: 0 25px 60px rgba(0,0,0,0.4);
 }
 
 .avatar-wrap {
@@ -238,7 +240,6 @@ onBeforeUnmount(() => {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  border: 3px solid rgba(255,255,255,0.3);
   object-fit: cover;
   display: block;
 }
@@ -247,7 +248,6 @@ onBeforeUnmount(() => {
   position: absolute;
   bottom: -4px;
   right: -4px;
-  background: rgba(255,255,255,0.15);
   border-radius: 50%;
   width: 26px;
   height: 26px;
@@ -259,7 +259,6 @@ onBeforeUnmount(() => {
 }
 
 .lock-username {
-  color: #fff;
   font-size: 18px;
   font-weight: 600;
   margin-bottom: 6px;
@@ -267,7 +266,6 @@ onBeforeUnmount(() => {
 }
 
 .lock-hint {
-  color: rgba(255,255,255,0.5);
   font-size: 13px;
   margin-bottom: 28px;
 }
@@ -276,16 +274,9 @@ onBeforeUnmount(() => {
   width: 100%;
   display: flex;
   align-items: center;
-  background: rgba(255,255,255,0.1);
-  border: 1px solid rgba(255,255,255,0.2);
   border-radius: 50px;
   padding: 4px 4px 4px 20px;
-  transition: border-color 0.3s;
-}
-
-.input-wrap:focus-within {
-  border-color: rgba(255,255,255,0.6);
-  background: rgba(255,255,255,0.13);
+  transition: border-color 0.3s, background-color 0.3s;
 }
 
 .input-wrap.shake {
@@ -305,20 +296,14 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
   font-size: 15px;
   padding: 10px 0;
-}
-
-.lock-input::placeholder {
-  color: rgba(255,255,255,0.35);
 }
 
 .unlock-btn {
   width: 42px;
   height: 42px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #764ba2);
   border: none;
   color: #fff;
   font-size: 18px;
@@ -362,13 +347,114 @@ onBeforeUnmount(() => {
 }
 
 .lock-footer a {
-  color: rgba(255,255,255,0.4);
   font-size: 13px;
   text-decoration: none;
   transition: color 0.2s;
 }
 
-.lock-footer a:hover {
+/* ================== 暗色模式样式 ================== */
+.lock-container.theme-dark {
+  background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+}
+.theme-dark .lock-time {
+  color: #fff;
+  text-shadow: 0 0 40px rgba(255,255,255,0.3);
+}
+.theme-dark .lock-date {
+  color: rgba(255,255,255,0.6);
+}
+.theme-dark .lock-card {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4);
+}
+.theme-dark .lock-avatar {
+  border: 3px solid rgba(255,255,255,0.3);
+}
+.theme-dark .lock-icon {
+  background: rgba(255,255,255,0.15);
+}
+.theme-dark .lock-username {
+  color: #fff;
+}
+.theme-dark .lock-hint {
+  color: rgba(255,255,255,0.5);
+}
+.theme-dark .input-wrap {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+}
+.theme-dark .input-wrap:focus-within {
+  border-color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.13);
+}
+.theme-dark .lock-input {
+  color: #fff;
+}
+.theme-dark .lock-input::placeholder {
+  color: rgba(255,255,255,0.35);
+}
+.theme-dark .unlock-btn {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+}
+.theme-dark .lock-footer a {
+  color: rgba(255,255,255,0.4);
+}
+.theme-dark .lock-footer a:hover {
   color: rgba(255,255,255,0.8);
+}
+
+/* ================== 亮色模式样式 ================== */
+.lock-container.theme-light {
+  background: linear-gradient(135deg, #f3f4f6, #e0e7ff, #f3e8ff);
+}
+.theme-light .lock-time {
+  color: #0f172a;
+  text-shadow: 0 0 40px rgba(15, 23, 42, 0.08);
+}
+.theme-light .lock-date {
+  color: rgba(15, 23, 42, 0.6);
+}
+.theme-light .lock-card {
+  background: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 25px 60px rgba(15, 23, 42, 0.1);
+}
+.theme-light .lock-avatar {
+  border: 3px solid rgba(15, 23, 42, 0.1);
+}
+.theme-light .lock-icon {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+.theme-light .lock-username {
+  color: #0f172a;
+}
+.theme-light .lock-hint {
+  color: rgba(15, 23, 42, 0.5);
+}
+.theme-light .input-wrap {
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+.theme-light .input-wrap:focus-within {
+  border-color: rgba(79, 70, 229, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+}
+.theme-light .lock-input {
+  color: #0f172a;
+}
+.theme-light .lock-input::placeholder {
+  color: rgba(15, 23, 42, 0.38);
+}
+.theme-light .unlock-btn {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+.theme-light .lock-footer a {
+  color: rgba(15, 23, 42, 0.55);
+}
+.theme-light .lock-footer a:hover {
+  color: #4f46e5;
 }
 </style>
