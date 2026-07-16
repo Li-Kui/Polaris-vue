@@ -1,112 +1,216 @@
 <template>
-  <div class="app-container ai-workflow-manager">
-    <!-- 1. 工作流配置列表模式 -->
-    <div v-if="viewMode === 'list'">
-      <!-- 顶部高效筛选栏 -->
-      <div class="filter-container">
-        <el-form :model="queryParams" ref="queryForm" :inline="true" class="demo-form-inline">
-          <el-form-item label="工作流编码">
-            <el-input v-model="queryParams.workflowCode" placeholder="请输入编码" clearable @keyup.enter="handleQuery" style="width: 180px;"/>
-          </el-form-item>
-          <el-form-item label="工作流名称">
-            <el-input v-model="queryParams.workflowName" placeholder="请输入名称" clearable @keyup.enter="handleQuery" style="width: 180px;"/>
-          </el-form-item>
-          <el-form-item label="状态">
-            <el-select v-model="queryParams.status" placeholder="请选择" clearable style="width: 120px;">
-              <el-option label="正常" value="1"/>
-              <el-option label="禁用" value="0"/>
-            </el-select>
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-            <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-            <el-button class="btn-primary-glow" icon="Plus" type="primary" @click="handleAdd">新增工作流</el-button>
-          </el-form-item>
-        </el-form>
-      </div>
-
-      <!-- 卡片式工作流总览列表 -->
-      <div v-loading="loading" class="card-list-container">
-        <div v-if="workflowList.length === 0" class="empty-state">
-          <div class="empty-icon">⚙️</div>
-          <p style="color: var(--el-text-color-primary) !important; font-weight: 600;">暂无工作流编排，点击上方“新增工作流”按钮开始设计您的 AI 智能体工作流吧！</p>
+  <div class="app-container no-sidebar-manage-wrap">
+    <div class="content-inner">
+      <!-- 1. 顶部高效筛选与操作栏 (完全恢复系统公共原装样式) -->
+      <div v-if="viewMode !== 'edit'" class="polaris-filter-card">
+          <el-form :model="queryParams" ref="queryForm" :inline="true" class="polaris-filter-form">
+            <el-form-item label="工作流编码">
+              <el-input v-model="queryParams.workflowCode" placeholder="请输入编码" clearable @keyup.enter="handleQuery" style="width: 180px;"/>
+            </el-form-item>
+            <el-form-item label="工作流名称">
+              <el-input v-model="queryParams.workflowName" placeholder="请输入名称" clearable @keyup.enter="handleQuery" style="width: 180px;"/>
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="queryParams.status" placeholder="请选择" clearable style="width: 120px;">
+                <el-option label="正常" value="1"/>
+                <el-option label="禁用" value="0"/>
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" icon="Search" @click="handleQuery" class="polaris-query-btn">搜索</el-button>
+              <el-button icon="Refresh" @click="resetQuery" class="polaris-reset-btn">重置</el-button>
+            </el-form-item>
+          </el-form>
         </div>
 
-        <el-row v-else :gutter="20">
-          <el-col v-for="item in workflowList" :key="item.id" :lg="12" :md="12" :sm="24" :xs="24" class="card-col">
-            <div :class="['workflow-card', { 'is-disabled': item.status === '0' }]">
-              <!-- 卡片头：发光管线图标与状态 -->
-              <div class="card-header">
-                <div class="workflow-avatar">
-                  <el-icon><operation /></el-icon>
-                </div>
-                <div class="header-info">
-                  <h3 class="workflow-title-text">{{ item.workflowName }}</h3>
-                  <span class="workflow-code-tag">{{ item.workflowCode }}</span>
-                </div>
-                <div class="status-switch">
-                  <el-switch
-                    v-model="item.status"
-                    active-value="1"
-                    inactive-value="0"
-                    @change="handleStatusChange(item)"
-                  />
-                </div>
+
+        <transition name="view-mode-fade" mode="out-in">
+          <!-- 🧠 三维北辰星图卡片视图 -->
+          <div v-if="viewMode === 'card'" key="card-view" class="synapse-card-grid-wrapper polaris-table-card">
+            <!-- 共享操作行：新增工作流与视图切换器 (错落有致) -->
+            <div class="matrix-actions-bar" style="margin-top: 0; width: 100%;">
+              <div class="actions-left">
+                <el-button type="primary" class="action-btn-primary" icon="Plus" @click="handleAdd">
+                  新增工作流
+                </el-button>
               </div>
-
-              <!-- 卡片主体：描述与节点管线可视化 -->
-              <div class="card-body">
-                <div class="desc-box">
-                  <p class="desc-text">{{ item.description || '暂无描述' }}</p>
-                </div>
-
-                <!-- 只读迷你拓扑图（真实展示分支结构） -->
-                <div class="mini-graph-visualization">
-                  <span class="pipeline-label">执行流向：</span>
-                  <div class="mini-graph-canvas" v-if="item._miniGraph">
-                    <svg :width="item._miniGraph.width" :height="item._miniGraph.height" class="mini-graph-svg">
-                      <g v-for="(e, ei) in item._miniGraph.edges" :key="'e'+ei">
-                        <path
-                          :d="`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1+e.y2)/2}, ${e.x2} ${(e.y1+e.y2)/2}, ${e.x2} ${e.y2}`"
-                          fill="none"
-                          :stroke="e.cond ? '#f59e0b' : '#a5b4fc'"
-                          :stroke-width="e.cond ? 2 : 1.5"
-                          :stroke-dasharray="e.cond ? '4 3' : '0'"
-                        />
-                      </g>
-                      <g v-for="(n, ni) in item._miniGraph.nodes" :key="'n'+ni">
-                        <rect
-                          :x="n.x - item._miniGraph.nodeW/2" :y="n.y - item._miniGraph.nodeH/2"
-                          :width="item._miniGraph.nodeW" :height="item._miniGraph.nodeH"
-                          :rx="n.type === 'term' ? 12 : 5"
-                          :class="['mini-node', 'mini-node-' + n.type]"
-                        />
-                        <text :x="n.x" :y="n.y + 3" text-anchor="middle"
-                              :class="['mini-node-text', (n.type === 'term' || n.type === 'classifier') ? 'mini-node-text-light' : '']">
-                          {{ n.name.length > 6 ? n.name.slice(0,6) + '…' : n.name }}
-                        </text>
-                      </g>
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 卡片页脚：时间与操作 -->
-              <div class="card-footer">
-                <span class="create-time-text"><el-icon><clock /></el-icon> {{ formatDate(item.createTime) }}</span>
-                <div class="action-buttons">
-                  <el-button class="footer-action-btn edit" icon="Edit" link size="small" @click="handleUpdate(item)">编辑编排</el-button>
-                  <el-button class="footer-action-btn delete" icon="Delete" link size="small" @click="handleDelete(item)">删除</el-button>
+              <div class="actions-right">
+                <div class="view-mode-toggle-row">
+                  <button
+                    :class="['toggle-view-btn', { active: viewMode === 'card' }]"
+                    @click="viewMode = 'card'; lastListViewMode = 'card'"
+                  >
+                    🧠 三维星图
+                  </button>
+                  <button
+                    :class="['toggle-view-btn', { active: viewMode === 'table' }]"
+                    @click="viewMode = 'table'; lastListViewMode = 'table'"
+                  >
+                    📊 经典表格
+                  </button>
                 </div>
               </div>
             </div>
-          </el-col>
-        </el-row>
-      </div>
-    </div>
 
-    <!-- 2. 独立整屏工作流编排工作台 -->
-    <div v-else class="workflow-workbench-container">
+            <div v-loading="loading" class="synapse-card-grid-container">
+              <div v-if="workflowList.length === 0" class="empty-state">
+                <div class="empty-icon">⚙️</div>
+                <p>暂无工作流编排，点击上方"新增工作流"按钮开始设计您的 AI 智能体工作流吧！</p>
+              </div>
+
+              <div class="synapse-card-grid" v-else>
+                <div
+                  v-for="item in workflowList"
+                  :key="item.id"
+                  :class="['synapse-glass-card', item.status === '1' ? 'status-border-active' : 'status-border-error']"
+                >
+                  <!-- 卡片高亮流光线 -->
+                  <div class="card-shimmer-ray"></div>
+                  
+                  <div class="card-header-row">
+                    <span class="card-code">{{ item.workflowCode }}</span>
+                    <!-- 雷达多层呼吸灯 -->
+                    <div class="status-cell clickable-status" @click="toggleStatus(item)">
+                      <span :class="['pulse-light-ripple', item.status === '1' ? 'pulse-active' : 'pulse-error']"></span>
+                      <span class="status-badge-text" :class="item.status === '1' ? 'text-active' : 'text-error'">
+                        {{ item.status === '1' ? '正常' : '禁用' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="card-body">
+                    <h4 class="card-name" :title="item.workflowName">{{ item.workflowName }}</h4>
+                    <div class="desc-box" style="margin-top: 6px; margin-bottom: 12px;">
+                      <p class="desc-text" :title="item.description || '暂无描述'">{{ item.description || '暂无描述' }}</p>
+                    </div>
+
+                    <!-- 只读迷你拓扑图（真实展示分支结构） -->
+                    <div class="mini-graph-visualization">
+                      <span class="pipeline-label" style="font-size: 11px; font-weight: 700; color: var(--polaris-text-sub); display: block; margin-bottom: 6px;">
+                        执行流向：
+                      </span>
+                      <div class="mini-graph-canvas" v-if="item._miniGraph">
+                        <svg :width="item._miniGraph.width" :height="item._miniGraph.height" class="mini-graph-svg">
+                          <g v-for="(e, ei) in item._miniGraph.edges" :key="'e'+ei">
+                            <path
+                              :d="`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1+e.y2)/2}, ${e.x2} ${(e.y1+e.y2)/2}, ${e.x2} ${e.y2}`"
+                              fill="none"
+                              :stroke="e.cond ? '#f59e0b' : '#38bdf8'"
+                              :stroke-width="e.cond ? 2 : 1.5"
+                              :stroke-dasharray="e.cond ? '4 3' : '0'"
+                            />
+                          </g>
+                          <g v-for="(n, ni) in item._miniGraph.nodes" :key="'n'+ni">
+                            <rect
+                              :x="n.x - item._miniGraph.nodeW/2" :y="n.y - item._miniGraph.nodeH/2"
+                              :width="item._miniGraph.nodeW" :height="item._miniGraph.nodeH"
+                              :rx="n.type === 'term' ? 12 : 5"
+                              :class="['mini-node', 'mini-node-' + n.type]"
+                            />
+                            <text :x="n.x" :y="n.y + 3" text-anchor="middle"
+                                  :class="['mini-node-text', (n.type === 'term' || n.type === 'classifier') ? 'mini-node-text-light' : '']">
+                              {{ n.name.length > 6 ? n.name.slice(0,6) + '…' : n.name }}
+                            </text>
+                          </g>
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 卡片底部操作按钮 -->
+                  <div class="card-footer-actions">
+                    <el-button type="primary" link class="card-op-edit-pill" @click="handleUpdate(item)">
+                      <el-icon><edit /></el-icon>
+                      <span>编辑编排</span>
+                    </el-button>
+                    <el-button type="danger" link class="card-op-delete-pill" @click="handleDelete(item)">
+                      <el-icon><delete /></el-icon>
+                      <span>删除</span>
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 三维星图视图下的分页组件 -->
+            <pagination
+              v-show="total > 0"
+              :total="total"
+              v-model:page="queryParams.pageNum"
+              v-model:limit="queryParams.pageSize"
+              @pagination="getList"
+            />
+          </div>
+
+          <!-- 📊 经典表格视图 -->
+          <div v-else-if="viewMode === 'table'" key="table-view" class="polaris-table-card">
+            <!-- 共享操作行：新增工作流与视图切换器 -->
+            <div class="matrix-actions-bar" style="margin-top: 0; width: 100%;">
+              <div class="actions-left">
+                <el-button type="primary" class="action-btn-primary" icon="Plus" @click="handleAdd">
+                  新增工作流
+                </el-button>
+              </div>
+              <div class="actions-right">
+                <div class="view-mode-toggle-row">
+                  <button
+                    :class="['toggle-view-btn', { active: viewMode === 'card' }]"
+                    @click="viewMode = 'card'; lastListViewMode = 'card'"
+                  >
+                    🧠 三维星图
+                  </button>
+                  <button
+                    :class="['toggle-view-btn', { active: viewMode === 'table' }]"
+                    @click="viewMode = 'table'; lastListViewMode = 'table'"
+                  >
+                    📊 经典表格
+                  </button>
+                </div>
+              </div>
+            </div>
+            <el-table v-loading="loading" :data="workflowList" class="polaris-el-table">
+              <el-table-column label="工作流唯一编码" prop="workflowCode" width="160" />
+              <el-table-column label="工作流名称" prop="workflowName" min-width="180" :show-overflow-tooltip="true" />
+              <el-table-column label="描述" prop="description" min-width="220" :show-overflow-tooltip="true">
+                <template #default="{ row }">
+                  <span>{{ row.description || '暂无描述' }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="运行状态" width="120">
+                <template #default="{ row }">
+                  <div class="status-cell clickable-status" @click="toggleStatus(row)">
+                    <span :class="['pulse-light-ripple', row.status === '1' ? 'pulse-active' : 'pulse-error']"></span>
+                    <span class="status-label" :class="row.status === '1' ? 'text-active' : 'text-error'">
+                      {{ row.status === '1' ? '正常' : '禁用' }}
+                    </span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="创建时间" prop="createTime" width="150">
+                <template #default="{ row }">
+                  <span>{{ formatDate(row.createTime) }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="160" fixed="right">
+                <template #default="{ row }">
+                  <div class="table-op-actions">
+                    <el-button type="primary" link class="op-btn-edit" @click="handleUpdate(row)">编辑编排</el-button>
+                    <el-button type="danger" link class="op-btn-delete" @click="handleDelete(row)">删除</el-button>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 经典表格视图下的分页组件 -->
+            <pagination
+              v-show="total > 0"
+              :total="total"
+              v-model:page="queryParams.pageNum"
+              v-model:limit="queryParams.pageSize"
+              @pagination="getList"
+            />
+    </div>
+    <div v-else-if="viewMode === 'edit'" key="edit-view" class="workflow-workbench-container">
       <!-- 顶部控制条 -->
       <div class="workbench-header">
         <div class="header-left">
@@ -395,7 +499,9 @@
         </div>
       </el-dialog>
     </div>
+  </transition>
   </div>
+</div>
 </template>
 <script>
 import {addWorkflow, delWorkflow, getWorkflow, listWorkflow, updateWorkflow} from "@/api/ai/workflow";
@@ -440,7 +546,8 @@ export default {
       },
       isDraggingActive: false,
       activeStepIndex: null,
-      viewMode: 'list',
+      viewMode: 'card',
+      lastListViewMode: 'card',
       mermaidError: "",
       // 画布节点/边双向绑定（直接驱动 Vue Flow）
       vfNodes: [],
@@ -636,7 +743,21 @@ export default {
       }
 
       const nodes = graph.nodes || [];
-      const edges = graph.edges || [];
+      const edges = JSON.parse(JSON.stringify(graph.edges || []));
+
+      // 自动补全首尾边以防 BFS 崩溃及开始/结束节点隐形
+      if (nodes.length > 0) {
+        const hasStartEdge = edges.some(e => e.from === '__start__');
+        if (!hasStartEdge) {
+          const firstNode = nodes[0].ref || nodes[0].id;
+          edges.unshift({ from: '__start__', to: firstNode });
+        }
+        const hasEndEdge = edges.some(e => e.to === '__end__');
+        if (!hasEndEdge) {
+          const lastNode = nodes[nodes.length - 1].ref || nodes[nodes.length - 1].id;
+          edges.push({ from: lastNode, to: '__end__' });
+        }
+      }
       const allIds = ['__start__', ...nodes.map(n => n.ref || n.id), '__end__'];
       const nodeMap = {};
       nodes.forEach(n => { nodeMap[n.ref || n.id] = n; });
@@ -705,6 +826,10 @@ export default {
       const edge = this.graph.edges.find(e => e.from === fromRef && e.to === toRef && e.condition);
       return edge ? edge.condition : '';
     },
+    toggleStatus(row) {
+      row.status = row.status === "1" ? "0" : "1";
+      this.handleStatusChange(row);
+    },
     async handleStatusChange(row) {
       const text = row.status === "1" ? "启用" : "禁用";
       try {
@@ -724,7 +849,7 @@ export default {
       return dateStr.substring(0, 10);
     },
     cancel() {
-      this.viewMode = 'list';
+      this.viewMode = this.lastListViewMode || 'card';
       this.activeStepIndex = null;
       this.reset();
     },
@@ -1495,7 +1620,7 @@ export default {
             }
             if (res.code === 200) {
               this.$message.success("保存成功");
-              this.viewMode = 'list';
+              this.viewMode = this.lastListViewMode || 'card';
               this.getList();
             } else {
               this.$message.error(res.msg || "保存失败");
@@ -1525,10 +1650,19 @@ export default {
 };
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .ai-workflow-manager {
   background-color: transparent !important;
   min-height: 100vh;
+}
+
+/* 页面内部容器 Flex 布局，使搜索栏与下方内容间距为 16px */
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
 }
 .filter-container {
   background: rgba(255, 255, 255, 0.02) !important;
@@ -1550,196 +1684,7 @@ export default {
   background: linear-gradient(135deg, var(--el-color-success-dark-2) 0%, var(--el-color-success-dark-2) 100%);
 }
 
-/* 列表卡片样式 */
-.card-list-container {
-  margin-top: 10px;
-}
-.card-col {
-  margin-bottom: 24px;
-}
-.workflow-card {
-  background: var(--el-fill-color-blank) !important;
-  border: 1px solid var(--el-border-color-light) !important;
-  border-radius: 16px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05) !important;
-  transition: all 0.3s ease;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  height: 240px;
-  color: var(--el-text-color-regular) !important;
-}
-.workflow-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 25px var(--el-color-primary-light-8);
-  border-color: var(--el-color-primary-light-5);
-}
-.workflow-card.is-disabled {
-  opacity: 0.5;
-  background: var(--el-fill-color-light) !important;
-}
-.card-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--el-border-color-light) !important;
-  background: transparent !important;
-}
-.workflow-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-dark-2) 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-  font-size: 20px;
-  box-shadow: 0 4px 8px var(--el-color-primary-light-5);
-}
-.header-info {
-  flex: 1;
-  overflow: hidden;
-}
-.workflow-title-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--el-text-color-primary) !important;
-  margin: 0 0 4px;
-}
-.workflow-code-tag {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  font-family: Menlo, Monaco, Consolas, monospace;
-}
-.card-body {
-  padding: 16px 20px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
-}
-.desc-box {
-  margin-bottom: 10px;
-}
-.desc-text {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-  line-height: 1.5;
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* 横向链路可视化 */
-.pipeline-visualization {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: auto;
-}
-.mini-graph-visualization {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: auto;
-}
-.mini-graph-canvas {
-  display: flex;
-  justify-content: center;
-  overflow: auto;
-  max-height: 220px;
-  background: rgba(129,140,248,0.04);
-  border-radius: 8px;
-  padding: 4px 0;
-}
-.mini-node { stroke-width: 1.5; }
-.mini-node-term { fill: var(--el-color-primary); stroke: none; }
-.mini-node-agent { fill: var(--el-bg-color); stroke: #cbd5e1; }
-.mini-node-classifier { fill: #a855f7; stroke: #c084fc; }
-.mini-node-java { fill: #16a34a; stroke: #86efac; }
-.mini-node-text {
-  font-size: 10px;
-  fill: var(--el-text-color-primary);
-  font-weight: 600;
-  pointer-events: none;
-}
-.mini-node-text-light { fill: #fff; }
-.pipeline-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--el-text-color-secondary);
-}
-.pipeline-flow-container {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-}
-.pipeline-node {
-  background: var(--el-color-primary-light-9);
-  border: 1px solid var(--el-color-primary-light-5);
-  border-radius: 20px;
-  padding: 4px 12px;
-  font-size: 11px;
-  color: var(--el-color-primary);
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-  box-shadow: 0 1px 3px rgba(var(--el-color-primary-rgb), 0.05);
-}
-.pipeline-node.is-java {
-  background: var(--el-color-success-light-9);
-  border-color: var(--el-color-success-light-5);
-  color: var(--el-color-success);
-}
-.pipeline-node el-icon {
-  font-size: 11px;
-}
-.pipeline-arrow {
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-  animation: pulseArrow 1.5s infinite ease-in-out;
-}
-@keyframes pulseArrow {
-  0%, 100% { opacity: 0.4; transform: scale(0.9); }
-  50% { opacity: 1; transform: scale(1.1); }
-}
-.card-footer {
-  padding: 12px 20px;
-  background: var(--el-fill-color-light);
-  border-top: 1px solid var(--el-border-color-light);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.create-time-text {
-  font-size: 11px;
-  color: var(--el-text-color-secondary);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.footer-action-btn {
-  font-weight: 600;
-  font-size: 12px;
-  padding: 0 4px;
-}
-.footer-action-btn.edit {
-  color: var(--el-color-primary);
-}
-.footer-action-btn.delete {
-  color: var(--el-color-danger);
-}
+/* 清除原有的废弃卡片样式，避免干扰 Polaris 磨砂玻璃卡片 */
 
 /* ================================================================
    三栏编排工作台样式（跟随项目主题变量）
@@ -2378,5 +2323,411 @@ export default {
 .vue-flow-preview :deep(.vue-flow__handle) {
   opacity: 0 !important;
   pointer-events: none !important;
+}
+
+/* 聚合操作栏 (检索卡片正下方) */
+.matrix-actions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0 16px; /* 增加适度外边距，形成舒适的呼吸感 */
+  padding: 0 4px;
+}
+
+.actions-left {
+  display: flex;
+  align-items: center;
+}
+
+.actions-right {
+  display: flex;
+  align-items: center;
+}
+
+/* 视图切换器按钮 */
+.view-mode-toggle-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.03);
+  height: 36px;
+  box-sizing: border-box;
+
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(255, 255, 255, 0.03);
+  }
+}
+
+.toggle-view-btn {
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 12px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &.active {
+    background-color: #ffffff;
+    color: #4f46e5;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #94a3b8;
+
+    &.active {
+      background-color: rgba(255, 255, 255, 0.05);
+      color: #38bdf8;
+      box-shadow: none;
+    }
+  }
+}
+
+.view-mode-fade-enter-active,
+.view-mode-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.view-mode-fade-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+.view-mode-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* ===== 🧠 三维北辰星图卡片视图布局 ===== */
+.synapse-card-grid-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+}
+
+.synapse-card-grid-container {
+  width: 100%;
+}
+
+.synapse-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 20px;
+  width: 100%;
+}
+
+/* 三维玻璃卡片 */
+.synapse-glass-card {
+  border-radius: 24px;
+  padding: 24px;
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.03);
+
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.3);
+  }
+  
+  &:hover {
+    transform: translateY(-6px) scale(1.02) !important;
+    
+    .card-shimmer-ray {
+      transform: skewX(-20deg) translateX(400px);
+    }
+
+    &.status-border-active {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(16, 185, 129, 0.2) !important;
+
+      .dark &,
+      .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(16, 185, 129, 0.22) !important;
+      }
+    }
+    &.status-border-error {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(239, 68, 68, 0.25) !important;
+
+      .dark &,
+      .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(239, 68, 68, 0.25) !important;
+      }
+    }
+  }
+
+  &.status-border-active {
+    border-color: rgba(16, 185, 129, 0.3);
+
+    .dark &,
+    .theme-dark & {
+      border-color: rgba(16, 185, 129, 0.25);
+      box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.08);
+    }
+  }
+  &.status-border-error {
+    border-color: rgba(239, 68, 68, 0.35);
+
+    .dark &,
+    .theme-dark & {
+      border-color: rgba(239, 68, 68, 0.25);
+      box-shadow: 0 0 20px -5px rgba(239, 68, 68, 0.08);
+    }
+  }
+}
+
+.card-shimmer-ray {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80px;
+  width: 50px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  transform: skewX(-20deg) translateX(-100px);
+  transition: transform 0.6s ease;
+  pointer-events: none;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-code {
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: rgba(0, 0, 0, 0.03);
+  color: #4f46e5;
+
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(255, 255, 255, 0.04);
+    color: #38bdf8;
+  }
+}
+
+.status-badge-text {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card-name {
+  font-size: 14.5px;
+  font-weight: 800;
+  margin: 0;
+  color: #0f172a;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
+}
+
+/* 雷达呼吸灯相关组件 */
+.pulse-light-ripple {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  position: relative;
+  
+  &::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    opacity: 0;
+    animation: radarBreath-scoped 2s infinite ease-out;
+  }
+}
+
+@keyframes radarBreath-scoped {
+  0% { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.pulse-active {
+  background-color: #10b981;
+  color: #10b981;
+  filter: drop-shadow(0 0 3px #10b981);
+}
+
+.pulse-error {
+  background-color: #ef4444;
+  color: #ef4444;
+  filter: drop-shadow(0 0 3px #ef4444);
+}
+
+.text-active {
+  color: #10b981;
+}
+
+.text-error {
+  color: #ef4444;
+}
+
+.clickable-status {
+  cursor: pointer;
+  transition: transform 0.2s;
+  &:hover {
+    transform: scale(1.04);
+  }
+}
+
+/* 卡片操作按钮 */
+.card-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.05);
+  padding-top: 12px;
+
+  .dark &,
+  .theme-dark & {
+    border-top-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.card-op-edit-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4f46e5 !important;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  
+  &:hover {
+    opacity: 0.8;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #38bdf8 !important;
+  }
+}
+
+.card-op-delete-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ef4444 !important;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #fca5a5 !important;
+  }
+}
+
+/* 表格视图布局及美化 */
+.polaris-table-card {
+  border-radius: 20px;
+  padding: 16px 20px;
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.02);
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* ===== 🧠 迷你拓扑图节点上色美化 ===== */
+.mini-node {
+  stroke-width: 1.5;
+}
+.mini-node-term {
+  fill: #4f46e5;
+  stroke: none;
+
+  .dark &,
+  .theme-dark & {
+    fill: #38bdf8;
+  }
+}
+.mini-node-agent {
+  fill: #ffffff;
+  stroke: #cbd5e1;
+
+  .dark &,
+  .theme-dark & {
+    fill: rgba(30, 41, 59, 0.7);
+    stroke: rgba(255, 255, 255, 0.08);
+  }
+}
+.mini-node-classifier {
+  fill: #a855f7;
+  stroke: #c084fc;
+}
+.mini-node-java {
+  fill: #16a34a;
+  stroke: #86efac;
+}
+.mini-node-text {
+  font-size: 10px;
+  fill: #1e293b;
+  font-weight: 700;
+  pointer-events: none;
+
+  .dark &,
+  .theme-dark & {
+    fill: #cbd5e1;
+  }
+}
+.mini-node-text-light {
+  fill: #ffffff !important;
+}
+
+.mini-graph-canvas {
+  background: rgba(129, 140, 248, 0.04);
+  border: 1px solid var(--polaris-inner-border, rgba(0,0,0,0.06));
+  border-radius: 8px;
+  padding: 6px 4px;
+  display: flex;
+  justify-content: center;
 }
 </style>
