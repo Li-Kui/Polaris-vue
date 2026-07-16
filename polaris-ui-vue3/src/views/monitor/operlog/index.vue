@@ -1,155 +1,159 @@
 <template>
-   <div class="app-container">
-      <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px">
-         <el-form-item label="操作地址" prop="operIp">
-            <el-input
-               v-model="queryParams.operIp"
-               placeholder="请输入操作地址"
-               clearable
-               style="width: 240px;"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="系统模块" prop="title">
-            <el-input
-               v-model="queryParams.title"
-               placeholder="请输入系统模块"
-               clearable
-               style="width: 240px;"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="操作人员" prop="operName">
-            <el-input
-               v-model="queryParams.operName"
-               placeholder="请输入操作人员"
-               clearable
-               style="width: 240px;"
-               @keyup.enter="handleQuery"
-            />
-         </el-form-item>
-         <el-form-item label="类型" prop="businessType">
-            <el-select
-               v-model="queryParams.businessType"
-               placeholder="操作类型"
-               clearable
-               style="width: 240px"
-            >
-               <el-option
-                  v-for="dict in sys_oper_type"
-                  :key="dict.value"
-                  :label="dict.label"
-                  :value="dict.value"
+   <div class="app-container no-sidebar-manage-wrap">
+      <div class="content-inner">
+         <el-form :model="queryParams" ref="queryRef" :inline="true" v-show="showSearch" label-width="68px" class="polaris-filter-card polaris-filter-form">
+            <el-form-item label="操作地址" prop="operIp">
+               <el-input
+                  v-model="queryParams.operIp"
+                  placeholder="请输入操作地址"
+                  clearable
+                  style="width: 240px;"
+                  @keyup.enter="handleQuery"
                />
-            </el-select>
-         </el-form-item>
-         <el-form-item label="状态" prop="status">
-            <el-select
-               v-model="queryParams.status"
-               placeholder="操作状态"
-               clearable
-               style="width: 240px"
-            >
-               <el-option
-                  v-for="dict in sys_common_status"
-                  :key="dict.value"
-                  :label="dict.label"
-                  :value="dict.value"
+            </el-form-item>
+            <el-form-item label="系统模块" prop="title">
+               <el-input
+                  v-model="queryParams.title"
+                  placeholder="请输入系统模块"
+                  clearable
+                  style="width: 240px;"
+                  @keyup.enter="handleQuery"
                />
-            </el-select>
-         </el-form-item>
-         <el-form-item label="操作时间" style="width: 308px">
-            <el-date-picker
-               v-model="dateRange"
-               value-format="YYYY-MM-DD HH:mm:ss"
-               type="daterange"
-               range-separator="-"
-               start-placeholder="开始日期"
-               end-placeholder="结束日期"
-               :default-time="[new Date(2000, 1, 1, 0, 0, 0), new Date(2000, 1, 1, 23, 59, 59)]"
-            ></el-date-picker>
-         </el-form-item>
-         <el-form-item>
-            <el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button>
-            <el-button icon="Refresh" @click="resetQuery">重置</el-button>
-         </el-form-item>
-      </el-form>
+            </el-form-item>
+            <el-form-item label="操作人员" prop="operName">
+               <el-input
+                  v-model="queryParams.operName"
+                  placeholder="请输入操作人员"
+                  clearable
+                  style="width: 240px;"
+                  @keyup.enter="handleQuery"
+               />
+            </el-form-item>
+            <el-form-item label="类型" prop="businessType">
+               <el-select
+                  v-model="queryParams.businessType"
+                  placeholder="操作类型"
+                  clearable
+                  style="width: 240px"
+               >
+                  <el-option
+                     v-for="dict in sys_oper_type"
+                     :key="dict.value"
+                     :label="dict.label"
+                     :value="dict.value"
+                  />
+               </el-select>
+            </el-form-item>
+            <el-form-item label="状态" prop="status">
+               <el-select
+                  v-model="queryParams.status"
+                  placeholder="操作状态"
+                  clearable
+                  style="width: 240px"
+               >
+                  <el-option
+                     v-for="dict in sys_common_status"
+                     :key="dict.value"
+                     :label="dict.label"
+                     :value="dict.value"
+                  />
+               </el-select>
+            </el-form-item>
+            <el-form-item label="操作时间" style="width: 308px">
+               <el-date-picker
+                  v-model="dateRange"
+                  value-format="YYYY-MM-DD HH:mm:ss"
+                  type="daterange"
+                  range-separator="-"
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                  :default-time="[new Date(2000, 1, 1, 0, 0, 0), new Date(2000, 1, 1, 23, 59, 59)]"
+               ></el-date-picker>
+            </el-form-item>
+            <el-form-item>
+               <el-button type="primary" icon="Search" @click="handleQuery" class="polaris-query-btn">搜索</el-button>
+               <el-button icon="Refresh" @click="resetQuery" class="polaris-reset-btn">重置</el-button>
+            </el-form-item>
+         </el-form>
 
-      <el-row :gutter="10" class="mb8">
-         <el-col :span="1.5">
-            <el-button
-               type="danger"
-               plain
-               icon="Delete"
-               :disabled="multiple"
-               @click="handleDelete"
-               v-hasPermi="['monitor:operlog:remove']"
-            >删除</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="danger"
-               plain
-               icon="Delete"
-               @click="handleClean"
-               v-hasPermi="['monitor:operlog:remove']"
-            >清空</el-button>
-         </el-col>
-         <el-col :span="1.5">
-            <el-button
-               type="warning"
-               plain
-               icon="Download"
-               @click="handleExport"
-               v-hasPermi="['monitor:operlog:export']"
-            >导出</el-button>
-         </el-col>
-         <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
-      </el-row>
+      <div class="polaris-table-card">
+         <div class="polaris-action-row">
+            <div class="actions-left">
+               <el-button
+                  type="danger"
+                  icon="Delete"
+                  :disabled="multiple"
+                  @click="handleDelete"
+                  v-hasPermi="['monitor:operlog:remove']"
+                  class="action-btn-danger"
+               >删除</el-button>
+               <el-button
+                  type="danger"
+                  icon="Delete"
+                  @click="handleClean"
+                  v-hasPermi="['monitor:operlog:remove']"
+                  class="action-btn-danger"
+               >清空</el-button>
+               <el-button
+                  type="warning"
+                  icon="Download"
+                  @click="handleExport"
+                  v-hasPermi="['monitor:operlog:export']"
+                  class="action-btn-secondary"
+               >导出</el-button>
+            </div>
+            <right-toolbar v-model:showSearch="showSearch" @queryTable="getList"></right-toolbar>
+         </div>
 
-      <el-table ref="operlogRef" v-loading="loading" :data="operlogList" @selection-change="handleSelectionChange" :default-sort="defaultSort" @sort-change="handleSortChange">
-         <el-table-column type="selection" width="50" align="center" />
-         <el-table-column label="日志编号" align="center" prop="operId" />
-         <el-table-column label="系统模块" align="center" prop="title" :show-overflow-tooltip="true" />
-         <el-table-column label="操作类型" align="center" prop="businessType">
-            <template #default="scope">
-               <dict-tag :options="sys_oper_type" :value="scope.row.businessType" />
-            </template>
-         </el-table-column>
-         <el-table-column label="操作人员" align="center" width="110" prop="operName" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']" />
-         <el-table-column label="操作地址" align="center" prop="operIp" width="130" :show-overflow-tooltip="true" />
-         <el-table-column label="操作状态" align="center" prop="status">
-            <template #default="scope">
-               <dict-tag :options="sys_common_status" :value="scope.row.status" />
-            </template>
-         </el-table-column>
-         <el-table-column label="操作日期" align="center" prop="operTime" width="180" sortable="custom" :sort-orders="['descending', 'ascending']">
-            <template #default="scope">
-               <span>{{ parseTime(scope.row.operTime) }}</span>
-            </template>
-         </el-table-column>
-         <el-table-column label="消耗时间" align="center" prop="costTime" width="110" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']">
-            <template #default="scope">
-               <span>{{ scope.row.costTime }}毫秒</span>
-            </template>
-         </el-table-column>
-         <el-table-column label="操作" align="center" class-name="small-padding fixed-width">
-            <template #default="scope">
-               <el-button link type="primary" icon="View" @click="handleDetail(scope.row, scope.index)" v-hasPermi="['monitor:operlog:query']">详细</el-button>
-            </template>
-         </el-table-column>
-      </el-table>
+         <el-table ref="operlogRef" v-loading="loading" :data="operlogList" @selection-change="handleSelectionChange" :default-sort="defaultSort" @sort-change="handleSortChange" class="polaris-el-table">
+            <el-table-column type="selection" width="50" align="center" />
+            <el-table-column label="日志编号" align="center" prop="operId" width="100" />
+            <el-table-column label="系统模块" align="center" prop="title" :show-overflow-tooltip="true" min-width="120" />
+            <el-table-column label="操作类型" align="center" prop="businessType" width="100">
+               <template #default="scope">
+                  <dict-tag :options="sys_oper_type" :value="scope.row.businessType" />
+               </template>
+            </el-table-column>
+            <el-table-column label="操作人员" align="center" width="110" prop="operName" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']" />
+            <el-table-column label="操作地址" align="center" prop="operIp" width="130" :show-overflow-tooltip="true" />
+            <el-table-column label="操作状态" align="center" prop="status" width="100">
+               <template #default="scope">
+                  <div class="status-cell">
+                     <span :class="['pulse-light-ripple', scope.row.status === 0 ? 'pulse-active' : 'pulse-error']"></span>
+                     <span class="status-label" :class="scope.row.status === 0 ? 'text-active' : 'text-error'">{{ scope.row.status === 0 ? '正常' : '异常' }}</span>
+                  </div>
+               </template>
+            </el-table-column>
+            <el-table-column label="操作日期" align="center" prop="operTime" width="180" sortable="custom" :sort-orders="['descending', 'ascending']">
+               <template #default="scope">
+                  <span>{{ parseTime(scope.row.operTime) }}</span>
+               </template>
+            </el-table-column>
+            <el-table-column label="消耗时间" align="center" prop="costTime" width="110" :show-overflow-tooltip="true" sortable="custom" :sort-orders="['descending', 'ascending']">
+               <template #default="scope">
+                  <span>{{ scope.row.costTime }}毫秒</span>
+               </template>
+            </el-table-column>
+            <el-table-column label="操作" align="center" width="100" class-name="small-padding fixed-width">
+               <template #default="scope">
+                  <el-tooltip content="详细" placement="top">
+                     <el-button link type="primary" icon="View" @click="handleDetail(scope.row)" v-hasPermi="['monitor:operlog:query']"></el-button>
+                  </el-tooltip>
+               </template>
+            </el-table-column>
+         </el-table>
 
-      <pagination
-         v-show="total > 0"
-         :total="total"
-         v-model:page="queryParams.pageNum"
-         v-model:limit="queryParams.pageSize"
-         @pagination="getList"
-      />
-
-      <operlog-detail v-model:visible="detailVisible" :row="detailRow" />
+         <pagination
+            v-show="total > 0"
+            :total="total"
+            v-model:page="queryParams.pageNum"
+            v-model:limit="queryParams.pageSize"
+            @pagination="getList"
+         />
+      </div>
    </div>
+   <operlog-detail v-model:visible="detailVisible" :row="detailRow" />
+</div>
 </template>
 
 <script setup name="Operlog">
@@ -260,3 +264,42 @@ function handleExport() {
 
 getList()
 </script>
+
+<style lang="scss" scoped>
+/* 覆盖全局 .app-container 的 padding: 20px */
+.app-container.no-sidebar-manage-wrap {
+  padding: 16px !important;
+}
+
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+</style>
+
+<style lang="scss">
+/* 针对北辰操作日志表格的公共组件覆盖（全局非 scoped，但仅对 .polaris-el-table 生效以起隔离保护作用） */
+.polaris-el-table {
+  /* 强行隐藏表格核心容器的横向溢出，在完全保留原有平移+放大悬浮动效的同时，彻底消除横向滚动条与左右滑动 */
+  .el-table__inner-wrapper,
+  .el-table__body-wrapper,
+  .el-scrollbar__wrap {
+    overflow-x: hidden !important;
+  }
+
+  /* 彻底屏蔽表格内部可能生成的横向滚动条组件，防范一切滚动条闪烁与左右滑动 */
+  .el-scrollbar__bar.is-horizontal {
+    display: none !important;
+  }
+
+  /* 调整行高，加大行内间距，使行高看起来更加舒适美观 */
+  .el-table__row {
+    td.el-table__cell {
+      padding: 12px 0 !important;
+    }
+  }
+}
+</style>
