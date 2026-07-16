@@ -1,72 +1,93 @@
 <template>
-  <div class="app-container">
-    <el-row :gutter="10">
-      <el-col :span="24" class="card-box">
-        <el-card>
-          <template #header><Monitor style="width: 1em; height: 1em; vertical-align: middle;" /> <span style="vertical-align: middle;">基本信息</span></template>
-          <div class="el-table el-table--enable-row-hover el-table--medium">
-            <table cellspacing="0" style="width: 100%">
-              <tbody>
-                <tr>
-                  <td class="el-table__cell is-leaf"><div class="cell">Redis版本</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.redis_version }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">运行模式</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.redis_mode == "standalone" ? "单机" : "集群" }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">端口</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.tcp_port }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">客户端数</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.connected_clients }}</div></td>
-                </tr>
-                <tr>
-                  <td class="el-table__cell is-leaf"><div class="cell">运行时间(天)</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.uptime_in_days }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">使用内存</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.used_memory_human }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">使用CPU</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ parseFloat(cache.info.used_cpu_user_children).toFixed(2) }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">内存配置</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.maxmemory_human }}</div></td>
-                </tr>
-                <tr>
-                  <td class="el-table__cell is-leaf"><div class="cell">AOF是否开启</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.aof_enabled == "0" ? "否" : "是" }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">RDB是否成功</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.rdb_last_bgsave_status }}</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">Key数量</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.dbSize">{{ cache.dbSize }} </div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell">网络入口/出口</div></td>
-                  <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.instantaneous_input_kbps }}kps/{{cache.info.instantaneous_output_kbps}}kps</div></td>
-                </tr>
-              </tbody>
-            </table>
+  <div class="app-container no-sidebar-manage-wrap">
+    <div class="content-inner">
+      <el-row :gutter="16">
+        <!-- 基本信息 -->
+        <el-col :span="24" class="card-box">
+          <div class="polaris-table-card">
+            <div class="card-header-custom">
+              <div class="card-header-title">
+                <el-icon class="header-icon"><Monitor /></el-icon>
+                <span>基本信息</span>
+              </div>
+            </div>
+            <div class="polaris-el-table">
+              <table cellspacing="0" style="width: 100%">
+                <tbody>
+                  <tr>
+                    <td class="el-table__cell is-leaf"><div class="cell">Redis版本</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.redis_version }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">运行模式</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.redis_mode == "standalone" ? "单机" : "集群" }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">端口</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.tcp_port }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">客户端数</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.connected_clients }}</div></td>
+                  </tr>
+                  <tr>
+                    <td class="el-table__cell is-leaf"><div class="cell">运行时间(天)</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.uptime_in_days }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">使用内存</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.used_memory_human }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">使用CPU</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ parseFloat(cache.info.used_cpu_user_children).toFixed(2) }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">内存配置</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.maxmemory_human }}</div></td>
+                  </tr>
+                  <tr>
+                    <td class="el-table__cell is-leaf"><div class="cell">AOF是否开启</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.aof_enabled == "0" ? "否" : "是" }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">RDB是否成功</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.rdb_last_bgsave_status }}</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">Key数量</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.dbSize">{{ cache.dbSize }} </div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell">网络入口/出口</div></td>
+                    <td class="el-table__cell is-leaf"><div class="cell" v-if="cache.info">{{ cache.info.instantaneous_input_kbps }}kps/{{cache.info.instantaneous_output_kbps}}kps</div></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
-        </el-card>
-      </el-col>
+        </el-col>
 
-      <el-col :span="12" class="card-box">
-        <el-card>
-          <template #header><PieChart style="width: 1em; height: 1em; vertical-align: middle;" /> <span style="vertical-align: middle;">命令统计</span></template>
-          <div class="el-table el-table--enable-row-hover el-table--medium">
-            <div ref="commandstats" style="height: 420px" />
+        <!-- 命令统计 -->
+        <el-col :span="12" class="card-box">
+          <div class="polaris-table-card">
+            <div class="card-header-custom">
+              <div class="card-header-title">
+                <el-icon class="header-icon"><PieChart /></el-icon>
+                <span>命令统计</span>
+              </div>
+            </div>
+            <div class="chart-container">
+              <div ref="commandstats" class="chart-div" />
+            </div>
           </div>
-        </el-card>
-      </el-col>
+        </el-col>
 
-      <el-col :span="12" class="card-box">
-        <el-card>
-          <template #header><Odometer style="width: 1em; height: 1em; vertical-align: middle;" /> <span style="vertical-align: middle;">内存信息</span></template>
-          <div class="el-table el-table--enable-row-hover el-table--medium">
-            <div ref="usedmemory" style="height: 420px" />
+        <!-- 内存信息 -->
+        <el-col :span="12" class="card-box">
+          <div class="polaris-table-card">
+            <div class="card-header-custom">
+              <div class="card-header-title">
+                <el-icon class="header-icon"><Odometer /></el-icon>
+                <span>内存信息</span>
+              </div>
+            </div>
+            <div class="chart-container">
+              <div ref="usedmemory" class="chart-div" />
+            </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </el-col>
+      </el-row>
+    </div>
   </div>
 </template>
 
 <script setup name="Cache">
 import {getCache} from '@/api/monitor/cache'
 import * as echarts from 'echarts'
+import {getCurrentInstance, ref} from 'vue'
 
 const cache = ref([])
 const commandstats = ref(null)
@@ -130,3 +151,67 @@ function getList() {
 
 getList()
 </script>
+
+<style lang="scss" scoped>
+/* 覆盖全局 .app-container 的 padding: 20px */
+.app-container.no-sidebar-manage-wrap {
+  padding: 16px !important;
+}
+
+.content-inner {
+  padding: 0 !important;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+}
+
+.card-box {
+  margin-bottom: 16px;
+}
+
+.card-header-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  
+  .dark & {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+}
+
+.card-header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  
+  .dark & {
+    color: #f1f5f9;
+  }
+  
+  .header-icon {
+    font-size: 16px;
+    color: #4f46e5;
+    
+    .dark & {
+      color: #38bdf8;
+    }
+  }
+}
+
+.chart-container {
+  width: 100%;
+  overflow: hidden;
+}
+
+.chart-div {
+  width: 100%;
+  height: 420px;
+}
+</style>
