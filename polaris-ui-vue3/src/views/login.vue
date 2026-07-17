@@ -638,7 +638,6 @@ function executeRealLogin() {
   }).catch((err) => {
     loading.value = false
     currentView.value = 'login'
-    ElMessage.error(err?.msg || '神经信道同步失败，解密密钥无效')
   })
 }
 </script>

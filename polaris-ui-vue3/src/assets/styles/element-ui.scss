@@ -1398,6 +1398,404 @@ html.theme-dark,
   }
 }
 
+/* ==========================================================================
+   💎 北辰 Polaris 全局轻提示 (ElMessage) 极致显眼高对比度胶囊 (High Contrast Glass Capsule)
+   ========================================================================== */
+.el-message {
+  width: fit-content !important; /* 锁定宽度仅包裹内容，彻底解决拉伸问题 */
+  min-width: 180px !important;
+  max-width: 480px !important;
+  border-radius: 50px !important; /* 精致圆润的胶囊轮廓 */
+  padding: 12px 28px !important; /* 增加内边距，让小胶囊显得饱满且高级 */
+  backdrop-filter: blur(20px) !important;
+  -webkit-backdrop-filter: blur(20px) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-width: 1.5px !important; /* 加粗描边边框 */
+  
+  // 核心文字：加粗、提高字号、加强字间距
+  .el-message__content {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px !important;
+    line-height: 1.2 !important;
+    padding: 0 !important;
+  }
+  
+  // 状态图标微调
+  .el-message__icon {
+    font-size: 16px !important;
+    margin-right: 10px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+  }
+
+  // 1. 亮色模式：高饱和状态色背景 + 超深对比度文字 + 弥散彩色外发光阴影
+  html:not(.dark) & {
+    box-shadow: 0 15px 35px -8px rgba(0, 0, 0, 0.08), 
+                0 0 1px rgba(0, 0, 0, 0.06), 
+                inset 0 1px 0 rgba(255, 255, 255, 0.7) !important;
+    
+    &.el-message--success {
+      background-color: rgba(240, 253, 250, 0.96) !important; /* 淡淡的绿透白背景 */
+      border: 1.5px solid rgba(16, 185, 129, 0.45) !important; /* 明绿边框 */
+      .el-message__content { color: #065f46 !important; } /* 深墨绿字，对比度极佳 */
+      .el-message__icon { color: #10b981 !important; }
+      box-shadow: 0 15px 35px -8px rgba(16, 185, 129, 0.15), 0 0 1px rgba(0, 0, 0, 0.06) !important;
+    }
+    
+    &.el-message--error {
+      background-color: rgba(254, 242, 242, 0.96) !important; /* 淡淡的红透白背景 */
+      border: 1.5px solid rgba(239, 68, 68, 0.45) !important; /* 明红边框 */
+      .el-message__content { color: #991b1b !important; } /* 深赤红字，对比度极佳且醒目 */
+      .el-message__icon { color: #ef4444 !important; }
+      box-shadow: 0 15px 35px -8px rgba(239, 68, 68, 0.15), 0 0 1px rgba(0, 0, 0, 0.06) !important;
+    }
+    
+    &.el-message--warning {
+      background-color: rgba(255, 251, 235, 0.96) !important; /* 淡淡的黄透白背景 */
+      border: 1.5px solid rgba(245, 158, 11, 0.45) !important;
+      .el-message__content { color: #92400e !important; } /* 深琥珀字 */
+      .el-message__icon { color: #f59e0b !important; }
+      box-shadow: 0 15px 35px -8px rgba(245, 158, 11, 0.15), 0 0 1px rgba(0, 0, 0, 0.06) !important;
+    }
+    
+    &.el-message--info {
+      background-color: rgba(245, 243, 255, 0.96) !important; /* 淡淡的蓝透白背景 */
+      border: 1.5px solid rgba(79, 70, 229, 0.35) !important;
+      .el-message__content { color: #3730a3 !important; } /* 深蓝字 */
+      .el-message__icon { color: #4f46e5 !important; }
+      box-shadow: 0 15px 35px -8px rgba(79, 70, 229, 0.12), 0 0 1px rgba(0, 0, 0, 0.06) !important;
+    }
+  }
+
+  // 2. 暗色模式：高光深色背景 + 荧光状态文字 + 强霓虹外圈发光
+  html.dark &,
+  html.theme-dark &,
+  .dark &,
+  .theme-dark & {
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    box-shadow: 0 24px 50px -15px rgba(0, 0, 0, 0.65), 
+                inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
+    
+    &.el-message--success {
+      background-color: rgba(6, 25, 18, 0.85) !important; /* 深绿黑背景 */
+      border: 1.5px solid rgba(52, 211, 153, 0.4) !important;
+      .el-message__content { color: #a7f3d0 !important; } /* 极亮青绿文字 */
+      .el-message__icon {
+        color: #34d399 !important;
+        filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.65)) !important;
+      }
+      box-shadow: 0 24px 50px -15px rgba(0, 0, 0, 0.65), 
+                  0 0 25px rgba(52, 211, 153, 0.25) !important; /* 绿色外发光 */
+    }
+    
+    &.el-message--error {
+      background-color: rgba(25, 8, 12, 0.85) !important; /* 深红黑背景 */
+      border: 1.5px solid rgba(248, 113, 113, 0.4) !important;
+      .el-message__content { color: #fecaca !important; } /* 极亮粉红文字 */
+      .el-message__icon {
+        color: #fca5a5 !important;
+        filter: drop-shadow(0 0 8px rgba(252, 165, 165, 0.65)) !important;
+      }
+      box-shadow: 0 24px 50px -15px rgba(0, 0, 0, 0.65), 
+                  0 0 25px rgba(248, 113, 113, 0.25) !important; /* 红色外发光 */
+    }
+    
+    &.el-message--warning {
+      background-color: rgba(25, 18, 8, 0.85) !important; /* 深黄黑背景 */
+      border: 1.5px solid rgba(251, 191, 36, 0.4) !important;
+      .el-message__content { color: #fef3c7 !important; } /* 极亮金黄文字 */
+      .el-message__icon {
+        color: #fbbf24 !important;
+        filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.65)) !important;
+      }
+      box-shadow: 0 24px 50px -15px rgba(0, 0, 0, 0.65), 
+                  0 0 25px rgba(251, 191, 36, 0.25) !important;
+    }
+    
+    &.el-message--info {
+      background-color: rgba(10, 15, 30, 0.85) !important; /* 深蓝黑背景 */
+      border: 1.5px solid rgba(56, 189, 248, 0.4) !important;
+      .el-message__content { color: #e0f2fe !important; } /* 极亮极光蓝文字 */
+      .el-message__icon {
+        color: #38bdf8 !important;
+        filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.65)) !important;
+      }
+      box-shadow: 0 24px 50px -15px rgba(0, 0, 0, 0.65), 
+                  0 0 25px rgba(56, 189, 248, 0.25) !important;
+    }
+  }
+}
+
+// 物理果冻回弹式过渡动效
+.el-message-fade-enter-active {
+  animation: polaris-jelly-pop 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) both !important;
+}
+.el-message-fade-leave-active {
+  transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+  opacity: 0 !important;
+  transform: translateY(-20px) scale(0.9) !important;
+}
+
+@keyframes polaris-jelly-pop {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -35px, 0) scale3d(0.75, 0.75, 1);
+  }
+  60% {
+    transform: translate3d(0, 5px, 0) scale3d(1.04, 1.04, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  }
+}
+
+
+/* ==========================================================================
+   💎 北辰 Polaris 全局通知框 (ElNotification) 全息高亮漂浮卡片 (Holographic Card)
+   ========================================================================== */
+.el-notification {
+  border-radius: 20px !important;
+  padding: 16px 20px 16px 24px !important;
+  backdrop-filter: blur(30px) !important;
+  -webkit-backdrop-filter: blur(30px) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.4) !important; /* 加粗边框 */
+  overflow: hidden !important;
+  position: fixed !important;
+  
+  // 霓虹侧边状态指示线：加粗提亮
+  &::before {
+    content: "" !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 12% !important;
+    height: 76% !important;
+    width: 4.5px !important; /* 宽度加粗到 4.5px */
+    border-radius: 0 5px 5px 0 !important;
+    transition: all 0.3s ease !important;
+  }
+
+  .el-notification__group {
+    margin-left: 12px !important;
+    margin-right: 8px !important;
+  }
+
+  // 标题：加粗并使用高对比色
+  .el-notification__title {
+    font-size: 14px !important;
+    font-weight: 800 !important; /* 极粗体 */
+    line-height: 1.4 !important;
+    margin-bottom: 6px !important;
+    letter-spacing: 0.3px !important;
+  }
+
+  // 内容文字：字重加深
+  .el-notification__content {
+    font-size: 12px !important;
+    line-height: 1.5 !important;
+    margin: 0 !important;
+    font-weight: 600 !important;
+  }
+
+  // 关闭按钮精密交互
+  .el-notification__closeBtn {
+    font-size: 14px !important;
+    top: 16px !important;
+    right: 16px !important;
+    height: 22px !important;
+    width: 22px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 50% !important;
+    background-color: transparent !important;
+    transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+    
+    &:hover {
+      transform: scale(1.1) rotate(90deg) !important;
+      opacity: 1 !important;
+    }
+  }
+
+  // 状态图标
+  .el-notification__icon {
+    font-size: 20px !important;
+    height: 20px !important;
+    width: 20px !important;
+    margin-top: 1px !important;
+  }
+
+  // 1. 亮色模式
+  html:not(.dark) & {
+    border-color: rgba(255, 255, 255, 0.5) !important;
+    box-shadow: 0 20px 45px -10px rgba(0, 0, 0, 0.12), 
+                0 0 1px rgba(0, 0, 0, 0.05),
+                inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+    
+    .el-notification__title { color: #0f172a !important; }
+    .el-notification__content { color: #334155 !important; }
+    .el-notification__closeBtn { 
+      color: #94a3b8 !important; 
+      &:hover {
+        background-color: rgba(0, 0, 0, 0.05) !important;
+        color: #475569 !important;
+      }
+    }
+
+    &.success, &.el-notification--success, &.is-success {
+      background-color: rgba(240, 253, 250, 0.96) !important;
+      border-color: rgba(16, 185, 129, 0.45) !important;
+      .el-notification__title { color: #065f46 !important; }
+      &::before {
+        background: linear-gradient(to bottom, #10b981, #34d399) !important;
+        box-shadow: 0 0 10px rgba(52, 211, 153, 0.7) !important;
+      }
+      .el-notification__icon {
+        color: #10b981 !important;
+        filter: drop-shadow(0 2px 6px rgba(16, 185, 129, 0.35)) !important;
+      }
+      box-shadow: 0 20px 45px -10px rgba(16, 185, 129, 0.1), 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    }
+    
+    &.error, &.el-notification--error, &.is-error {
+      background-color: rgba(254, 242, 242, 0.96) !important;
+      border-color: rgba(239, 68, 68, 0.45) !important;
+      .el-notification__title { color: #991b1b !important; }
+      &::before {
+        background: linear-gradient(to bottom, #ef4444, #fca5a5) !important;
+        box-shadow: 0 0 10px rgba(239, 68, 68, 0.7) !important;
+      }
+      .el-notification__icon {
+        color: #ef4444 !important;
+        filter: drop-shadow(0 2px 6px rgba(239, 68, 68, 0.35)) !important;
+      }
+      box-shadow: 0 20px 45px -10px rgba(239, 68, 68, 0.1), 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    }
+    
+    &.warning, &.el-notification--warning, &.is-warning {
+      background-color: rgba(255, 251, 235, 0.96) !important;
+      border-color: rgba(245, 158, 11, 0.45) !important;
+      .el-notification__title { color: #92400e !important; }
+      &::before {
+        background: linear-gradient(to bottom, #f59e0b, #fbbf24) !important;
+        box-shadow: 0 0 10px rgba(245, 158, 11, 0.7) !important;
+      }
+      .el-notification__icon {
+        color: #f59e0b !important;
+        filter: drop-shadow(0 2px 6px rgba(245, 158, 11, 0.35)) !important;
+      }
+      box-shadow: 0 20px 45px -10px rgba(245, 158, 11, 0.1), 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    }
+    
+    &.info, &.el-notification--info, &.is-info {
+      background-color: rgba(245, 243, 255, 0.96) !important;
+      border-color: rgba(79, 70, 229, 0.35) !important;
+      .el-notification__title { color: #3730a3 !important; }
+      &::before {
+        background: linear-gradient(to bottom, #4f46e5, #38bdf8) !important;
+        box-shadow: 0 0 10px rgba(79, 70, 229, 0.7) !important;
+      }
+      .el-notification__icon {
+        color: #4f46e5 !important;
+        filter: drop-shadow(0 2px 6px rgba(79, 70, 229, 0.35)) !important;
+      }
+      box-shadow: 0 20px 45px -10px rgba(79, 70, 229, 0.08), 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    }
+  }
+
+  // 2. 暗色模式
+  html.dark &,
+  html.theme-dark &,
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(8, 12, 24, 0.7) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.65), 
+                0 0 1px rgba(255, 255, 255, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+
+    .el-notification__title { color: #f8fafc !important; }
+    .el-notification__content { color: #cbd5e1 !important; }
+    .el-notification__closeBtn { 
+      color: #64748b !important; 
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.08) !important;
+        color: #cbd5e1 !important;
+      }
+    }
+
+    &.success, &.el-notification--success, &.is-success {
+      &::before {
+        background: linear-gradient(to bottom, #10b981, #34d399) !important;
+        box-shadow: 0 0 12px rgba(52, 211, 153, 0.8) !important;
+      }
+      .el-notification__icon {
+        color: #34d399 !important;
+        filter: drop-shadow(0 0 8px rgba(52, 211, 153, 0.6)) !important;
+      }
+      box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.65), 0 0 20px rgba(52, 211, 153, 0.1) !important;
+    }
+    &.error, &.el-notification--error, &.is-error {
+      &::before {
+        background: linear-gradient(to bottom, #ef4444, #fca5a5) !important;
+        box-shadow: 0 0 12px rgba(239, 68, 68, 0.8) !important;
+      }
+      .el-notification__icon {
+        color: #fca5a5 !important;
+        filter: drop-shadow(0 0 8px rgba(252, 165, 165, 0.6)) !important;
+      }
+    }
+    &.warning, &.el-notification--warning, &.is-warning {
+      &::before {
+        background: linear-gradient(to bottom, #f59e0b, #fbbf24) !important;
+        box-shadow: 0 0 12px rgba(245, 158, 11, 0.8) !important;
+      }
+      .el-notification__icon {
+        color: #fbbf24 !important;
+        filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.6)) !important;
+      }
+    }
+    &.info, &.el-notification--info, &.is-info {
+      &::before {
+        background: linear-gradient(to bottom, #4f46e5, #38bdf8) !important;
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.8) !important;
+      }
+      .el-notification__icon {
+        color: #38bdf8 !important;
+        filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.6)) !important;
+      }
+    }
+  }
+}
+
+// 物理阻尼侧滑进入过渡动画
+.el-notification-fade-enter-active {
+  animation: polaris-spring-slide 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.1) both !important;
+}
+.el-notification-fade-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+  opacity: 0 !important;
+  transform: translate3d(40px, 0, 0) scale(0.9) !important;
+}
+
+@keyframes polaris-spring-slide {
+  0% {
+    opacity: 0;
+    transform: translate3d(120%, 0, 0) scale3d(0.9, 0.9, 1);
+  }
+  70% {
+    transform: translate3d(-10px, 0, 0) scale3d(1.02, 1.02, 1);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
+  }
+}
+
+
 
 
 

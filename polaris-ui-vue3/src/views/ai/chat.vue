@@ -394,40 +394,42 @@
                 <!-- 用户消息包装（支持附件卡片展现） -->
                 <div v-else class="user-bubble-wrapper">
                   <div v-if="msg.fileName" class="msg-attachment-card-wrapper">
-                    <!-- 如果是图片附件 -->
-                    <div v-if="isImageFile(msg.fileName)" class="msg-image-attachment">
-                      <el-image
-                        :preview-src-list="[msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : '']"
-                        :src="msg.fileUrl ? (msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)) : ''"
-                        class="chat-inline-image"
-                        fit="cover"
-                      >
-                        <template #placeholder>
-                          <div class="image-slot">
-                            加载中<span class="dot">...</span>
-                          </div>
-                        </template>
-                      </el-image>
-                      <div class="image-name-badge">{{ msg.fileName }}</div>
-                    </div>
-                    <!-- 其他普通文档/PDF 附件 -->
-                    <div v-else class="msg-attachment-card">
-                      <el-icon class="attachment-card-icon"><document /></el-icon>
-                      <div class="attachment-card-info">
-                        <span :title="msg.fileName" class="attachment-card-name">{{ msg.fileName }}</span>
-                        <span class="attachment-card-desc">
-                          {{ msg.fileName.toLowerCase().endsWith('.pdf') ? '已成功关联 PDF 多模态图文解析' : '已成功关联此对话解析' }}
-                        </span>
+                    <div v-for="(fileItem, fileIdx) in getAttachmentList(msg)" :key="fileIdx" class="msg-attachment-card-item">
+                      <!-- 如果是图片附件 -->
+                      <div v-if="isImageFile(fileItem.name)" class="msg-image-attachment">
+                        <el-image
+                          :preview-src-list="[fileItem.url ? (fileItem.url.startsWith('http') ? fileItem.url : (uploadUrl.replace('/common/upload', '') + fileItem.url)) : '']"
+                          :src="fileItem.url ? (fileItem.url.startsWith('http') ? fileItem.url : (uploadUrl.replace('/common/upload', '') + fileItem.url)) : ''"
+                          class="chat-inline-image"
+                          fit="cover"
+                        >
+                          <template #placeholder>
+                            <div class="image-slot">
+                              加载中<span class="dot">...</span>
+                            </div>
+                          </template>
+                        </el-image>
+                        <div class="image-name-badge">{{ fileItem.name }}</div>
                       </div>
-                      <el-link
-                        v-if="msg.fileUrl"
-                        :href="msg.fileUrl.startsWith('http') ? msg.fileUrl : (uploadUrl.replace('/common/upload', '') + msg.fileUrl)"
-                        :underlined="false"
-                        class="attachment-card-download"
-                        icon="Download"
-                        target="_blank"
-                        type="primary"
-                      ></el-link>
+                      <!-- 其他普通文档/PDF 附件 -->
+                      <div v-else class="msg-attachment-card">
+                        <el-icon class="attachment-card-icon"><document /></el-icon>
+                        <div class="attachment-card-info">
+                          <span :title="fileItem.name" class="attachment-card-name">{{ fileItem.name }}</span>
+                          <span class="attachment-card-desc">
+                            {{ fileItem.name.toLowerCase().endsWith('.pdf') ? '已成功关联 PDF 多模态图文解析' : '已成功关联此对话解析' }}
+                          </span>
+                        </div>
+                        <el-link
+                          v-if="fileItem.url"
+                          :href="fileItem.url.startsWith('http') ? fileItem.url : (uploadUrl.replace('/common/upload', '') + fileItem.url)"
+                          :underlined="false"
+                          class="attachment-card-download"
+                          icon="Download"
+                          target="_blank"
+                          type="primary"
+                        ></el-link>
+                      </div>
                     </div>
                   </div>
                   <span class="user-text">{{ msg.content }}</span>
@@ -444,18 +446,18 @@
       <!-- 输入区域 -->
       <div v-show="currentConvId" class="input-area">
         <!-- 待发送附件预览栏 -->
-        <div v-if="attachment" class="attachment-preview-bar">
-          <div class="attachment-tag">
-            <template v-if="isImageFile(attachment.name)">
+        <div v-if="attachments && attachments.length" class="attachment-preview-bar">
+          <div v-for="(item, index) in attachments" :key="index" class="attachment-tag">
+            <template v-if="isImageFile(item.name)">
               <el-image
-                :src="attachment.url ? (attachment.url.startsWith('http') ? attachment.url : (uploadUrl.replace('/common/upload', '') + attachment.url)) : ''"
+                :src="item.url ? (item.url.startsWith('http') ? item.url : (uploadUrl.replace('/common/upload', '') + item.url)) : ''"
                 class="preview-inline-image"
                 fit="cover"
               />
             </template>
             <el-icon v-else><document /></el-icon>
-            <span :title="attachment.name" class="file-name">{{ attachment.name }}</span>
-            <el-icon class="remove-btn" @click="handleRemoveAttachment"><close /></el-icon>
+            <span :title="item.name" class="file-name">{{ item.name }}</span>
+            <el-icon class="remove-btn" @click="handleRemoveAttachment(index)"><close /></el-icon>
           </div>
         </div>
 
@@ -883,7 +885,7 @@ export default {
       // 附件上传相关
       uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
       uploadHeaders: { Authorization: "Bearer " + getToken() },
-      attachment: null,
+      attachments: [],
       uploadingAttachment: false,
       // 报告预览相关
       reportVisible: false,
@@ -1442,14 +1444,25 @@ export default {
       const text = this.inputText.trim()
       if (!text) return
 
-      const attachedFile = this.attachment
+      const attachedFiles = this.attachments || []
       this.inputText = ''
-      this.attachment = null
+      this.attachments = []
       this.isStreaming = true
 
       // 追加用户气泡
-      const displayContent = attachedFile ? `${text}\n\n📎 附件: ${attachedFile.name}` : text
-      this.messages.push({ role: 'user', content: displayContent, loading: false, streaming: false, error: null })
+      let displayContent = text
+      if (attachedFiles.length > 0) {
+        displayContent += '\n\n📎 附件: ' + attachedFiles.map(f => f.name).join(', ')
+      }
+      this.messages.push({
+        role: 'user',
+        content: displayContent,
+        loading: false,
+        streaming: false,
+        error: null,
+        fileName: attachedFiles.map(f => f.name).join(','),
+        fileUrl: attachedFiles.map(f => f.url).join(',')
+      })
 
       // 追加 AI loading 占位
       const aiIndex = this.messages.length
@@ -1467,8 +1480,9 @@ export default {
         url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
       } else {
         url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
-        if (attachedFile) {
-          url += `&fileUrl=${encodeURIComponent(attachedFile.url)}`
+        if (attachedFiles.length > 0) {
+          const fileUrls = attachedFiles.map(f => f.url).join(',')
+          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
         }
       }
       const token = getToken()
@@ -2410,8 +2424,8 @@ export default {
         this.$message.warning('正在对话中，暂不支持上传附件')
         return false
       }
-      if (this.attachment) {
-        this.$message.warning('请先删除已有附件，再上传新附件')
+      if (this.attachments && this.attachments.length >= 5) {
+        this.$message.warning('最多只能上传 5 个附件')
         return false
       }
 
@@ -2447,13 +2461,26 @@ export default {
       return ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(ext)
     },
 
+    getAttachmentList(msg) {
+      if (!msg.fileName || !msg.fileUrl) return []
+      const names = msg.fileName.split(',')
+      const urls = msg.fileUrl.split(',')
+      return names.map((name, i) => ({
+        name: name,
+        url: urls[i] || ''
+      }))
+    },
+
     handleAttachmentSuccess(res, file) {
       this.uploadingAttachment = false
       if (res.code === 200) {
-        this.attachment = {
+        if (!this.attachments) {
+          this.attachments = []
+        }
+        this.attachments.push({
           name: file.name,
           url: res.fileName
-        }
+        })
         this.$message.success('文件上传成功')
       } else {
         this.$message.error(res.msg || '文件上传失败')
@@ -2465,8 +2492,10 @@ export default {
       this.$message.error('文件上传接口调用失败')
     },
 
-    handleRemoveAttachment() {
-      this.attachment = null
+    handleRemoveAttachment(index) {
+      if (this.attachments) {
+        this.attachments.splice(index, 1)
+      }
     },
 
     // ──────────────────────────────────────────
@@ -3255,6 +3284,53 @@ export default {
   align-items: flex-end;
 }
 
+.msg-attachment-card-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.msg-image-attachment {
+  max-width: 300px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  text-align: left;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  }
+
+  .chat-inline-image {
+    width: 100%;
+    max-height: 180px;
+    display: block;
+  }
+
+  .image-name-badge {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    color: #fff;
+    font-size: 11px;
+    padding: 6px 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .msg-attachment-card {
   display: flex;
   align-items: center;
@@ -3328,6 +3404,65 @@ export default {
 
   .theme-light & {
     background: rgba(0, 0, 0, 0.04) !important;
+  }
+}
+
+/* 待发送附件预览栏 */
+.attachment-preview-bar {
+  max-width: 820px;
+  margin: 0 auto 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.attachment-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--polaris-card-bg);
+  border: 1px solid var(--polaris-card-border);
+  padding: 6px 12px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  max-width: 100%;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+
+  .preview-inline-image {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .el-icon {
+    font-size: 16px;
+    color: var(--polaris-text-sub);
+  }
+
+  .file-name {
+    font-size: 12px;
+    color: var(--polaris-text-main);
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .remove-btn {
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--polaris-text-sub);
+    transition: color 0.2s;
+    margin-left: 4px;
+
+    &:hover {
+      color: var(--polaris-danger-color);
+    }
   }
 }
 
