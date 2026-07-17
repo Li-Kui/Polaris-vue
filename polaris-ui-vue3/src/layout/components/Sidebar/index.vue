@@ -800,9 +800,21 @@ nextTick(() => {
   &.icon-message { color: #eab308 !important; }   // 通知公告：琥珀黄
   &.icon-log { color: #f43f5e !important; }       // 日志管理：玫瑰红
   
-  // 三级及其他常用图标彩色化
+  // 子级与常用图标彩色化
   &.icon-form { color: #10b981 !important; }      // 操作日志：绿
   &.icon-login { color: #3b82f6 !important; }     // 登录日志：蓝
+  &.icon-logininfor { color: #3b82f6 !important; } // 登录日志信息：科技蓝
+  &.icon-online { color: #06b6d4 !important; }    // 在线用户：湖水蓝
+  &.icon-job { color: #f59e0b !important; }       // 定时任务：金黄
+  &.icon-druid { color: #e11d48 !important; }     // 数据监控：玫瑰红
+  &.icon-server { color: #2563eb !important; }    // 服务监控：宝蓝
+  &.icon-redis { color: #dc2626 !important; }     // 缓存监控：极客红
+  &.icon-redis-list { color: #fb7185 !important; } // 缓存列表：珊瑚粉
+  &.icon-build { color: #ea580c !important; }     // 表单构建：落日橙
+  &.icon-code { color: #059669 !important; }      // 代码生成：翡翠绿
+  &.icon-swagger { color: #16a34a !important; }   // 系统接口/工作流管理：Swagger绿
+  &.icon-excel { color: #15803d !important; }     // 知识库管理：微软绿
+  &.icon-guide { color: #6366f1 !important; }     // 模型管理：智能蓝
 }
 
 @keyframes pulse-icon {
