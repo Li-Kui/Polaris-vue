@@ -13,10 +13,7 @@ import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -203,11 +200,24 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         String fileName = null;
         if (fileUrl != null && !fileUrl.trim().isEmpty()) {
             sseHelper.sendSse(emitter, "status", "正在解析文件附件...");
-            parsedAttachmentContent = AttachmentParserHelper.parse(fileUrl);
+            String[] urls = fileUrl.split(",");
+            StringBuilder sbContent = new StringBuilder();
+            StringBuilder sbNames = new StringBuilder();
+            for (String url : urls) {
+                String trimmedUrl = url.trim();
+                if (trimmedUrl.isEmpty()) continue;
+                String content = AttachmentParserHelper.parse(trimmedUrl);
+                if (content != null && !content.trim().isEmpty()) {
+                    sbContent.append("【附件: ").append(trimmedUrl.substring(trimmedUrl.lastIndexOf("/") + 1)).append("】\n")
+                            .append(content).append("\n\n");
+                }
+                String name = trimmedUrl.substring(trimmedUrl.lastIndexOf("/") + 1);
+                if (sbNames.length() > 0) sbNames.append(",");
+                sbNames.append(name);
+            }
+            parsedAttachmentContent = sbContent.toString();
+            fileName = sbNames.toString();
             sseHelper.sendSse(emitter, "status", "附件解析成功，正在初始化 AI 思考...");
-            fileName = fileUrl.substring(fileUrl.lastIndexOf("/") + 1);
-
-            // 安全限制：若解析内容过大超过 28000 字符，进行截断，防止超限报错
             if (parsedAttachmentContent != null && parsedAttachmentContent.length() > 28000) {
                 parsedAttachmentContent = parsedAttachmentContent.substring(0, 28000)
                         + "\n\n...[由于文件附件体积过大，已自动截断保留前 28000 字符内容]...";
@@ -382,19 +392,51 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 String fileUrl = m.getFileUrl();
                 if (fileUrl != null && !fileUrl.trim().isEmpty()) {
                     String fileName = m.getFileName() != null ? m.getFileName() : "";
-                    if (mediaHelper.isImageFile(fileName)) {
-                        list.add(mediaHelper.buildImageMessage(m.getContent(), fileUrl, fileName));
-                    } else if (fileName.toLowerCase().endsWith(".pdf")) {
-                        list.add(mediaHelper.buildPdfMultimodalMessage(m.getContent(), fileUrl, fileName, m.getFileContent()));
-                    } else {
-                        // 其他纯文本文档：常规提取纯文本拼接
-                        if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
-                            String combinedPrompt = m.getContent() + "\n\n"
-                                    + "--------------------------------------------------\n"
-                                    + "[已为您解析并关联对话附件: " + fileName + "]\n"
-                                    + "--------------------------------------------------\n"
-                                    + m.getFileContent();
+
+                    String[] urls = fileUrl.split(",");
+                    String[] names = fileName.split(",");
+
+                    List<Content> contents = new ArrayList<>();
+                    contents.add(TextContent.from(m.getContent()));
+
+                    boolean hasMultimodal = false;
+                    for (int j = 0; j < urls.length; j++) {
+                        String url = urls[j].trim();
+                        if (url.isEmpty()) continue;
+                        String name = j < names.length ? names[j].trim() : url.substring(url.lastIndexOf("/") + 1);
+
+                        if (mediaHelper.isImageFile(name)) {
+                            String base64 = mediaHelper.convertImageToBase64(url);
+                            if (base64 != null) {
+                                contents.add(ImageContent.from(base64, mediaHelper.getImageMimeType(name)));
+                                hasMultimodal = true;
+                            }
+                        } else if (name.toLowerCase().endsWith(".pdf")) {
+                            List<String> pagesBase64 = mediaHelper.renderPdfPagesToBase64(url, 3);
+                            if (pagesBase64 != null && !pagesBase64.isEmpty()) {
+                                for (String pageBase64 : pagesBase64) {
+                                    contents.add(ImageContent.from(pageBase64, "image/png"));
+                                }
+                                hasMultimodal = true;
+                            }
+                        }
+                    }
+
+                    if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
+                        String combinedPrompt = m.getContent() + "\n\n"
+                                + "--------------------------------------------------\n"
+                                + "[已为您解析并关联对话附件: " + fileName + "]\n"
+                                + "--------------------------------------------------\n"
+                                + m.getFileContent();
+                        if (hasMultimodal) {
+                            contents.set(0, TextContent.from(combinedPrompt));
+                            list.add(UserMessage.from(contents));
+                        } else {
                             list.add(UserMessage.from(combinedPrompt));
+                        }
+                    } else {
+                        if (hasMultimodal) {
+                            list.add(UserMessage.from(contents));
                         } else {
                             list.add(UserMessage.from(m.getContent()));
                         }

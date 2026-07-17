@@ -210,7 +210,7 @@ public class MultimodalMediaHelper {
     /**
      * 运行时将 PDF 文档前 3 页通过 PDFBox 渲染为 Base64 图片
      */
-    private List<String> renderPdfPagesToBase64(String fileUrl, int maxPages) {
+    public List<String> renderPdfPagesToBase64(String fileUrl, int maxPages) {
         List<String> resultList = new ArrayList<>();
         try {
             String localPath = PolarisConfig.getProfile();
