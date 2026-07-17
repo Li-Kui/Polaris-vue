@@ -1726,19 +1726,12 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@use "@/assets/styles/polaris-ai.scss";
 .ai-workflow-manager {
   background-color: transparent !important;
   min-height: 100vh;
 }
 
-/* 页面内部容器 Flex 布局，使搜索栏与下方内容间距为 16px */
-.content-inner {
-  padding: 0 !important;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  height: 100%;
-}
 .filter-container {
   background: rgba(255, 255, 255, 0.02) !important;
   backdrop-filter: blur(20px) !important;
@@ -2861,99 +2854,8 @@ export default {
   pointer-events: none !important;
 }
 
-/* 聚合操作栏 (检索卡片正下方) */
-.matrix-actions-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 12px 0 16px; /* 增加适度外边距，形成舒适的呼吸感 */
-  padding: 0 4px;
-}
 
-.actions-left {
-  display: flex;
-  align-items: center;
-}
 
-.actions-right {
-  display: flex;
-  align-items: center;
-}
-
-/* 视图切换器按钮 */
-.view-mode-toggle-row {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.03);
-  height: 36px;
-  box-sizing: border-box;
-
-  .dark &,
-  .theme-dark & {
-    background-color: rgba(255, 255, 255, 0.03);
-  }
-}
-
-.toggle-view-btn {
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 0 12px;
-  height: 28px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &.active {
-    background-color: #ffffff;
-    color: #4f46e5;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-  }
-
-  .dark &,
-  .theme-dark & {
-    color: #94a3b8;
-
-    &.active {
-      background-color: rgba(255, 255, 255, 0.05);
-      color: #38bdf8;
-      box-shadow: none;
-    }
-  }
-}
-
-.view-mode-fade-enter-active,
-.view-mode-fade-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.view-mode-fade-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.view-mode-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-/* ===== 🧠 三维北辰星图卡片视图布局 ===== */
-.synapse-card-grid-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-}
-
-.synapse-card-grid-container {
-  width: 100%;
-}
 
 .synapse-card-grid {
   display: grid;
@@ -3039,23 +2941,6 @@ export default {
   }
 }
 
-.card-shimmer-ray {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -80px;
-  width: 50px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
-  transform: skewX(-20deg) translateX(-100px);
-  transition: transform 0.6s ease;
-  pointer-events: none;
-}
-
-.card-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
 .card-code {
   font-family: Menlo, Monaco, Consolas, monospace;
@@ -3074,10 +2959,6 @@ export default {
   }
 }
 
-.status-badge-text {
-  font-size: 11px;
-  font-weight: bold;
-}
 
 .card-body {
   display: flex;
@@ -3152,19 +3033,6 @@ export default {
   }
 }
 
-/* 卡片操作按钮 */
-.card-footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  border-top: 1px dashed rgba(0, 0, 0, 0.05);
-  padding-top: 12px;
-
-  .dark &,
-  .theme-dark & {
-    border-top-color: rgba(255, 255, 255, 0.05);
-  }
-}
 
 .card-op-edit-pill {
   font-size: 12px;

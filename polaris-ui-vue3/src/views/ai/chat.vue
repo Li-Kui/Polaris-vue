@@ -319,15 +319,25 @@
                     v-html="renderMarkdown(msg.content)"
                   ></div>
                   <!-- 报告操作工具栏 -->
-                  <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="msg-tools">
-                    <el-button
-                      class="tool-btn report-btn"
-                      icon="Document"
-                      link
-                      @click="openReportView(msg.content)"
-                    >
-                      以精美报告形式查看
-                    </el-button>
+                  <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
+                    <div class="report-card-body">
+                      <div class="report-card-left">
+                        <div class="report-card-icon-wrapper">
+                          <el-icon class="report-icon-svg"><document /></el-icon>
+                        </div>
+                        <div class="report-card-info">
+                          <div class="report-card-title">
+                            分析报告已生成
+                            <span class="report-pill-badge">精美报告</span>
+                          </div>
+                          <div class="report-card-desc">系统已为您提炼核心指标与可视化图表</div>
+                        </div>
+                      </div>
+                      <div class="report-card-right">
+                        <span class="action-text">点击查看报告</span>
+                        <el-icon class="action-arrow"><arrow-right /></el-icon>
+                      </div>
+                    </div>
                   </div>
                   <!-- 审批控制面板 -->
                   <div v-if="msg.requireApproval && msg.approved === null" class="approval-card-panel">
@@ -668,71 +678,132 @@
       </div>
     </main>
 
-    <!-- ========== 精美报告预览弹窗 ========== -->
-    <el-dialog
-      :append-to-body="true"
-      :fullscreen="true"
-      v-model="reportVisible"
-      class="pretty-report-dialog"
-      title="AI 智能报告生成器"
-      @close="handleReportClose"
-    >
-      <div class="report-toolbar">
-        <el-button icon="Printer" size="small" type="primary" @click="handlePrintReport">打印报告 / 导出 PDF</el-button>
-        <el-button icon="Download" size="small" type="success" @click="handleDownloadHtmlReport">导出静态 HTML</el-button>
-        <el-button icon="DocumentCopy" size="small" @click="handleCopyHtmlReport">复制 HTML 源码</el-button>
-        <el-button icon="Close" size="small" @click="reportVisible = false">关闭</el-button>
-      </div>
-
-      <div id="report-print-area" class="report-preview-page">
-        <div class="report-paper">
-          <!-- 页眉装点 -->
-          <div class="paper-header">
-            <span class="confidential-tag">内部绝密 / AI 智能分析</span>
-            <span class="report-serial">编号：AI-REP-{{ currentReportId }}</span>
-          </div>
-
-          <div class="paper-title-area">
-            <div class="paper-badge">
-              <el-icon><document-checked /></el-icon> REPORT
-            </div>
-            <h1 class="paper-title">{{ reportTitle }}</h1>
-            <div class="paper-meta">
-              <span><strong>生成人：</strong>{{ currentUserName }}</span>
-              <span><strong>生成时间：</strong>{{ formatReportTime() }}</span>
-              <span><strong>会话来源：</strong>{{ conversationTitle }}</span>
-            </div>
-          </div>
-
-          <div class="paper-divider">
-            <span class="divider-circle"></span>
-          </div>
-
-          <!-- ECharts 可视化数据分析对比图表 -->
-          <div v-if="hasChartData" class="report-chart-section">
-            <div class="section-top-bar">
-              <div class="section-title">
-                <el-icon class="chart-icon-accent"><data-line /></el-icon> 数据对比可视化直观分析
+    <!-- ========== 通用精美报告预览局部面板 (只在右侧内容区全屏，不遮挡左侧系统菜单) ========== -->
+    <transition name="el-zoom-in-bottom">
+      <div v-if="reportVisible" class="pretty-report-panel-local">
+        <!-- 精致工具栏 -->
+        <div class="report-toolbar-v2">
+          <div class="report-toolbar-inner">
+            <div class="toolbar-left">
+              <div class="toolbar-brand">
+                <el-icon class="brand-icon"><data-board /></el-icon>
+                <span class="brand-title">AI 智能分析报告</span>
               </div>
-              <div class="chart-options">
-                <el-radio-group v-model="activeChartType" size="small" @change="switchChartType">
-                  <el-radio-button label="bar"><el-icon><data-analysis /></el-icon> 对比柱状图</el-radio-button>
-                  <el-radio-button label="line"><el-icon><share /></el-icon> 趋势折线图</el-radio-button>
-                </el-radio-group>
+              <span class="toolbar-divider-line"></span>
+              <span class="toolbar-report-id">NO. {{ currentReportId }}</span>
+            </div>
+            <div class="toolbar-right">
+              <el-button class="toolbar-btn" size="small" @click="handlePrintReport">
+                <el-icon><printer /></el-icon> 打印 / PDF
+              </el-button>
+              <el-button class="toolbar-btn" size="small" @click="handleDownloadHtmlReport">
+                <el-icon><download /></el-icon> 导出 HTML
+              </el-button>
+              <el-button class="toolbar-btn" size="small" @click="handleCopyHtmlReport">
+                <el-icon><document-copy /></el-icon> 复制源码
+              </el-button>
+              <el-button class="toolbar-btn-close" size="small" circle @click="handleReportClose">
+                <el-icon><close /></el-icon>
+              </el-button>
+            </div>
+          </div>
+        </div>
+
+        <div id="report-print-area" class="report-preview-page">
+          <div class="report-paper">
+            <!-- 页眉装饰条 -->
+            <div class="paper-header-v2">
+              <div class="header-gradient-bar"></div>
+              <div class="header-info-row">
+                <span class="confidential-tag-v2">
+                  <el-icon><lock /></el-icon> 内部报告 · AI 智能分析
+                </span>
+                <span class="report-serial-v2">编号：AI-REP-{{ currentReportId }}</span>
               </div>
             </div>
-            <div id="pretty-report-chart" class="pretty-chart-box"></div>
-          </div>
 
-          <div class="paper-content markdown-body" v-html="renderMarkdown(reportContent)"></div>
+            <!-- 标题区 -->
+            <div class="paper-title-area-v2">
+              <div class="paper-badge-v2">
+                <el-icon><notebook /></el-icon>
+                <span>ANALYSIS REPORT</span>
+              </div>
+              <h1 class="paper-title-v2">{{ reportTitle }}</h1>
+              <div class="paper-meta-v2">
+                <div class="meta-item">
+                  <el-icon><user /></el-icon>
+                  <span>生成人：admin</span>
+                </div>
+                <div class="meta-item">
+                  <el-icon><calendar /></el-icon>
+                  <span>生成时间：{{ formatReportTime() }}</span>
+                </div>
+                <div class="meta-item">
+                  <el-icon><chat-dot-round /></el-icon>
+                  <span>会话来源：{{ currentUserName }} 的分析请求</span>
+                </div>
+              </div>
+            </div>
 
-          <div class="paper-footer">
-            <p>※ 本报告由 RuoYi-AI 大模型内容引擎分析生成，其内容仅供参考，不构成任何最终决策 and 操作建议。 ※</p>
-            <p class="footer-page-num">Page 1 of 1</p>
+            <!-- 统计概览卡片 -->
+            <div v-if="reportStats" class="report-stats-row">
+              <div v-for="(stat, idx) in reportStats" :key="idx" class="stat-card" :class="'stat-card-' + stat.color">
+                <div class="stat-icon-box">
+                  <span class="stat-emoji">{{ stat.emoji }}</span>
+                </div>
+                <div class="stat-info">
+                  <span class="stat-value">{{ stat.value }}</span>
+                  <span class="stat-label">{{ stat.label }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 精美分隔线 -->
+            <div class="paper-divider-v2">
+              <span class="divider-dot"></span>
+              <span class="divider-dot"></span>
+              <span class="divider-dot"></span>
+            </div>
+
+            <!-- ECharts 可视化数据图表 -->
+            <div v-if="hasChartData" class="report-chart-section-v2">
+              <div class="chart-section-header">
+                <div class="chart-section-title">
+                  <span class="section-icon-wrapper">
+                    <el-icon><trend-charts /></el-icon>
+                  </span>
+                  <span>数据可视化分析</span>
+                </div>
+                <div class="chart-type-switcher">
+                  <el-radio-group v-if="chartConfig && chartConfig.mode !== 'pie'" v-model="activeChartType" size="small" @change="switchChartType">
+                    <el-radio-button label="bar"><el-icon><histogram /></el-icon> 柱状图</el-radio-button>
+                    <el-radio-button label="line"><el-icon><data-line /></el-icon> 折线图</el-radio-button>
+                  </el-radio-group>
+                  <span v-else class="chart-type-badge">
+                    <el-icon><pie-chart /></el-icon> 分布统计
+                  </span>
+                </div>
+              </div>
+              <div id="pretty-report-chart" class="pretty-chart-box-v2"></div>
+            </div>
+
+            <!-- 正文内容卡片化分段展示 -->
+            <div class="paper-content-v2-container">
+              <div v-for="(section, idx) in reportSections" :key="idx" class="report-content-card">
+                <div class="markdown-body" v-html="renderMarkdown(section)"></div>
+              </div>
+            </div>
+
+            <!-- 页脚 -->
+            <div class="paper-footer-v2">
+              <div class="footer-gradient-line"></div>
+              <p class="footer-disclaimer">本报告由 AI 大模型内容引擎分析生成，仅供参考，不构成最终决策依据</p>
+              <p class="footer-brand">Powered by <strong>RuoYi-AI</strong> · {{ formatReportTime() }}</p>
+            </div>
           </div>
         </div>
       </div>
-    </el-dialog>
+    </transition>
 
     <!-- ========== 重命名弹窗 ========== -->
     <el-dialog
@@ -823,6 +894,8 @@ export default {
       activeChartType: 'bar',
       chartConfig: null,
       reportChartInstance: null,
+      reportSections: [],
+      reportStats: null,
       enableWebSearch: false,
       // 语音输入相关
       isListening: false,
@@ -1660,36 +1733,36 @@ export default {
 
       let html = this.escapeHtml(cleanText)
 
-      // 1. 代码块
+      // 1. 转义安全之后，立即执行精致数据表格的深度转换
+      html = this.parseAndFormatTables(html)
+
+      // 2. 代码块
       html = html.replace(
         /```[\w]*\n?([\s\S]*?)```/g,
         '<pre class="code-block"><code>$1</code></pre>'
       )
 
-      // 2. 行内代码
+      // 3. 行内代码
       html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
 
-      // 3. 标题 (Markdown #, ##, ###, ####)
-      html = html.replace(/^#\s*(.*?)$/gm, '<h1>$1</h1>')
-      html = html.replace(/^##\s*(.*?)$/gm, '<h2>$1</h2>')
-      html = html.replace(/^###\s*(.*?)$/gm, '<h3>$1</h3>')
-      html = html.replace(/^####\s*(.*?)$/gm, '<h4>$1</h4>')
+      // 4. 标题 (Markdown #, ##, ###, ####) - 去掉尾部 $ 锚点，强健匹配，并支持至少一个空格分割
+      html = html.replace(/^#\s+(.+)/gm, '<h1>$1</h1>')
+      html = html.replace(/^##\s+(.+)/gm, '<h2>$1</h2>')
+      html = html.replace(/^###\s+(.+)/gm, '<h3>$1</h3>')
+      html = html.replace(/^####\s+(.+)/gm, '<h4>$1</h4>')
 
-      // 4. 粗体
+      // 5. 粗体与斜体
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      // 5. 斜体
       html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
 
-      // 5.5 超链接
+      // 6. 超链接
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
         let href = url
-        // 自动纠错一：剥离外部域名，防范大模型幻想拼凑 klingai.com 或其他无关域名等情况
         if (url.startsWith('http://') || url.startsWith('https://')) {
           if (url.includes('/upload/') && (url.includes('/profile/') || url.includes('/pro'))) {
             url = url.replace(/^https?:\/\/[^\/]+/, '')
           }
         }
-        // 自动纠错二：将错改的 /proXXX/upload/ 路径还原回系统的 /profile/upload/
         if (url.includes('/upload/') && !url.startsWith('/profile/')) {
           url = url.replace(/^\/pro[^\/]*\/upload\//, '/profile/upload/')
         }
@@ -1700,62 +1773,22 @@ export default {
         return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
       })
 
-      // 6. 简单的 Markdown 表格解析逻辑
-      const lines = html.split('\n')
-      let inTable = false
-      let tableHtml = ''
-      for (let i = 0; i < lines.length; i++) {
-        let line = lines[i].trim()
-        if (line.startsWith('|') && line.endsWith('|')) {
-          if (line.match(/^\|[\s-|-]*\|$/)) {
-            lines[i] = ''
-            continue
-          }
-          const cells = line.split('|').slice(1, -1).map(c => c.trim())
-          if (!inTable) {
-            inTable = true
-            tableHtml += '<table class="report-table"><thead><tr>'
-            cells.forEach(c => { tableHtml += `<th>${c}</th>` })
-            tableHtml += '</tr></thead><tbody>'
-          } else {
-            tableHtml += '<tr>'
-            cells.forEach(c => { tableHtml += `<td>${c}</td>` })
-            tableHtml += '</tr>'
-          }
-          lines[i] = ''
-        } else {
-          if (inTable) {
-            inTable = false
-            tableHtml += '</tbody></table>'
-            lines[i] = tableHtml + '\n' + lines[i]
-            tableHtml = ''
-          }
-        }
-      }
-      if (inTable) {
-        tableHtml += '</tbody></table>'
-        lines.push(tableHtml)
-      }
-      html = lines.join('\n')
-
-      // 7. 无序列表与有序列表
-      html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      // 7. 无序列表与有序列表（支持任意缩进空格，避免源码外露）
+      html = html.replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
       html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`)
       html = html.replace(/<\/ul>\s*<ul>/g, '')
 
-      html = html.replace(/^\d+\. (.+)$/gm, '<ol-li>$1</ol-li>')
+      html = html.replace(/^\s*\d+\. (.+)$/gm, '<ol-li>$1</ol-li>')
       html = html.replace(/(<ol-li>[\s\S]*?<\/ol-li>)/g, m => `<ol>${m}</ol>`)
       html = html.replace(/<\/ol>\s*<ol>/g, '')
       html = html.replace(/ol-li/g, 'li')
 
-      // 8. 引用块
-      html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
+      // 8. 引用块（支持任意前导空格）
+      html = html.replace(/^\s*&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>')
       html = html.replace(/<\/blockquote>\s*<blockquote>/g, '<br>')
 
       // 9. 水平线与换行
       html = html.replace(/^---+$/gm, '<hr>')
-
-      // 合并三个及以上的换行，压缩多余空行
       html = html.replace(/\n{3,}/g, '\n\n')
       html = html.replace(/\n/g, '<br>')
 
@@ -1764,6 +1797,75 @@ export default {
       html = html.replace(/(<\/(table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|h4|blockquote|hr)>)\s*<br>/gi, '$1')
 
       return html
+    },
+
+    // 智能解析精致数据表格（Markdown 和 空格文本对齐均适用）
+    parseAndFormatTables(text) {
+      if (!text) return text
+      
+      const lines = text.split('\n')
+      const newLines = []
+      let i = 0
+      
+      while (i < lines.length) {
+        let line = lines[i].trim()
+        
+        // 检测表格开始条件 (必须包含竖线，且下一行是经典的表头隔离特征行)
+        if (line.startsWith('|') && i + 1 < lines.length) {
+          let nextLine = lines[i + 1].trim()
+          
+          // 使用零歧义的标准表格分割匹配正则
+          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
+            const rawHeaders = line.split('|').slice(1, -1).map(c => c.trim())
+            let tableHtml = '<table class="report-table"><thead><tr>'
+            rawHeaders.forEach(th => {
+              tableHtml += `<th>${th}</th>`
+            })
+            tableHtml += '</tr></thead><tbody>'
+            
+            // 跳过表头隔离行
+            i += 2 
+            
+            // 循环读取数据行
+            while (i < lines.length) {
+              let dataLine = lines[i].trim()
+              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
+                const cells = dataLine.split('|').slice(1, -1).map(c => {
+                  let cellVal = c.trim()
+                  // 如果包含状态标签，进一步转译为彩色精美状态胶囊
+                  if (cellVal === '是' || cellVal === '正常' || cellVal === '已分配' || cellVal === '成功') {
+                    return `<span class="report-badge badge-success">✅ ${cellVal}</span>`
+                  } else if (cellVal === '否' || cellVal === '异常' || cellVal === '失败') {
+                    return `<span class="report-badge badge-danger">❌ ${cellVal}</span>`
+                  } else if (cellVal === '未知' || cellVal === '挂起' || cellVal === '待定') {
+                    return `<span class="report-badge badge-warning">⚠️ ${cellVal}</span>`
+                  }
+                  return cellVal
+                })
+                
+                tableHtml += '<tr>'
+                cells.forEach(td => {
+                  tableHtml += `<td>${td}</td>`
+                })
+                tableHtml += '</tr>'
+                i++
+              } else {
+                break
+              }
+            }
+            
+            tableHtml += '</tbody></table>'
+            // 作为一个无换行的大整体块塞入，防范中途渲染折行 Bug
+            newLines.push(tableHtml)
+            continue
+          }
+        }
+        
+        newLines.push(lines[i])
+        i++
+      }
+      
+      return newLines.join('\n')
     },
 
     // ──────────────────────────────────────────
@@ -1869,8 +1971,11 @@ export default {
     openReportView(content) {
       this.reportContent = content
 
-      // 尝试自动提取报告大标题
-      const titleMatch = content.match(/^#+\s+(.+)$/m)
+      // 1. 统一处理换行符，保障正则切割无偏差
+      const normalizedContent = content ? content.replace(/\r\n/g, '\n') : ''
+
+      // 2. 尝试提取报告大标题
+      const titleMatch = normalizedContent.match(/^#\s+(.+)$/m)
       if (titleMatch && titleMatch[1]) {
         this.reportTitle = titleMatch[1].trim()
       } else {
@@ -1879,10 +1984,43 @@ export default {
       }
 
       this.currentReportId = Math.random().toString(36).substring(2, 10).toUpperCase()
+
+      // 3. 智能正文卡片切割逻辑：按二级标题 (## ) 拆分正文
+      if (normalizedContent) {
+        // 先去掉顶部重复的大标题行
+        let cleanContent = normalizedContent.replace(/^#\s+.+$/m, '').trim()
+        
+        // 拆分卡片，匹配以 ## 开头的行
+        const rawSections = cleanContent.split(/^(?=##\s+)/gm)
+        this.reportSections = rawSections
+          .map(s => s.trim())
+          .filter(s => s.length > 0 && s.startsWith('##'))
+
+        // 智能清洗最后一个章节末尾的聊天寒暄引导语
+        if (this.reportSections.length > 0) {
+          const lastIndex = this.reportSections.length - 1
+          let lastSection = this.reportSections[lastIndex]
+          const paragraphs = lastSection.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0)
+          if (paragraphs.length > 1) {
+            const lastPara = paragraphs[paragraphs.length - 1]
+            const isChatter = /[\?？吗😊]|告诉我|有帮助|任何问题|深入的分析|进一步的操作/i.test(lastPara)
+            if (isChatter) {
+              paragraphs.pop()
+              this.reportSections[lastIndex] = paragraphs.join('\n\n')
+            }
+          }
+        }
+      } else {
+        this.reportSections = []
+      }
+
+      // 4. 精准提取指标卡片
+      this.reportStats = this.extractReportStats(normalizedContent)
+
       this.reportVisible = true
 
-      // 解析表格数据并初始化图表
-      const parsed = this.parseTablesForCharts(content)
+      // 5. 解析表格数据并初始化图表
+      const parsed = this.parseTablesForCharts(normalizedContent)
       if (parsed) {
         this.hasChartData = true
         this.chartConfig = parsed
@@ -1894,6 +2032,70 @@ export default {
         this.hasChartData = false
         this.chartConfig = null
       }
+    },
+
+    // 辅助解析真正的表格结构数据（避免正则扫描产生的多算少算偏差 Bug）
+    extractStructuredTables(content) {
+      if (!content) return []
+      
+      const lines = content.split('\n')
+      const tables = []
+      let i = 0
+      
+      while (i < lines.length) {
+        let line = lines[i].trim()
+        if (line.startsWith('|') && i + 1 < lines.length) {
+          let nextLine = lines[i + 1].trim()
+          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
+            const tableRows = []
+            // 跳过表头和分割线
+            i += 2 
+            
+            while (i < lines.length) {
+              let dataLine = lines[i].trim()
+              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
+                const cells = dataLine.split('|').slice(1, -1).map(c => c.trim())
+                tableRows.push(cells)
+                i++
+              } else {
+                break
+              }
+            }
+            tables.push(tableRows)
+            continue
+          }
+        }
+        i++
+      }
+      return tables
+    },
+
+    // 精准生成概览统计卡片数据
+    extractReportStats(content) {
+      if (!content) return null
+
+      // 通过精准结构解析器获取表格
+      const tables = this.extractStructuredTables(content)
+      const tableCount = tables.length
+      
+      // 累计所有表格的有效数据条数
+      let totalRows = 0
+      tables.forEach(t => {
+        totalRows += t.length
+      })
+
+      // 计算章节数（二级标题数）
+      const sectionCount = this.reportSections.length
+
+      // 字数统计
+      const wordCount = content.replace(/\s+/g, '').length
+
+      return [
+        { label: '分析章节', value: sectionCount, emoji: '📚', color: 'indigo' },
+        { label: '分析字数', value: wordCount, emoji: '✍️', color: 'blue' },
+        { label: '数据表格', value: tableCount, emoji: '📊', color: 'emerald' },
+        { label: '数据行数', value: totalRows, emoji: '⚡', color: 'amber' }
+      ]
     },
 
     initReportChart() {
@@ -3622,32 +3824,896 @@ export default {
   color: #10b981 !important;
 }
 
-/* 报告精美弹窗 */
-.pretty-report-dialog {
-  :deep(.el-dialog__header) {
-    background: var(--polaris-bg) !important;
-    border-bottom: 1px solid var(--polaris-inner-border);
-    
-    .el-dialog__title {
-      color: var(--polaris-text-main) !important;
-      font-weight: 700;
+/* ========== 📄 通用精美报告预览局部面板 (不遮挡侧边栏) ========== */
+.pretty-report-panel-local {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  background: var(--polaris-bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: -4px 0 30px rgba(0, 0, 0, 0.05);
+}
+
+/* — 精致工具栏 — */
+.report-toolbar-v2 {
+  background: var(--polaris-card-bg);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid var(--polaris-card-border) !important;
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04) !important;
+  z-index: 10;
+  position: relative;
+  padding: 10px 20px;
+  max-width: 900px;
+  width: calc(100% - 64px);
+  margin: 16px auto 0;
+}
+
+.report-toolbar-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-icon {
+  font-size: 22px;
+  color: #6366f1;
+  filter: drop-shadow(0 2px 6px rgba(99, 102, 241, 0.2));
+  .dark &, .theme-dark & { color: #818cf8; }
+}
+
+.brand-title {
+  font-size: 15px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #4f46e5, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: 0.04em;
+  .dark &, .theme-dark & {
+    background: linear-gradient(135deg, #a5b4fc, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+.toolbar-divider-line {
+  width: 1px;
+  height: 18px;
+  background: #e2e8f0;
+  .dark &, .theme-dark & { background: #334155; }
+}
+
+.toolbar-report-id {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 0.08em;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 4px;
+  .dark &, .theme-dark & {
+    background: #1e293b;
+    color: #94a3b8;
+  }
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-btn {
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  padding: 8px 16px !important;
+  height: 32px !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  background: #fafafa !important;
+  color: #475569 !important;
+
+  .el-icon {
+    font-size: 13px;
+    margin-right: 4px;
+  }
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    background: #ffffff !important;
+    color: #6366f1 !important;
+    border-color: rgba(99, 102, 241, 0.3) !important;
+  }
+
+  .dark &, .theme-dark & {
+    background: #1e293b !important;
+    border-color: rgba(255, 255, 255, 0.06) !important;
+    color: #cbd5e1 !important;
+    &:hover {
+      background: #243249 !important;
+      color: #818cf8 !important;
+      border-color: rgba(129, 140, 248, 0.3) !important;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     }
   }
 
-  .report-toolbar {
-    background: var(--polaris-card-bg) !important;
-    border-bottom: 1px solid var(--polaris-inner-border);
+  // 特殊按钮分色
+  &:nth-child(1) { // 打印 PDF
+    background: rgba(99, 102, 241, 0.04) !important;
+    border-color: rgba(99, 102, 241, 0.12) !important;
+    color: #6366f1 !important;
+    &:hover {
+      background: #6366f1 !important;
+      color: #ffffff !important;
+      border-color: #6366f1 !important;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+    }
   }
 
-  .report-preview-page {
-    background: var(--polaris-bg) !important;
+  &:nth-child(2) { // 导出 HTML
+    background: rgba(16, 185, 129, 0.04) !important;
+    border-color: rgba(16, 185, 129, 0.12) !important;
+    color: #10b981 !important;
+    &:hover {
+      background: #10b981 !important;
+      color: #ffffff !important;
+      border-color: #10b981 !important;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+    }
+  }
+}
+
+.toolbar-btn-close {
+  border: 1px solid rgba(0, 0, 0, 0.06) !important;
+  background: rgba(239, 68, 68, 0.04) !important;
+  color: #ef4444 !important;
+  width: 32px !important;
+  height: 32px !important;
+  transition: all 0.25s ease !important;
+
+  &:hover {
+    transform: rotate(90deg) scale(1.05);
+    background: #ef4444 !important;
+    border-color: #ef4444 !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+  }
+  .dark &, .theme-dark & {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+  }
+}
+
+/* — 报告预览主体 — */
+.report-preview-page {
+  background: var(--polaris-bg) !important;
+  padding: 16px 32px 32px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* — 报告仿真纸张设计 — */
+.report-paper {
+  background: var(--polaris-card-bg) !important;
+  border: 1px solid var(--polaris-card-border) !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.04);
+  color: var(--polaris-text-main);
+  max-width: 900px;
+  margin: 0 auto 40px;
+  border-radius: 20px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  position: relative;
+
+  .dark &, .theme-dark & {
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  }
+}
+
+/* — 页眉装饰条 — */
+.paper-header-v2 {
+  position: relative;
+}
+
+.header-gradient-bar {
+  height: 6px;
+  background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899);
+}
+
+.header-info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 40px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  .dark &, .theme-dark & { border-bottom-color: rgba(255, 255, 255, 0.02); }
+}
+
+.confidential-tag-v2 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #6366f1;
+  .dark &, .theme-dark & { color: #818cf8; }
+}
+
+/* — 标题区与元信息 — */
+.paper-title-area-v2 {
+  padding: 20px 40px 16px;
+  background: linear-gradient(to bottom, rgba(99, 102, 241, 0.02), transparent);
+}
+
+.paper-badge-v2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.08);
+  color: #6366f1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.paper-title-v2 {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 10px 0 12px;
+  line-height: 1.35;
+  .dark &, .theme-dark & { color: #f8fafc; }
+}
+
+.paper-meta-v2 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  font-size: 12px;
+  color: #64748b;
+  .dark &, .theme-dark & { color: #94a3b8; }
+
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    .el-icon {
+      font-size: 14px;
+      color: #94a3b8;
+    }
+  }
+}
+
+/* — 统计指标卡片 — */
+.report-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 0 40px;
+  margin: 12px 0;
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.01);
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-2px);
   }
 
-  .report-paper {
-    background: var(--polaris-card-bg) !important;
-    border: 1px solid var(--polaris-card-border) !important;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.06);
+  .dark &, .theme-dark & {
+    background: rgba(30, 41, 59, 0.4);
+    border-color: rgba(255, 255, 255, 0.04);
+  }
+
+  .stat-icon-box {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+  }
+
+  .stat-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+    font-weight: 800;
+    line-height: 1.2;
+    color: #0f172a;
+    .dark &, .theme-dark & { color: #f8fafc; }
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: #64748b;
+    .dark &, .theme-dark & { color: #94a3b8; }
+  }
+
+  /* 品牌色系统 */
+  &.stat-card-indigo {
+    border-left: 3.5px solid #6366f1;
+    .stat-icon-box { background: rgba(99, 102, 241, 0.06); }
+  }
+  &.stat-card-blue {
+    border-left: 3.5px solid #3b82f6;
+    .stat-icon-box { background: rgba(59, 130, 246, 0.06); }
+  }
+  &.stat-card-emerald {
+    border-left: 3.5px solid #10b981;
+    .stat-icon-box { background: rgba(16, 185, 129, 0.06); }
+  }
+  &.stat-card-amber {
+    border-left: 3.5px solid #f59e0b;
+    .stat-icon-box { background: rgba(245, 158, 11, 0.06); }
+  }
+}
+
+/* — 分隔点 — */
+.paper-divider-v2 {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 0;
+
+  .divider-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #cbd5e1;
+    .dark &, .theme-dark & { background: #475569; }
+  }
+}
+
+/* — 图表区 — */
+.report-chart-section-v2 {
+  margin: 12px 40px;
+  padding: 20px;
+  border-radius: 16px;
+  background: rgba(99, 102, 241, 0.01);
+  border: 1px dashed rgba(99, 102, 241, 0.12);
+
+  .dark &, .theme-dark & {
+    background: rgba(99, 102, 241, 0.02);
+    border-color: rgba(99, 102, 241, 0.2);
+  }
+}
+
+/* — 📊 图表类型切换器美化（兼容亮暗色双主题，防止文字背景同色看不见） — */
+.chart-type-switcher {
+  :deep(.el-radio-group) {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    padding: 3px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+
+    .theme-light & {
+      background: rgba(0, 0, 0, 0.04) !important;
+      border: 1px solid rgba(0, 0, 0, 0.04) !important;
+    }
+  }
+
+  :deep(.el-radio-button) {
+    border: none !important;
+    box-shadow: none !important;
+
+    .el-radio-button__inner {
+      background: transparent !important;
+      border: none !important;
+      color: var(--polaris-text-sub) !important;
+      border-radius: 6px !important;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 6px 14px !important;
+      height: auto !important;
+      line-height: 1.5;
+      transition: all 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+      box-shadow: none !important;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+
+      .theme-light & {
+        color: #64748b !important;
+      }
+
+      &:hover {
+        color: var(--polaris-brand-color) !important;
+      }
+    }
+
+    &.is-active {
+      .el-radio-button__inner {
+        background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%) !important;
+        color: #ffffff !important;
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+
+        .theme-light & {
+          background: #ffffff !important;
+          color: #4f46e5 !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+          border: 1px solid rgba(79, 70, 229, 0.12) !important;
+        }
+      }
+    }
+  }
+}
+
+.chart-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.chart-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #1e3a8a;
+  .dark &, .theme-dark & { color: #93c5fd; }
+
+  .section-icon-wrapper {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: rgba(99, 102, 241, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6366f1;
+  }
+}
+
+.pretty-chart-box-v2 {
+  height: 280px;
+  width: 100%;
+}
+
+/* — 正文卡片包装器 — */
+.paper-content-v2-container {
+  padding: 8px 40px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* — 每一个正文独立卡片 — */
+.report-content-card {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.01);
+  border-radius: 16px;
+  padding: 24px 28px;
+  line-height: 1.85;
+  font-size: 14px;
+  color: #334155;
+  transition: all 0.3s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.04);
+  }
+
+  .dark &, .theme-dark & {
+    background: rgba(30, 41, 59, 0.4);
+    border-color: rgba(255, 255, 255, 0.04);
+    color: #cbd5e1;
+    &:hover {
+      box-shadow: 0 8px 24px rgba(99, 102, 241, 0.08);
+    }
+  }
+
+  :deep(h1) {
+    font-size: 22px;
+    font-weight: 800;
+    color: #1e293b;
+    margin: 32px 0 16px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid rgba(99, 102, 241, 0.12);
+    .dark &, .theme-dark & { color: #f1f5f9; border-bottom-color: rgba(99, 102, 241, 0.2); }
+  }
+
+  :deep(h2) {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1e3a8a;
+    margin: 28px 0 14px;
+    padding-left: 12px;
+    border-left: 3px solid #6366f1;
+    .dark &, .theme-dark & { color: #93c5fd; border-left-color: #818cf8; }
+  }
+
+  :deep(h3) {
+    font-size: 16px;
+    font-weight: 700;
+    color: #334155;
+    margin: 24px 0 10px;
+    .dark &, .theme-dark & { color: #e2e8f0; }
+  }
+
+  :deep(p) {
+    margin: 0 0 14px;
+    color: #475569;
+    .dark &, .theme-dark & { color: #cbd5e1; }
+  }
+
+  :deep(ul), :deep(ol) {
+    margin: 8px 0 16px;
+    padding-left: 24px;
+    li {
+      margin-bottom: 6px;
+      color: #475569;
+      .dark &, .theme-dark & { color: #cbd5e1; }
+    }
+  }
+
+  :deep(blockquote) {
+    margin: 16px 0;
+    padding: 14px 20px;
+    background: rgba(99, 102, 241, 0.04);
+    border-left: 4px solid #6366f1;
+    border-radius: 0 10px 10px 0;
+    color: #475569;
+    font-style: italic;
+    .dark &, .theme-dark & {
+      background: rgba(99, 102, 241, 0.06);
+      border-left-color: #818cf8;
+      color: #94a3b8;
+    }
+  }
+
+  :deep(code) {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+    padding: 2.5px 6px;
+    background: rgba(99, 102, 241, 0.04);
+    color: #6366f1;
+    border-radius: 4px;
+    .dark &, .theme-dark & {
+      background: rgba(99, 102, 241, 0.08);
+      color: #818cf8;
+    }
+  }
+
+  :deep(pre) {
+    background: #1e293b;
+    color: #cbd5e1;
+    padding: 16px 20px;
+    border-radius: 12px;
+    overflow-x: auto;
+    margin: 18px 0;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+    code {
+      background: transparent;
+      color: #cbd5e1;
+      padding: 0;
+    }
+  }
+
+  :deep(hr) {
+    border: none;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #e2e8f0, transparent);
+    margin: 24px 0;
+    .dark &, .theme-dark & { background: linear-gradient(90deg, transparent, #334155, transparent); }
+  }
+
+  :deep(strong) {
+    font-weight: 700;
+    color: #1e293b;
+    .dark &, .theme-dark & { color: #f1f5f9; }
+  }
+
+  /* ===== 📊 智能报告可视化精致表格样式 ===== */
+  :deep(.report-table) {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    margin: 20px 0;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+    font-size: 13px;
+
+    .dark &, .theme-dark & {
+      box-shadow: 0 4px 25px rgba(0, 0, 0, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    thead {
+      tr {
+        background: linear-gradient(to bottom, #f8fafc, #f1f5f9);
+        .dark &, .theme-dark & {
+          background: linear-gradient(to bottom, rgba(30, 41, 59, 0.6), rgba(15, 23, 42, 0.8));
+        }
+      }
+      th {
+        padding: 12px 16px;
+        font-weight: 700;
+        color: #334155;
+        text-align: left;
+        border-bottom: 1.5px solid rgba(0, 0, 0, 0.06);
+        letter-spacing: 0.03em;
+        .dark &, .theme-dark & {
+          color: #f1f5f9;
+          border-bottom: 1.5px solid rgba(255, 255, 255, 0.08);
+        }
+      }
+    }
+
+    tbody {
+      tr {
+        background-color: #ffffff;
+        transition: background-color 0.2s ease;
+        &:last-child td { border-bottom: none; }
+        &:hover { background-color: #f8fafc; }
+
+        .dark &, .theme-dark & {
+          background-color: rgba(30, 41, 59, 0.25);
+          &:hover { background-color: rgba(255, 255, 255, 0.02); }
+        }
+      }
+      td {
+        padding: 12px 16px;
+        color: #4b5563;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+        vertical-align: middle;
+        .dark &, .theme-dark & {
+          color: #cbd5e1;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+      }
+    }
+  }
+
+  /* ===== 🏷 可视化报告状态胶囊徽章 ===== */
+  :deep(.report-badge) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.01);
+
+    &.badge-danger {
+      background-color: rgba(239, 68, 68, 0.08) !important;
+      color: #ef4444 !important;
+      border: 1px solid rgba(239, 68, 68, 0.16) !important;
+    }
+    &.badge-warning {
+      background-color: rgba(245, 158, 11, 0.08) !important;
+      color: #d97706 !important;
+      border: 1px solid rgba(245, 158, 11, 0.16) !important;
+    }
+    &.badge-success {
+      background-color: rgba(16, 185, 129, 0.08) !important;
+      color: #10b981 !important;
+      border: 1px solid rgba(16, 185, 129, 0.16) !important;
+    }
+    &.badge-primary {
+      background-color: rgba(59, 130, 246, 0.08) !important;
+      color: #3b82f6 !important;
+      border: 1px solid rgba(59, 130, 246, 0.16) !important;
+    }
+  }
+}
+
+/* — 页脚 — */
+.paper-footer-v2 {
+  padding: 24px 40px 28px;
+  text-align: center;
+}
+
+.footer-gradient-line {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.15), transparent);
+  margin-bottom: 14px;
+}
+
+.footer-disclaimer {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
+.footer-brand {
+  font-size: 12px;
+  color: #64748b;
+  strong {
+    color: #6366f1;
+    font-weight: 700;
+  }
+  .dark &, .theme-dark & { color: #94a3b8; }
+}
+
+/* ==========================================================================
+   智能分析报告操作卡片美化样式
+   ========================================================================== */
+.report-action-card {
+  margin-top: 14px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(168, 85, 247, 0.06) 100%) !important;
+  border: 1px solid rgba(99, 102, 241, 0.28) !important;
+  border-radius: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05) !important;
+
+  .theme-light & {
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(168, 85, 247, 0.03) 100%) !important;
+    border: 1px solid rgba(99, 102, 241, 0.16) !important;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.03) !important;
+  }
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.6s ease;
+  }
+
+  &:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 102, 241, 0.45) !important;
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.18) !important;
+
+    &::before {
+      transform: translateX(100%);
+    }
+
+    .action-arrow {
+      transform: translateX(4px);
+    }
+    
+    .report-card-icon-wrapper {
+      transform: scale(1.05);
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.45);
+    }
+  }
+
+  .report-card-body {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .report-card-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex: 1;
+    min-width: 240px;
+  }
+
+  .report-card-icon-wrapper {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(99, 102, 241, 0.25);
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+
+    .report-icon-svg {
+      font-size: 20px;
+      color: #ffffff;
+    }
+  }
+
+  .report-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+  }
+
+  .report-card-title {
+    font-size: 14px;
+    font-weight: 700;
     color: var(--polaris-text-main);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.4;
+  }
+
+  .report-pill-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: #ffffff;
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    padding: 2px 6px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+  }
+
+  .report-card-desc {
+    font-size: 12px;
+    color: var(--polaris-text-sub);
+    line-height: 1.4;
+    opacity: 0.85;
+  }
+
+  .report-card-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--polaris-brand-color);
+    flex-shrink: 0;
+
+    .action-arrow {
+      font-size: 12px;
+      transition: transform 0.3s ease;
+    }
   }
 }
 </style>

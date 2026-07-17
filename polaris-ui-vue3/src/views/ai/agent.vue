@@ -650,103 +650,11 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@use "@/assets/styles/polaris-ai.scss";
+
 /* 过滤表单样式微调，清除多余 margin */
 .polaris-filter-form {
   margin-bottom: 0 !important;
-}
-
-/* 聚合操作栏 (检索卡片正下方) */
-.matrix-actions-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin: 12px 0 16px; /* 增加适度外边距，形成舒适的呼吸感 */
-  padding: 0 4px;
-}
-
-.actions-left {
-  display: flex;
-  align-items: center;
-}
-
-.actions-right {
-  display: flex;
-  align-items: center;
-}
-
-/* 视图切换器按钮 */
-.view-mode-toggle-row {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  align-items: center;
-  background-color: rgba(0, 0, 0, 0.03);
-  height: 36px;
-  box-sizing: border-box;
-
-  .dark &,
-  .theme-dark & {
-    background-color: rgba(255, 255, 255, 0.03);
-  }
-}
-
-.toggle-view-btn {
-  background: transparent;
-  border: none;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 0 12px;
-  height: 28px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-  color: #64748b;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &.active {
-    background-color: #ffffff;
-    color: #4f46e5;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-  }
-
-  .dark &,
-  .theme-dark & {
-    color: #94a3b8;
-
-    &.active {
-      background-color: rgba(255, 255, 255, 0.05);
-      color: #38bdf8;
-      box-shadow: none;
-    }
-  }
-}
-
-.view-mode-fade-enter-active,
-.view-mode-fade-leave-active {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.view-mode-fade-enter-from {
-  opacity: 0;
-  transform: translateY(6px);
-}
-.view-mode-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
-
-/* ===== 🧠 三维北辰星图卡片视图布局 ===== */
-.synapse-card-grid-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-}
-
-.synapse-card-grid-container {
-  width: 100%;
 }
 
 .synapse-card-grid {
@@ -828,23 +736,6 @@ export default {
   }
 }
 
-.card-shimmer-ray {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -80px;
-  width: 50px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
-  transform: skewX(-20deg) translateX(-100px);
-  transition: transform 0.6s ease;
-  pointer-events: none;
-}
-
-.card-header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
 .card-code {
   font-family: Menlo, Monaco, Consolas, monospace;
@@ -863,10 +754,6 @@ export default {
   }
 }
 
-.status-badge-text {
-  font-size: 11px;
-  font-weight: bold;
-}
 
 .card-body {
   display: flex;
@@ -986,22 +873,6 @@ export default {
   }
 }
 
-.radial-gauge-text {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: monospace;
-  font-size: 11px;
-  font-weight: 800;
-  color: #0f172a;
-
-  .dark &,
-  .theme-dark & {
-    color: #cbd5e1;
-  }
-}
 
 .prompt-preview-card {
   background: var(--el-fill-color-light);
@@ -1054,18 +925,6 @@ export default {
   word-break: break-word;
 }
 
-.card-footer-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  border-top: 1px dashed rgba(0, 0, 0, 0.05);
-  padding-top: 12px;
-
-  .dark &,
-  .theme-dark & {
-    border-top-color: rgba(255, 255, 255, 0.05);
-  }
-}
 
 .card-op-edit {
   font-size: 11px;
@@ -1546,59 +1405,6 @@ export default {
    智能体管理卡片视觉与动效微调 (Modern Dashboard Enhancement)
    ========================================================================== */
 
-/* 芯片化大模型徽章 */
-.card-model-chip-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  font-family: Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  font-weight: 700;
-  color: #475569;
-  background: rgba(0, 0, 0, 0.03);
-  padding: 3px 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  transition: all 0.3s;
-
-  .model-cpu-icon {
-    font-size: 12px;
-    color: #64748b;
-  }
-
-  .dark &,
-  .theme-dark & {
-    color: #cbd5e1;
-    background: rgba(255, 255, 255, 0.03);
-    border-color: rgba(255, 255, 255, 0.05);
-    
-    .model-cpu-icon {
-      color: #94a3b8;
-    }
-  }
-}
-
-.synapse-glass-card:hover .card-model-chip-badge {
-  background: rgba(139, 92, 246, 0.05);
-  border-color: rgba(139, 92, 246, 0.15);
-  color: #8b5cf6;
-
-  .model-cpu-icon {
-    color: #8b5cf6;
-  }
-
-  .dark &,
-  .theme-dark & {
-    background: rgba(56, 189, 248, 0.05);
-    border-color: rgba(56, 189, 248, 0.15);
-    color: #38bdf8;
-
-    .model-cpu-icon {
-      color: #38bdf8;
-    }
-  }
-}
 
 /* 动态智能体药丸型标签颜色映射 */
 .card-code {
@@ -1668,165 +1474,6 @@ export default {
   }
 }
 
-/* Mac 极客终端风格系统提示词展示区 */
-.prompt-preview-terminal {
-  border-radius: 12px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  height: 100px;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-  
-  /* 默认：亮色模式 */
-  background: #f8fafc;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02), 0 4px 10px rgba(0, 0, 0, 0.02);
-
-  &:hover {
-    border-color: rgba(139, 92, 246, 0.3);
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02), 0 6px 15px rgba(139, 92, 246, 0.08);
-  }
-
-  /* 深色模式覆盖 */
-  .dark &,
-  .theme-dark & {
-    background: #0b0f19;
-    border-color: rgba(255, 255, 255, 0.03);
-    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.4);
-
-    &:hover {
-      border-color: rgba(56, 189, 248, 0.22);
-      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 6px 15px rgba(56, 189, 248, 0.08);
-    }
-  }
-}
-
-.terminal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 24px;
-  padding: 0 10px;
-  
-  /* 默认：亮色模式 */
-  background: rgba(0, 0, 0, 0.02);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-
-  /* 深色模式覆盖 */
-  .dark &,
-  .theme-dark & {
-    background: rgba(255, 255, 255, 0.03);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-  }
-}
-
-.terminal-dots {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-
-  span {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-  }
-
-  .dot-red { background-color: #ff5f56; }
-  .dot-yellow { background-color: #ffbd2e; }
-  .dot-green { background-color: #27c93f; }
-}
-
-.terminal-title {
-  font-family: monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  
-  /* 默认：亮色模式 */
-  color: rgba(0, 0, 0, 0.35);
-
-  /* 深色模式覆盖 */
-  .dark &,
-  .theme-dark & {
-    color: rgba(255, 255, 255, 0.35);
-  }
-}
-
-.terminal-copy-btn {
-  background: transparent;
-  border: none;
-  padding: 0;
-  margin: 0;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  transition: all 0.2s;
-  
-  /* 默认：亮色模式 */
-  color: rgba(0, 0, 0, 0.4);
-
-  &:hover {
-    color: #8b5cf6;
-    transform: scale(1.1);
-  }
-
-  /* 深色模式覆盖 */
-  .dark &,
-  .theme-dark & {
-    color: rgba(255, 255, 255, 0.4);
-
-    &:hover {
-      color: #38bdf8;
-      transform: scale(1.1);
-    }
-  }
-}
-
-.terminal-body {
-  padding: 8px 12px;
-  flex: 1;
-  overflow-y: auto;
-
-  &::-webkit-scrollbar {
-    width: 4px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 4px;
-  }
-  &::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .dark &,
-  .theme-dark & {
-    &::-webkit-scrollbar-thumb {
-      background: rgba(255, 255, 255, 0.1);
-    }
-  }
-}
-
-.terminal-body .prompt-content-text {
-  font-family: Menlo, Monaco, Consolas, "Fira Code", monospace;
-  font-size: 11px;
-  line-height: 1.6;
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  
-  /* 默认：亮色模式 */
-  color: #334155;
-
-  /* 深色模式覆盖 */
-  .dark &,
-  .theme-dark & {
-    color: #cbd5e1;
-  }
-}
 
 /* 精致药丸型卡片操作按钮 */
 .card-op-edit-pill,
@@ -1903,143 +1550,4 @@ export default {
   height: 100%;
 }
 
-/* ===== 智能体配置工作台表单元素及滑块、单选框高新科技化美化 ===== */
-.agent-workbench-container {
-  :deep(.el-form-item__label) {
-    font-size: 12px;
-    font-weight: 700;
-    color: #64748b;
-    padding-bottom: 6px !important;
-
-    .dark &,
-    .theme-dark & {
-      color: #94a3b8;
-    }
-  }
-
-  :deep(.el-input__wrapper),
-  :deep(.el-select__wrapper) {
-    border-radius: 12px !important;
-    background-color: #ffffff !important;
-    border: 1px solid rgba(0, 0, 0, 0.08) !important;
-    box-shadow: none !important;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-
-    &:hover {
-      border-color: rgba(139, 92, 246, 0.3) !important;
-    }
-
-    &.is-focus {
-      border-color: #8b5cf6 !important;
-      box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15) !important;
-    }
-
-    .dark &,
-    .theme-dark & {
-      background-color: rgba(0, 0, 0, 0.25) !important;
-      border-color: rgba(255, 255, 255, 0.06) !important;
-
-      &:hover {
-        border-color: rgba(56, 189, 248, 0.3) !important;
-      }
-
-      &.is-focus {
-        border-color: #38bdf8 !important;
-        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15) !important;
-      }
-    }
-  }
-
-  :deep(.el-input__inner) {
-    font-size: 12.5px;
-    color: #0f172a;
-
-    .dark &,
-    .theme-dark & {
-      color: #cbd5e1;
-    }
-  }
-
-  /* 状态单选框美化 */
-  :deep(.el-radio) {
-    border-radius: 10px;
-    padding: 8px 16px;
-    border: 1px solid rgba(0, 0, 0, 0.06) !important;
-    background: #ffffff;
-    transition: all 0.3s;
-    margin-right: 12px;
-    height: auto;
-
-    &.is-checked {
-      border-color: #8b5cf6 !important;
-      background: rgba(139, 92, 246, 0.02) !important;
-      
-      .el-radio__label {
-        color: #8b5cf6 !important;
-      }
-      .el-radio__inner {
-        border-color: #8b5cf6 !important;
-        background: #8b5cf6 !important;
-      }
-    }
-
-    .dark &,
-    .theme-dark & {
-      background: rgba(255, 255, 255, 0.02);
-      border-color: rgba(255, 255, 255, 0.05) !important;
-
-      &.is-checked {
-        border-color: #38bdf8 !important;
-        background: rgba(56, 189, 248, 0.02) !important;
-
-        .el-radio__label {
-          color: #38bdf8 !important;
-        }
-        .el-radio__inner {
-          border-color: #38bdf8 !important;
-          background: #38bdf8 !important;
-        }
-      }
-    }
-  }
-
-  /* 随机温度滑块美化 */
-  :deep(.el-slider) {
-    .el-slider__runway {
-      background-color: rgba(0, 0, 0, 0.04) !important;
-      height: 5px;
-
-      .dark &,
-      .theme-dark & {
-        background-color: rgba(255, 255, 255, 0.04) !important;
-      }
-    }
-    .el-slider__bar {
-      height: 5px;
-      background-color: #8b5cf6 !important;
-
-      .dark &,
-      .theme-dark & {
-        background-color: #38bdf8 !important;
-      }
-    }
-    .el-slider__button {
-      border: 2px solid #8b5cf6 !important;
-      background-color: #ffffff !important;
-      width: 14px;
-      height: 14px;
-      box-shadow: 0 2px 6px rgba(139, 92, 246, 0.2);
-
-      .dark &,
-      .theme-dark & {
-        border-color: #38bdf8 !important;
-        background-color: #0f172a !important;
-        box-shadow: 0 2px 6px rgba(56, 189, 248, 0.3);
-      }
-    }
-    .el-input-number--small {
-      width: 90px;
-    }
-  }
-}
 </style>
