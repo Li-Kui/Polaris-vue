@@ -52,6 +52,43 @@
               </div>
             </div>
 
+            <!-- 全局 SVG 渐变与滤镜定义 (用于迷你拓扑图连线与节点发光) -->
+            <svg style="width: 0; height: 0; position: absolute;" aria-hidden="true" focusable="false">
+              <defs>
+                <!-- 连线渐变：默认渐变与条件分支渐变 -->
+                <linearGradient id="edge-gradient-normal" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#818cf8" />
+                  <stop offset="100%" stop-color="#38bdf8" />
+                </linearGradient>
+                <linearGradient id="edge-gradient-cond" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stop-color="#f59e0b" />
+                  <stop offset="100%" stop-color="#f97316" />
+                </linearGradient>
+
+                <!-- 节点渐变 -->
+                <linearGradient id="node-grad-term" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#4f46e5" />
+                  <stop offset="100%" stop-color="#818cf8" />
+                </linearGradient>
+                <linearGradient id="node-grad-agent-light" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#ffffff" />
+                  <stop offset="100%" stop-color="#f8fafc" />
+                </linearGradient>
+                <linearGradient id="node-grad-agent-dark" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="rgba(30, 41, 59, 0.95)" />
+                  <stop offset="100%" stop-color="rgba(15, 23, 42, 0.85)" />
+                </linearGradient>
+                <linearGradient id="node-grad-classifier" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#7c3aed" />
+                  <stop offset="100%" stop-color="#c084fc" />
+                </linearGradient>
+                <linearGradient id="node-grad-java" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#10b981" />
+                  <stop offset="100%" stop-color="#34d399" />
+                </linearGradient>
+              </defs>
+            </svg>
+
             <div v-loading="loading" class="synapse-card-grid-container">
               <div v-if="workflowList.length === 0" class="empty-state">
                 <div class="empty-icon">⚙️</div>
@@ -80,14 +117,34 @@
 
                   <div class="card-body">
                     <h4 class="card-name" :title="item.workflowName">{{ item.workflowName }}</h4>
-                    <div class="desc-box" style="margin-top: 6px; margin-bottom: 12px;">
-                      <p class="desc-text" :title="item.description || '暂无描述'">{{ item.description || '暂无描述' }}</p>
+                    
+                    <!-- 流程核心指标徽章 -->
+                    <div class="workflow-stats-chips" v-if="item._miniGraph">
+                      <span class="stat-chip-pill chip-purple">
+                        <el-icon><cpu /></el-icon>
+                        <span>智能体 x{{ item._miniGraph.agentCount }}</span>
+                      </span>
+                      <span class="stat-chip-pill chip-blue" v-if="item._miniGraph.classifierCount > 0">
+                        <el-icon><share /></el-icon>
+                        <span>意图路由 x{{ item._miniGraph.classifierCount }}</span>
+                      </span>
+                      <span class="stat-chip-pill chip-green" v-if="item._miniGraph.javaCount > 0">
+                        <el-icon><connection /></el-icon>
+                        <span>系统组件 x{{ item._miniGraph.javaCount }}</span>
+                      </span>
+                    </div>
+
+                    <!-- 流程备注说明 -->
+                    <div class="desc-box">
+                      <p :class="['desc-text', { 'no-desc': !item.description }]" :title="item.description || '暂无描述说明'">
+                        {{ item.description || '暂无描述说明，请点击编辑编排开始设计流程描述' }}
+                      </p>
                     </div>
 
                     <!-- 只读迷你拓扑图（真实展示分支结构） -->
                     <div class="mini-graph-visualization">
                       <span class="pipeline-label" style="font-size: 11px; font-weight: 700; color: var(--polaris-text-sub); display: block; margin-bottom: 6px;">
-                        执行流向：
+                        执行走向：
                       </span>
                       <div class="mini-graph-canvas" v-if="item._miniGraph">
                         <svg :width="item._miniGraph.width" :height="item._miniGraph.height" class="mini-graph-svg">
@@ -95,20 +152,18 @@
                             <path
                               :d="`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1+e.y2)/2}, ${e.x2} ${(e.y1+e.y2)/2}, ${e.x2} ${e.y2}`"
                               fill="none"
-                              :stroke="e.cond ? '#f59e0b' : '#38bdf8'"
-                              :stroke-width="e.cond ? 2 : 1.5"
-                              :stroke-dasharray="e.cond ? '4 3' : '0'"
+                              :class="['mini-graph-edge-path', e.cond ? 'edge-cond' : 'edge-normal']"
                             />
                           </g>
                           <g v-for="(n, ni) in item._miniGraph.nodes" :key="'n'+ni">
                             <rect
                               :x="n.x - item._miniGraph.nodeW/2" :y="n.y - item._miniGraph.nodeH/2"
                               :width="item._miniGraph.nodeW" :height="item._miniGraph.nodeH"
-                              :rx="n.type === 'term' ? 12 : 5"
+                              :rx="n.type === 'term' ? 12 : 6"
                               :class="['mini-node', 'mini-node-' + n.type]"
                             />
                             <text :x="n.x" :y="n.y + 3" text-anchor="middle"
-                                  :class="['mini-node-text', (n.type === 'term' || n.type === 'classifier') ? 'mini-node-text-light' : '']">
+                                  :class="['mini-node-text', (n.type === 'term' || n.type === 'classifier' || n.type === 'java') ? 'mini-node-text-light' : 'mini-node-text-' + n.type]">
                               {{ n.name.length > 6 ? n.name.slice(0,6) + '…' : n.name }}
                             </text>
                           </g>
@@ -191,10 +246,11 @@
                   <span>{{ formatDate(row.createTime) }}</span>
                 </template>
               </el-table-column>
-              <el-table-column label="操作" width="160" fixed="right">
+              <el-table-column label="操作" width="160" fixed="right" align="center">
                 <template #default="{ row }">
                   <div class="table-op-actions">
                     <el-button type="primary" link class="op-btn-edit" @click="handleUpdate(row)">编辑编排</el-button>
+                    <span class="op-divider"></span>
                     <el-button type="danger" link class="op-btn-delete" @click="handleDelete(row)">删除</el-button>
                   </div>
                 </template>
@@ -807,6 +863,15 @@ export default {
         return { id, x: pos[id].x, y: pos[id].y, type, name };
       });
 
+      let agentCount = 0;
+      let classifierCount = 0;
+      let javaCount = 0;
+      drawNodes.forEach(n => {
+        if (n.type === 'agent') agentCount++;
+        else if (n.type === 'classifier') classifierCount++;
+        else if (n.type === 'java') javaCount++;
+      });
+
       const drawEdges = edges
         .filter(e => pos[e.from] && pos[e.to])
         .map(e => ({
@@ -815,7 +880,17 @@ export default {
           cond: !!(e.condition && e.condition.trim())
         }));
 
-      return { width: W, height: svgH, nodeW, nodeH, nodes: drawNodes, edges: drawEdges };
+      return { 
+        width: W, 
+        height: svgH, 
+        nodeW, 
+        nodeH, 
+        nodes: drawNodes, 
+        edges: drawEdges,
+        agentCount,
+        classifierCount,
+        javaCount
+      };
     },
     previewEdgeLabel(nodeIndex) {
       const validNodes = this.previewNodes;
@@ -2441,6 +2516,10 @@ export default {
   background: rgba(255, 255, 255, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.03);
+  --node-agent-grad-start: #ffffff;
+  --node-agent-grad-end: #f8fafc;
+  --node-agent-stroke: rgba(0, 0, 0, 0.08);
+  --node-agent-text: #1e293b;
 
 
   .dark &,
@@ -2448,6 +2527,10 @@ export default {
     background: rgba(15, 23, 42, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.05);
     box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.3);
+    --node-agent-grad-start: rgba(30, 41, 59, 0.8);
+    --node-agent-grad-end: rgba(15, 23, 42, 0.6);
+    --node-agent-stroke: rgba(255, 255, 255, 0.08);
+    --node-agent-text: #e2e8f0;
   }
   
   &:hover {
@@ -2676,58 +2759,260 @@ export default {
   }
 }
 
+.table-op-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.op-divider {
+  width: 1px;
+  height: 12px;
+  background-color: rgba(0, 0, 0, 0.08);
+
+  .dark &,
+  .theme-dark & {
+    background-color: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.op-btn-edit {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 0;
+  color: #4f46e5 !important;
+
+  .dark &,
+  .theme-dark & {
+    color: #38bdf8 !important;
+  }
+}
+
+.op-btn-delete {
+  font-size: 12px;
+  font-weight: bold;
+  padding: 0;
+  color: #ef4444 !important;
+
+  .dark &,
+  .theme-dark & {
+    color: #fca5a5 !important;
+  }
+}
+
 /* ===== 🧠 迷你拓扑图节点上色美化 ===== */
 .mini-node {
   stroke-width: 1.5;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.04));
 }
+
 .mini-node-term {
-  fill: #4f46e5;
-  stroke: none;
-
-  .dark &,
-  .theme-dark & {
-    fill: #38bdf8;
-  }
+  fill: url(#node-grad-term);
+  stroke: rgba(99, 102, 241, 0.3);
+  filter: drop-shadow(0 2px 6px rgba(79, 70, 229, 0.25));
 }
+
 .mini-node-agent {
-  fill: #ffffff;
-  stroke: #cbd5e1;
+  fill: url(#node-grad-agent-light);
+  stroke: rgba(0, 0, 0, 0.08);
 
   .dark &,
   .theme-dark & {
-    fill: rgba(30, 41, 59, 0.7);
+    fill: url(#node-grad-agent-dark);
     stroke: rgba(255, 255, 255, 0.08);
   }
 }
+
 .mini-node-classifier {
-  fill: #a855f7;
-  stroke: #c084fc;
+  fill: url(#node-grad-classifier);
+  stroke: rgba(168, 85, 247, 0.3);
+  filter: drop-shadow(0 2px 6px rgba(168, 85, 247, 0.2));
 }
+
 .mini-node-java {
-  fill: #16a34a;
-  stroke: #86efac;
+  fill: url(#node-grad-java);
+  stroke: rgba(16, 185, 129, 0.3);
+  filter: drop-shadow(0 2px 6px rgba(16, 185, 129, 0.2));
 }
+
 .mini-node-text {
   font-size: 10px;
   fill: #1e293b;
   font-weight: 700;
   pointer-events: none;
+}
+
+.mini-node-text-agent {
+  fill: #1e293b;
 
   .dark &,
   .theme-dark & {
     fill: #cbd5e1;
   }
 }
+
 .mini-node-text-light {
   fill: #ffffff !important;
 }
 
+/* 动效导线 */
+.mini-graph-edge-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke 0.3s, stroke-width 0.3s;
+}
+
+.edge-normal {
+  stroke: url(#edge-gradient-normal);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  animation: flowLine 25s linear infinite;
+}
+
+.edge-cond {
+  stroke: url(#edge-gradient-cond);
+  stroke-width: 2.5;
+  stroke-dasharray: 5 4;
+  animation: flowLine 15s linear infinite;
+}
+
+@keyframes flowLine {
+  from {
+    stroke-dashoffset: 200;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 .mini-graph-canvas {
-  background: rgba(129, 140, 248, 0.04);
-  border: 1px solid var(--polaris-inner-border, rgba(0,0,0,0.06));
-  border-radius: 8px;
-  padding: 6px 4px;
+  background: rgba(248, 250, 252, 0.35);
+  background-image: radial-gradient(rgba(99, 102, 241, 0.08) 1px, transparent 1px);
+  background-size: 10px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 16px;
+  padding: 16px 8px;
   display: flex;
   justify-content: center;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
+  position: relative;
+  overflow: hidden;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.25);
+    background-image: radial-gradient(rgba(56, 189, 248, 0.1) 1px, transparent 1px);
+    background-size: 10px 10px;
+    border-color: rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* ===== 流程备注说明与左边框修饰 ===== */
+.desc-box {
+  background: rgba(0, 0, 0, 0.02);
+  border-left: 3px solid #818cf8;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-top: 6px;
+  margin-bottom: 12px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(255, 255, 255, 0.02);
+    border-left-color: #38bdf8;
+  }
+}
+
+.desc-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+  }
+  
+  &.no-desc {
+    color: #94a3b8;
+    font-style: italic;
+    
+    .dark &,
+    .theme-dark & {
+      color: #64748b;
+    }
+  }
+}
+
+/* ===== 流程核心指标徽章 ===== */
+.workflow-stats-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.stat-chip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  transition: all 0.3s;
+
+  .el-icon {
+    font-size: 12px;
+  }
+
+  &.chip-purple {
+    color: #8b5cf6;
+    background: rgba(139, 92, 246, 0.06);
+    border-color: rgba(139, 92, 246, 0.12);
+  }
+  &.chip-blue {
+    color: #3b82f6;
+    background: rgba(59, 130, 246, 0.06);
+    border-color: rgba(59, 130, 246, 0.12);
+  }
+  &.chip-green {
+    color: #10b981;
+    background: rgba(16, 185, 129, 0.06);
+    border-color: rgba(16, 185, 129, 0.12);
+  }
+
+  .dark &,
+  .theme-dark & {
+    &.chip-purple {
+      color: #a78bfa;
+      background: rgba(167, 139, 250, 0.08);
+      border-color: rgba(167, 139, 250, 0.15);
+    }
+    &.chip-blue {
+      color: #93c5fd;
+      background: rgba(147, 197, 253, 0.08);
+      border-color: rgba(147, 197, 253, 0.15);
+    }
+    &.chip-green {
+      color: #6ee7b7;
+      background: rgba(110, 231, 183, 0.08);
+      border-color: rgba(110, 231, 183, 0.15);
+    }
+  }
 }
 </style>
