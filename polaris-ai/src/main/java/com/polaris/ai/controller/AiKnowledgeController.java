@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Date;
 import java.util.List;
 
 /**
@@ -133,6 +134,7 @@ public class AiKnowledgeController extends BaseController {
             document.setName(file.getOriginalFilename());
             document.setFileUrl(fileUrl);
             document.setCreateBy(SecurityUtils.getUsername());
+            document.setCreateTime(new Date());
             aiKnowledgeService.insertDocument(document);
 
             // 3. 异步触发向量化入库
