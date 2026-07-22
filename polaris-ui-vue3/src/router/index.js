@@ -89,6 +89,19 @@ export const constantRoutes = [
         meta: { title: '个人中心', icon: 'user' }
       }
     ]
+  },
+  {
+    path: '/ai',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: 'report',
+        component: () => import('@/views/ai/report'),
+        name: 'AiReport',
+        meta: { title: 'AI 分析报告中心', icon: 'document' }
+      }
+    ]
   }
 ]
 

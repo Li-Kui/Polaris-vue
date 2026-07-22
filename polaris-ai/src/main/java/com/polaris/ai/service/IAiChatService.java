@@ -99,5 +99,5 @@ public interface IAiChatService extends IService<AiConversation>
      * @param userId         当前登录用户 ID（用于鉴权）
      * @param emitter        SSE 发发射器，由 Controller 创建并传入
      */
-    void chat(Long conversationId, String userMessage, String fileUrl, Boolean enableSearch, Long userId, SseEmitter emitter);
+    void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter);
 }

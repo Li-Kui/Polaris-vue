@@ -62,10 +62,19 @@ public class SecurityContextToolExecutor {
             return map;
         }
 
-        // 解析智能体绑定的工具集合
+        // 解析智能体/工作流节点绑定的工具集合（同时支持类名和快捷别名如 web_search, image_generate）
         Set<String> toolNames = new HashSet<>();
         for (String t : toolsConfig.split(",")) {
-            toolNames.add(t.trim());
+            String trimmed = t.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            String mappedClass = TOOL_CLASS_MAP.get(trimmed);
+            if (mappedClass != null) {
+                toolNames.add(mappedClass);
+            } else {
+                toolNames.add(trimmed);
+            }
         }
 
         SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
@@ -75,6 +84,10 @@ public class SecurityContextToolExecutor {
             String className = targetClass.getSimpleName();
 
             if (toolNames.contains(className)) {
+                if (className.contains("WebSearchTools")
+                        && (searchKey == null || searchKey.trim().isEmpty())) {
+                    continue;
+                }
                 Method[] methods = targetClass.getDeclaredMethods();
                 for (Method method : methods) {
                     if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
@@ -122,9 +135,16 @@ public class SecurityContextToolExecutor {
         Set<String> allowedClassNames = new HashSet<>();
         if (enabledTools != null && !enabledTools.trim().isEmpty()) {
             for (String toolKey : enabledTools.split(",")) {
-                String className = TOOL_CLASS_MAP.get(toolKey.trim());
+                String trimmedKey = toolKey.trim();
+                if (trimmedKey.isEmpty()) {
+                    continue;
+                }
+                String className = TOOL_CLASS_MAP.get(trimmedKey);
                 if (className != null) {
                     allowedClassNames.add(className);
+                } else {
+                    // 若不在 TOOL_CLASS_MAP 别名表中，说明传入的是工具类实际类名（如 SysUserTools）
+                    allowedClassNames.add(trimmedKey);
                 }
             }
         }

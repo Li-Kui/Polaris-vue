@@ -59,3 +59,11 @@ export function listMessages(conversationId) {
     method: 'get'
   })
 }
+
+// 获取已启用的智能体列表
+export function listActiveAgents() {
+  return request({
+    url: '/ai/agent/list/all',
+    method: 'get'
+  })
+}

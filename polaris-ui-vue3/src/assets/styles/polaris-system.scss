@@ -339,19 +339,81 @@
   }
 }
 
-/* 表格操作按钮 */
+/* 表格操作按钮双模式兼容支持 */
+.polaris-el-table {
+  .el-button.is-link,
+  .el-button--link {
+    font-weight: 600;
+
+    &.el-button--primary {
+      color: #2563eb !important;
+      --el-button-text-color: #2563eb !important;
+
+      &:hover {
+        color: #1d4ed8 !important;
+        background-color: rgba(37, 99, 235, 0.08) !important;
+      }
+    }
+
+    &.el-button--danger {
+      color: #ef4444 !important;
+      --el-button-text-color: #ef4444 !important;
+
+      &:hover {
+        color: #dc2626 !important;
+        background-color: rgba(239, 68, 68, 0.08) !important;
+      }
+    }
+
+    &.el-button--success {
+      color: #10b981 !important;
+      --el-button-text-color: #10b981 !important;
+
+      &:hover {
+        color: #059669 !important;
+        background-color: rgba(16, 185, 129, 0.08) !important;
+      }
+    }
+
+    /* 暗黑模式适配 */
+    .dark &,
+    html.dark & {
+      &.el-button--primary {
+        color: #60a5fa !important;
+        --el-button-text-color: #60a5fa !important;
+
+        &:hover {
+          color: #93c5fd !important;
+          background-color: rgba(96, 165, 250, 0.15) !important;
+        }
+      }
+
+      &.el-button--danger {
+        color: #f87171 !important;
+        --el-button-text-color: #f87171 !important;
+
+        &:hover {
+          color: #fca5a5 !important;
+          background-color: rgba(248, 113, 113, 0.15) !important;
+        }
+      }
+
+      &.el-button--success {
+        color: #34d399 !important;
+        --el-button-text-color: #34d399 !important;
+
+        &:hover {
+          color: #6ee7b7 !important;
+          background-color: rgba(52, 211, 153, 0.15) !important;
+        }
+      }
+    }
+  }
+}
+
 .small-padding {
   .el-button {
     font-weight: 700;
-
-    &[type="primary"],
-    &.el-button--primary {
-      color: #4f46e5 !important;
-
-      &:hover {
-        color: #4338ca !important;
-      }
-    }
   }
 }
 
@@ -435,5 +497,53 @@
   100% {
     transform: scale(2.2);
     opacity: 0;
+  }
+}
+
+/* ===== 抽屉关闭按钮双模式高对比度增强 ===== */
+.el-drawer__header {
+  .el-drawer__close-btn {
+    margin-left: 16px !important;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #64748b !important;
+    transition: all 0.25s ease;
+
+    .el-icon, i, svg {
+      color: #64748b !important;
+      font-size: 18px;
+      transition: color 0.25s ease;
+    }
+
+    &:hover {
+      background-color: rgba(0, 0, 0, 0.06) !important;
+
+      .el-icon, i, svg {
+        color: #0f172a !important;
+      }
+    }
+  }
+}
+
+.dark .el-drawer__header,
+html.dark .el-drawer__header {
+  .el-drawer__close-btn {
+    color: #94a3b8 !important;
+
+    .el-icon, i, svg {
+      color: #94a3b8 !important;
+    }
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.12) !important;
+
+      .el-icon, i, svg {
+        color: #ffffff !important;
+      }
+    }
   }
 }

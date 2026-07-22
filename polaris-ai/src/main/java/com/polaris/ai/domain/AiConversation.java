@@ -53,4 +53,12 @@ public class AiConversation extends BaseEntity
     /** 关联的知识库 ID */
     @Schema(description = "关联的知识库 ID")
     private Long knowledgeBaseId;
+
+    /** 关联的智能体 Code */
+    @Schema(description = "关联的智能体 Code")
+    private String agentCode;
+
+    /** 关联的工作流 Code */
+    @Schema(description = "关联的工作流 Code")
+    private String workflowCode;
 }

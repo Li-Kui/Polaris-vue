@@ -145,11 +145,14 @@ public class AiAgentController extends BaseController {
      * GET /ai/agent/list/all
      */
     @Operation(summary = "获取所有启用的智能体列表")
-    @GetMapping("/list/all")
+    @GetMapping({"/list/all", "/active/list"})
     public ResultData<List<AiAgent>> listAll() {
         AiAgent query = new AiAgent();
-        query.setStatus("1");
+        query.setStatus("0");
         List<AiAgent> list = agentService.selectAgentList(query);
+        if (list == null || list.isEmpty()) {
+            list = agentService.list();
+        }
         return ok(list);
     }
 

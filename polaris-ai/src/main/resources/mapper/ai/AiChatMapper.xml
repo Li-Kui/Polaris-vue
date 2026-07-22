@@ -33,8 +33,8 @@
 
     <insert id="insertConversation" parameterType="com.polaris.ai.domain.AiConversation"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_conversation(title, user_id, model, model_config_id, del_flag, knowledge_base_id, create_by, create_time, update_time)
-        VALUES (#{title}, #{userId}, #{model}, #{modelConfigId}, '0', #{knowledgeBaseId}, #{createBy}, NOW(), NOW())
+        INSERT INTO ai_conversation(title, user_id, model, model_config_id, del_flag, knowledge_base_id, agent_code, workflow_code, create_by, create_time, update_time)
+        VALUES (#{title}, #{userId}, #{model}, #{modelConfigId}, '0', #{knowledgeBaseId}, #{agentCode}, #{workflowCode}, #{createBy}, NOW(), NOW())
     </insert>
 
     <update id="updateConversationTitle">
@@ -48,6 +48,8 @@
             <if test="model != null and model != ''">model = #{model},</if>
             <if test="modelConfigId != null">model_config_id = #{modelConfigId},</if>
             knowledge_base_id = #{knowledgeBaseId},
+            agent_code = #{agentCode},
+            workflow_code = #{workflowCode},
             update_time = NOW()
         </set>
         WHERE id = #{id} AND user_id = #{userId}

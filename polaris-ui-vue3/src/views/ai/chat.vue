@@ -750,42 +750,67 @@
                 </div>
               </el-popover>
 
-              <!-- 工作流选择药丸 -->
+              <!-- 智能体与工作流选择药丸 -->
               <el-popover
                 v-model:visible="showWorkflowPopover"
                 placement="top-start"
-                title="选用智能体工作流"
-                width="240"
+                title="选择 AI 智能体 / 工作流"
+                width="260"
                 trigger="click"
                 popper-class="pill-selector-popper popper-workflow"
-                @show="loadWorkflows"
+                @show="handleShowAgentWorkflowPopover"
               >
                 <template #reference>
-                  <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode }]">
-                    <el-icon><connection /></el-icon>
-                    <span class="pill-label">{{ getSelectedWorkflowLabel() }}</span>
+                  <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode || selectedAgentCode }]">
+                    <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><chat-dot-round v-else /></el-icon>
+                    <span class="pill-label">{{ getSelectedAgentOrWorkflowLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
                   </button>
                 </template>
                 <div class="popper-selector-list">
+                  <!-- 1. 常规对话 -->
                   <div
-                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode }]"
-                    @click="selectedWorkflowCode = ''; showWorkflowPopover = false"
+                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode && !selectedAgentCode }]"
+                    @click="selectMode('', ''); showWorkflowPopover = false"
                   >
                     <el-icon class="item-icon"><chat-dot-round /></el-icon>
                     <span class="item-name">直接常规提问</span>
-                    <el-icon v-if="!selectedWorkflowCode" class="check-icon"><check /></el-icon>
+                    <el-icon v-if="!selectedWorkflowCode && !selectedAgentCode" class="check-icon"><check /></el-icon>
                   </div>
-                  <div
-                    v-for="item in workflows"
-                    :key="item.workflowCode"
-                    :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
-                    @click="selectedWorkflowCode = item.workflowCode; showWorkflowPopover = false"
-                  >
-                    <el-icon class="item-icon"><connection /></el-icon>
-                    <span class="item-name">{{ item.workflowName }}</span>
-                    <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
-                  </div>
+
+                  <!-- 2. 专属智能体列表 -->
+                  <template v-if="agents && agents.length > 0">
+                    <div class="popper-group-header">
+                      <el-icon><cpu /></el-icon> 专属 AI 智能体
+                    </div>
+                    <div
+                      v-for="item in agents"
+                      :key="item.agentCode"
+                      :class="['popper-selector-item', { 'is-active': selectedAgentCode === item.agentCode }]"
+                      @click="selectMode('agent', item.agentCode); showWorkflowPopover = false"
+                    >
+                      <el-icon class="item-icon"><cpu /></el-icon>
+                      <span class="item-name" :title="item.description">{{ item.agentName }}</span>
+                      <el-icon v-if="selectedAgentCode === item.agentCode" class="check-icon"><check /></el-icon>
+                    </div>
+                  </template>
+
+                  <!-- 3. 智能体工作流列表 -->
+                  <template v-if="workflows && workflows.length > 0">
+                    <div class="popper-group-header">
+                      <el-icon><connection /></el-icon> 智能体工作流
+                    </div>
+                    <div
+                      v-for="item in workflows"
+                      :key="item.workflowCode"
+                      :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
+                      @click="selectMode('workflow', item.workflowCode); showWorkflowPopover = false"
+                    >
+                      <el-icon class="item-icon"><connection /></el-icon>
+                      <span class="item-name" :title="item.description">{{ item.workflowName }}</span>
+                      <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                    </div>
+                  </template>
                 </div>
               </el-popover>
 
@@ -844,14 +869,14 @@
               <span class="toolbar-report-id">NO. {{ currentReportId }}</span>
             </div>
             <div class="toolbar-right">
-              <el-button class="toolbar-btn" size="small" @click="handlePrintReport">
-                <el-icon><printer /></el-icon> 打印 / PDF
+              <el-button class="toolbar-btn" size="small" type="warning" plain :loading="aiRefining" @click="handleAiRefineReport">
+                <el-icon v-if="!aiRefining"><magic-stick /></el-icon> ✨ AI 深度重塑美化
               </el-button>
-              <el-button class="toolbar-btn" size="small" @click="handleDownloadHtmlReport">
-                <el-icon><download /></el-icon> 导出 HTML
+              <el-button class="toolbar-btn" size="small" type="primary" plain @click="handleSaveReportToDb">
+                <el-icon><folder-add /></el-icon> 保存至云端
               </el-button>
-              <el-button class="toolbar-btn" size="small" @click="handleCopyHtmlReport">
-                <el-icon><document-copy /></el-icon> 复制源码
+              <el-button class="toolbar-btn" size="small" type="primary" @click="handleExportPdf">
+                <el-icon><download /></el-icon> 导出 PDF
               </el-button>
               <el-button class="toolbar-btn-close" size="small" circle @click="handleReportClose">
                 <el-icon><close /></el-icon>
@@ -859,6 +884,43 @@
             </div>
           </div>
         </div>
+
+        <!-- 全屏暗色磨砂蒙层 + 居中浮动 AI 重塑思考看板弹窗 -->
+        <transition name="el-fade-in">
+          <div v-if="aiRefining" class="ai-refine-modal-backdrop">
+            <div class="ai-refine-stepper-panel">
+              <div class="stepper-header">
+                <div class="stepper-title">
+                  <el-icon class="is-loading title-spinner"><loading /></el-icon>
+                  <span class="title-text">✨ AI 大模型正在深度重塑分析报告...</span>
+                </div>
+                <span class="stepper-tag">步骤推演与 100% 格式校验中</span>
+              </div>
+              <div class="stepper-body">
+                <div class="step-item" :class="{ 'step-active': aiRefineStep === 1, 'step-done': aiRefineStep > 1 }">
+                  <el-icon v-if="aiRefineStep > 1" class="step-icon done-icon"><circle-check-filled /></el-icon>
+                  <el-icon v-else-if="aiRefineStep === 1" class="step-icon loading-icon is-loading"><loading /></el-icon>
+                  <span v-else class="step-icon dot-icon"></span>
+                  <span class="step-label">1. 读取上下文与核心数据</span>
+                </div>
+                <span class="step-arrow">➔</span>
+                <div class="step-item" :class="{ 'step-active': aiRefineStep === 2, 'step-done': aiRefineStep > 2 }">
+                  <el-icon v-if="aiRefineStep > 2" class="step-icon done-icon"><circle-check-filled /></el-icon>
+                  <el-icon v-else-if="aiRefineStep === 2" class="step-icon loading-icon is-loading"><loading /></el-icon>
+                  <span v-else class="step-icon dot-icon"></span>
+                  <span class="step-label">2. 提炼 KPI & 高管决策摘要</span>
+                </div>
+                <span class="step-arrow">➔</span>
+                <div class="step-item" :class="{ 'step-active': aiRefineStep === 3, 'step-done': aiRefineStep > 3 }">
+                  <el-icon v-if="aiRefineStep > 3" class="step-icon done-icon"><circle-check-filled /></el-icon>
+                  <el-icon v-else-if="aiRefineStep === 3" class="step-icon loading-icon is-loading"><loading /></el-icon>
+                  <span v-else class="step-icon dot-icon"></span>
+                  <span class="step-label">3. 构建数据可视化面板</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
 
         <div id="report-print-area" class="report-preview-page">
           <div class="report-paper">
@@ -938,6 +1000,17 @@
               <div id="pretty-report-chart" class="pretty-chart-box-v2"></div>
             </div>
 
+            <!-- AI 智能提炼的高管极简摘要 Banner -->
+            <div v-if="refinedSchema && refinedSchema.executiveSummary" class="executive-summary-banner" style="margin-bottom: 20px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 8px;">
+              <div class="summary-header" style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #0369a1; font-size: 15px; margin-bottom: 8px;">
+                <el-icon><opportunity /></el-icon>
+                <span>高管极简摘要与决策建议 (Executive Summary)</span>
+              </div>
+              <div class="summary-body" style="color: #334155; font-size: 14px; line-height: 1.6;">
+                {{ refinedSchema.executiveSummary }}
+              </div>
+            </div>
+
             <!-- 正文内容卡片化分段展示 -->
             <div class="paper-content-v2-container">
               <div v-for="(section, idx) in reportSections" :key="idx" class="report-content-card">
@@ -945,11 +1018,30 @@
               </div>
             </div>
 
+            <!-- AI 智能提取的行动计划看板 (Action Plan) -->
+            <div v-if="refinedSchema && refinedSchema.actionPlan && refinedSchema.actionPlan.length > 0" class="report-action-plan-section" style="margin-top: 25px; background: #fafafa; border: 1px solid #f0f0f0; padding: 20px; border-radius: 8px;">
+              <div class="action-plan-header" style="display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">
+                <el-icon style="color: #10b981;"><checked /></el-icon>
+                <span>建议改进与行动计划看板 (Action Plan)</span>
+              </div>
+              <el-table :data="refinedSchema.actionPlan" border stripe style="width: 100%;">
+                <el-table-column label="优先级" prop="priority" width="100" align="center">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.priority === 'P1' ? 'danger' : (scope.row.priority === 'P2' ? 'warning' : 'info')" effect="dark" size="small">
+                      {{ scope.row.priority }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="改进措施 / 行动建议" prop="action" min-width="220" />
+                <el-table-column label="建议责任部门/人" prop="owner" width="160" align="center" />
+              </el-table>
+            </div>
+
             <!-- 页脚 -->
             <div class="paper-footer-v2">
               <div class="footer-gradient-line"></div>
               <p class="footer-disclaimer">本报告由 AI 大模型内容引擎分析生成，仅供参考，不构成最终决策依据</p>
-              <p class="footer-brand">Powered by <strong>RuoYi-AI</strong> · {{ formatReportTime() }}</p>
+              <p class="footer-brand">Powered by <strong>Polaris-AI</strong> · {{ formatReportTime() }}</p>
             </div>
           </div>
         </div>
@@ -992,6 +1084,7 @@ import {
   createConversation,
   deleteConversation,
   deleteConversationsBatch,
+  listActiveAgents,
   listConversations,
   listMessages,
   renameConversation,
@@ -1000,6 +1093,7 @@ import {
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
 import {listActiveWorkflows} from '@/api/ai/workflow'
+import {refineReport, saveReport} from '@/api/ai/report'
 import request from '@/utils/request'
 
 export default {
@@ -1014,7 +1108,9 @@ export default {
       models: [],
       selectedModelConfigId: null,
       selectedWorkflowCode: '',
+      selectedAgentCode: '',
       workflows: [],
+      agents: [],
       toolDictionary: {},
       currentWorkflowThreadId: null,
       showModelPopover: false,
@@ -1056,6 +1152,10 @@ export default {
       reportChartInstance: null,
       reportSections: [],
       reportStats: null,
+      aiRefining: false,
+      aiRefineStep: 0,
+      aiRefinementInProgress: false,
+      refinedSchema: null,
       enableWebSearch: false,
       // 语音输入相关
       isListening: false,
@@ -1133,6 +1233,7 @@ export default {
   },
   mounted() {
     this.loadConvList(true)
+    this.loadAgents()
     document.body.classList.add('ai-chat-page')
   },
   activated() {
@@ -1140,6 +1241,7 @@ export default {
     this.loadModels()
     this.loadKnowledgeBases()
     this.loadWorkflows()
+    this.loadAgents()
   },
   beforeUnmount() {
     this.abortStream()
@@ -1739,6 +1841,47 @@ export default {
       }
     },
 
+    async loadAgents() {
+      try {
+        const res = await listActiveAgents()
+        if (res.code === 200) {
+          this.agents = res.data || []
+        }
+      } catch (e) {
+        console.error('加载智能体列表失败', e)
+      }
+    },
+
+    handleShowAgentWorkflowPopover() {
+      this.loadWorkflows()
+      this.loadAgents()
+    },
+
+    selectMode(type, code) {
+      if (type === 'agent') {
+        this.selectedAgentCode = code
+        this.selectedWorkflowCode = ''
+      } else if (type === 'workflow') {
+        this.selectedWorkflowCode = code
+        this.selectedAgentCode = ''
+      } else {
+        this.selectedAgentCode = ''
+        this.selectedWorkflowCode = ''
+      }
+    },
+
+    getSelectedAgentOrWorkflowLabel() {
+      if (this.selectedAgentCode) {
+        const agent = this.agents.find(a => a.agentCode === this.selectedAgentCode)
+        return agent ? agent.agentName : '专属智能体'
+      }
+      if (this.selectedWorkflowCode) {
+        const wf = this.workflows.find(w => w.workflowCode === this.selectedWorkflowCode)
+        return wf ? wf.workflowName : '工作流'
+      }
+      return '常规对话'
+    },
+
     async loadToolDictionary() {
       try {
         const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
@@ -2025,8 +2168,15 @@ export default {
         const threadId = this.currentWorkflowThreadId || this.generateUuid()
         this.currentWorkflowThreadId = threadId
         url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
+        if (attachedFiles.length > 0) {
+          const fileUrls = attachedFiles.map(f => f.url).join(',')
+          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
+        }
       } else {
         url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+        if (this.selectedAgentCode) {
+          url += `&agentCode=${encodeURIComponent(this.selectedAgentCode)}`
+        }
         if (attachedFiles.length > 0) {
           const fileUrls = attachedFiles.map(f => f.url).join(',')
           url += `&fileUrl=${encodeURIComponent(fileUrls)}`
@@ -2316,6 +2466,9 @@ export default {
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
 
+      // 5.1 过滤清除独立的 --- / *** 分割线裸文本，避免在界面裸露出多余字符串
+      html = html.replace(/^(?:---|[*]{3,}|_{3,})\s*$/gm, '')
+
       // 6. 超链接
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
         let href = url
@@ -2451,52 +2604,30 @@ export default {
       return count >= 3
     },
 
-    // 解析 Markdown 数值对比表格
+    // 解析 Markdown 数值对比表格（仅对具有实际对比价值的数值型表格生成 ECharts 图表）
     parseTablesForCharts(content) {
       if (!content) return null
 
-      const lines = content.split('\n')
-      const tables = []
-      let currentTable = null
+      const tables = this.extractStructuredTablesWithHeaders(content)
+      if (!tables || tables.length === 0) return null
 
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim()
-        if (line.startsWith('|') && line.endsWith('|')) {
-          const cells = line.split('|').map(c => c.trim()).filter((c, idx, arr) => idx > 0 && idx < arr.length - 1)
-          if (cells.length > 0) {
-            if (!currentTable) {
-              currentTable = { headers: cells, rows: [], isSeparatorNext: false }
-            } else {
-              const isSeparator = cells.every(cell => /^:?-+:?$/.test(cell) || cell === '')
-              if (isSeparator) {
-                currentTable.isSeparatorNext = true
-              } else {
-                currentTable.rows.push(cells)
-              }
-            }
-          }
-        } else {
-          if (currentTable) {
-            if (currentTable.rows.length > 0) {
-              tables.push(currentTable)
-            }
-            currentTable = null
-          }
-        }
-      }
-      if (currentTable && currentTable.rows.length > 0) {
-        tables.push(currentTable)
-      }
-
-      if (tables.length === 0) return null
-
+      // 筛选出第一列为名称、后面列包含有价值数值的分析型表格
       const validTables = tables.filter(t => {
-        return t.rows.some(row => {
-          return row.slice(1).some(cell => {
-            const num = parseFloat(cell.replace(/[^\d.-]/g, ''))
-            return !isNaN(num)
+        if (t.headers.length < 2 || t.rows.length < 1) return false
+        // 判断后面是否有真正的可度量数值（如数量、百分比、金额、得分、占比等）
+        let numericCellCount = 0
+        t.rows.forEach(row => {
+          row.slice(1).forEach(cell => {
+            const clean = cell.replace(/[^\d.-]/g, '')
+            if (clean !== '' && !isNaN(parseFloat(clean))) {
+              numericCellCount++
+            }
           })
         })
+        // 至少有 50% 以上的数值单元格，且不能是纯列表ID/序号表格
+        const totalNumCells = t.rows.length * (t.headers.length - 1)
+        const isHeaderLikeId = t.headers.some(h => /ID|序号|账号|用户名|IP|时间|日期/i.test(h))
+        return (numericCellCount / totalNumCells >= 0.4) && !isHeaderLikeId
       })
 
       if (validTables.length === 0) return null
@@ -2529,16 +2660,63 @@ export default {
       }
     },
 
+    // 辅助解析带表头的结构化表格
+    extractStructuredTablesWithHeaders(content) {
+      if (!content) return []
+      
+      const lines = content.split('\n')
+      const tables = []
+      let i = 0
+      
+      while (i < lines.length) {
+        let line = lines[i].trim()
+        if (line.startsWith('|') && i + 1 < lines.length) {
+          let nextLine = lines[i + 1].trim()
+          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
+            const headers = line.split('|').slice(1, -1).map(c => c.trim())
+            const tableRows = []
+            i += 2 
+            
+            while (i < lines.length) {
+              let dataLine = lines[i].trim()
+              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
+                const cells = dataLine.split('|').slice(1, -1).map(c => c.trim())
+                tableRows.push(cells)
+                i++
+              } else {
+                break
+              }
+            }
+            if (headers.length > 0 && tableRows.length > 0) {
+              tables.push({ headers, rows: tableRows })
+            }
+            continue
+          }
+        }
+        i++
+      }
+      return tables
+    },
+
     openReportView(content) {
-      this.reportContent = content
+      // 1. 统一处理换行符，并强力过滤报告最顶部的 AI 寒暄客套前缀（如 "好的，我先从系统中查询..."）
+      let normalizedContent = content ? content.replace(/\r\n/g, '\n').trim() : ''
 
-      // 1. 统一处理换行符，保障正则切割无偏差
-      const normalizedContent = content ? content.replace(/\r\n/g, '\n') : ''
+      // 自动过滤报告第一个 Markdown 标题 (# 或 ##) 之前的所有 AI 客套与过程说明段落
+      const firstHeadingIndex = normalizedContent.search(/^#{1,3}\s+/m)
+      if (firstHeadingIndex > 0) {
+        normalizedContent = normalizedContent.substring(firstHeadingIndex).trim()
+      } else {
+        // 若无标准的 # 标题，匹配清除常见的开场白模式
+        normalizedContent = normalizedContent.replace(/^(好的|收到|已为您|以下是为您|好的，已|好的，我|已成功|首先)[^\n\:]*[\:\：\n]\s*/gi, '').trim()
+      }
 
-      // 2. 尝试提取报告大标题
-      const titleMatch = normalizedContent.match(/^#\s+(.+)$/m)
+      this.reportContent = normalizedContent
+
+      // 2. 强力提取报告大标题（兼容 # 标题、#Emoji 标题、无空格标题等多种格式）
+      const titleMatch = normalizedContent.match(/^#\s*([^\n]+)$/m)
       if (titleMatch && titleMatch[1]) {
-        this.reportTitle = titleMatch[1].trim()
+        this.reportTitle = titleMatch[1].replace(/^[🛡️📊📑📋📝\s]+/, '').trim()
       } else {
         const currentConv = this.conversations.find(c => c.id === this.currentConvId)
         this.reportTitle = currentConv ? currentConv.title : '智能数据分析报告'
@@ -2546,31 +2724,51 @@ export default {
 
       this.currentReportId = Math.random().toString(36).substring(2, 10).toUpperCase()
 
-      // 3. 智能正文卡片切割逻辑：按二级标题 (## ) 拆分正文
+      // 3. 超强容错正文拆分逻辑（支持 ##一、/ ## 1. / ### 各种二级、三级标题格式）
       if (normalizedContent) {
-        // 先去掉顶部重复的大标题行
-        let cleanContent = normalizedContent.replace(/^#\s+.+$/m, '').trim()
-        
-        // 拆分卡片，匹配以 ## 开头的行
-        const rawSections = cleanContent.split(/^(?=##\s+)/gm)
-        this.reportSections = rawSections
-          .map(s => s.trim())
-          .filter(s => s.length > 0 && s.startsWith('##'))
+        // 清理最顶部独立的一张大标题行 (# xxx)
+        let cleanContent = normalizedContent.replace(/^#\s*[^\n]+\n?/, '').trim()
 
-        // 智能清洗最后一个章节末尾的聊天寒暄引导语
-        if (this.reportSections.length > 0) {
-          const lastIndex = this.reportSections.length - 1
-          let lastSection = this.reportSections[lastIndex]
+        // 强力剥离正文开头与头部区域重复的元数据段落（兼容包含粗体 **、列表 -、引用 > 等多种 Markdown 格式）
+        for (let i = 0; i < 6; i++) {
+          cleanContent = cleanContent.replace(/^[\s\*\-\>]*[\*\_]*(报告生成时间|评估人|评估范围|生成时间|报告时间|报告编号|编制部门|报告作者|创建人|评估对象|评估周期)[\*\_]*\s*[\：\:][^\n]*\n?/gi, '').trim()
+        }
+
+        // 使用宽泛正则拆分章节：匹配行首的 ## 或 ### 标题
+        const rawSections = cleanContent.split(/(?=^#{2,3}\s*[^\n]+)/gm)
+        let parsedSections = rawSections
+          .map(s => s.trim())
+          .filter(s => {
+            if (!s) return false
+            // 若某段非以 ## 开头，且只包含符号或被剔除后的残余废字符，清空过滤
+            if (!s.startsWith('#')) {
+              const textOnly = s.replace(/[\s\*\-\>\:\：\.\,\n]/g, '')
+              if (textOnly.length < 3) return false
+            }
+            return true
+          })
+
+        // 清洗末尾的交互/寒暄问句
+        if (parsedSections.length > 0) {
+          const lastIndex = parsedSections.length - 1
+          let lastSection = parsedSections[lastIndex]
           const paragraphs = lastSection.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0)
           if (paragraphs.length > 1) {
             const lastPara = paragraphs[paragraphs.length - 1]
-            const isChatter = /[\?？吗😊]|告诉我|有帮助|任何问题|深入的分析|进一步的操作/i.test(lastPara)
+            const isChatter = /[\?？吗😊]|告诉我|有帮助|需要我|深入的分析|进一步的操作/i.test(lastPara)
             if (isChatter) {
               paragraphs.pop()
-              this.reportSections[lastIndex] = paragraphs.join('\n\n')
+              parsedSections[lastIndex] = paragraphs.join('\n\n')
             }
           }
         }
+
+        // 兜底防御：若未切分出章节，绝对不清空内容，将完整 cleanContent 作为一个整体渲染！
+        if (parsedSections.length === 0 && cleanContent.length > 0) {
+          parsedSections = [cleanContent]
+        }
+
+        this.reportSections = parsedSections
       } else {
         this.reportSections = []
       }
@@ -2597,38 +2795,8 @@ export default {
 
     // 辅助解析真正的表格结构数据（避免正则扫描产生的多算少算偏差 Bug）
     extractStructuredTables(content) {
-      if (!content) return []
-      
-      const lines = content.split('\n')
-      const tables = []
-      let i = 0
-      
-      while (i < lines.length) {
-        let line = lines[i].trim()
-        if (line.startsWith('|') && i + 1 < lines.length) {
-          let nextLine = lines[i + 1].trim()
-          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
-            const tableRows = []
-            // 跳过表头和分割线
-            i += 2 
-            
-            while (i < lines.length) {
-              let dataLine = lines[i].trim()
-              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
-                const cells = dataLine.split('|').slice(1, -1).map(c => c.trim())
-                tableRows.push(cells)
-                i++
-              } else {
-                break
-              }
-            }
-            tables.push(tableRows)
-            continue
-          }
-        }
-        i++
-      }
-      return tables
+      const tables = this.extractStructuredTablesWithHeaders(content)
+      return tables.map(t => t.rows)
     },
 
     // 精准生成概览统计卡片数据
@@ -2645,8 +2813,9 @@ export default {
         totalRows += t.length
       })
 
-      // 计算章节数（二级标题数）
-      const sectionCount = this.reportSections.length
+      // 计算章节数（匹配所有 # / ## / ### 标题，保证非 0）
+      const sectionMatches = content.match(/^#{1,3}\s*[^\n]+/gm)
+      const sectionCount = sectionMatches ? sectionMatches.length : (this.reportSections.length || 1)
 
       // 字数统计
       const wordCount = content.replace(/\s+/g, '').length
@@ -2735,42 +2904,161 @@ export default {
       return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
     },
 
-    handlePrintReport() {
-      this.$nextTick(() => {
-        window.print()
-      })
+    handleExportPdf() {
+      const element = document.getElementById('report-print-area')
+      const fileName = `AI智能分析报告_${this.currentReportId || 'REP'}.pdf`
+
+      if (window.html2pdf && element) {
+        const opt = {
+          margin:       [10, 10, 10, 10],
+          filename:     fileName,
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { scale: 2, useCORS: true },
+          jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        }
+        window.html2pdf().set(opt).from(element).save()
+      } else {
+        // 尝试加载 html2pdf.js 库直接文件下载；若在无网离线环境下则优雅调起标准 PDF 保存窗口
+        if (!window.html2pdfLoading) {
+          window.html2pdfLoading = true
+          const script = document.createElement('script')
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js'
+          script.onload = () => {
+            if (window.html2pdf && element) {
+              const opt = {
+                margin:       [10, 10, 10, 10],
+                filename:     fileName,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+              }
+              window.html2pdf().set(opt).from(element).save()
+            } else {
+              window.print()
+            }
+          }
+          script.onerror = () => {
+            window.print()
+          }
+          document.head.appendChild(script)
+        } else {
+          window.print()
+        }
+      }
     },
 
-    handleCopyHtmlReport() {
-      const reportElement = document.querySelector('#report-print-area .report-paper')
-      if (!reportElement) {
-        this.$message.warning('报告渲染失败，无法复制')
+    async handleSaveReportToDb() {
+      if (!this.reportContent) {
+        this.$message.warning('无法保存，报告内容为空')
         return
       }
-
-      const styleTag = '<style>\n' +
-        '  .report-paper { padding: 40px; font-family: sans-serif; color: #1f2937; line-height: 1.8; max-width: 800px; margin: 0 auto; background: #fff; }\n' +
-        '  h1 { font-size: 2rem; color: #1e3a8a; border-bottom: 2px solid #e5e7eb; padding-bottom: 12px; }\n' +
-        '  h2 { font-size: 1.5rem; color: #1e40af; margin-top: 30px; }\n' +
-        '  table { width:100%; border-collapse:collapse; margin:20px 0; }\n' +
-        '  th, td { padding: 12px; border: 1px solid #e5e7eb; text-align: left; }\n' +
-        '  th { background: #f9fafb; font-weight: bold; }\n' +
-        '  blockquote { padding: 10px 20px; background: #f3f4f6; border-left: 4px solid #3b82f6; color: #4b5563; }\n' +
-        '</style>'
-
-      const fullHtml = '<html><head><meta charset="utf-8">' + styleTag + '</head><body>' + reportElement.innerHTML + '</body></html>'
-
-      const textarea = document.createElement('textarea')
-      textarea.value = fullHtml
-      document.body.appendChild(textarea)
-      textarea.select()
       try {
-        document.execCommand('copy')
-        this.$message.success('已将精美 HTML 报告源码复制到剪贴板！')
+        const currentConv = (this.conversations || []).find(c => c.id === this.currentConvId)
+        const agentCodeToSave = this.selectedAgentCode || (currentConv && currentConv.agentCode) || 'POLARIS-ANALYST'
+        const payload = {
+          reportCode: 'REP-' + (this.currentReportId || Date.now()),
+          reportTitle: this.reportTitle || 'AI 智能分析报告',
+          conversationId: this.currentConvId,
+          agentCode: agentCodeToSave,
+          reportContent: this.reportContent,
+          reportStats: JSON.stringify(this.reportStats || []),
+          createTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
+        }
+        const res = await saveReport(payload)
+        if (res.code === 200 || res.data) {
+          this.$message.success('报告已成功保存归档至数据库！可在“报告中心”随时查阅。')
+        } else {
+          this.$message.error(res.msg || '保存报告失败')
+        }
       } catch (err) {
-        this.$message.error('复制失败，请重试')
+        console.error('保存报告失败', err)
+        this.$message.error('保存报告出现异常：' + (err.message || '网络连接超时'))
       }
-      document.body.removeChild(textarea)
+    },
+
+    async handleAiRefineReport() {
+      if (!this.reportContent) {
+        this.$message.warning('报告内容为空，无法美化')
+        return
+      }
+      this.aiRefining = true
+      this.aiRefineStep = 1
+      this.aiRefinementInProgress = true
+
+      // 动态推进思考步骤看板
+      const t1 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 2 }, 1500)
+      const t2 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 3 }, 3500)
+
+      try {
+        const res = await refineReport(this.reportContent)
+        if (res.code === 200 && res.data) {
+          let schema = null
+          if (typeof res.data === 'object') {
+            schema = res.data
+          } else {
+            let cleanText = String(res.data)
+            const firstBrace = cleanText.indexOf('{')
+            const lastBrace = cleanText.lastIndexOf('}')
+            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+              cleanText = cleanText.substring(firstBrace, lastBrace + 1)
+            }
+            schema = JSON.parse(cleanText)
+          }
+
+          console.log('>>> [原生对象解析成功]:', schema)
+          this.refinedSchema = schema
+          this.aiRefineStep = 4 // 完成所有步骤
+
+          if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
+            this.reportStats = schema.kpiCards.map(k => ({
+              label: k.label || k.title,
+              value: k.value || '0',
+              emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
+              color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
+            }))
+          }
+
+          if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
+            const viz = schema.visualizations[0]
+            if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
+              this.hasChartData = true
+              this.chartConfig = {
+                xAxisData: viz.chartData.categories,
+                series: viz.chartData.series.map(s => ({
+                  name: s.name,
+                  type: viz.chartType === 'line' ? 'line' : 'bar',
+                  data: s.data,
+                  barMaxWidth: 30
+                })),
+                legendData: viz.chartData.series.map(s => s.name)
+              }
+              this.$nextTick(() => {
+                this.initReportChart()
+              })
+            }
+          }
+
+          setTimeout(() => {
+            this.aiRefining = false
+            this.aiRefinementInProgress = false
+            this.$forceUpdate()
+            this.$message.success('✨ AI 已成功重塑分析报告！提炼高管摘要与可视化图表。')
+          }, 600)
+
+        } else {
+          this.aiRefining = false
+          this.aiRefinementInProgress = false
+          this.$message.error(res.msg || 'AI 美化重塑失败')
+        }
+      } catch (err) {
+        this.aiRefining = false
+        this.aiRefinementInProgress = false
+        console.error('AI 重塑报告失败', err)
+        this.$message.error('AI 重塑报告失败，请稍后重试')
+      } finally {
+        clearTimeout(t1)
+        clearTimeout(t2)
+      }
     },
 
     handleDownloadHtmlReport() {
@@ -5994,6 +6282,239 @@ export default {
       font-size: 12px;
       transition: transform 0.3s ease;
     }
+  }
+}
+
+.popper-group-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: #8b5cf6;
+  padding: 8px 12px 4px 12px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid rgba(226, 232, 240, 0.6);
+  margin-top: 6px;
+  &:first-child {
+    border-top: none;
+    margin-top: 0;
+  }
+}
+
+/* ==========================================================================
+   AI 深度重塑全屏暗色磨砂蒙层与居中浮动弹窗（完全隔离底层原页面）
+   ========================================================================== */
+.ai-refine-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3000;
+  background: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ai-refine-stepper-panel {
+  width: 100%;
+  max-width: 640px;
+  margin: 0;
+  padding: 24px 28px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 60%, #311b92 100%);
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  border-radius: 16px;
+  box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.65), 0 0 35px rgba(124, 58, 237, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+  animation: modal-pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #a855f7, #3b82f6, transparent);
+    animation: shimmer-top-bar 2.5s infinite linear;
+  }
+}
+
+@keyframes modal-pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes shimmer-top-bar {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.stepper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+
+  .stepper-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 15px;
+    color: #f3e8ff;
+    letter-spacing: 0.3px;
+
+    .title-spinner {
+      font-size: 18px;
+      color: #c084fc;
+    }
+  }
+
+  .stepper-tag {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e9d5ff;
+    background: rgba(168, 85, 247, 0.25);
+    border: 1px solid rgba(168, 85, 247, 0.4);
+    padding: 3px 10px;
+    border-radius: 12px;
+    letter-spacing: 0.5px;
+  }
+}
+
+.stepper-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(10px);
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #94a3b8;
+    transition: all 0.3s ease;
+
+    .step-icon {
+      font-size: 16px;
+    }
+
+    .done-icon {
+      color: #34d399;
+    }
+
+    .loading-icon {
+      color: #c084fc;
+    }
+
+    .dot-icon {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #475569;
+    }
+
+    &.step-active {
+      color: #f3e8ff;
+      font-weight: 700;
+    }
+
+    &.step-done {
+      color: #34d399;
+      font-weight: 600;
+    }
+  }
+
+  .step-arrow {
+    color: #818cf8;
+    font-weight: 700;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+}
+</style>
+
+<!-- 打印专用全局样式，确保导出/打印 PDF 时仅渲染报告主体并隐藏系统侧边栏、顶部导航与工具栏 -->
+<style>
+@media print {
+  /* 1. 将 body 内所有无关系统元素隐藏 */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* 2. 仅恢复报告打印区域及其子元素可见 */
+  #report-print-area,
+  #report-print-area * {
+    visibility: visible !important;
+  }
+
+  /* 3. 将报告区域绝对定位至打印窗口最左上方，满幅无阴影铺开 */
+  #report-print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .report-paper {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 10mm 15mm !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: #ffffff !important;
+  }
+
+  /* 4. 隐藏报告工具栏和关闭按钮 */
+  .report-toolbar-v2,
+  .report-toolbar-inner,
+  .toolbar-btn-close {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* 5. 解除外层 Layout 容器的高度与 overflow 截断，避免长报告多页截断 */
+  html, body, #app, .app-wrapper, .main-container, .app-main, .chat-container, .report-drawer-body, .el-overlay {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    position: static !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* 6. 页面边距与纸张规范优化 */
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
   }
 }
 </style>

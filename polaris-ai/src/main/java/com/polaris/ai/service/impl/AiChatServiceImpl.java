@@ -9,6 +9,7 @@ import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
+import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
@@ -73,6 +74,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Autowired
     private com.polaris.ai.pivot.AiModelFactory modelFactory;
+
+    @Autowired
+    private IAiAgentService agentService;
 
     @Autowired
     private MultimodalMediaHelper mediaHelper;
@@ -197,7 +201,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      * 6. 流式结束后持久化完整 AI 回复及 Token 消耗
      */
     @Override
-    public void chat(Long conversationId, String userInput, String fileUrl, Boolean enableSearch, Long userId, SseEmitter emitter) {
+    public void chat(Long conversationId, String userInput, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter) {
         // 1. 鉴权：会话必须属于当前用户
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
         if (conv == null) {
@@ -251,8 +255,22 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             aiChatMapper.updateConversationTitle(conversationId, autoTitle, userId);
         }
 
-        // 4. 构建完整的消息上下文（SystemMessage + 历史消息）
+        // 4. 智能体检测与上下文构建
+        com.polaris.ai.domain.AiAgent selectedAgent = null;
+        if (agentCode != null && !agentCode.trim().isEmpty()) {
+            try {
+                selectedAgent = agentService.selectAgentByCode(agentCode);
+                log.info(">>> 当前对话使用专属智能体: {} ({})", selectedAgent.getAgentName(), agentCode);
+            } catch (Exception e) {
+                log.error(">>> 查询指定智能体失败: {}", agentCode, e);
+            }
+        }
+
+        // 构建完整的消息上下文（SystemMessage + 历史消息）
         List<ChatMessage> messages = buildMessages(conversationId, userId);
+        if (selectedAgent != null && selectedAgent.getSystemPrompt() != null && !selectedAgent.getSystemPrompt().trim().isEmpty()) {
+            messages.add(0, dev.langchain4j.data.message.SystemMessage.from(selectedAgent.getSystemPrompt()));
+        }
 
         // 4.1 判断是否需要启用向量检索器
         ContentRetriever contentRetriever = null;
@@ -287,9 +305,22 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         } catch (Exception e) {
             log.error(">>> 查询模型配置失败，无法提取工具配置: {}", e.getMessage());
         }
-        // 模型未配置工具白名单时，回退到前端 enableSearch 开关的行为
-        if (enabledTools == null || enabledTools.trim().isEmpty()) {
-            enabledTools = Boolean.TRUE.equals(enableSearch) ? "web_search" : "";
+        // 1. 若前端开启了 enableSearch 开关（或包含联网搜索指令），将 web_search 融入工具链
+        if (Boolean.TRUE.equals(enableSearch)) {
+            if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                enabledTools = "web_search";
+            } else if (!enabledTools.contains("web_search")) {
+                enabledTools = enabledTools + ",web_search";
+            }
+        }
+
+        // 2. 整合智能体绑定的专属工具链
+        if (selectedAgent != null && selectedAgent.getTools() != null && !selectedAgent.getTools().trim().isEmpty()) {
+            if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                enabledTools = selectedAgent.getTools();
+            } else {
+                enabledTools = enabledTools + "," + selectedAgent.getTools();
+            }
         }
         Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
 

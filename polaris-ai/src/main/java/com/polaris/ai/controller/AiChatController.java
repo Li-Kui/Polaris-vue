@@ -197,6 +197,7 @@ public class AiChatController extends BaseController {
     public SseEmitter stream(@RequestParam Long conversationId,
                              @RequestParam String message,
                              @RequestParam(required = false) String fileUrl,
+                             @RequestParam(required = false) String agentCode,
                              @RequestParam(required = false, defaultValue = "false") Boolean enableSearch) {
         SseEmitter emitter = new SseEmitter(0L);
         Long userId = SecurityUtils.getUserId();
@@ -223,7 +224,7 @@ public class AiChatController extends BaseController {
                 SecurityContextHolder.setContext(context);
                 // 将域名设置到 ThreadLocal 中
                 com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
-                aiChatService.chat(conversationId, message, fileUrl, enableSearch, userId, emitter);
+                aiChatService.chat(conversationId, message, fileUrl, agentCode, enableSearch, userId, emitter);
             } finally {
                 // 清理 ThreadLocal
                 com.polaris.ai.utils.BaseUrlHolder.clear();

@@ -133,6 +133,7 @@ public class AiWorkflowController extends BaseController {
     public SseEmitter runWorkflowStream(
             @RequestParam String workflowCode,
             @RequestParam String message,
+            @RequestParam(required = false) String fileUrl,
             @RequestParam(required = false) String threadId,
             @RequestParam(required = false) Long conversationId) {
 
@@ -143,8 +144,12 @@ public class AiWorkflowController extends BaseController {
         Runnable task = () -> {
             try {
                 SecurityContextHolder.setContext(securityContext);
+                if (fileUrl != null && !fileUrl.trim().isEmpty()) {
+                    com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
+                }
                 langGraph4jEngine.run(workflowCode, message, threadId, securityContext, emitter, conversationId, userId);
             } finally {
+                com.polaris.ai.utils.ChatContextHolder.clear();
                 SecurityContextHolder.clearContext();
             }
         };

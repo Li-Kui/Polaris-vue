@@ -98,6 +98,8 @@ CREATE TABLE `ai_conversation` (
   `model` varchar(50) NOT NULL DEFAULT 'qwen-plus' COMMENT '使用模型',
   `model_config_id` bigint(20) DEFAULT NULL COMMENT '所选大模型配置ID',
   `knowledge_base_id` bigint(20) DEFAULT NULL COMMENT '关联的知识库id',
+  `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code',
+  `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -230,6 +232,7 @@ CREATE TABLE `ai_image_task` (
   `dept_id` bigint(20) DEFAULT NULL COMMENT '部门ID',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI图像生成任务表';
 
@@ -260,4 +263,45 @@ INSERT INTO `sys_menu`
   (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
    `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
 VALUES
-  (10, '绘图工坊', 1061, 0, 'aiDraw', 'ai/draw', '', '', 1, 0, 'C', '0', '0', '', 'picture', 'admin', NOW(), 'AI绘图工坊');
+  (2050, '绘图工坊', 2000, 6, 'draw', 'ai/draw/index', NULL, 'AiDraw',
+   1, 0, 'C', '0', '0', 'ai:draw:list', 'image', 'admin', NOW(), 'AI高级绘图工坊页面');
+
+-- ----------------------------
+-- 增量升级 SQL 脚本（已有数据库环境直接执行以下部分）
+-- ----------------------------
+-- 补齐 ai_conversation 表的智能体与工作流绑定字段
+ALTER TABLE `ai_conversation` ADD COLUMN `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code';
+ALTER TABLE `ai_conversation` ADD COLUMN `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code';
+
+-- ----------------------------
+-- 12. Table structure for ai_report (AI分析报告表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_report`;
+CREATE TABLE `ai_report` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '报告ID',
+  `report_code` varchar(64) DEFAULT NULL COMMENT '报告编号',
+  `report_title` varchar(255) NOT NULL COMMENT '报告标题',
+  `conversation_id` bigint(20) DEFAULT NULL COMMENT '关联会话ID',
+  `agent_code` varchar(64) DEFAULT NULL COMMENT '关联智能体编码',
+  `report_content` longtext COMMENT '报告Markdown正文',
+  `report_stats` text COMMENT '统计指标JSON',
+  `user_id` bigint(20) DEFAULT NULL COMMENT '所属用户ID',
+  `status` char(1) DEFAULT '0' COMMENT '状态（0正常 1归档）',
+  `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0存在 2删除）',
+  `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
+  `create_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `update_by` varchar(64) DEFAULT '' COMMENT '更新者',
+  `update_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI分析报告归档表';
+
+-- ----------------------------
+-- 13. Ruoyi 系统菜单数据 (AI分析报告中心菜单)
+-- ----------------------------
+INSERT INTO `sys_menu`
+  (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
+   `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+VALUES
+  (2051, '报告中心', 1061, 7, 'report', 'ai/report', NULL, 'AiReport',
+   1, 0, 'C', '0', '0', 'ai:report:list', 'document', 'admin', NOW(), 'AI分析报告归档管理页面');
