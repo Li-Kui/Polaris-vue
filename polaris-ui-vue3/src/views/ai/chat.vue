@@ -656,6 +656,7 @@
                 :on-error="handleAttachmentError"
                 :on-success="handleAttachmentSuccess"
                 :show-file-list="false"
+                multiple
                 class="attachment-uploader-modern"
               >
                 <el-button
@@ -1039,6 +1040,7 @@ export default {
       renameTargetId: null,
       attachments: [],
       uploadingAttachment: false,
+      uploadingCount: 0,
       uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
       uploadHeaders: { Authorization: "Bearer " + getToken() },
       activePolls: {},
@@ -2896,21 +2898,22 @@ export default {
         this.$message.warning('正在对话中，暂不支持上传附件')
         return false
       }
-      if (this.attachments && this.attachments.length >= 5) {
-        this.$message.warning('最多只能上传 5 个附件')
+      const currentTotal = (this.attachments ? this.attachments.length : 0) + this.uploadingCount
+      if (currentTotal >= 5) {
+        this.$message.warning('单次对话最多允许关联 5 个附件')
         return false
       }
 
       // 校验文件名中不能有逗号
       if (file.name.includes(',')) {
-        this.$message.error('文件名不正确，不能包含英文逗号!')
+        this.$message.error(`文件 "${file.name}" 名称包含英文逗号，已被拦截`)
         return false
       }
 
       // 限制 10MB
       const isLt10M = file.size / 1024 / 1024 < 10
       if (!isLt10M) {
-        this.$message.error('附件大小不能超过 10MB!')
+        this.$message.error(`文件 "${file.name}" 大小超过 10MB 限制!`)
         return false
       }
 
@@ -2919,10 +2922,11 @@ export default {
       const nameParts = file.name.split('.')
       const ext = nameParts[nameParts.length - 1].toLowerCase()
       if (!allowedExts.includes(ext)) {
-        this.$message.error('暂不支持该类型的文件解析，目前仅支持：' + allowedExts.join(', '))
+        this.$message.error(`文件 "${file.name}" 格式不支持，支持类型：` + allowedExts.join(', '))
         return false
       }
 
+      this.uploadingCount++
       this.uploadingAttachment = true
       return true
     },
@@ -2944,7 +2948,10 @@ export default {
     },
 
     handleAttachmentSuccess(res, file) {
-      this.uploadingAttachment = false
+      this.uploadingCount = Math.max(0, this.uploadingCount - 1)
+      if (this.uploadingCount === 0) {
+        this.uploadingAttachment = false
+      }
       if (res.code === 200) {
         if (!this.attachments) {
           this.attachments = []
@@ -2953,15 +2960,19 @@ export default {
           name: file.name,
           url: res.url
         })
-        this.$message.success('文件上传成功')
+        this.$message.success(`文件 "${file.name}" 上传成功`)
       } else {
-        this.$message.error(res.msg || '文件上传失败')
+        this.$message.error(res.msg || `文件 "${file.name}" 上传失败`)
       }
     },
 
-    handleAttachmentError() {
-      this.uploadingAttachment = false
-      this.$message.error('文件上传接口调用失败')
+    handleAttachmentError(err, file) {
+      this.uploadingCount = Math.max(0, this.uploadingCount - 1)
+      if (this.uploadingCount === 0) {
+        this.uploadingAttachment = false
+      }
+      const fileName = file ? file.name : ''
+      this.$message.error(fileName ? `文件 "${fileName}" 上传失败` : '文件上传接口调用失败')
     },
 
     handleRemoveAttachment(index) {

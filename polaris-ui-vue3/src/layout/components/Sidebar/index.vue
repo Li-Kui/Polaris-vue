@@ -351,6 +351,7 @@ nextTick(() => {
 </script>
 
 <style lang="scss" scoped>
+@use "sass:list";
 .admin-sidebar {
   height: 100%;
   width: 100%;
@@ -781,40 +782,68 @@ nextTick(() => {
   }
 }
 
-// 彩色图标核心配置样式
+// 彩色图标核心配置样式 - 丰富多姿大调色盘与独立算法
+$menu-color-palette: (
+  #ff5252, #3b82f6, #0ea5e9, #a855f7, #10b981, #6366f1, #f97316, #ec4899,
+  #eab308, #8b5cf6, #f43f5e, #06b6d4, #22c55e, #ea580c, #2563eb, #dc2626,
+  #84cc16, #06b6d4, #d946ef, #f43f5e, #38bdf8, #10b981, #fb7185, #818cf8
+);
+
+// 1. 精密且丰富的特定菜单图标色彩映射（覆盖系统管理、监控、工具、AI 管理等全系）
 .svg-icon {
-  // 一级与主要二级图标彩色化
-  &.icon-dashboard { color: #ff5252 !important; } // 首页：珊瑚红
-  &.icon-system { color: #3b82f6 !important; }    // 系统管理：科技蓝
-  &.icon-monitor { color: #0ea5e9 !important; }   // 系统监控：天空蓝
-  &.icon-tool { color: #a855f7 !important; }      // 系统工具：幻彩紫
+  // 核心大类
+  &.icon-dashboard { color: #ff5252 !important; }   // 首页：珊瑚红
+  &.icon-system { color: #3b82f6 !important; }      // 系统管理：科技蓝
+  &.icon-monitor { color: #0ea5e9 !important; }     // 系统监控：天空蓝
+  &.icon-tool { color: #a855f7 !important; }        // 系统工具：幻彩紫
+  &.icon-ai { color: #10b981 !important; }          // AI管理：翡翠绿
+
+  // 系统管理子项
+  &.icon-user { color: #3b82f6 !important; }        // 用户管理：蓝
+  &.icon-peoples { color: #8b5cf6 !important; }     // 角色管理：紫
+  &.icon-tree-table { color: #06b6d4 !important; }  // 菜单管理：青蓝
+  &.icon-tree { color: #a855f7 !important; }        // 部门管理：淡紫
+  &.icon-post { color: #f97316 !important; }        // 岗位管理：橙
+  &.icon-dict { color: #ec4899 !important; }        // 字典管理：粉
+  &.icon-edit { color: #f59e0b !important; }        // 参数设置：黄
+  &.icon-message { color: #ef4444 !important; }     // 通知公告：红
+  &.icon-log { color: #10b981 !important; }         // 日志管理：绿
+
+  // 监控与工具子项
+  &.icon-online { color: #0ea5e9 !important; }      // 在线用户：天空蓝
+  &.icon-job { color: #f59e0b !important; }         // 定时任务：琥珀金
+  &.icon-druid { color: #e11d48 !important; }       // 数据监控：玫瑰红
+  &.icon-server { color: #6366f1 !important; }      // 服务监控：靛紫
+  &.icon-redis { color: #dc2626 !important; }       // 缓存监控：极客红
+  &.icon-redis-list { color: #fb7185 !important; }   // 缓存列表：珊瑚粉
+  &.icon-code { color: #14b8a6 !important; }        // 代码生成：松石绿
+  &.icon-build { color: #ea580c !important; }       // 表单构建：落日橙
+  &.icon-swagger { color: #10b981 !important; }     // 系统接口：绿
+
+  // 🤖 AI 管理专属菜单全系多彩化（绝对不重复！）
+  &.icon-chat, &.icon-message-box { color: #10b981 !important; }   // AI 对话：翡翠绿
+  &.icon-excel, &.icon-knowledge, &.icon-book, &.icon-collection { color: #0ea5e9 !important; } // 知识库管理：天空蓝
+  &.icon-guide, &.icon-model, &.icon-cpu { color: #8b5cf6 !important; }     // 模型管理：优雅紫
+  &.icon-agent, &.icon-robot, &.icon-bot { color: #f59e0b !important; }     // 智能体管理：琥珀黄
+  &.icon-workflow, &.icon-connection { color: #ec4899 !important; }        // 工作流管理：霓虹粉
+  &.icon-draw, &.icon-picture, &.icon-palette { color: #6366f1 !important; } // 绘图工坊：靛红紫
+}
+
+// 2. 动态错位循环兜底色盘（用于未命名的任意新新增菜单）
+$palette-len: list.length($menu-color-palette);
+@for $i from 1 through $palette-len {
+  $c: list.nth($menu-color-palette, $i);
   
-  // 二级子级菜单图标彩色化
-  &.icon-user { color: #10b981 !important; }      // 用户管理：翡翠绿
-  &.icon-peoples { color: #6366f1 !important; }   // 角色管理：靛青紫
-  &.icon-tree-table { color: #06b6d4 !important; }// 菜单管理：湖水蓝
-  &.icon-tree { color: #22c55e !important; }      // 部门管理：森林绿
-  &.icon-post { color: #f97316 !important; }      // 岗位管理：活力橙
-  &.icon-dict { color: #8b5cf6 !important; }      // 字典管理：优雅紫
-  &.icon-edit { color: #ec4899 !important; }      // 参数设置：霓虹粉
-  &.icon-message { color: #eab308 !important; }   // 通知公告：琥珀黄
-  &.icon-log { color: #f43f5e !important; }       // 日志管理：玫瑰红
+  // 一级菜单按基础索引
+  .sidebar-menu > .menu-node-wrapper:nth-child(#{$palette-len}n + #{$i}) > .menu-item .svg-icon {
+    color: $c !important;
+  }
   
-  // 子级与常用图标彩色化
-  &.icon-form { color: #10b981 !important; }      // 操作日志：绿
-  &.icon-login { color: #3b82f6 !important; }     // 登录日志：蓝
-  &.icon-logininfor { color: #3b82f6 !important; } // 登录日志信息：科技蓝
-  &.icon-online { color: #06b6d4 !important; }    // 在线用户：湖水蓝
-  &.icon-job { color: #f59e0b !important; }       // 定时任务：金黄
-  &.icon-druid { color: #e11d48 !important; }     // 数据监控：玫瑰红
-  &.icon-server { color: #2563eb !important; }    // 服务监控：宝蓝
-  &.icon-redis { color: #dc2626 !important; }     // 缓存监控：极客红
-  &.icon-redis-list { color: #fb7185 !important; } // 缓存列表：珊瑚粉
-  &.icon-build { color: #ea580c !important; }     // 表单构建：落日橙
-  &.icon-code { color: #059669 !important; }      // 代码生成：翡翠绿
-  &.icon-swagger { color: #16a34a !important; }   // 系统接口/工作流管理：Swagger绿
-  &.icon-excel { color: #15803d !important; }     // 知识库管理：微软绿
-  &.icon-guide { color: #6366f1 !important; }     // 模型管理：智能蓝
+  // 二级子菜单添加 +5 质数错位散列，打破和一级或平行子菜单的连续相同色
+  $sub-c: list.nth($menu-color-palette, (($i * 5 + 3) % $palette-len) + 1);
+  .submenu-inner > .menu-node-wrapper:nth-child(#{$palette-len}n + #{$i}) .svg-icon {
+    color: $sub-c !important;
+  }
 }
 
 @keyframes pulse-icon {
