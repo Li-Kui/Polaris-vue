@@ -368,6 +368,7 @@
                   </div>
                   <!-- 如果是画图任务标识的消息 -->
                   <div v-if="isImageTaskMessage(msg.content)" class="image-task-panel">
+                    <div v-if="extractTextBeforeTaskJson(msg.content)" class="markdown-body text-before-task" v-html="renderMarkdown(extractTextBeforeTaskJson(msg.content))"></div>
                     <div v-for="task in parseTaskInfos(msg.content)" :key="task.taskId" class="image-task-card-wrapper">
                       <!-- 骨架屏加载态 -->
                       <div v-if="task.isPending || task.status === '0'" class="image-skeleton-card">
@@ -1337,7 +1338,7 @@ export default {
 
       // 3. 捕获系统的异步轮询任务
       try {
-        const regex = /\{[\s\S]*?"taskId"\s*:\s*"img_[\s\S]*?"[\s\S]*?\}/g;
+        const regex = /\{[\s\S]*?"taskId"\s*:\s*"(img_[a-zA-Z0-9_]+?)"[\s\S]*?\}/g;
         let match;
         while ((match = regex.exec(content)) !== null) {
           try {
@@ -1376,17 +1377,17 @@ export default {
         console.error(">>> 匹配任务正则表达式异常: ", err);
       }
 
-      // 如果一个符合格式的都没匹配到，且包含特定关键词，则返回一个占位加载中对象
-      if (results.length === 0) {
-        return [{ isPending: true }];
-      }
-
       return results;
     },
     // 保留单任务兼容方法，避免外部零星引用导致报错
     parseTaskInfo(content) {
       const infos = this.parseTaskInfos(content);
       return infos.length > 0 ? infos[0] : { isPending: true };
+    },
+    extractTextBeforeTaskJson(content) {
+      if (!content) return '';
+      let cleaned = content.replace(/\{[\s\S]*?"taskId"\s*:\s*"(img_[a-zA-Z0-9_]+?)"[\s\S]*?\}/g, '');
+      return cleaned.trim();
     },
 
     startPolling(taskId) {

@@ -100,4 +100,11 @@ public interface IAiChatService extends IService<AiConversation>
      * @param emitter        SSE 发发射器，由 Controller 创建并传入
      */
     void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter);
+
+    /**
+     * 发送消息并以 SSE 流式返回 AI 回复（支持断流取消标记）
+     */
+    default void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+        chat(conversationId, userMessage, fileUrl, agentCode, enableSearch, userId, emitter);
+    }
 }

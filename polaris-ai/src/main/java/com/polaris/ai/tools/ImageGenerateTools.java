@@ -41,8 +41,8 @@ public class ImageGenerateTools implements AiTool {
          "【颜色铁律】当用户要求参考另一张图的颜色/风格/材质时，严禁在 prompt 中写出任何具体颜色名称（如红、蓝、橙、深色等）。" +
          "因为你看到的是被压缩、可能严重失真的图片，你识别的颜色往往是错的；真实颜色必须交给绘图模型直接从原图像素读取。" +
          "你只能用『图N的颜色』这类引用方式表达。正确：『将图1汽车的车身颜色替换为图2汽车的车身颜色』；错误：『将图1的车改成橙色』。" +
-         "【重要约束】工具执行后会返回一个 JSON 字符串，你必须且只能将该 JSON 字符串原封不动地返回给用户，" +
-         "严禁在 JSON 前后添加任何中文或英文的解释、代码块标记（如 ```json）或任何客套话。")
+         "【颜色互换/多图修改场景】当用户要求『互换两张图的颜色』或分别对多张图片进行修改时，修改每张图属于独立的绘图任务。你必须针对每一张图片分别调用一次本工具（例如第一次调用将图1改成图2的颜色，第二次调用将图2改成图1的颜色），严禁合并为同一次工具调用。" +
+         "【重要约束】工具执行后会返回一个 JSON 字符串，你可以附带简短的友善说明，但必须在回复中包含工具返回的 JSON 内容。")
     public String drawImage(
             @P("必须传入，绘图/改图的具体提示词。若为改图或参考图场景，请用『图1』『图2』明确指代对话中按上传顺序排列的图片，写清楚要改什么、参考哪张图的什么特征。"
              + "【严禁臆测颜色】参考另一张图的颜色时，绝不允许写出具体颜色名（红/蓝/橙等），只能写『图N的颜色』，让绘图模型自己从原图读取真实颜色。"
@@ -91,20 +91,24 @@ public class ImageGenerateTools implements AiTool {
 
         try {
             AiImageTask task = imageGenerationService.submit(cmd);
-            Map<String, Object> result = new HashMap<>();
+            Map<String, Object> result = new LinkedHashMap<>();
             result.put("type", "image-task");
             result.put("taskId", task.getTaskId());
             result.put("prompt", prompt);
             result.put("status", "processing");
             result.put("imageCount", imageUrls.size());
-            return JSON.toJSONString(result);
+            String jsonResult = JSON.toJSONString(result);
+            ChatContextHolder.addTaskJson(cmd.getConversationId(), jsonResult);
+            return jsonResult;
         } catch (Exception e) {
             log.error(">>> [ImageGenerateTools] 发起绘图任务失败", e);
-            Map<String, String> fail = new HashMap<>();
+            Map<String, String> fail = new LinkedHashMap<>();
             fail.put("type", "image-task");
             fail.put("status", "fail");
             fail.put("errorMsg", e.getMessage() != null ? e.getMessage() : "发起绘图任务失败");
-            return JSON.toJSONString(fail);
+            String failJson = JSON.toJSONString(fail);
+            ChatContextHolder.addTaskJson(cmd.getConversationId(), failJson);
+            return failJson;
         }
     }
 

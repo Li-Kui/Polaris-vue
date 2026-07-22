@@ -231,7 +231,7 @@ public class SecurityContextToolExecutor {
                 com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
                 return delegate.execute(request, memoryId);
             } finally {
-                com.polaris.ai.utils.ChatContextHolder.clear();
+                com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
                 SearchKeyHolder.clear();
                 RequestContextHolder.resetRequestAttributes();
                 if (previousAttributes != null) {

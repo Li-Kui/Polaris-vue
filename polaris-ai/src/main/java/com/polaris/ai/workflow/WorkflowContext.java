@@ -3,8 +3,8 @@ package com.polaris.ai.workflow;
 import lombok.Data;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 工作流执行上下文
@@ -21,8 +21,8 @@ public class WorkflowContext {
     /** SSE 实时消息发射器 */
     private final SseEmitter emitter;
 
-    /** 节点间共享的数据容器 */
-    private final Map<String, Object> variables = new HashMap<>();
+    /** 节点间共享的数据容器（使用 ConcurrentHashMap 确保工作流分支并行节点执行时的线程安全） */
+    private final Map<String, Object> variables = new ConcurrentHashMap<>();
 
     /** 最近一个节点执行后的完整文本输出（作为下一个节点的输入上下文） */
     private String latestOutput;
@@ -48,10 +48,17 @@ public class WorkflowContext {
     }
 
     /**
-     * 设置共享变量
+     * 设置共享变量（兼顾 ConcurrentHashMap 不可存 null value 的特性，保持原业务逻辑一致）
      */
     public void setVariable(String key, Object value) {
-        this.variables.put(key, value);
+        if (key == null) {
+            return;
+        }
+        if (value == null) {
+            this.variables.remove(key);
+        } else {
+            this.variables.put(key, value);
+        }
     }
 
     /**
@@ -59,6 +66,9 @@ public class WorkflowContext {
      */
     @SuppressWarnings("unchecked")
     public <T> T getVariable(String key) {
+        if (key == null) {
+            return null;
+        }
         return (T) this.variables.get(key);
     }
 }
