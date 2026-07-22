@@ -97,4 +97,22 @@
         DELETE FROM ai_message WHERE conversation_id = #{conversationId}
     </delete>
 
+    <update id="deleteConversationsBatch">
+        UPDATE ai_conversation
+        SET del_flag = '2'
+        WHERE user_id = #{userId}
+          AND id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <delete id="deleteMessagesByConversationIds">
+        DELETE FROM ai_message
+        WHERE conversation_id IN
+        <foreach item="convId" collection="conversationIds" open="(" separator="," close=")">
+            #{convId}
+        </foreach>
+    </delete>
+
 </mapper>

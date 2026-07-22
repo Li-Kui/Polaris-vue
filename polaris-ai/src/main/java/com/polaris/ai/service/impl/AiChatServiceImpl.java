@@ -171,6 +171,16 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         return aiChatMapper.deleteConversation(id, userId);
     }
 
+    @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public int deleteConversationsBatch(List<Long> ids, Long userId) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        aiChatMapper.deleteMessagesByConversationIds(ids);
+        return aiChatMapper.deleteConversationsBatch(ids, userId);
+    }
+
     // ----------------------------------------------------------------
     // 核心：LangChain4j 流式对话
     // ----------------------------------------------------------------

@@ -79,6 +79,15 @@ public interface IAiChatService extends IService<AiConversation>
     int deleteConversation(Long id, Long userId);
 
     /**
+     * 批量删除会话（逻辑删除会话列表 + 物理删除关联的所有消息）
+     *
+     * @param ids    会话 ID 列表
+     * @param userId 当前登录用户 ID
+     * @return 影响行数
+     */
+    int deleteConversationsBatch(List<Long> ids, Long userId);
+
+    /**
      * 发送消息并以 SSE 流式返回 AI 回复
      * 方法内部异步执行，通过 SseEmitter 逐 token 推送给前端
      * 对话结束后自动将完整回复持久化到数据库

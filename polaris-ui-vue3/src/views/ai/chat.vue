@@ -46,20 +46,66 @@
     <!-- ========== 左侧会话栏 ========== -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <el-button
-          :disabled="isStreaming"
-          :loading="creatingConv"
-          class="btn-new-chat"
-          @click="handleNewConversation"
-        >
-          <el-icon v-if="!creatingConv"><edit /></el-icon>
-          新对话
-        </el-button>
+        <template v-if="!isBatchMode">
+          <el-button
+            :disabled="isStreaming"
+            :loading="creatingConv"
+            class="btn-new-chat"
+            @click="handleNewConversation"
+          >
+            <el-icon v-if="!creatingConv"><edit /></el-icon>
+            新对话
+          </el-button>
+          <el-tooltip content="批量管理" placement="top">
+            <el-button
+              class="btn-batch-toggle"
+              circle
+              size="default"
+              :disabled="isStreaming || !conversations.length"
+              @click="toggleBatchMode(true)"
+            >
+              <el-icon><files /></el-icon>
+            </el-button>
+          </el-tooltip>
+        </template>
+
+        <template v-else>
+          <div class="batch-header-bar">
+            <el-checkbox
+              v-model="isSelectAll"
+              :indeterminate="isIndeterminate"
+            >
+              全选
+            </el-checkbox>
+            <span class="batch-count-tip" v-if="selectedConvIds.length">
+              已选 {{ selectedConvIds.length }} 项
+            </span>
+            <div class="batch-header-actions">
+              <el-button
+                size="small"
+                type="danger"
+                plain
+                :disabled="!selectedConvIds.length"
+                :loading="batchDeleting"
+                @click="handleBatchDelete"
+              >
+                删除
+              </el-button>
+              <el-button
+                size="small"
+                circle
+                icon="Close"
+                @click="toggleBatchMode(false)"
+              ></el-button>
+            </div>
+          </div>
+        </template>
       </div>
 
       <div
         v-loading="loadingConvs"
         class="conv-list"
+        :class="{ 'in-batch-mode': isBatchMode }"
         element-loading-text="加载中..."
       >
         <div v-if="!loadingConvs && conversations.length === 0" class="conv-empty">
@@ -70,13 +116,20 @@
           <div
             v-for="conv in conversations"
             :key="conv.id"
-            :class="{ active: currentConvId === conv.id }"
+            :class="{ active: !isBatchMode && currentConvId === conv.id, selected: isBatchMode && selectedConvIds.includes(conv.id) }"
             class="conv-item"
-            @click="handleSelectConversation(conv.id)"
+            @click="isBatchMode ? toggleConvSelection(conv.id) : handleSelectConversation(conv.id)"
           >
-            <el-icon class="conv-icon"><chat-dot-round /></el-icon>
+            <el-checkbox
+              v-if="isBatchMode"
+              :model-value="selectedConvIds.includes(conv.id)"
+              class="conv-checkbox"
+              @change="toggleConvSelection(conv.id)"
+              @click.stop
+            />
+            <el-icon v-else class="conv-icon"><chat-dot-round /></el-icon>
             <span class="conv-title">{{ conv.title }}</span>
-            <div class="conv-actions" @click.stop>
+            <div v-if="!isBatchMode" class="conv-actions" @click.stop>
               <el-tooltip :open-delay="300" content="重命名" placement="top">
                 <el-button
                   class="conv-action-btn"
@@ -934,6 +987,7 @@ import {getToken} from '@/utils/auth'
 import {
   createConversation,
   deleteConversation,
+  deleteConversationsBatch,
   listConversations,
   listMessages,
   renameConversation,
@@ -967,6 +1021,11 @@ export default {
       loadingConvs: false,
       creatingConv: false,
       currentConvId: null,
+
+      // 批量删除历史会话管理
+      isBatchMode: false,
+      selectedConvIds: [],
+      batchDeleting: false,
       messages: [],
       loadingMessages: false,
       inputText: '',
@@ -1000,6 +1059,21 @@ export default {
     }
   },
   computed: {
+    isSelectAll: {
+      get() {
+        return this.conversations.length > 0 && this.selectedConvIds.length === this.conversations.length
+      },
+      set(val) {
+        if (val) {
+          this.selectedConvIds = this.conversations.map(c => c.id)
+        } else {
+          this.selectedConvIds = []
+        }
+      }
+    },
+    isIndeterminate() {
+      return this.selectedConvIds.length > 0 && this.selectedConvIds.length < this.conversations.length
+    },
     currentUserName() {
       try {
         return this.$store.state.user.nickName || this.$store.state.user.name || '系统用户'
@@ -1753,6 +1827,65 @@ export default {
         }
       } catch (error) {
         this.$message.error('删除失败，请重试')
+      }
+    },
+
+    /** 切换批量管理模式 */
+    toggleBatchMode(enable) {
+      this.isBatchMode = enable
+      this.selectedConvIds = []
+    },
+
+    /** 切换单个会话的勾选状态 */
+    toggleConvSelection(id) {
+      const idx = this.selectedConvIds.indexOf(id)
+      if (idx > -1) {
+        this.selectedConvIds.splice(idx, 1)
+      } else {
+        this.selectedConvIds.push(id)
+      }
+    },
+
+    /** 执行批量删除历史会话 */
+    async handleBatchDelete() {
+      if (!this.selectedConvIds.length) return
+
+      const count = this.selectedConvIds.length
+      try {
+        await this.$confirm(`确认要批量删除选中的 ${count} 条历史会话吗？删除后关联消息不可恢复！`, '批量删除警告', {
+          confirmButtonText: '确定删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        })
+      } catch (error) {
+        return  // 用户取消
+      }
+
+      this.batchDeleting = true
+      try {
+        const res = await deleteConversationsBatch(this.selectedConvIds)
+        if (res.code === 200) {
+          // 销毁被删除会话关联的所有轮询
+          this.selectedConvIds.forEach(id => {
+            this.stopPollingByConversation(id)
+          })
+
+          // 如果当前选择的会话被删除了，清空消息主视图
+          if (this.selectedConvIds.includes(this.currentConvId)) {
+            this.currentConvId = null
+            this.messages = []
+          }
+
+          this.$message.success(`成功批量删除 ${count} 条会话`)
+          this.toggleBatchMode(false)
+          await this.loadConvList()
+        } else {
+          this.$message.error('批量删除失败：' + (res.msg || res.code))
+        }
+      } catch (error) {
+        this.$message.error('批量删除失败，请重试')
+      } finally {
+        this.batchDeleting = false
       }
     },
 
@@ -3547,12 +3680,18 @@ export default {
 }
 
 .sidebar-header {
-  padding: 18px 16px 12px;
+  padding: 14px 12px 12px;
   border-bottom: 1px solid var(--polaris-inner-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 62px;
+  box-sizing: border-box;
 }
 
 .btn-new-chat {
-  width: 100% !important;
+  flex: 1;
+  min-width: 0;
   background: rgba(255, 255, 255, 0.02) !important;
   border: 1px dashed var(--polaris-card-border) !important;
   color: var(--polaris-text-main) !important;
@@ -3560,7 +3699,7 @@ export default {
   font-size: 13px !important;
   font-weight: 600 !important;
   gap: 6px !important;
-  height: 40px !important;
+  height: 38px !important;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
   backdrop-filter: blur(5px);
   
@@ -3571,6 +3710,52 @@ export default {
     box-shadow: 0 4px 12px var(--polaris-brand-glow) !important;
     transform: translateY(-1px);
   }
+}
+
+.btn-batch-toggle {
+  flex-shrink: 0;
+  border-radius: 10px !important;
+  border: 1px solid var(--polaris-card-border) !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+  color: var(--polaris-text-sub) !important;
+  width: 38px !important;
+  height: 38px !important;
+  transition: all 0.2s ease !important;
+
+  &:hover:not(:disabled) {
+    color: var(--polaris-brand-color) !important;
+    border-color: var(--polaris-brand-color) !important;
+    background: var(--polaris-brand-hover) !important;
+  }
+}
+
+.batch-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 6px;
+
+  .el-checkbox {
+    margin-right: 0;
+    --el-checkbox-text-color: var(--polaris-text-main);
+  }
+}
+
+.batch-count-tip {
+  font-size: 12px;
+  color: var(--polaris-brand-color);
+  font-weight: 600;
+  background: var(--polaris-brand-hover);
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.batch-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .conv-list {
@@ -3613,6 +3798,24 @@ export default {
     color: var(--polaris-brand-color) !important;
     font-weight: 700;
     border-left-color: var(--polaris-brand-color);
+  }
+
+  &.selected {
+    background: rgba(239, 68, 68, 0.08) !important;
+    border-left-color: #ef4444 !important;
+    color: var(--polaris-text-main) !important;
+
+    :global(.dark) &,
+    :global(.theme-dark) &,
+    .dark &,
+    .theme-dark & {
+      background: rgba(239, 68, 68, 0.15) !important;
+    }
+  }
+
+  .conv-checkbox {
+    margin-right: 2px;
+    height: auto;
   }
 }
 

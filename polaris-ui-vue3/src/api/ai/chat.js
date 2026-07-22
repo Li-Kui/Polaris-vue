@@ -43,6 +43,15 @@ export function deleteConversation(id) {
   })
 }
 
+// 批量删除会话
+export function deleteConversationsBatch(ids) {
+  return request({
+    url: '/ai/chat/conversations/batch',
+    method: 'delete',
+    data: ids
+  })
+}
+
 // 获取会话消息历史
 export function listMessages(conversationId) {
   return request({

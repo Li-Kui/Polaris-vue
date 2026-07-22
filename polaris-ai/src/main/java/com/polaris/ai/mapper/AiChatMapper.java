@@ -117,4 +117,21 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      * @return 影响行数
      */
     int deleteMessagesByConversationId(Long conversationId);
+
+    /**
+     * 逻辑删除指定的会话列表（限制只能删除当前用户的会话）
+     *
+     * @param ids    会话 ID 列表
+     * @param userId 用户 ID
+     * @return 影响行数
+     */
+    int deleteConversationsBatch(@Param("ids") List<Long> ids, @Param("userId") Long userId);
+
+    /**
+     * 物理删除多个会话下的所有消息
+     *
+     * @param conversationIds 会话 ID 列表
+     * @return 影响行数
+     */
+    int deleteMessagesByConversationIds(@Param("conversationIds") List<Long> conversationIds);
 }

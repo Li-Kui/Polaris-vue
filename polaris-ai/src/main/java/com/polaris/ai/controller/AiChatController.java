@@ -139,6 +139,23 @@ public class AiChatController extends BaseController {
     }
 
     /**
+     * 批量删除会话（逻辑删除会话列表 + 物理删除关联的所有消息）
+     * DELETE /ai/chat/conversations/batch
+     *
+     * @param ids 会话 ID 列表
+     * @return 操作结果
+     */
+    @Operation(summary = "批量删除会话")
+    @Log(title = "AI对话", businessType = BusinessType.DELETE)
+    @DeleteMapping("/conversations/batch")
+    @ResponseBody
+    public ResultData deleteConversationsBatch(@RequestBody List<Long> ids) {
+        Long userId = SecurityUtils.getUserId();
+        aiChatService.deleteConversationsBatch(ids, userId);
+        return ok();
+    }
+
+    /**
      * 获取指定会话的消息历史
      * GET /ai/chat/conversations/{id}/messages
      * 会校验会话归属，防止越权查看他人消息
