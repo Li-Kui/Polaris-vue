@@ -108,14 +108,17 @@ public class MultimodalMediaHelper {
         try {
             String localPath = PolarisConfig.getProfile();
             String relativePath = fileUrl;
-            if (fileUrl.startsWith("/profile")) {
-                relativePath = fileUrl.substring("/profile".length());
+            if (fileUrl.contains("/profile/")) {
+                relativePath = fileUrl.substring(fileUrl.indexOf("/profile/"));
+            }
+            if (relativePath.startsWith("/profile")) {
+                relativePath = relativePath.substring("/profile".length());
             }
             File file = new File(localPath + relativePath);
             if (file.exists()) {
                 byte[] fileBytes = Files.readAllBytes(file.toPath());
-                // 动态缩放与压缩，初始参数设为安全的 600x600, 0.45f，并在内部支持自适应降级循环
-                byte[] compressedBytes = compressImage(fileBytes, 600, 600, 0.45f);
+                // 动态缩放与压缩：初始 1024x1024, 0.72f，兼顾颜色保真与网关体积；内部支持自适应降级循环
+                byte[] compressedBytes = compressImage(fileBytes, 1024, 1024, 0.72f);
                 return Base64.getEncoder().encodeToString(compressedBytes);
             } else {
                 log.warn(">>> 未找到多模态图片文件: {}", file.getAbsolutePath());
@@ -127,9 +130,9 @@ public class MultimodalMediaHelper {
     }
 
     /**
-     * 自适应多级降级图片压缩，控制在 120000 字符内，保障通义千问等大模型网关安全
+     * 自适应多级降级图片压缩，控制在指定字符长度内，保障大模型网关安全
      */
-    private byte[] compressImage(byte[] imageBytes, int maxWidth, int maxHeight, float quality) {
+    private byte[] compressImage(byte[] imageBytes, int maxWidth, int maxHeight, float quality, int maxBase64Length) {
         byte[] resultBytes = imageBytes;
         int currentWidth = maxWidth;
         int currentHeight = maxHeight;
@@ -140,13 +143,13 @@ public class MultimodalMediaHelper {
                 resultBytes = compressImageOnce(imageBytes, currentWidth, currentHeight, currentQuality);
                 String base64 = Base64.getEncoder().encodeToString(resultBytes);
                 
-                if (base64.length() < 120000) {
+                if (base64.length() < maxBase64Length) {
                     log.info(">>> 图片动态压缩第 {} 次成功，原体积: {} bytes, 压缩后体积: {} bytes, Base64字符长度: {}", 
                             i + 1, imageBytes.length, resultBytes.length, base64.length());
                     break;
                 }
                 
-                log.warn(">>> 图片第 {} 次压缩后 Base64 长度 {} 仍超 120000 限额，启动等比降级...", i + 1, base64.length());
+                log.warn(">>> 图片第 {} 次压缩后 Base64 长度 {} 仍超 {} 限额，启动等比降级...", i + 1, base64.length(), maxBase64Length);
                 currentWidth = (int) (currentWidth * 0.75);
                 currentHeight = (int) (currentHeight * 0.75);
                 currentQuality = currentQuality * 0.75f;
@@ -155,6 +158,14 @@ public class MultimodalMediaHelper {
             log.error(">>> 自适应压缩失败，回退到原图: {}", e.getMessage());
         }
         return resultBytes;
+    }
+
+    /**
+     * 自适应多级降级图片压缩，默认控制在 35000 字符内，保障通义千问等大模型网关安全
+     */
+    private byte[] compressImage(byte[] imageBytes, int maxWidth, int maxHeight, float quality) {
+        // 上限提高到 90000 字符：颜色保真需要更高质量，主流大模型网关（通义千问/豆包）单图 base64 均可承受
+        return compressImage(imageBytes, maxWidth, maxHeight, quality, 90000);
     }
 
     /**
@@ -178,6 +189,9 @@ public class MultimodalMediaHelper {
 
             BufferedImage resizedImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             java.awt.Graphics2D g2d = resizedImage.createGraphics();
+            // 先填白底：PNG 透明区域在 TYPE_INT_RGB 下默认变黑，会污染大模型对配色的判断，故统一填白
+            g2d.setColor(java.awt.Color.WHITE);
+            g2d.fillRect(0, 0, width, height);
             g2d.drawImage(originalImage, 0, 0, width, height, null);
             g2d.dispose();
 
@@ -215,8 +229,11 @@ public class MultimodalMediaHelper {
         try {
             String localPath = PolarisConfig.getProfile();
             String relativePath = fileUrl;
-            if (fileUrl.startsWith("/profile")) {
-                relativePath = fileUrl.substring("/profile".length());
+            if (fileUrl.contains("/profile/")) {
+                relativePath = fileUrl.substring(fileUrl.indexOf("/profile/"));
+            }
+            if (relativePath.startsWith("/profile")) {
+                relativePath = relativePath.substring("/profile".length());
             }
             File file = new File(localPath + relativePath);
             if (!file.exists()) {
@@ -233,7 +250,9 @@ public class MultimodalMediaHelper {
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
                     ImageIO.write(bim, "png", baos);
                     byte[] bytes = baos.toByteArray();
-                    resultList.add(Base64.getEncoder().encodeToString(bytes));
+                    // 将 PDF 渲染出的图片也进行压缩，并限定单页 Base64 长度在 30000 字符以内
+                    byte[] compressedBytes = compressImage(bytes, 600, 600, 0.40f, 30000);
+                    resultList.add(Base64.getEncoder().encodeToString(compressedBytes));
                 }
             }
         } catch (Exception e) {

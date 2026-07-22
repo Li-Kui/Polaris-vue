@@ -1,13 +1,16 @@
 package com.polaris.ai.pivot;
 
 import com.polaris.ai.domain.AiModelConfig;
+import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.common.core.domain.entity.SysRole;
 import com.polaris.common.core.domain.entity.SysUser;
 import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.image.ImageModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import dev.langchain4j.model.openai.OpenAiImageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,12 +41,14 @@ public class AiModelFactory
     // 模型实例缓存，避免频繁从数据库查询及构建
     private final Map<String, StreamingChatModel> chatCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> embeddingCache = new ConcurrentHashMap<>();
+    private final Map<String, ImageModel> imageCache = new ConcurrentHashMap<>();
     // 配置对象缓存，用以实现全流程零数据库 I/O
     private final Map<Long, AiModelConfig> configCache = new ConcurrentHashMap<>();
 
     // 默认模型缓存从单例变量重构为部门隔离多实例映射，支持并发安全
     private final Map<String, StreamingChatModel> defaultChatCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> defaultEmbeddingCache = new ConcurrentHashMap<>();
+    private final Map<String, ImageModel> defaultImageCache = new ConcurrentHashMap<>();
 
     @Autowired
     private IAiModelConfigService modelConfigService;
@@ -58,9 +63,11 @@ public class AiModelFactory
         log.info(">>> 清空动态大模型与向量模型缓存");
         chatCache.clear();
         embeddingCache.clear();
+        imageCache.clear();
         configCache.clear();
         defaultChatCache.clear();
         defaultEmbeddingCache.clear();
+        defaultImageCache.clear();
     }
 
     /**
@@ -123,6 +130,31 @@ public class AiModelFactory
     }
 
     /**
+     * 统一获取对应用途下有权访问的默认模型配置对象
+     */
+    public AiModelConfig getDefaultModelConfig(ModelType type)
+    {
+        SysUser user = null;
+        Long userDeptId = null;
+        try {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+                user = SecurityUtils.getLoginUser().getUser();
+                userDeptId = user.getDeptId();
+            }
+        } catch (Exception e) {
+            // 无Web登录上下文
+        }
+
+        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
+        try {
+            return modelConfigService.selectDefaultModel(type.name(), userDeptId, dataScopeSql);
+        } catch (Exception e) {
+            log.error("从数据库加载默认 [{}] 模型配置失败，userDeptId={}", type.name(), userDeptId, e);
+        }
+        return null;
+    }
+
+    /**
      * 获取默认的聊天对话模型
      */
     public StreamingChatModel getDefaultStreamingModel()
@@ -138,7 +170,6 @@ public class AiModelFactory
             // 正常捕获，说明无Web请求登录上下文
         }
 
-        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
         String cacheKey = "default_chat_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
         
         StreamingChatModel cachedModel = defaultChatCache.get(cacheKey);
@@ -153,7 +184,7 @@ public class AiModelFactory
             }
 
             try {
-                AiModelConfig config = modelConfigService.selectDefaultChatModel(userDeptId, dataScopeSql);
+                AiModelConfig config = getDefaultModelConfig(ModelType.CHAT);
                 if (config != null) {
                     cachedModel = getChatModelInstance(config);
                     defaultChatCache.put(cacheKey, cachedModel);
@@ -176,24 +207,7 @@ public class AiModelFactory
      */
     public AiModelConfig getDefaultChatModelConfig()
     {
-        SysUser user = null;
-        Long userDeptId = null;
-        try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
-                user = SecurityUtils.getLoginUser().getUser();
-                userDeptId = user.getDeptId();
-            }
-        } catch (Exception e) {
-            // 正常捕获，无Web登录上下文
-        }
-
-        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
-        try {
-            return modelConfigService.selectDefaultChatModel(userDeptId, dataScopeSql);
-        } catch (Exception e) {
-            log.error("从数据库加载默认聊天模型配置失败，userDeptId={}", userDeptId, e);
-        }
-        return null;
+        return getDefaultModelConfig(ModelType.CHAT);
     }
 
     /**
@@ -267,7 +281,6 @@ public class AiModelFactory
             // 正常捕获，无Web登录上下文
         }
 
-        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
         String cacheKey = "default_embed_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
         
         EmbeddingModel cachedModel = defaultEmbeddingCache.get(cacheKey);
@@ -282,7 +295,7 @@ public class AiModelFactory
             }
 
             try {
-                AiModelConfig config = modelConfigService.selectDefaultEmbeddingModel(userDeptId, dataScopeSql);
+                AiModelConfig config = getDefaultModelConfig(ModelType.EMBEDDING);
                 if (config != null) {
                     cachedModel = getEmbeddingModelInstance(config);
                     defaultEmbeddingCache.put(cacheKey, cachedModel);
@@ -295,6 +308,60 @@ public class AiModelFactory
             if (cachedModel == null) {
                 cachedModel = getFallbackEmbeddingModel();
                 defaultEmbeddingCache.put(cacheKey, cachedModel);
+            }
+        }
+        return cachedModel;
+    }
+
+    /**
+     * 按指定模型配置获取图像模型实例（带缓存），供绘图适配器调用
+     */
+    public ImageModel getImageModel(AiModelConfig config)
+    {
+        if (config == null) {
+            return null;
+        }
+        return getImageModelInstance(config);
+    }
+
+    /**
+     * 获取默认的图像生成模型
+     */
+    public ImageModel getDefaultImageModel()
+    {
+        SysUser user = null;
+        Long userDeptId = null;
+        try {
+            if (SecurityContextHolder.getContext().getAuthentication() != null) {
+                user = SecurityUtils.getLoginUser().getUser();
+                userDeptId = user.getDeptId();
+            }
+        } catch (Exception e) {
+            // 无Web登录上下文
+        }
+
+        String cacheKey = "default_image_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        
+        ImageModel cachedModel = defaultImageCache.get(cacheKey);
+        if (cachedModel != null) {
+            return cachedModel;
+        }
+
+        synchronized (this) {
+            cachedModel = defaultImageCache.get(cacheKey);
+            if (cachedModel != null) {
+                return cachedModel;
+            }
+
+            try {
+                AiModelConfig config = getDefaultModelConfig(ModelType.IMAGE);
+                if (config != null) {
+                    cachedModel = getImageModelInstance(config);
+                    defaultImageCache.put(cacheKey, cachedModel);
+                    return cachedModel;
+                }
+            } catch (Exception e) {
+                log.error("从数据库加载角色数据权限关联的默认图像生成模型失败，userDeptId={}", userDeptId, e);
             }
         }
         return cachedModel;
@@ -367,6 +434,20 @@ public class AiModelFactory
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
 
+                case "ark":
+                    String arkUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                            ? config.getBaseUrl().trim() : "https://ark.cn-beijing.volces.com/api/v3";
+                    return OpenAiStreamingChatModel.builder()
+                            .baseUrl(arkUrl)
+                            .apiKey(config.getApiKey())
+                            .modelName(config.getModelName())
+                            .maxTokens(maxTokens)
+                            .temperature(temperature)
+                            .timeout(Duration.ofSeconds(120))
+                            .customHeaders(customHeaders)
+                            .returnThinking("1".equals(config.getEnableThinking()))
+                            .build();
+
                 default:
                     throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
             }
@@ -431,8 +512,56 @@ public class AiModelFactory
                             .timeout(Duration.ofSeconds(120))
                             .build();
 
+                case "ark":
+                    String arkEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                            ? config.getBaseUrl().trim() : "https://ark.cn-beijing.volces.com/api/v3";
+                    return OpenAiEmbeddingModel.builder()
+                            .baseUrl(arkEmbedUrl)
+                            .apiKey(apiKey)
+                            .modelName(config.getModelName())
+                            .timeout(Duration.ofSeconds(60))
+                            .build();
+
                 default:
                     throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
+            }
+        });
+    }
+
+    private ImageModel getImageModelInstance(AiModelConfig config)
+    {
+        String cacheKey = "image_" + config.getId();
+        return imageCache.computeIfAbsent(cacheKey, key -> {
+            log.info(">>> 动态构建图像生成模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
+            String provider = config.getProvider().toLowerCase();
+            String apiKey = config.getApiKey();
+
+            switch (provider) {
+                case "dashscope":
+                    String dashscopeImageUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                            ? config.getBaseUrl().trim() : DASHSCOPE_BASE_URL;
+                    return OpenAiImageModel.builder()
+                            .baseUrl(dashscopeImageUrl)
+                            .apiKey(apiKey)
+                            .modelName(config.getModelName() != null && !config.getModelName().isEmpty() ? config.getModelName() : "wanx-v1")
+                            .timeout(Duration.ofSeconds(60))
+                            .build();
+
+                case "openai":
+                    return OpenAiImageModel.builder()
+                            .baseUrl(config.getBaseUrl())
+                            .apiKey(apiKey)
+                            .modelName(config.getModelName() != null && !config.getModelName().isEmpty() ? config.getModelName() : "dall-e-3")
+                            .timeout(Duration.ofSeconds(60))
+                            .build();
+
+                default:
+                    return OpenAiImageModel.builder()
+                            .baseUrl(config.getBaseUrl())
+                            .apiKey(apiKey)
+                            .modelName(config.getModelName())
+                            .timeout(Duration.ofSeconds(60))
+                            .build();
             }
         });
     }
@@ -483,6 +612,16 @@ public class AiModelFactory
                         .modelName(fileProps.getModelName())
                         .temperature(fileProps.getTemperature())
                         .timeout(Duration.ofSeconds(180))
+                        .build();
+
+            case "ark":
+                return OpenAiStreamingChatModel.builder()
+                        .baseUrl("https://ark.cn-beijing.volces.com/api/v3")
+                        .apiKey(fileProps.getApiKey())
+                        .modelName(fileProps.getModelName())
+                        .maxTokens(fileProps.getMaxTokens())
+                        .temperature(fileProps.getTemperature())
+                        .timeout(Duration.ofSeconds(120))
                         .build();
 
             default:

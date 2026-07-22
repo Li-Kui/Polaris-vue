@@ -69,9 +69,13 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "是否默认聊天模型 (1是 0否)")
     private String isDefault;
 
-    /** 是否默认向量模型 (1是 0否) */
-    @Schema(description = "是否默认向量模型 (1是 0否)")
-    private String isDefaultEmbedding;
+    /** 模型用途类型 (CHAT / EMBEDDING / IMAGE) */
+    @Schema(description = "模型用途类型 (CHAT / EMBEDDING / IMAGE)")
+    private String modelType;
+
+    /** 当前模型启用的工具集白名单 */
+    @Schema(description = "当前模型启用的工具集白名单")
+    private String enabledTools;
 
     /** 是否开启思考模式 (1是 0否) */
     @Schema(description = "是否开启思考模式 (1是 0否)")
@@ -93,6 +97,22 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "联网搜索 API Key")
     @Sensitive(desensitizedType = DesensitizedType.PASSWORD)
     private String searchKey;
+
+    /** 图像能力清单JSON数组（仅IMAGE类型有效），如 ["text_to_image","inpainting"] */
+    @Schema(description = "图像能力清单JSON数组")
+    private String imageCapabilities;
+
+    /** 模型质量标签JSON数组，用于推荐排序，如 ["text_rendering","photorealistic"] */
+    @Schema(description = "模型质量标签JSON数组")
+    private String modelFeatures;
+
+    /** 默认出图尺寸，如 1024x1024 */
+    @Schema(description = "默认出图尺寸")
+    private String defaultImageSize;
+
+    /** 模型备注（管理员可见，不参与路由） */
+    @Schema(description = "模型备注")
+    private String modelDescription;
 
     /** 状态 (1正常 0禁用) */
     @Schema(description = "状态 (1正常 0禁用)")

@@ -27,4 +27,11 @@ public class AiToolRegistry {
     public Map<ToolSpecification, ToolExecutor> getContextAwareTools(SecurityContext securityContext, boolean enableSearch, String searchKey) {
         return SecurityContextToolExecutor.getAllTools(aiTools, securityContext, enableSearch, searchKey);
     }
+
+    /**
+     * 根据当前会话模型启用的工具白名单动态装配工具
+     */
+    public Map<ToolSpecification, ToolExecutor> getContextAwareTools(SecurityContext securityContext, String enabledTools, String searchKey) {
+        return SecurityContextToolExecutor.getAllTools(aiTools, securityContext, enabledTools, searchKey);
+    }
 }

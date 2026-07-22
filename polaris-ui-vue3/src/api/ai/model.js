@@ -59,6 +59,14 @@ export function setDefaultEmbedding(id) {
   })
 }
 
+// 设为默认绘图模型
+export function setDefaultImage(id) {
+  return request({
+    url: `/ai/model/${id}/defaultImage`,
+    method: 'put'
+  })
+}
+
 // 查询当前登录用户可用的模型列表
 export function listAvailableModel() {
   return request({

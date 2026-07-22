@@ -12,6 +12,7 @@ import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.service.IAiWorkflowService;
 import com.polaris.ai.tools.SecurityContextToolExecutor;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.utils.AiErrorTranslator;
 import com.polaris.ai.workflow.WorkflowNodeExecutor;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
@@ -328,7 +329,7 @@ public class LangGraph4jEngine {
             jdbcTemplate.update("UPDATE ai_graph_checkpoint SET status = 'paused' WHERE thread_id = ? ORDER BY create_time DESC LIMIT 1", threadId);
         } else {
             jdbcTemplate.update("UPDATE ai_graph_checkpoint SET status = 'error' WHERE thread_id = ? ORDER BY create_time DESC LIMIT 1", threadId);
-            sseHelper.sendSse(emitter, "error", "工作流执行中断: " + e.getMessage());
+            sseHelper.sendSse(emitter, "error", "工作流执行中断: " + AiErrorTranslator.translate(e));
         }
         emitter.complete();
     }
@@ -546,7 +547,7 @@ public class LangGraph4jEngine {
                             log.error("[LangGraph4j] 智能体节点 [{}] 流式报错", nodeCode, error);
                             streamError[0] = (Exception) error;
                             try {
-                                sseHelper.sendSse(emitter, "node_error", nodeCode + "|" + error.getMessage());
+                                sseHelper.sendSse(emitter, "node_error", nodeCode + "|" + AiErrorTranslator.translate(error));
                             } catch (Exception ignored) {
                             }
                             latch.countDown();
@@ -750,7 +751,7 @@ public class LangGraph4jEngine {
 
             } catch (Exception e) {
                 log.error("[LangGraph4j] Java 节点 [{}] 执行异常", nodeCode, e);
-                sseHelper.sendSse(emitter, "node_error", nodeCode + "|" + e.getMessage());
+                sseHelper.sendSse(emitter, "node_error", nodeCode + "|" + AiErrorTranslator.translate(e));
                 throw e;
             }
         };

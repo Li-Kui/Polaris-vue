@@ -102,6 +102,14 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
     List<AiMessage> selectMessagesByConversationId(Long conversationId);
 
     /**
+     * 根据会话 ID 查询该会话下最新的一条带有图片附件的用户消息
+     *
+     * @param conversationId 会话 ID
+     * @return 消息实体
+     */
+    AiMessage selectLatestUserMessageWithImage(@Param("conversationId") Long conversationId);
+
+    /**
      * 物理删除指定会话下的所有消息
      * 通常在删除会话时级联调用，先删消息再删会话
      *

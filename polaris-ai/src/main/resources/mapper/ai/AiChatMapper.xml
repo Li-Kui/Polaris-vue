@@ -83,6 +83,16 @@
         LIMIT 100
     </select>
 
+    <select id="selectLatestUserMessageWithImage" resultMap="MessageResult">
+        SELECT * FROM ai_message
+        WHERE conversation_id = #{conversationId}
+          AND role = 'user'
+          AND file_url IS NOT NULL
+          AND file_url != ''
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
     <delete id="deleteMessagesByConversationId">
         DELETE FROM ai_message WHERE conversation_id = #{conversationId}
     </delete>

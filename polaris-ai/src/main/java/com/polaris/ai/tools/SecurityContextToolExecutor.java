@@ -32,6 +32,12 @@ public class SecurityContextToolExecutor {
 
     private static final Logger log = LoggerFactory.getLogger(SecurityContextToolExecutor.class);
 
+    private static final Map<String, String> TOOL_CLASS_MAP = new HashMap<>();
+    static {
+        TOOL_CLASS_MAP.put("web_search", "WebSearchTools");
+        TOOL_CLASS_MAP.put("image_generate", "ImageGenerateTools");
+    }
+
     /**
      * 构建按 Agent 级别过滤的工具集（带安全上下文传播）
      *
@@ -98,29 +104,50 @@ public class SecurityContextToolExecutor {
             SecurityContext securityContext,
             boolean enableSearch,
             String searchKey) {
+        String enabledTools = enableSearch ? "web_search" : "";
+        return getAllTools(allTools, securityContext, enabledTools, searchKey);
+    }
+
+    public static Map<ToolSpecification, ToolExecutor> getAllTools(
+            List<? extends AiTool> allTools,
+            SecurityContext securityContext,
+            String enabledTools,
+            String searchKey) {
 
         Map<ToolSpecification, ToolExecutor> map = new HashMap<>();
         if (allTools == null || allTools.isEmpty()) {
             return map;
         }
 
+        Set<String> allowedClassNames = new HashSet<>();
+        if (enabledTools != null && !enabledTools.trim().isEmpty()) {
+            for (String toolKey : enabledTools.split(",")) {
+                String className = TOOL_CLASS_MAP.get(toolKey.trim());
+                if (className != null) {
+                    allowedClassNames.add(className);
+                }
+            }
+        }
+
         SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
 
         for (Object toolObj : allTools) {
             Class<?> targetClass = AopUtils.getTargetClass(toolObj);
-            if (targetClass.getSimpleName().contains("WebSearchTools") && !enableSearch) {
+            String className = targetClass.getSimpleName();
+
+            if (!allowedClassNames.contains(className)) {
                 continue;
             }
+
+            if (className.contains("WebSearchTools")
+                    && (searchKey == null || searchKey.trim().isEmpty())) {
+                continue;
+            }
+
             Method[] methods = targetClass.getDeclaredMethods();
             for (Method method : methods) {
                 if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
                     ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(method);
-
-                    if (targetClass.getSimpleName().contains("WebSearchTools")
-                            && (searchKey == null || searchKey.trim().isEmpty())) {
-                        continue;
-                    }
-
                     ToolExecutor originalExecutor = new DefaultToolExecutor(toolObj, method);
                     ToolExecutor wrappedExecutor = new PropagatingExecutor(
                             originalExecutor, securityContext, simpleAttrs, searchKey, null, null);
@@ -145,6 +172,8 @@ public class SecurityContextToolExecutor {
         private final String searchKey;
         private final SseEmitter emitter;
         private final String nodeCode;
+        private final Long conversationId;
+        private final String fileUrl;
 
         public PropagatingExecutor(ToolExecutor delegate, SecurityContext securityContext,
                                    RequestAttributes requestAttributes, String searchKey,
@@ -155,6 +184,8 @@ public class SecurityContextToolExecutor {
             this.searchKey = searchKey;
             this.emitter = emitter;
             this.nodeCode = nodeCode;
+            this.conversationId = com.polaris.ai.utils.ChatContextHolder.getConversationId();
+            this.fileUrl = com.polaris.ai.utils.ChatContextHolder.getFileUrl();
         }
 
         @Override
@@ -176,8 +207,11 @@ public class SecurityContextToolExecutor {
                     RequestContextHolder.setRequestAttributes(requestAttributes);
                 }
                 SearchKeyHolder.set(searchKey);
+                com.polaris.ai.utils.ChatContextHolder.setConversationId(conversationId);
+                com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
                 return delegate.execute(request, memoryId);
             } finally {
+                com.polaris.ai.utils.ChatContextHolder.clear();
                 SearchKeyHolder.clear();
                 RequestContextHolder.resetRequestAttributes();
                 if (previousAttributes != null) {

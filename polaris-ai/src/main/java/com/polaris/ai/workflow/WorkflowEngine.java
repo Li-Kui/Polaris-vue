@@ -12,6 +12,7 @@ import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.service.IAiWorkflowService;
 import com.polaris.ai.tools.SecurityContextToolExecutor;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.utils.AiErrorTranslator;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -102,7 +103,7 @@ public class WorkflowEngine {
                         sendSse(emitter, "node_done", nodeCode);
                     } catch (Exception e) {
                         log.error("Java 节点 [{}] 执行异常", nodeCode, e);
-                        sendSse(emitter, "node_error", nodeCode + "|" + e.getMessage());
+                        sendSse(emitter, "node_error", nodeCode + "|" + AiErrorTranslator.translate(e));
                         throw e; // 中断工作流
                     }
                     continue;
@@ -126,7 +127,7 @@ public class WorkflowEngine {
 
         } catch (Exception e) {
             log.error("工作流执行中断", e);
-            sendSse(emitter, "error", "工作流异常中断: " + e.getMessage());
+            sendSse(emitter, "error", "工作流异常中断: " + AiErrorTranslator.translate(e));
             emitter.complete();
         }
     }
@@ -189,7 +190,7 @@ public class WorkflowEngine {
                 })
                 .onError(error -> {
                     log.error("智能体节点 [{}] 运行流式报错", nodeCode, error);
-                    sendSse(emitter, "node_error", nodeCode + "|" + error.getMessage());
+                    sendSse(emitter, "node_error", nodeCode + "|" + AiErrorTranslator.translate(error));
                     latch.countDown();
                 })
                 .start();

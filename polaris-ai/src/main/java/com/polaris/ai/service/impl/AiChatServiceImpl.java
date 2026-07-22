@@ -258,17 +258,30 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
 
         // 5. 使用 AiServices 动态构建代理并注册工具类
+        // 设置对话上下文，供绘图工具在执行时抓取会话ID与已上传图片URL
+        // （PropagatingExecutor 在构造时快照读取，必须早于 getContextAwareTools）
+        com.polaris.ai.utils.ChatContextHolder.setConversationId(conversationId);
+        if (fileUrl != null && !fileUrl.trim().isEmpty()) {
+            com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
+        }
         SecurityContext securityContext = SecurityContextHolder.getContext();
         String searchKey = null;
+        String enabledTools = null;
         try {
             com.polaris.ai.domain.AiModelConfig modelConfig = modelFactory.getModelConfig(conv.getModelConfigId());
             if (modelConfig != null) {
                 searchKey = modelConfig.getSearchKey();
+                // 优先使用模型配置中定义的工具白名单（在模型设置页面配置）
+                enabledTools = modelConfig.getEnabledTools();
             }
         } catch (Exception e) {
-            log.error(">>> 查询模型配置失败，无法提取 searchKey: {}", e.getMessage());
+            log.error(">>> 查询模型配置失败，无法提取工具配置: {}", e.getMessage());
         }
-        Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, Boolean.TRUE.equals(enableSearch), searchKey);
+        // 模型未配置工具白名单时，回退到前端 enableSearch 开关的行为
+        if (enabledTools == null || enabledTools.trim().isEmpty()) {
+            enabledTools = Boolean.TRUE.equals(enableSearch) ? "web_search" : "";
+        }
+        Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
 
         // 动态根据当前会话绑定的模型ID，获取对应的执行模型实例
         StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModelConfigId());
@@ -330,6 +343,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     emitter.complete();
                 })
                 .start();
+
+        // 各工具的 PropagatingExecutor 已快照捕获上下文，这里清理请求线程防止线程复用污染
+        com.polaris.ai.utils.ChatContextHolder.clear();
     }
 
     // ----------------------------------------------------------------
@@ -400,6 +416,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     contents.add(TextContent.from(m.getContent()));
 
                     boolean hasMultimodal = false;
+                    int imageCount = 0;
                     for (int j = 0; j < urls.length; j++) {
                         String url = urls[j].trim();
                         if (url.isEmpty()) continue;
@@ -410,6 +427,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                             if (base64 != null) {
                                 contents.add(ImageContent.from(base64, mediaHelper.getImageMimeType(name)));
                                 hasMultimodal = true;
+                                imageCount++;
                             }
                         } else if (name.toLowerCase().endsWith(".pdf")) {
                             List<String> pagesBase64 = mediaHelper.renderPdfPagesToBase64(url, 3);
@@ -422,8 +440,14 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         }
                     }
 
+                    // 多图场景注入顺序说明，让模型能准确理解用户对"图1/图2"的指代（改图/参考图工具依赖此顺序）
+                    String orderNote = imageCount >= 2
+                            ? "【本条消息包含 " + imageCount + " 张图片，按上传先后顺序依次为图1、图2……"
+                                + "请严格按此序号理解用户对『图N』的指代】\n"
+                            : "";
+
                     if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
-                        String combinedPrompt = m.getContent() + "\n\n"
+                        String combinedPrompt = orderNote + m.getContent() + "\n\n"
                                 + "--------------------------------------------------\n"
                                 + "[已为您解析并关联对话附件: " + fileName + "]\n"
                                 + "--------------------------------------------------\n"
@@ -436,6 +460,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         }
                     } else {
                         if (hasMultimodal) {
+                            if (!orderNote.isEmpty()) {
+                                contents.set(0, TextContent.from(orderNote + m.getContent()));
+                            }
                             list.add(UserMessage.from(contents));
                         } else {
                             list.add(UserMessage.from(m.getContent()));

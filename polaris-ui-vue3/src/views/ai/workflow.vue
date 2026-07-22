@@ -147,7 +147,7 @@
                         执行走向：
                       </span>
                       <div class="mini-graph-canvas" v-if="item._miniGraph">
-                        <svg :width="item._miniGraph.width" :height="item._miniGraph.height" class="mini-graph-svg">
+                        <svg :width="item._miniGraph.width" :height="item._miniGraph.height" class="mini-graph-svg" style="margin: auto 0; flex-shrink: 0;">
                           <g v-for="(e, ei) in item._miniGraph.edges" :key="'e'+ei">
                             <path
                               :d="`M ${e.x1} ${e.y1} C ${e.x1} ${(e.y1+e.y2)/2}, ${e.x2} ${(e.y1+e.y2)/2}, ${e.x2} ${e.y2}`"
@@ -874,11 +874,15 @@ export default {
 
       const drawEdges = edges
         .filter(e => pos[e.from] && pos[e.to])
-        .map(e => ({
-          x1: pos[e.from].x, y1: pos[e.from].y + nodeH / 2,
-          x2: pos[e.to].x, y2: pos[e.to].y - nodeH / 2,
-          cond: !!(e.condition && e.condition.trim())
-        }));
+        .map(e => {
+          const x1 = pos[e.from].x;
+          const x2 = pos[e.to].x;
+          return {
+            x1, y1: pos[e.from].y + nodeH / 2,
+            x2: x1 === x2 ? x2 + 0.01 : x2, y2: pos[e.to].y - nodeH / 2,
+            cond: !!(e.condition && e.condition.trim())
+          };
+        });
 
       return { 
         width: W, 
@@ -1007,7 +1011,15 @@ export default {
     deleteNodeStep(index) {
       const ref = this.graph.nodes[index] && this.graph.nodes[index].ref;
       this.graph.nodes.splice(index, 1);
-      if (ref) this.graph.edges = this.graph.edges.filter(e => e.from !== ref && e.to !== ref);
+      if (ref) {
+        this.graph.edges = this.graph.edges.filter(e => e.from !== ref && e.to !== ref);
+        // 清理分类节点中引用该已删除节点的 branches 分支出口
+        this.graph.nodes.forEach(n => {
+          if (n.type === 'classifier' && n.branches) {
+            n.branches = n.branches.filter(b => b.targetRef !== ref);
+          }
+        });
+      }
       this.syncEdges();
       this.buildVfGraph();
     },
@@ -1237,27 +1249,50 @@ export default {
       const exists = this.graph.edges.find(e => e.from === source && e.to === target);
       if (exists) return;
 
-      // 同步到 graph.edges（用真实 ref；占位节点的 source/target 就是 _uid，暂存即可）
-      this.graph.edges.push({ from: source, to: target, condition: null });
+      const sourceNode = this.graph.nodes.find(n => n.ref === source || n._uid === source);
+      const isClassifier = sourceNode && sourceNode.type === 'classifier';
+      let slug = null;
+
+      // 如果源节点是分类路由节点，联动在 sourceNode.branches 自动新增分支
+      if (isClassifier) {
+        if (!sourceNode.branches) sourceNode.branches = [];
+        const hasBranch = sourceNode.branches.some(b => b.targetRef === target);
+        if (!hasBranch) {
+          slug = 'br_' + Math.random().toString(36).substr(2, 6);
+          const targetNode = this.graph.nodes.find(n => n.ref === target || n._uid === target);
+          const targetName = targetNode ? (targetNode.clfName || this.getAgentShortName(targetNode.ref) || target) : target;
+          sourceNode.branches.push({
+            slug,
+            label: targetName,
+            targetRef: target
+          });
+        } else {
+          const br = sourceNode.branches.find(b => b.targetRef === target);
+          if (br) slug = br.slug;
+        }
+      }
+
+      // 同步到 graph.edges
+      this.graph.edges.push({ from: source, to: target, condition: slug });
 
       // 标记分支
-      const sourceNode = this.graph.nodes.find(n => n.ref === source || n._uid === source);
       if (sourceNode) {
         const outEdges = this.graph.edges.filter(e => e.from === source);
         if (outEdges.length > 1) sourceNode.branchMode = true;
       }
 
       // 直接往 vfEdges push，不重建整图（防止占位节点被覆盖）
-      const edgeStyle = { stroke: '#818cf8', strokeWidth: 2 };
+      const edgeStyle = isClassifier ? { stroke: '#f59e0b', strokeWidth: 2 } : { stroke: '#818cf8', strokeWidth: 2 };
+      const condLabel = isClassifier ? (sourceNode.branches.find(b => b.targetRef === target)?.label || '') : '';
       this.vfEdges.push({
         id: `vfe-${source}-${target}-${Date.now()}`,
         source,
         target,
         type: 'smoothstep',
-        label: '',
-        animated: false,
+        label: condLabel,
+        animated: isClassifier,
         style: edgeStyle,
-        markerEnd: { type: 'arrowclosed', color: '#818cf8', width: 16, height: 16 }
+        markerEnd: { type: 'arrowclosed', color: isClassifier ? '#f59e0b' : '#818cf8', width: 16, height: 16 }
       });
     },
 
@@ -1306,6 +1341,11 @@ export default {
       const ve = this.vfEdges.find(e => e.id === this.edgeEditor.edgeId);
       if (ve) {
         this.graph.edges = this.graph.edges.filter(e => !(e.from === ve.source && e.to === ve.target));
+        // 若源节点是分类路由节点，联动清理分支定义
+        const sourceNode = this.graph.nodes.find(n => n.ref === ve.source);
+        if (sourceNode && sourceNode.type === 'classifier' && sourceNode.branches) {
+          sourceNode.branches = sourceNode.branches.filter(b => b.targetRef !== ve.target);
+        }
       }
       this.edgeEditor.visible = false;
       this.buildVfGraph();
@@ -3222,12 +3262,25 @@ export default {
   background-size: 10px 10px;
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 16px;
-  padding: 16px 8px;
+  padding: 12px 8px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  height: 160px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.02);
   position: relative;
-  overflow: hidden;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.2);
+    border-radius: 4px;
+  }
 
   .dark &,
   .theme-dark & {
@@ -3236,6 +3289,10 @@ export default {
     background-size: 10px 10px;
     border-color: rgba(255, 255, 255, 0.04);
     box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+    
+    &::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.25);
+    }
   }
 }
 
@@ -3247,14 +3304,28 @@ export default {
   padding: 8px 12px;
   margin-top: 6px;
   margin-bottom: 12px;
-  min-height: 48px;
+  height: 46px;
+  overflow-y: auto;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
+
+  &::-webkit-scrollbar {
+    width: 3px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.15);
+    border-radius: 2px;
+  }
 
   .dark &,
   .theme-dark & {
     background: rgba(255, 255, 255, 0.02);
     border-left-color: #38bdf8;
+    
+    &::-webkit-scrollbar-thumb {
+      background: rgba(56, 189, 248, 0.2);
+    }
   }
 }
 
@@ -3263,11 +3334,8 @@ export default {
   font-size: 12px;
   line-height: 1.5;
   color: #64748b;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-all;
+  width: 100%;
 
   .dark &,
   .theme-dark & {

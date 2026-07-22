@@ -43,6 +43,11 @@ public interface IAiModelConfigService extends IService<AiModelConfig>
     AiModelConfig selectDefaultEmbeddingModel(Long userDeptId, String dataScopeSql);
 
     /**
+     * 获取指定类型下的默认模型配置
+     */
+    AiModelConfig selectDefaultModel(String modelType, Long userDeptId, String dataScopeSql);
+
+    /**
      * 新增模型配置
      */
     int insertModelConfig(AiModelConfig config);
@@ -61,6 +66,11 @@ public interface IAiModelConfigService extends IService<AiModelConfig>
      * 重置所有模型配置的默认向量模型状态
      */
     int cleanDefaultEmbeddingStatus(Long deptId);
+
+    /**
+     * 清除指定类型下的默认模型状态
+     */
+    int cleanDefaultStatus(String modelType, Long deptId);
 
     /**
      * 根据 ID 删除模型配置

@@ -313,7 +313,98 @@
                       </div>
                     </el-collapse-transition>
                   </div>
+                  <!-- 如果是画图任务标识的消息 -->
+                  <div v-if="isImageTaskMessage(msg.content)" class="image-task-panel">
+                    <div v-for="task in parseTaskInfos(msg.content)" :key="task.taskId" class="image-task-card-wrapper">
+                      <!-- 骨架屏加载态 -->
+                      <div v-if="task.isPending || task.status === '0'" class="image-skeleton-card">
+                        <div class="glow-shimmer"></div>
+                        <div class="skeleton-content">
+                          <el-icon class="is-loading"><loading /></el-icon>
+                          <span class="loading-text">正在绘制灵感画面...</span>
+                          <span class="elapsed-time-text" v-if="task.elapsedTime !== undefined">已用时: {{ task.elapsedTime }}s</span>
+                          <span class="prompt-text" v-if="task.prompt">“{{ task.prompt }}”</span>
+                        </div>
+                      </div>
+                      
+                      <!-- 成功大图卡片 -->
+                      <div v-else-if="task.status === '1'" class="image-success-card">
+                        <el-image 
+                          :src="resolveImageUrl(task.imageUrl)" 
+                          :preview-src-list="[resolveImageUrl(task.imageUrl)]" 
+                          fit="contain" 
+                          class="generated-img-view"
+                          preview-teleported
+                        >
+                          <template #placeholder>
+                            <div class="image-slot-loading">
+                              <el-icon class="is-loading"><loading /></el-icon>加载图片中...
+                            </div>
+                          </template>
+                        </el-image>
+                        <!-- 耗时 Badge -->
+                        <div class="elapsed-badge" v-if="task.elapsedTime">
+                          <el-icon><clock /></el-icon>
+                          <span>生成耗时: {{ task.elapsedTime }}s</span>
+                        </div>
+                        <div class="img-hover-actions">
+                          <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(task.imageUrl))" />
+                          <el-button round size="small" icon="Refresh" title="重新生成" class="btn-img-regenerate" @click="handleRegenerate(task.prompt)">重新生成</el-button>
+                        </div>
+                      </div>
+
+                      <!-- 生图参数配置卡片 (status === '3') -->
+                      <div v-else-if="task.status === '3'" class="image-config-card">
+                        <div class="config-header">
+                          <el-icon><setting /></el-icon>
+                          <span class="config-title">绘图配置参数</span>
+                        </div>
+                        <div class="config-body">
+                          <div class="config-item">
+                            <span class="config-label">生图提示词：</span>
+                            <span class="config-value prompt-value">{{ task.prompt }}</span>
+                          </div>
+                          <div class="config-row">
+                            <div class="config-item">
+                              <span class="config-label">尺寸：</span>
+                              <span class="config-value">{{ task.width }} x {{ task.height }}</span>
+                            </div>
+                            <div class="config-item">
+                              <span class="config-label">步数：</span>
+                              <span class="config-value">{{ task.steps }}</span>
+                            </div>
+                          </div>
+                          <div class="config-item">
+                            <span class="config-label">模型：</span>
+                            <span class="config-value">{{ task.model }}</span>
+                          </div>
+                        </div>
+                        <div class="config-footer">
+                          <el-button type="primary" size="small" icon="DocumentCopy" @click="handleCopyText(task.prompt)">复制提示词</el-button>
+                          <span class="config-tip">提示：当前聊天模型可能暂不支持直接绘图，建议复制提示词后切换为其他支持工具调用的模型</span>
+                        </div>
+                      </div>
+
+                      <!-- 失败卡片 -->
+                      <div v-else class="image-fail-card">
+                        <el-icon class="fail-icon"><circle-close /></el-icon>
+                        <span class="fail-desc">生成失败: {{ task.errorMsg || '画图服务响应异常或超时' }}</span>
+                        <span class="elapsed-time-fail" v-if="task.elapsedTime">共耗时: {{ task.elapsedTime }}s</span>
+                        <el-button 
+                          type="danger" 
+                          plain 
+                          size="small" 
+                          class="btn-regenerate"
+                          icon="Refresh"
+                          @click="handleRegenerate(task.prompt)"
+                        >重新生成</el-button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 普通 Markdown 渲染 -->
                   <div
+                    v-else
                     :class="{ 'typing-cursor': msg.streaming }"
                     class="markdown-body"
                     v-html="renderMarkdown(msg.content)"
@@ -401,7 +492,8 @@
                           :preview-src-list="[fileItem.url ? (fileItem.url.startsWith('http') ? fileItem.url : (uploadUrl.replace('/common/upload', '') + fileItem.url)) : '']"
                           :src="fileItem.url ? (fileItem.url.startsWith('http') ? fileItem.url : (uploadUrl.replace('/common/upload', '') + fileItem.url)) : ''"
                           class="chat-inline-image"
-                          fit="cover"
+                          fit="contain"
+                          preview-teleported
                         >
                           <template #placeholder>
                             <div class="image-slot">
@@ -850,6 +942,7 @@ import {
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
 import {listActiveWorkflows} from '@/api/ai/workflow'
+import request from '@/utils/request'
 
 export default {
   name: 'AiChat',
@@ -882,11 +975,12 @@ export default {
       renameDialogVisible: false,
       renameTitle: '',
       renameTargetId: null,
-      // 附件上传相关
-      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
-      uploadHeaders: { Authorization: "Bearer " + getToken() },
       attachments: [],
       uploadingAttachment: false,
+      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
+      uploadHeaders: { Authorization: "Bearer " + getToken() },
+      activePolls: {},
+      taskStateMap: {},
       // 报告预览相关
       reportVisible: false,
       reportContent: '',
@@ -965,9 +1059,239 @@ export default {
   beforeUnmount() {
     this.abortStream()
     this.cleanupVoiceInput()
+    if (this.activePolls) {
+      Object.keys(this.activePolls).forEach(id => clearInterval(this.activePolls[id]))
+    }
     document.body.classList.remove('ai-chat-page')
   },
   methods: {
+    isImageTaskMessage(content) {
+      if (!content) return false;
+      // 1. 系统内置的异步生图轮询格式 (支持含有 type: image-task，或者包含 taskId 且 taskId 含有 img_ 标识)
+      if (content.includes('"type":"image-task"') || content.includes('"type": "image-task"') || 
+         (content.includes('"taskId":') && content.includes('"status":') && content.includes('img_'))) {
+        return true;
+      }
+      // 2. 兼容中转直出/模型自返回的图片 URL 或 Base64 格式
+      if (content.includes('"image":') && 
+         (content.includes('http://') || content.includes('https://') || content.includes('data:image/') || content.includes('base64,'))) {
+        return true;
+      }
+      // 3. 兼容模型直接返回的生图参数配置格式
+      if (content.includes('"prompt":') && (content.includes('"cfg_scale":') || content.includes('"sampler":') || content.includes('"model":'))) {
+        return true;
+      }
+      return false;
+    },
+
+    // 统一解析图片 URL：绝对地址原样返回，/profile 相对路径补上后端 baseUrl
+    resolveImageUrl(url) {
+      if (!url) return ''
+      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+        return url
+      }
+      const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
+      return baseUrl + url
+    },
+    parseTaskInfos(content) {
+      if (!content) return [];
+      
+      const results = [];
+      
+      // 1. 先尝试捕获直接返回的图片 URL 或 Base64 图像
+      if (content.includes('"image":') && 
+         (content.includes('http://') || content.includes('https://') || content.includes('data:image/') || content.includes('base64,'))) {
+        try {
+          const regex = /\{[\s\S]*?"image"\s*:\s*"[\s\S]*?"[\s\S]*?\}/g;
+          let match;
+          while ((match = regex.exec(content)) !== null) {
+            const rawData = JSON.parse(match[0]);
+            if (rawData.image) {
+              results.push({
+                taskId: 'direct_' + Math.random().toString(36).substring(2, 9),
+                isPending: false,
+                status: '1', // 直接设为成功态
+                imageUrl: rawData.image,
+                prompt: '生成的图片',
+                errorMsg: ''
+              });
+            }
+          }
+        } catch (err) {
+          console.error(">>> 解析图像 JSON 数据异常: ", err);
+        }
+      }
+
+      // 2. 捕获直接返回的生图配置参数
+      if (content.includes('"prompt":') && (content.includes('"cfg_scale":') || content.includes('"sampler":') || content.includes('"model":'))) {
+        try {
+          const regex = /\{[\s\S]*?"prompt"\s*:\s*"[\s\S]*?"[\s\S]*?\}/g;
+          let match;
+          while ((match = regex.exec(content)) !== null) {
+            const rawData = JSON.parse(match[0]);
+            if (rawData.prompt && !rawData.image) { // 避免和带 image 字段重复
+              results.push({
+                taskId: 'config_' + Math.random().toString(36).substring(2, 9),
+                isPending: false,
+                status: '3', // 状态 3：代表参数配置卡片
+                prompt: rawData.prompt,
+                width: rawData.width || 512,
+                height: rawData.height || 512,
+                steps: rawData.steps || 20,
+                model: rawData.model || 'stable-diffusion',
+                errorMsg: ''
+              });
+            }
+          }
+        } catch (err) {
+          console.error(">>> 解析图像参数配置 JSON 异常: ", err);
+        }
+      }
+
+      // 3. 捕获系统的异步轮询任务
+      try {
+        const regex = /\{[\s\S]*?"taskId"\s*:\s*"img_[\s\S]*?"[\s\S]*?\}/g;
+        let match;
+        while ((match = regex.exec(content)) !== null) {
+          try {
+            const rawData = JSON.parse(match[0]);
+            const taskId = rawData.taskId;
+            if (!taskId) continue;
+
+            if (this.taskStateMap[taskId]) {
+              results.push({ isPending: false, ...this.taskStateMap[taskId] });
+              continue;
+            }
+
+            const initialTask = {
+              taskId: taskId,
+              prompt: rawData.prompt || 'AI 绘图',
+              status: rawData.status === 'fail' ? '2' : '0', // 0-进行中, 1-成功, 2-失败
+              imageUrl: '',
+              errorMsg: rawData.errorMsg || '',
+              startTime: Date.now(),
+              elapsedTime: 0,
+              conversationId: this.currentConvId
+            };
+
+            this.taskStateMap[taskId] = initialTask;
+
+            if (initialTask.status === '0') {
+              this.startPolling(taskId);
+            }
+
+            results.push({ isPending: false, ...initialTask });
+          } catch (e) {
+            console.error(">>> 解析单任务 JSON 异常: ", e);
+          }
+        }
+      } catch (err) {
+        console.error(">>> 匹配任务正则表达式异常: ", err);
+      }
+
+      // 如果一个符合格式的都没匹配到，且包含特定关键词，则返回一个占位加载中对象
+      if (results.length === 0) {
+        return [{ isPending: true }];
+      }
+
+      return results;
+    },
+    // 保留单任务兼容方法，避免外部零星引用导致报错
+    parseTaskInfo(content) {
+      const infos = this.parseTaskInfos(content);
+      return infos.length > 0 ? infos[0] : { isPending: true };
+    },
+
+    startPolling(taskId) {
+      if (this.activePolls[taskId]) return;
+      
+      let pollCount = 0;
+      const maxPolls = 90; // 最大轮询 90 次（每 2 秒一次，共计 180 秒 / 3 分钟）
+      
+      const poll = async () => {
+        pollCount++;
+        
+        // 动态计算已用时并更新状态
+        if (this.taskStateMap[taskId] && this.taskStateMap[taskId].startTime) {
+          this.taskStateMap[taskId].elapsedTime = Math.round((Date.now() - this.taskStateMap[taskId].startTime) / 1000);
+        }
+
+        if (pollCount > maxPolls) {
+          console.warn(`>>> 绘图任务 ${taskId} 轮询超时，主动终止。`);
+          this.stopPolling(taskId);
+          this.taskStateMap[taskId] = {
+            ...this.taskStateMap[taskId],
+            status: '2', // 将状态置为失败态
+            errorMsg: '生成超时，请检查后台图像生成服务'
+          };
+          return;
+        }
+
+        try {
+          const res = await request({
+            url: `/ai/chat/image-task/status/${taskId}`,
+            method: 'get'
+          });
+          if (res && res.code === 200) {
+            const data = res.data;
+            const taskStart = this.taskStateMap[taskId] ? this.taskStateMap[taskId].startTime : Date.now();
+            const elapsed = Math.round((Date.now() - taskStart) / 1000);
+            const convId = this.taskStateMap[taskId] ? this.taskStateMap[taskId].conversationId : this.currentConvId;
+            
+            this.taskStateMap[taskId] = {
+              taskId: taskId,
+              prompt: data.prompt,
+              status: data.status,
+              imageUrl: data.imageUrl,
+              errorMsg: data.errorMsg,
+              startTime: taskStart,
+              elapsedTime: elapsed,
+              conversationId: convId // 轮询覆盖时保留会话 ID
+            };
+            if (data.status === '1' || data.status === '2') {
+              this.stopPolling(taskId);
+            }
+          }
+        } catch (e) {
+          console.error('获取画图状态异常:', e);
+        }
+      };
+
+      poll();
+      this.activePolls[taskId] = setInterval(poll, 2000);
+    },
+
+    stopPolling(taskId) {
+      if (this.activePolls[taskId]) {
+        clearInterval(this.activePolls[taskId]);
+        delete this.activePolls[taskId];
+      }
+    },
+
+    stopPollingByConversation(convId) {
+      if (!convId || !this.activePolls) return;
+      Object.keys(this.activePolls).forEach(taskId => {
+        const task = this.taskStateMap[taskId];
+        if (task && task.conversationId === convId) {
+          this.stopPolling(taskId);
+        }
+      });
+    },
+
+    handleDownload(url) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AI-Generated-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    },
+
+    handleRegenerate(prompt) {
+      this.inputText = `帮我画：${prompt}`;
+      this.handleSend();
+    },
+
     getStepName(message, code) {
       if (this.toolDictionary && this.toolDictionary[code]) {
         return this.toolDictionary[code];
@@ -1363,6 +1687,8 @@ export default {
           this.messages = (res.data || []).map(m => ({
             role: m.role,
             content: m.content,
+            fileName: m.fileName || null,
+            fileUrl: m.fileUrl || null,
             loading: false,
             streaming: false,
             error: null
@@ -1415,6 +1741,7 @@ export default {
       try {
         const res = await deleteConversation(id)
         if (res.code === 200) {
+          this.stopPollingByConversation(id) // 定向销毁被删除会话关联的所有生图轮询定时器
           if (this.currentConvId === id) {
             this.currentConvId = null
             this.messages = []
@@ -2479,7 +2806,7 @@ export default {
         }
         this.attachments.push({
           name: file.name,
-          url: res.fileName
+          url: res.url
         })
         this.$message.success('文件上传成功')
       } else {
@@ -2605,6 +2932,474 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+/* ===== AI 绘图卡片相关样式 ===== */
+.image-task-panel {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  max-width: 100%;
+}
+
+.image-task-card-wrapper {
+  flex: 0 0 auto;
+  max-width: 320px;
+}
+
+.image-skeleton-card {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  border-radius: 12px;
+  background: rgba(226, 232, 240, 0.65); /* 亮色底色 */
+  border: 1px solid rgba(15, 23, 42, 0.08); /* 亮色微弱边框 */
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+
+.glow-shimmer {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(99, 102, 241, 0.1) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-anim 2.5s infinite linear;
+}
+
+@keyframes shimmer-anim {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton-content {
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #334155; /* 亮色模式下使用深灰，确保可读 */
+  padding: 16px;
+  text-align: center;
+  transition: color 0.3s ease;
+
+  .el-icon {
+    font-size: 24px;
+    color: #4f46e5; /* 亮色模式下使用较深的主题紫蓝色 */
+    margin-bottom: 12px;
+    transition: color 0.3s ease;
+  }
+}
+
+.loading-text {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
+.prompt-text {
+  font-size: 12px;
+  color: #475569; /* 亮色模式下使用更清晰的次级文字颜色 */
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.3s ease;
+}
+
+/* 兼容暗色模式下的可视度与磨砂玻璃质感 */
+:global(.dark) .image-skeleton-card,
+:global(.theme-dark) .image-skeleton-card {
+  background: rgba(15, 23, 42, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(.dark) .skeleton-content,
+:global(.theme-dark) .skeleton-content {
+  color: #94a3b8 !important;
+}
+
+:global(.dark) .skeleton-content .el-icon,
+:global(.theme-dark) .skeleton-content .el-icon {
+  color: #6366f1 !important;
+}
+
+:global(.dark) .prompt-text,
+:global(.theme-dark) .prompt-text {
+  color: #64748b !important;
+}
+
+:global(.dark) .elapsed-time-text,
+:global(.theme-dark) .elapsed-time-text {
+  color: #94a3b8 !important;
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+:global(.dark) .image-config-card,
+:global(.theme-dark) .image-config-card {
+  background: rgba(30, 41, 59, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+:global(.dark) .image-config-card .config-header,
+:global(.theme-dark) .image-config-card .config-header {
+  color: #818cf8 !important;
+}
+
+:global(.dark) .image-config-card .config-body,
+:global(.theme-dark) .image-config-card .config-body {
+  color: #cbd5e1 !important;
+}
+
+:global(.dark) .image-config-card .config-value,
+:global(.theme-dark) .image-config-card .config-value {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+:global(.dark) .image-config-card .config-footer,
+:global(.theme-dark) .image-config-card .config-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.image-success-card {
+  position: relative;
+  width: 320px;
+  height: 320px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.generated-img-view {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.3s ease;
+  cursor: zoom-in;
+  object-fit: contain;
+}
+
+.image-success-card:hover .generated-img-view {
+  transform: scale(1.02);
+}
+
+.img-hover-actions {
+  position: absolute;
+  bottom: -40px;
+  left: 0; right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 12px;
+  gap: 8px;
+  transition: bottom 0.2s ease;
+  z-index: 2;
+}
+
+/* 蒙层内的下载/刷新按钮：固定使用深色玻璃质感配色，不随亮暗主题切换，
+   避免选中(hover/active)后与浅色态混色导致图标看不清 */
+.img-hover-actions .el-button {
+  --el-button-bg-color: rgba(255, 255, 255, 0.12);
+  --el-button-border-color: rgba(255, 255, 255, 0.35);
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: rgba(255, 255, 255, 0.28);
+  --el-button-hover-border-color: rgba(255, 255, 255, 0.6);
+  --el-button-hover-text-color: #ffffff;
+  --el-button-active-bg-color: rgba(255, 255, 255, 0.4);
+  --el-button-active-border-color: rgba(255, 255, 255, 0.7);
+  --el-button-active-text-color: #ffffff;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.image-success-card:hover .img-hover-actions {
+  bottom: 0;
+}
+
+/* 图片预览放大后的操作按钮（关闭/上一张/下一张/放大缩小旋转等）：
+   固定使用深色玻璃质感配色，不随亮暗主题变量变化，避免暗黑模式下
+   背景变浅导致白色图标看不清 */
+:global(.el-image-viewer__btn) {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0.9;
+}
+
+:global(.el-image-viewer__btn:hover) {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+  opacity: 1;
+}
+
+:global(.el-image-viewer__actions) {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+:global(.el-image-viewer__actions__inner) {
+  color: #ffffff !important;
+}
+
+.image-slot-loading {
+  width: 100%;
+  height: 100%;
+  background: rgba(15, 23, 42, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.image-fail-card {
+  position: relative;
+  width: 320px;
+  min-height: 140px;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+  margin: 4px 0;
+  
+  /* 亮色模式卡片背景与边框 */
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95) 0%, rgba(254, 226, 226, 0.85) 100%);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.08);
+
+  /* 暗色模式卡片背景与边框 */
+  :global(.dark) &,
+  :global(.theme-dark) &,
+  .dark &,
+  .theme-dark & {
+    background: rgba(30, 41, 59, 0.85);
+    border: 1px solid rgba(239, 68, 68, 0.35);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .fail-icon {
+    font-size: 26px;
+    color: #dc2626; /* 亮色下清晰深红 */
+
+    :global(.dark) &,
+    :global(.theme-dark) &,
+    .dark &,
+    .theme-dark & {
+      color: #f87171;
+    }
+  }
+
+  .fail-desc {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: center;
+    color: #991b1b; /* 亮色模式高对比度深红，极度清晰 */
+    margin-bottom: 2px;
+
+    :global(.dark) &,
+    :global(.theme-dark) &,
+    .dark &,
+    .theme-dark & {
+      color: #fca5a5;
+    }
+  }
+
+  .elapsed-time-fail {
+    font-size: 11px;
+    color: #991b1b;
+    background: rgba(239, 68, 68, 0.12);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-family: monospace;
+
+    :global(.dark) &,
+    :global(.theme-dark) &,
+    .dark &,
+    .theme-dark & {
+      color: #94a3b8;
+      background: rgba(15, 23, 42, 0.4);
+    }
+  }
+
+  /* 重新生成按钮：亮/暗模式独立适配与高质感渐变 */
+  .btn-regenerate {
+    margin-top: 4px;
+    border-radius: 20px;
+    padding: 6px 18px;
+    font-weight: 500;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+    /* 亮色模式按钮 */
+    --el-button-bg-color: rgba(239, 68, 68, 0.1);
+    --el-button-border-color: rgba(239, 68, 68, 0.35);
+    --el-button-text-color: #dc2626;
+    --el-button-hover-bg-color: #dc2626;
+    --el-button-hover-border-color: #dc2626;
+    --el-button-hover-text-color: #ffffff;
+    --el-button-active-bg-color: #b91c1c;
+    --el-button-active-border-color: #b91c1c;
+    --el-button-active-text-color: #ffffff;
+    box-shadow: 0 2px 6px rgba(220, 38, 38, 0.12);
+
+    /* 暗色模式按钮 */
+    :global(.dark) &,
+    :global(.theme-dark) &,
+    .dark &,
+    .theme-dark & {
+      --el-button-bg-color: rgba(239, 68, 68, 0.22);
+      --el-button-border-color: rgba(239, 68, 68, 0.5);
+      --el-button-text-color: #fee2e2;
+      --el-button-hover-bg-color: rgba(239, 68, 68, 0.45);
+      --el-button-hover-border-color: rgba(239, 68, 68, 0.75);
+      --el-button-hover-text-color: #ffffff;
+      --el-button-active-bg-color: rgba(239, 68, 68, 0.6);
+      --el-button-active-border-color: rgba(239, 68, 68, 0.9);
+      --el-button-active-text-color: #ffffff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    }
+
+    &:hover {
+      transform: translateY(-1px);
+    }
+  }
+}
+
+.elapsed-time-text {
+  font-size: 11px;
+  color: #64748b; /* 亮色下 slate-500 */
+  margin-top: 4px;
+  margin-bottom: 8px;
+  background: rgba(15, 23, 42, 0.04);
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-family: monospace;
+}
+
+.elapsed-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: monospace;
+}
+
+.elapsed-time-fail {
+  font-size: 11px;
+  color: #ef4444;
+  opacity: 0.8;
+  margin-bottom: 4px;
+  font-family: monospace;
+}
+
+.image-config-card {
+  width: 320px;
+  border-radius: 12px;
+  background: rgba(241, 245, 249, 0.85); /* 亮色底色 */
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  padding: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  backdrop-filter: blur(8px);
+}
+
+.config-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #4f46e5;
+  font-weight: 600;
+  font-size: 14px;
+  
+  .el-icon {
+    font-size: 16px;
+  }
+}
+
+.config-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.config-label {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.config-value {
+  background: rgba(15, 23, 42, 0.04);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-family: monospace;
+  word-break: break-all;
+}
+
+.prompt-value {
+  max-height: 48px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.config-footer {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.config-tip {
+  font-size: 10px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+
 /* ==========================================================================
    针对 AI 对话页面，取消外层滚动条，隐藏版权信息
    ========================================================================== */
@@ -3310,8 +4105,10 @@ export default {
 
   .chat-inline-image {
     width: 100%;
-    max-height: 180px;
+    height: 180px;
     display: block;
+    object-fit: contain;
+    cursor: zoom-in;
   }
 
   .image-name-badge {
@@ -3627,20 +4424,64 @@ export default {
   }
 
   &:disabled {
-    background: rgba(0, 0, 0, 0.1) !important;
-    color: var(--polaris-text-sub) !important;
     box-shadow: none !important;
     cursor: not-allowed !important;
 
+    // 亮色模式下禁用状态
     .theme-light & {
-      background: #f1f5f9 !important;
+      background: #e2e8f0 !important;
+      color: #94a3b8 !important;
+    }
+
+    // 暗色模式下禁用状态
+    .dark &,
+    .theme-dark & {
+      background: rgba(255, 255, 255, 0.06) !important;
+      color: #475569 !important;
     }
   }
 }
 
 .btn-stop-modern {
-  background: var(--polaris-danger-color) !important;
-  box-shadow: 0 4px 10px rgba(239, 68, 68, 0.2) !important;
+  // 默认（主要是暗色模式）
+  background: rgba(239, 68, 68, 0.15) !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+  color: #f87171 !important; /* 亮红色，暗色中对比鲜明且柔和 */
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.25) !important;
+
+  // 亮色模式下
+  .theme-light & {
+    background: #ef4444 !important;
+    border: none !important;
+    color: #ffffff !important; /* 红色背景配白色图标，保证高对比度 */
+    box-shadow: 0 4px 10px rgba(239, 68, 68, 0.35) !important;
+  }
+
+  // 显式指定暗色模式以确保优先级
+  .dark &,
+  .theme-dark & {
+    background: rgba(239, 68, 68, 0.15) !important;
+    border: 1px solid rgba(239, 68, 68, 0.3) !important;
+    color: #f87171 !important;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.25) !important;
+  }
+
+  &:hover:not(:disabled) {
+    opacity: 0.95 !important;
+    
+    .theme-light & {
+      background: #dc2626 !important;
+      border: none !important;
+    }
+    
+    .dark &,
+    .theme-dark & {
+      background: rgba(239, 68, 68, 0.3) !important;
+      border-color: rgba(239, 68, 68, 0.6) !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.4) !important;
+    }
+  }
 }
 
 /* 语音输入覆盖层 */

@@ -14,6 +14,7 @@
               <el-option label="阿里云通义" value="dashscope"/>
               <el-option label="OpenAI" value="openai"/>
               <el-option label="Ollama (本地)" value="ollama"/>
+              <el-option label="火山引擎 Ark" value="ark"/>
             </el-select>
           </el-form-item>
           <el-form-item>
@@ -82,7 +83,7 @@
               <div
                 v-for="item in modelList"
                 :key="item.id"
-                :class="['synapse-glass-card', item.status === '1' ? (item.isDefault === '1' ? 'status-border-chat' : (item.isDefaultEmbedding === '1' ? 'status-border-embed' : 'status-border-active')) : 'status-border-inactive']"
+                :class="['synapse-glass-card', item.status === '1' ? (item.isDefault === '1' ? (item.modelType === 'CHAT' ? 'status-border-chat' : (item.modelType === 'EMBEDDING' ? 'status-border-embed' : 'status-border-image')) : 'status-border-active') : 'status-border-inactive']"
               >
                 <!-- 卡片流光反射 -->
                 <div class="card-shimmer-ray"></div>
@@ -93,6 +94,7 @@
                     <span v-else-if="item.provider === 'dashscope'">✦ </span>
                     <span v-else-if="item.provider === 'openai'">⚛ </span>
                     <span v-else-if="item.provider === 'ollama'">🦙 </span>
+                    <span v-else-if="item.provider === 'ark'">🌋 </span>
                     {{ getProviderLabel(item.provider) }}
                   </span>
                   
@@ -178,6 +180,16 @@
                     <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
                       全局共享
                     </el-tag>
+                    <template v-if="item.modelType === 'IMAGE'">
+                      <el-tag
+                        v-for="cap in jsonToArray(item.imageCapabilities)"
+                        :key="cap"
+                        effect="plain"
+                        size="small"
+                        type="warning"
+                        class="tech-pill"
+                      >{{ getImageCapabilityLabel(cap) }}</el-tag>
+                    </template>
                   </div>
 
                   <!-- 系统提示词预览 (Mac 代码终端自适应风格) -->
@@ -202,7 +214,8 @@
                 <!-- 卡片底部默认状态与操作 -->
                 <div class="card-footer-row-actions">
                   <div class="default-tags-area">
-                    <template v-if="!isEmbeddingModel(item.modelName)">
+                    <!-- 聊天模型默认状态 -->
+                    <template v-if="item.modelType === 'CHAT'">
                       <el-tag v-if="item.isDefault === '1'" class="active-tag-chat" effect="dark" size="small" type="success">
                         <el-icon><chat-dot-round /></el-icon>
                         <span>默认聊天</span>
@@ -212,13 +225,24 @@
                       </el-button>
                     </template>
 
-                    <template v-if="isEmbeddingModel(item.modelName)">
-                      <el-tag v-if="item.isDefaultEmbedding === '1'" class="active-tag-embed" effect="dark" size="small" type="primary">
+                    <!-- 向量模型默认状态 -->
+                    <template v-else-if="item.modelType === 'EMBEDDING'">
+                      <el-tag v-if="item.isDefault === '1'" class="active-tag-embed" effect="dark" size="small" type="primary">
                         <el-icon><collection /></el-icon>
                         <span>默认向量</span>
                       </el-tag>
                       <el-button v-else class="footer-action-btn color-primary" link size="small" @click="handleSetDefaultEmbedding(item)">
                         设为默认向量
+                      </el-button>
+                    </template>
+
+                    <!-- 绘图模型默认状态 -->
+                    <template v-else-if="item.modelType === 'IMAGE'">
+                      <el-tag v-if="item.isDefault === '1'" class="active-tag-chat" effect="dark" size="small" type="warning">
+                        <span>默认绘图</span>
+                      </el-tag>
+                      <el-button v-else class="footer-action-btn color-warning" link size="small" @click="handleSetDefaultImage(item)">
+                        设为默认绘图
                       </el-button>
                     </template>
                   </div>
@@ -272,13 +296,22 @@
                 <el-table-column label="系统默认" width="200">
                   <template #default="{ row }">
                     <div class="default-tags-cell">
-                      <template v-if="!isEmbeddingModel(row.modelName)">
+                      <!-- 聊天模型默认控制 -->
+                      <template v-if="row.modelType === 'CHAT'">
                         <el-tag v-if="row.isDefault === '1'" size="small" type="success">默认聊天</el-tag>
                         <el-button v-else link size="small" class="op-btn-default-set" @click="handleSetDefaultChat(row)">设为默认聊天</el-button>
                       </template>
-                      <template v-if="isEmbeddingModel(row.modelName)">
-                        <el-tag v-if="row.isDefaultEmbedding === '1'" size="small" type="primary">默认向量</el-tag>
+
+                      <!-- 向量模型默认控制 -->
+                      <template v-else-if="row.modelType === 'EMBEDDING'">
+                        <el-tag v-if="row.isDefault === '1'" size="small" type="primary">默认向量</el-tag>
                         <el-button v-else link size="small" class="op-btn-default-set-embed" @click="handleSetDefaultEmbedding(row)">设为默认向量</el-button>
+                      </template>
+
+                      <!-- 绘图模型默认控制 -->
+                      <template v-else-if="row.modelType === 'IMAGE'">
+                        <el-tag v-if="row.isDefault === '1'" size="small" type="warning">默认绘图</el-tag>
+                        <el-button v-else link size="small" class="op-btn-default-set-image" @click="handleSetDefaultImage(row)">设为默认绘图</el-button>
                       </template>
                     </div>
                   </template>
@@ -341,6 +374,7 @@
                 <el-option label="阿里云通义" value="dashscope"/>
                 <el-option label="OpenAI" value="openai"/>
                 <el-option label="Ollama (本地部署)" value="ollama"/>
+                <el-option label="火山引擎 Ark" value="ark"/>
               </el-select>
             </el-form-item>
 
@@ -413,20 +447,7 @@
               <h5>高级扩展特性</h5>
             </div>
             <el-row :gutter="20">
-              <el-col :span="12">
-                <el-form-item label="启用联网搜索" prop="enableSearch">
-                  <el-radio-group v-model="form.enableSearch">
-                    <el-radio label="1">开启</el-radio>
-                    <el-radio label="0">关闭</el-radio>
-                  </el-radio-group>
-                </el-form-item>
-              </el-col>
-              <el-col v-if="form.enableSearch === '1'" :span="12">
-                <el-form-item label="联网搜索 Key" prop="searchKey">
-                  <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
-                </el-form-item>
-              </el-col>
-              
+              <!-- 思考模式 (Reasoning) -->
               <el-col :span="12">
                 <el-form-item label="思考模式 (Reasoning)" prop="enableThinking">
                   <el-radio-group v-model="form.enableThinking">
@@ -447,23 +468,87 @@
                 </el-form-item>
               </el-col>
 
+              <!-- 模型用途与默认值 -->
               <el-col :span="12" style="margin-top: 10px;">
-                <el-form-item label="设为默认聊天模型" prop="isDefault">
+                <el-form-item label="模型用途" prop="modelType">
+                  <el-select v-model="form.modelType" placeholder="请选择模型用途" style="width: 100%;">
+                    <el-option label="文本对话模型 (CHAT)" value="CHAT"/>
+                    <el-option label="向量检索模型 (EMBEDDING)" value="EMBEDDING"/>
+                    <el-option label="图像生成模型 (IMAGE)" value="IMAGE"/>
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12" style="margin-top: 10px;">
+                <el-form-item label="设为默认模型" prop="isDefault">
                   <el-radio-group v-model="form.isDefault">
                     <el-radio label="1">是</el-radio>
                     <el-radio label="0">否</el-radio>
                   </el-radio-group>
                 </el-form-item>
               </el-col>
-              <el-col :span="12" style="margin-top: 10px;">
-                <el-form-item label="设为默认向量模型" prop="isDefaultEmbedding">
-                  <el-radio-group v-model="form.isDefaultEmbedding">
-                    <el-radio label="1">是</el-radio>
-                    <el-radio label="0">否</el-radio>
-                  </el-radio-group>
+
+              <!-- 大模型启用工具箱 -->
+              <el-col :span="24" v-if="form.modelType === 'CHAT'" style="margin-top: 10px;">
+                <el-form-item label="启用大模型工具" prop="enabledTools">
+                  <el-checkbox-group v-model="enabledToolsArray">
+                    <el-checkbox label="web_search">网络实时搜索</el-checkbox>
+                    <el-checkbox label="image_generate">AI 图像生成 (绘图工具)</el-checkbox>
+                  </el-checkbox-group>
+                </el-form-item>
+              </el-col>
+
+              <!-- 联网搜索 Key 配置（联级显示） -->
+              <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
+                <el-form-item label="联网搜索 Key" prop="searchKey">
+                  <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
                 </el-form-item>
               </el-col>
             </el-row>
+          </div>
+
+          <!-- 属性面板：图像能力配置（仅 IMAGE 类型显示） -->
+          <div v-if="form.modelType === 'IMAGE'" class="pane-card card-space-margin">
+            <div class="pane-card-header">
+              <span class="header-dot purple-dot"></span>
+              <h5>图像能力配置</h5>
+            </div>
+            <el-form-item label="支持的生成能力">
+              <el-checkbox-group v-model="imageCapabilitiesArray">
+                <el-checkbox
+                  v-for="opt in imageCapabilityOptions"
+                  :key="opt.value"
+                  :label="opt.value"
+                >{{ opt.label }}</el-checkbox>
+              </el-checkbox-group>
+            </el-form-item>
+            <el-form-item label="默认出图尺寸">
+              <el-select v-model="form.defaultImageSize" placeholder="默认 1024x1024" clearable style="width: 100%;">
+                <el-option label="1024x1024 (1:1 方形)" value="1024x1024"/>
+                <el-option label="1280x720 (16:9 横屏)" value="1280x720"/>
+                <el-option label="720x1280 (9:16 竖屏)" value="720x1280"/>
+                <el-option label="1024x768 (4:3)" value="1024x768"/>
+                <el-option label="768x1024 (3:4)" value="768x1024"/>
+              </el-select>
+            </el-form-item>
+            <el-form-item label="模型质量标签">
+              <el-checkbox-group v-model="modelFeaturesArray">
+                <el-checkbox
+                  v-for="opt in modelFeatureOptions"
+                  :key="opt.value"
+                  :label="opt.value"
+                >{{ opt.label }}</el-checkbox>
+              </el-checkbox-group>
+            </el-form-item>
+            <el-form-item label="模型备注">
+              <el-input
+                v-model="form.modelDescription"
+                :rows="2"
+                type="textarea"
+                placeholder="管理员可见的模型备注，不参与路由。"
+                maxlength="255"
+                show-word-limit
+              />
+            </el-form-item>
           </div>
 
           <!-- 属性面板三：系统专属提示词指令 -->
@@ -489,7 +574,16 @@
 </template>
 
 <script>
-import {addModel, delModel, getModel, listModel, setDefaultChat, setDefaultEmbedding, updateModel} from '@/api/ai/model'
+import {
+  addModel,
+  delModel,
+  getModel,
+  listModel,
+  setDefaultChat,
+  setDefaultEmbedding,
+  setDefaultImage,
+  updateModel
+} from '@/api/ai/model'
 import {deptTreeSelect} from '@/api/system/user'
 import {
   ChatDotRound,
@@ -520,6 +614,39 @@ export default {
     Delete,
     DocumentCopy
   },
+  computed: {
+    enabledToolsArray: {
+      get() {
+        if (!this.form || !this.form.enabledTools) return [];
+        return this.form.enabledTools.split(',').filter(Boolean);
+      },
+      set(val) {
+        if (this.form) {
+          this.form.enabledTools = val ? val.join(',') : '';
+        }
+      }
+    },
+    imageCapabilitiesArray: {
+      get() {
+        return this.jsonToArray(this.form && this.form.imageCapabilities);
+      },
+      set(val) {
+        if (this.form) {
+          this.form.imageCapabilities = val && val.length ? JSON.stringify(val) : null;
+        }
+      }
+    },
+    modelFeaturesArray: {
+      get() {
+        return this.jsonToArray(this.form && this.form.modelFeatures);
+      },
+      set(val) {
+        if (this.form) {
+          this.form.modelFeatures = val && val.length ? JSON.stringify(val) : null;
+        }
+      }
+    }
+  },
   data() {
     return {
       // 视图模式 card: 三维星图, table: 经典表格, edit: 独立整屏配置工作台
@@ -543,6 +670,27 @@ export default {
         name: undefined,
         provider: undefined
       },
+      // 图像生成能力选项（对应后端 ImageGenerationMode 枚举）
+      imageCapabilityOptions: [
+        { value: 'text_to_image', label: '文生图' },
+        { value: 'image_to_image', label: '图生图' },
+        { value: 'multi_image', label: '多图生成' },
+        { value: 'image_edit', label: '指令改图' },
+        { value: 'inpainting', label: '局部重绘' },
+        { value: 'object_removal', label: '消除' },
+        { value: 'outpainting', label: '扩图' },
+        { value: 'background_replacement', label: '换背景' },
+        { value: 'upscale', label: '高清放大' },
+        { value: 'restoration', label: '照片修复' }
+      ],
+      // 模型质量标签选项（不参与路由，仅用于推荐排序展示）
+      modelFeatureOptions: [
+        { value: 'text_rendering', label: '文字渲染强' },
+        { value: 'photorealistic', label: '写实照片' },
+        { value: 'character_consistency', label: '角色一致性' },
+        { value: 'fast_generation', label: '快速出图' },
+        { value: 'high_resolution', label: '高分辨率' }
+      ],
       // 表单参数
       form: {},
       // 表单校验
@@ -568,6 +716,22 @@ export default {
       if (!modelName) return false
       return modelName.toLowerCase().includes('embed')
     },
+    // 兼容解析：JSON 数组字符串 / 逗号分隔字符串 / 数组，统一转成数组
+    jsonToArray(val) {
+      if (!val) return [];
+      if (Array.isArray(val)) return val;
+      try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return String(val).split(',').filter(Boolean);
+      }
+    },
+    // 能力 code → 中文名
+    getImageCapabilityLabel(code) {
+      const hit = this.imageCapabilityOptions.find(o => o.value === code);
+      return hit ? hit.label : code;
+    },
     /** 查询模型配置列表 */
     getList() {
       this.loading = true
@@ -591,7 +755,8 @@ export default {
         deepseek: 'DeepSeek',
         dashscope: '阿里云通义',
         openai: 'OpenAI',
-        ollama: 'Ollama'
+        ollama: 'Ollama',
+        ark: '火山引擎 Ark'
       }
       return map[provider] || provider
     },
@@ -649,8 +814,13 @@ export default {
         enableSearch: '0',
         searchKey: undefined,
         deptId: undefined,
+        modelType: 'CHAT',
+        enabledTools: undefined,
+        defaultImageSize: '1024x1024',
+        imageCapabilities: undefined,
+        modelFeatures: undefined,
+        modelDescription: undefined,
         isDefault: '0',
-        isDefaultEmbedding: '0',
         status: '1'
       }
       this.resetForm('form')
@@ -688,6 +858,17 @@ export default {
     submitForm() {
       this.$refs['form'].validate(valid => {
         if (valid) {
+          if (this.form.modelType === 'CHAT') {
+            this.form.enableSearch = this.enabledToolsArray.includes('web_search') ? '1' : '0';
+          } else {
+            this.form.enableSearch = '0';
+          }
+          // 非图像模型清空图像能力字段，避免类型切换后残留脏数据
+          if (this.form.modelType !== 'IMAGE') {
+            this.form.imageCapabilities = null;
+            this.form.modelFeatures = null;
+            this.form.modelDescription = null;
+          }
           if (this.form.id != null) {
             updateModel(this.form).then(() => {
               this.$modal.msgSuccess('修改成功')
@@ -748,6 +929,15 @@ export default {
         this.getList()
       }).catch(() => {})
     },
+    /** 设为默认绘图模型 */
+    handleSetDefaultImage(row) {
+      this.$modal.confirm(`确认将模型 "${row.name}" 设置为系统默认的图像生成 IMAGE 模型吗？`).then(() => {
+        return setDefaultImage(row.id)
+      }).then(() => {
+        this.$modal.msgSuccess('默认绘图模型切换成功')
+        this.getList()
+      }).catch(() => {})
+    },
     /** 获取提供商 pill 色彩类名 */
     getProviderTagType(provider) {
       if (!provider) return 'tag-slate';
@@ -756,6 +946,7 @@ export default {
       if (p === 'dashscope') return 'tag-purple';
       if (p === 'openai') return 'tag-indigo';
       if (p === 'ollama') return 'tag-amber';
+      if (p === 'ark') return 'tag-orange';
       return 'tag-slate';
     },
     /** 复制系统提示词 */
@@ -772,8 +963,28 @@ export default {
 }
 </script>
 
+<style lang="scss">
+/* 解决多选框选中文案在白底面板下显示为白色的全局样式最高优先级覆写 */
+html body .agent-workbench-container,
+html body .ai-model-manager,
+html body .el-dialog,
+html body .pane-card {
+  .el-checkbox {
+    .el-checkbox__label {
+      color: #334155 !important; /* 强制覆盖未选中时显示为深 Slate 灰色 */
+    }
+    &.is-checked {
+      .el-checkbox__label {
+        color: #4f46e5 !important; /* 强制覆盖选中时显示为明亮 Indigo 紫蓝色 */
+      }
+    }
+  }
+}
+</style>
+
 <style lang="scss" scoped>
 @use "@/assets/styles/polaris-ai.scss";
+
 .ai-model-manager {
   background: transparent !important;
   min-height: calc(100vh - 84px);
@@ -891,6 +1102,15 @@ export default {
       box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(59, 130, 246, 0.2) !important;
       .dark &, .theme-dark & {
         box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(59, 130, 246, 0.22) !important;
+      }
+    }
+  }
+  &.status-border-image {
+    border-color: rgba(245, 158, 11, 0.35);
+    &:hover {
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.06), 0 0 15px rgba(245, 158, 11, 0.2) !important;
+      .dark &, .theme-dark & {
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55), 0 0 25px rgba(245, 158, 11, 0.22) !important;
       }
     }
   }

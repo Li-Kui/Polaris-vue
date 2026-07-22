@@ -49,6 +49,14 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
             @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
 
     /**
+     * 获取指定类型下的默认模型配置 (is_default = '1')
+     */
+    AiModelConfig selectDefaultModel(
+            @org.apache.ibatis.annotations.Param("modelType") String modelType,
+            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
+            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
+
+    /**
      * 新增模型配置
      */
     int insertModelConfig(AiModelConfig config);
@@ -69,4 +77,11 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
      * 重置所有模型配置的默认向量模型状态 (将 is_default_embedding 置为 '0')
      */
     int cleanDefaultEmbeddingStatus(@org.apache.ibatis.annotations.Param("deptId") Long deptId);
+
+    /**
+     * 清除指定类型下的默认模型状态
+     */
+    int cleanDefaultStatus(
+            @org.apache.ibatis.annotations.Param("modelType") String modelType,
+            @org.apache.ibatis.annotations.Param("deptId") Long deptId);
 }
