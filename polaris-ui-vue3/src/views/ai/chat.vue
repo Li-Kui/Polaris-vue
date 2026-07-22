@@ -687,6 +687,7 @@
                 width="240"
                 trigger="click"
                 popper-class="pill-selector-popper popper-model"
+                @show="loadModels"
               >
                 <template #reference>
                   <button :disabled="isStreaming" class="config-pill-btn pill-model">
@@ -717,6 +718,7 @@
                 width="240"
                 trigger="click"
                 popper-class="pill-selector-popper popper-kb"
+                @show="loadKnowledgeBases"
               >
                 <template #reference>
                   <button :disabled="isStreaming" :class="['config-pill-btn pill-kb', { 'is-active': selectedKbId }]">
@@ -755,6 +757,7 @@
                 width="240"
                 trigger="click"
                 popper-class="pill-selector-popper popper-workflow"
+                @show="loadWorkflows"
               >
                 <template #reference>
                   <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode }]">
@@ -1129,6 +1132,12 @@ export default {
   mounted() {
     this.loadConvList(true)
     document.body.classList.add('ai-chat-page')
+  },
+  activated() {
+    // 监听 Tab 唤醒生命周期，在从模型/知识库管理页切回时静默同步最新配置
+    this.loadModels()
+    this.loadKnowledgeBases()
+    this.loadWorkflows()
   },
   beforeUnmount() {
     this.abortStream()
@@ -1618,11 +1627,14 @@ export default {
             }]
             this.selectedModelConfigId = null
           } else {
-            const defModel = this.models.find(m => m.isDefault === '1')
-            if (defModel) {
-              this.selectedModelConfigId = defModel.id
-            } else if (this.models.length > 0) {
-              this.selectedModelConfigId = this.models[0].id
+            const currentExist = this.models.find(m => m.id === this.selectedModelConfigId)
+            if (!currentExist) {
+              const defModel = this.models.find(m => m.isDefault === '1')
+              if (defModel) {
+                this.selectedModelConfigId = defModel.id
+              } else if (this.models.length > 0) {
+                this.selectedModelConfigId = this.models[0].id
+              }
             }
           }
         }
