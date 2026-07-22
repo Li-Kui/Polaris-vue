@@ -80,10 +80,10 @@ public class AiChatController extends BaseController {
     @PostMapping("/conversations")
     @ResponseBody
     public ResultData createConversation(
-            @RequestParam(required = false) String model,
+            @RequestParam(required = false) Long modelConfigId,
             @RequestParam(required = false) Long knowledgeBaseId) {
         Long userId = SecurityUtils.getUserId();
-        AiConversation conv = aiChatService.createConversation(userId, model, knowledgeBaseId);
+        AiConversation conv = aiChatService.createConversation(userId, modelConfigId, knowledgeBaseId);
         return ok(conv);
     }
 
@@ -113,10 +113,10 @@ public class AiChatController extends BaseController {
     @ResponseBody
     public ResultData updateConversationConfig(
             @PathVariable Long id,
-            @RequestParam(required = false) String model,
+            @RequestParam(required = false) Long modelConfigId,
             @RequestParam(required = false) Long knowledgeBaseId) {
         Long userId = SecurityUtils.getUserId();
-        aiChatService.updateConversationConfig(id, model, knowledgeBaseId, userId);
+        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, userId);
         return ok();
     }
 
@@ -135,6 +135,23 @@ public class AiChatController extends BaseController {
     public ResultData deleteConversation(@PathVariable Long id) {
         Long userId = SecurityUtils.getUserId();
         aiChatService.deleteConversation(id, userId);
+        return ok();
+    }
+
+    /**
+     * 批量删除会话（逻辑删除会话列表 + 物理删除关联的所有消息）
+     * DELETE /ai/chat/conversations/batch
+     *
+     * @param ids 会话 ID 列表
+     * @return 操作结果
+     */
+    @Operation(summary = "批量删除会话")
+    @Log(title = "AI对话", businessType = BusinessType.DELETE)
+    @DeleteMapping("/conversations/batch")
+    @ResponseBody
+    public ResultData deleteConversationsBatch(@RequestBody List<Long> ids) {
+        Long userId = SecurityUtils.getUserId();
+        aiChatService.deleteConversationsBatch(ids, userId);
         return ok();
     }
 
@@ -180,9 +197,22 @@ public class AiChatController extends BaseController {
     public SseEmitter stream(@RequestParam Long conversationId,
                              @RequestParam String message,
                              @RequestParam(required = false) String fileUrl,
+                             @RequestParam(required = false) String agentCode,
                              @RequestParam(required = false, defaultValue = "false") Boolean enableSearch) {
         SseEmitter emitter = new SseEmitter(0L);
         Long userId = SecurityUtils.getUserId();
+
+        // 抓取当前主线程的域名与端口，利用 polaris-common 的 ServletUtils 规避跨模块依赖
+        String baseUrl = "";
+        try {
+            jakarta.servlet.http.HttpServletRequest request = com.polaris.common.utils.ServletUtils.getRequest();
+            StringBuffer url = request.getRequestURL();
+            String contextPath = request.getServletContext().getContextPath();
+            baseUrl = url.delete(url.length() - request.getRequestURI().length(), url.length()).append(contextPath).toString();
+        } catch (Exception e) {
+            baseUrl = "";
+        }
+        final String finalBaseUrl = baseUrl;
 
         // 获取当前主线程的安全上下文（包含已登录用户信息）
         final SecurityContext context = SecurityContextHolder.getContext();
@@ -192,8 +222,12 @@ public class AiChatController extends BaseController {
             try {
                 // 将安全上下文绑定到子线程
                 SecurityContextHolder.setContext(context);
-                aiChatService.chat(conversationId, message, fileUrl, enableSearch, userId, emitter);
+                // 将域名设置到 ThreadLocal 中
+                com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
+                aiChatService.chat(conversationId, message, fileUrl, agentCode, enableSearch, userId, emitter);
             } finally {
+                // 清理 ThreadLocal
+                com.polaris.ai.utils.BaseUrlHolder.clear();
                 // 执行完成后清除上下文，避免对线程造成污染
                 SecurityContextHolder.clearContext();
             }

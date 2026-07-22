@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -21,6 +23,7 @@ public class AiDocument extends BaseEntity
 
     /** 文档主键 ID */
     @Schema(description = "文档主键 ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 关联的知识库 ID */

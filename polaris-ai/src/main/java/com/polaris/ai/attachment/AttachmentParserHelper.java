@@ -43,8 +43,9 @@ public class AttachmentParserHelper {
         fileUrl = fileUrl.trim();
         log.info("开始解析AI对话附件资源: {}", fileUrl);
 
-        boolean isNetworkUrl = fileUrl.toLowerCase(Locale.ROOT).startsWith("http://") 
-                || fileUrl.toLowerCase(Locale.ROOT).startsWith("https://");
+        boolean isNetworkUrl = (fileUrl.toLowerCase(Locale.ROOT).startsWith("http://") 
+                || fileUrl.toLowerCase(Locale.ROOT).startsWith("https://"))
+                && !fileUrl.contains("/profile/");
 
         File fileToProcess = null;
         boolean needDeleteTempFile = false;
@@ -62,8 +63,11 @@ public class AttachmentParserHelper {
                 // 如果是本地北辰的 /profile 资源
                 String localPath = PolarisConfig.getProfile();
                 String relativePath = fileUrl;
-                if (fileUrl.startsWith("/profile")) {
-                    relativePath = fileUrl.substring("/profile".length());
+                if (fileUrl.contains("/profile/")) {
+                    relativePath = fileUrl.substring(fileUrl.indexOf("/profile/"));
+                }
+                if (relativePath.startsWith("/profile")) {
+                    relativePath = relativePath.substring("/profile".length());
                 }
                 fileToProcess = new File(localPath + relativePath);
                 log.info("映射到本地绝对路径: {}", fileToProcess.getAbsolutePath());

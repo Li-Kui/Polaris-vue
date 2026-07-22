@@ -1,0 +1,37 @@
+/* ==========================================================================
+   北辰 / Polaris 全局设计系统 Token (亮 / 暗双色自适应)
+   用法：所有 AI 模块页面统一引用此文件，通过 .dark 类自动切换
+   ========================================================================== */
+:root {
+  /* ✦ 极光亮色 (Glacier Light) */
+  --polaris-bg: #f1f5f9;
+  --polaris-card-bg: rgba(255, 255, 255, 0.65);
+  --polaris-card-border: rgba(255, 255, 255, 0.5);
+  --polaris-inner-border: rgba(0, 0, 0, 0.05);
+  --polaris-text-main: #0f172a;
+  --polaris-text-sub: #64748b;
+  --polaris-brand-color: #4f46e5;
+  --polaris-brand-hover: rgba(79, 70, 229, 0.06);
+  --polaris-brand-glow: rgba(79, 70, 229, 0.15);
+  --polaris-danger-color: #ef4444;
+  --polaris-danger-hover: rgba(239, 68, 68, 0.06);
+  --polaris-thinking-color: #b45309;
+  --polaris-thinking-glow: rgba(180, 83, 9, 0.15);
+}
+
+.dark {
+  /* ✦ 深空暗色 (Obsidian Dark) */
+  --polaris-bg: #080a10;
+  --polaris-card-bg: rgba(10, 15, 30, 0.55);
+  --polaris-card-border: rgba(255, 255, 255, 0.05);
+  --polaris-inner-border: rgba(255, 255, 255, 0.08);
+  --polaris-text-main: #f8fafc;
+  --polaris-text-sub: #94a3b8;
+  --polaris-brand-color: #38bdf8;
+  --polaris-brand-hover: rgba(255, 255, 255, 0.05);
+  --polaris-brand-glow: rgba(56, 189, 248, 0.2);
+  --polaris-danger-color: #fca5a5;
+  --polaris-danger-hover: rgba(239, 68, 68, 0.15);
+  --polaris-thinking-color: #dfb889;
+  --polaris-thinking-glow: rgba(223, 184, 137, 0.15);
+}

@@ -10,6 +10,7 @@
         <result property="title"           column="title"         />
         <result property="userId"          column="user_id"       />
         <result property="model"           column="model"         />
+        <result property="modelConfigId"   column="model_config_id" />
         <result property="delFlag"         column="del_flag"      />
         <result property="knowledgeBaseId" column="knowledge_base_id" />
         <result property="createTime"      column="create_time"   />
@@ -32,8 +33,8 @@
 
     <insert id="insertConversation" parameterType="com.polaris.ai.domain.AiConversation"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_conversation(title, user_id, model, del_flag, knowledge_base_id, create_by, create_time, update_time)
-        VALUES (#{title}, #{userId}, #{model}, '0', #{knowledgeBaseId}, #{createBy}, NOW(), NOW())
+        INSERT INTO ai_conversation(title, user_id, model, model_config_id, del_flag, knowledge_base_id, agent_code, workflow_code, create_by, create_time, update_time)
+        VALUES (#{title}, #{userId}, #{model}, #{modelConfigId}, '0', #{knowledgeBaseId}, #{agentCode}, #{workflowCode}, #{createBy}, NOW(), NOW())
     </insert>
 
     <update id="updateConversationTitle">
@@ -45,7 +46,10 @@
         UPDATE ai_conversation
         <set>
             <if test="model != null and model != ''">model = #{model},</if>
+            <if test="modelConfigId != null">model_config_id = #{modelConfigId},</if>
             knowledge_base_id = #{knowledgeBaseId},
+            agent_code = #{agentCode},
+            workflow_code = #{workflowCode},
             update_time = NOW()
         </set>
         WHERE id = #{id} AND user_id = #{userId}
@@ -81,8 +85,36 @@
         LIMIT 100
     </select>
 
+    <select id="selectLatestUserMessageWithImage" resultMap="MessageResult">
+        SELECT * FROM ai_message
+        WHERE conversation_id = #{conversationId}
+          AND role = 'user'
+          AND file_url IS NOT NULL
+          AND file_url != ''
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
     <delete id="deleteMessagesByConversationId">
         DELETE FROM ai_message WHERE conversation_id = #{conversationId}
+    </delete>
+
+    <update id="deleteConversationsBatch">
+        UPDATE ai_conversation
+        SET del_flag = '2'
+        WHERE user_id = #{userId}
+          AND id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+    <delete id="deleteMessagesByConversationIds">
+        DELETE FROM ai_message
+        WHERE conversation_id IN
+        <foreach item="convId" collection="conversationIds" open="(" separator="," close=")">
+            #{convId}
+        </foreach>
     </delete>
 
 </mapper>

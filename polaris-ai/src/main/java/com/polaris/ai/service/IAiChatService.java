@@ -25,7 +25,7 @@ public interface IAiChatService extends IService<AiConversation>
      * @param knowledgeBaseId 关联的知识库 ID（非必填）
      * @return 创建成功的会话实体（含自动回填的 id）
      */
-    AiConversation createConversation(Long userId, String model, Long knowledgeBaseId);
+    AiConversation createConversation(Long userId, Long modelConfigId, Long knowledgeBaseId);
 
     /**
      * 查询当前用户的所有会话列表
@@ -66,7 +66,7 @@ public interface IAiChatService extends IService<AiConversation>
      * @param userId          用户 ID
      * @return 影响行数
      */
-    int updateConversationConfig(Long id, String model, Long knowledgeBaseId, Long userId);
+    int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId);
 
     /**
      * 删除会话（逻辑删除会话 + 物理删除该会话下所有消息）
@@ -77,6 +77,15 @@ public interface IAiChatService extends IService<AiConversation>
      * @return 影响行数
      */
     int deleteConversation(Long id, Long userId);
+
+    /**
+     * 批量删除会话（逻辑删除会话列表 + 物理删除关联的所有消息）
+     *
+     * @param ids    会话 ID 列表
+     * @param userId 当前登录用户 ID
+     * @return 影响行数
+     */
+    int deleteConversationsBatch(List<Long> ids, Long userId);
 
     /**
      * 发送消息并以 SSE 流式返回 AI 回复
@@ -90,5 +99,5 @@ public interface IAiChatService extends IService<AiConversation>
      * @param userId         当前登录用户 ID（用于鉴权）
      * @param emitter        SSE 发发射器，由 Controller 创建并传入
      */
-    void chat(Long conversationId, String userMessage, String fileUrl, Boolean enableSearch, Long userId, SseEmitter emitter);
+    void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter);
 }

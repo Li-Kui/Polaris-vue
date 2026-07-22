@@ -1,5 +1,7 @@
 package com.polaris.ai.domain;
 
+import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -20,6 +22,7 @@ public class AiAgent extends BaseEntity {
 
     /** 主键ID */
     @Schema(description = "主键ID")
+    @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 智能体唯一编码 */
@@ -33,6 +36,10 @@ public class AiAgent extends BaseEntity {
     /** 底座大模型名称 */
     @Schema(description = "底座大模型名称")
     private String modelName;
+
+    /** 底座大模型配置ID */
+    @Schema(description = "底座大模型配置ID")
+    private Long modelConfigId;
 
     /** 系统角色提示词 */
     @Schema(description = "系统角色提示词")

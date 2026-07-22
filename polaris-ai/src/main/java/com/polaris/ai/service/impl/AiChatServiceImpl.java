@@ -9,17 +9,12 @@ import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
+import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
-import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
-import com.polaris.system.service.ISysConfigService;
-import com.polaris.system.service.ISysRoleService;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -78,16 +73,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     private AiChatMapper aiChatMapper;
 
     @Autowired
-    private ISysRoleService roleService;
-
-    @Autowired
-    private ISysConfigService configService;
-
-    @Autowired
-    private IAiModelConfigService modelConfigService;
-
-    @Autowired
     private com.polaris.ai.pivot.AiModelFactory modelFactory;
+
+    @Autowired
+    private IAiAgentService agentService;
 
     @Autowired
     private MultimodalMediaHelper mediaHelper;
@@ -109,11 +98,31 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      * 新建会话 model 参数为空时，取 application.yml 中配置 of 默认模型名
      */
     @Override
-    public AiConversation createConversation(Long userId, String model, Long knowledgeBaseId) {
+    public AiConversation createConversation(Long userId, Long modelConfigId, Long knowledgeBaseId) {
         AiConversation conv = new AiConversation();
         conv.setUserId(userId);
         conv.setTitle("新对话");
-        conv.setModel(model == null ? modelProps.getModelName() : model);
+
+        if (modelConfigId == null) {
+            try {
+                com.polaris.ai.domain.AiModelConfig defaultCfg = modelFactory.getDefaultChatModelConfig();
+                if (defaultCfg != null) {
+                    conv.setModelConfigId(defaultCfg.getId());
+                    conv.setModel(defaultCfg.getModelName());
+                } else {
+                    conv.setModel(modelProps.getModelName());
+                }
+            } catch (Exception e) {
+                conv.setModel(modelProps.getModelName());
+            }
+        } else {
+            conv.setModelConfigId(modelConfigId);
+            com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
+            if (cfg != null) {
+                conv.setModel(cfg.getModelName());
+            }
+        }
+
         conv.setKnowledgeBaseId(knowledgeBaseId);
         conv.setCreateBy(SecurityUtils.getUsername());
         aiChatMapper.insertConversation(conv);
@@ -146,8 +155,15 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     }
 
     @Override
-    public int updateConversationConfig(Long id, String model, Long knowledgeBaseId, Long userId) {
-        return aiChatMapper.updateConversationConfig(id, model, knowledgeBaseId, userId);
+    public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId) {
+        String modelName = null;
+        if (modelConfigId != null) {
+            com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
+            if (cfg != null) {
+                modelName = cfg.getModelName();
+            }
+        }
+        return aiChatMapper.updateConversationConfig(id, modelName, modelConfigId, knowledgeBaseId, userId);
     }
 
     /**
@@ -157,6 +173,16 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     public int deleteConversation(Long id, Long userId) {
         aiChatMapper.deleteMessagesByConversationId(id);
         return aiChatMapper.deleteConversation(id, userId);
+    }
+
+    @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
+    public int deleteConversationsBatch(List<Long> ids, Long userId) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        aiChatMapper.deleteMessagesByConversationIds(ids);
+        return aiChatMapper.deleteConversationsBatch(ids, userId);
     }
 
     // ----------------------------------------------------------------
@@ -175,7 +201,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      * 6. 流式结束后持久化完整 AI 回复及 Token 消耗
      */
     @Override
-    public void chat(Long conversationId, String userInput, String fileUrl, Boolean enableSearch, Long userId, SseEmitter emitter) {
+    public void chat(Long conversationId, String userInput, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter) {
         // 1. 鉴权：会话必须属于当前用户
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
         if (conv == null) {
@@ -188,11 +214,24 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         String fileName = null;
         if (fileUrl != null && !fileUrl.trim().isEmpty()) {
             sseHelper.sendSse(emitter, "status", "正在解析文件附件...");
-            parsedAttachmentContent = AttachmentParserHelper.parse(fileUrl);
+            String[] urls = fileUrl.split(",");
+            StringBuilder sbContent = new StringBuilder();
+            StringBuilder sbNames = new StringBuilder();
+            for (String url : urls) {
+                String trimmedUrl = url.trim();
+                if (trimmedUrl.isEmpty()) continue;
+                String content = AttachmentParserHelper.parse(trimmedUrl);
+                if (content != null && !content.trim().isEmpty()) {
+                    sbContent.append("【附件: ").append(trimmedUrl.substring(trimmedUrl.lastIndexOf("/") + 1)).append("】\n")
+                            .append(content).append("\n\n");
+                }
+                String name = trimmedUrl.substring(trimmedUrl.lastIndexOf("/") + 1);
+                if (sbNames.length() > 0) sbNames.append(",");
+                sbNames.append(name);
+            }
+            parsedAttachmentContent = sbContent.toString();
+            fileName = sbNames.toString();
             sseHelper.sendSse(emitter, "status", "附件解析成功，正在初始化 AI 思考...");
-            fileName = fileUrl.substring(fileUrl.lastIndexOf("/") + 1);
-
-            // 安全限制：若解析内容过大超过 28000 字符，进行截断，防止超限报错
             if (parsedAttachmentContent != null && parsedAttachmentContent.length() > 28000) {
                 parsedAttachmentContent = parsedAttachmentContent.substring(0, 28000)
                         + "\n\n...[由于文件附件体积过大，已自动截断保留前 28000 字符内容]...";
@@ -216,8 +255,22 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             aiChatMapper.updateConversationTitle(conversationId, autoTitle, userId);
         }
 
-        // 4. 构建完整的消息上下文（SystemMessage + 历史消息）
+        // 4. 智能体检测与上下文构建
+        com.polaris.ai.domain.AiAgent selectedAgent = null;
+        if (agentCode != null && !agentCode.trim().isEmpty()) {
+            try {
+                selectedAgent = agentService.selectAgentByCode(agentCode);
+                log.info(">>> 当前对话使用专属智能体: {} ({})", selectedAgent.getAgentName(), agentCode);
+            } catch (Exception e) {
+                log.error(">>> 查询指定智能体失败: {}", agentCode, e);
+            }
+        }
+
+        // 构建完整的消息上下文（SystemMessage + 历史消息）
         List<ChatMessage> messages = buildMessages(conversationId, userId);
+        if (selectedAgent != null && selectedAgent.getSystemPrompt() != null && !selectedAgent.getSystemPrompt().trim().isEmpty()) {
+            messages.add(0, dev.langchain4j.data.message.SystemMessage.from(selectedAgent.getSystemPrompt()));
+        }
 
         // 4.1 判断是否需要启用向量检索器
         ContentRetriever contentRetriever = null;
@@ -233,20 +286,46 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
 
         // 5. 使用 AiServices 动态构建代理并注册工具类
+        // 设置对话上下文，供绘图工具在执行时抓取会话ID与已上传图片URL
+        // （PropagatingExecutor 在构造时快照读取，必须早于 getContextAwareTools）
+        com.polaris.ai.utils.ChatContextHolder.setConversationId(conversationId);
+        if (fileUrl != null && !fileUrl.trim().isEmpty()) {
+            com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
+        }
         SecurityContext securityContext = SecurityContextHolder.getContext();
         String searchKey = null;
+        String enabledTools = null;
         try {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelFactory.getModelConfig(conv.getModelConfigId());
             if (modelConfig != null) {
                 searchKey = modelConfig.getSearchKey();
+                // 优先使用模型配置中定义的工具白名单（在模型设置页面配置）
+                enabledTools = modelConfig.getEnabledTools();
             }
         } catch (Exception e) {
-            log.error(">>> 查询模型配置失败，无法提取 searchKey: {}", e.getMessage());
+            log.error(">>> 查询模型配置失败，无法提取工具配置: {}", e.getMessage());
         }
-        Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, Boolean.TRUE.equals(enableSearch), searchKey);
+        // 1. 若前端开启了 enableSearch 开关（或包含联网搜索指令），将 web_search 融入工具链
+        if (Boolean.TRUE.equals(enableSearch)) {
+            if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                enabledTools = "web_search";
+            } else if (!enabledTools.contains("web_search")) {
+                enabledTools = enabledTools + ",web_search";
+            }
+        }
 
-        // 动态根据当前会话绑定的模型名称，获取对应的执行模型实例
-        StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModel());
+        // 2. 整合智能体绑定的专属工具链
+        if (selectedAgent != null && selectedAgent.getTools() != null && !selectedAgent.getTools().trim().isEmpty()) {
+            if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                enabledTools = selectedAgent.getTools();
+            } else {
+                enabledTools = enabledTools + "," + selectedAgent.getTools();
+            }
+        }
+        Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
+
+        // 动态根据当前会话绑定的模型ID，获取对应的执行模型实例
+        StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModelConfigId());
 
         AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
                 .streamingChatModel(targetChatModel)
@@ -305,6 +384,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     emitter.complete();
                 })
                 .start();
+
+        // 各工具的 PropagatingExecutor 已快照捕获上下文，这里清理请求线程防止线程复用污染
+        com.polaris.ai.utils.ChatContextHolder.clear();
     }
 
     // ----------------------------------------------------------------
@@ -336,8 +418,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         int max = modelProps.getMaxHistoryMessages();
 
         AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
-        if (conv != null && conv.getModel() != null) {
-            com.polaris.ai.domain.AiModelConfig modelConfig = modelConfigService.selectModelConfigByModelName(conv.getModel());
+        if (conv != null && conv.getModelConfigId() != null) {
+            com.polaris.ai.domain.AiModelConfig modelConfig = modelFactory.getModelConfig(conv.getModelConfigId());
             if (modelConfig != null) {
                 // 获取模型专属提示词
                 if (modelConfig.getSystemPrompt() != null && !modelConfig.getSystemPrompt().trim().isEmpty()) {
@@ -367,19 +449,62 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 String fileUrl = m.getFileUrl();
                 if (fileUrl != null && !fileUrl.trim().isEmpty()) {
                     String fileName = m.getFileName() != null ? m.getFileName() : "";
-                    if (mediaHelper.isImageFile(fileName)) {
-                        list.add(mediaHelper.buildImageMessage(m.getContent(), fileUrl, fileName));
-                    } else if (fileName.toLowerCase().endsWith(".pdf")) {
-                        list.add(mediaHelper.buildPdfMultimodalMessage(m.getContent(), fileUrl, fileName, m.getFileContent()));
-                    } else {
-                        // 其他纯文本文档：常规提取纯文本拼接
-                        if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
-                            String combinedPrompt = m.getContent() + "\n\n"
-                                    + "--------------------------------------------------\n"
-                                    + "[已为您解析并关联对话附件: " + fileName + "]\n"
-                                    + "--------------------------------------------------\n"
-                                    + m.getFileContent();
+
+                    String[] urls = fileUrl.split(",");
+                    String[] names = fileName.split(",");
+
+                    List<Content> contents = new ArrayList<>();
+                    contents.add(TextContent.from(m.getContent()));
+
+                    boolean hasMultimodal = false;
+                    int imageCount = 0;
+                    for (int j = 0; j < urls.length; j++) {
+                        String url = urls[j].trim();
+                        if (url.isEmpty()) continue;
+                        String name = j < names.length ? names[j].trim() : url.substring(url.lastIndexOf("/") + 1);
+
+                        if (mediaHelper.isImageFile(name)) {
+                            String base64 = mediaHelper.convertImageToBase64(url);
+                            if (base64 != null) {
+                                contents.add(ImageContent.from(base64, mediaHelper.getImageMimeType(name)));
+                                hasMultimodal = true;
+                                imageCount++;
+                            }
+                        } else if (name.toLowerCase().endsWith(".pdf")) {
+                            List<String> pagesBase64 = mediaHelper.renderPdfPagesToBase64(url, 3);
+                            if (pagesBase64 != null && !pagesBase64.isEmpty()) {
+                                for (String pageBase64 : pagesBase64) {
+                                    contents.add(ImageContent.from(pageBase64, "image/png"));
+                                }
+                                hasMultimodal = true;
+                            }
+                        }
+                    }
+
+                    // 多图场景注入顺序说明，让模型能准确理解用户对"图1/图2"的指代（改图/参考图工具依赖此顺序）
+                    String orderNote = imageCount >= 2
+                            ? "【本条消息包含 " + imageCount + " 张图片，按上传先后顺序依次为图1、图2……"
+                                + "请严格按此序号理解用户对『图N』的指代】\n"
+                            : "";
+
+                    if (m.getFileContent() != null && !m.getFileContent().trim().isEmpty()) {
+                        String combinedPrompt = orderNote + m.getContent() + "\n\n"
+                                + "--------------------------------------------------\n"
+                                + "[已为您解析并关联对话附件: " + fileName + "]\n"
+                                + "--------------------------------------------------\n"
+                                + m.getFileContent();
+                        if (hasMultimodal) {
+                            contents.set(0, TextContent.from(combinedPrompt));
+                            list.add(UserMessage.from(contents));
+                        } else {
                             list.add(UserMessage.from(combinedPrompt));
+                        }
+                    } else {
+                        if (hasMultimodal) {
+                            if (!orderNote.isEmpty()) {
+                                contents.set(0, TextContent.from(orderNote + m.getContent()));
+                            }
+                            list.add(UserMessage.from(contents));
                         } else {
                             list.add(UserMessage.from(m.getContent()));
                         }

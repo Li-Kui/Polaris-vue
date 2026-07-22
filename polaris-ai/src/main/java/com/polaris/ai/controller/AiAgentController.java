@@ -12,6 +12,7 @@ import com.polaris.common.core.domain.ResultData;
 import com.polaris.common.core.page.Page;
 import com.polaris.common.enums.BusinessType;
 import com.polaris.common.utils.SecurityUtils;
+import dev.langchain4j.agent.tool.Tool;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +67,66 @@ public class AiAgentController extends BaseController {
         }
         return ok(toolsList);
     }
+    
+    /**
+     * 获取系统所有含有 @Tool 注解的方法字典映射（用于前端动态替换英文方法名）
+     * GET /ai/agent/tools/dictionary
+     */
+    @Operation(summary = "获取所有工具方法中英文名称映射词典")
+    @GetMapping("/tools/dictionary")
+    public ResultData<Map<String, String>> getToolsDictionary() {
+        Map<String, String> dictionary = new HashMap<>();
+        
+        // 1. 扫描 @Tool 注解的方法
+        if (allTools != null) {
+            for (AiTool tool : allTools) {
+                Class<?> targetClass = AopUtils.getTargetClass(tool);
+                for (java.lang.reflect.Method method : targetClass.getDeclaredMethods()) {
+                    if (method.isAnnotationPresent(Tool.class)) {
+                        Tool toolAnn = method.getAnnotation(Tool.class);
+                        String methodName = method.getName();
+                        
+                        // 从 @Tool 的描述里提取第一句话或者前面的中文作为友好展示名
+                        String[] descriptions = toolAnn.value();
+                        String description = (descriptions != null && descriptions.length > 0) ? descriptions[0] : "";
+                        String friendlyName = extractFriendlyName(methodName, description);
+                        
+                        dictionary.put(methodName, friendlyName);
+                    }
+                }
+            }
+        }
+        
+        // 2. 扫描已有的智能体 code 和名称
+        List<AiAgent> agents = agentService.list();
+        if (agents != null) {
+            for (AiAgent agent : agents) {
+                if (agent.getAgentCode() != null && agent.getAgentName() != null) {
+                    dictionary.put(agent.getAgentCode(), agent.getAgentName());
+                }
+            }
+        }
+        
+        // 3. 扫描工作流节点 executor 常用名称（比如 intent_router 等）
+        dictionary.put("intent_router", "意图分发员");
+        dictionary.put("sys_user_analyst", "系统用户审计师");
+        dictionary.put("sys_user_query", "系统用户查询员");
+        dictionary.put("sys_user_audit", "系统用户审计师");
+        
+        return ok(dictionary);
+    }
+    
+    private String extractFriendlyName(String methodName, String description) {
+        if (description == null || description.trim().isEmpty()) {
+            return methodName;
+        }
+        // 对 Tool 描述文本进行处理，提取出第一个中文字句
+        String firstSentence = description.split("[,，.。;；\\n]")[0].trim();
+        if (firstSentence.length() > 20) {
+            return firstSentence.substring(0, 20) + "...";
+        }
+        return firstSentence.isEmpty() ? methodName : firstSentence;
+    }
 
     /**
      * 条件分页查询智能体配置列表
@@ -84,11 +145,14 @@ public class AiAgentController extends BaseController {
      * GET /ai/agent/list/all
      */
     @Operation(summary = "获取所有启用的智能体列表")
-    @GetMapping("/list/all")
+    @GetMapping({"/list/all", "/active/list"})
     public ResultData<List<AiAgent>> listAll() {
         AiAgent query = new AiAgent();
-        query.setStatus("1");
+        query.setStatus("0");
         List<AiAgent> list = agentService.selectAgentList(query);
+        if (list == null || list.isEmpty()) {
+            list = agentService.list();
+        }
         return ok(list);
     }
 

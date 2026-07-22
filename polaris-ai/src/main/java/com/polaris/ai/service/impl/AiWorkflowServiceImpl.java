@@ -5,8 +5,11 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.domain.AiWorkflow;
 import com.polaris.ai.mapper.AiWorkflowMapper;
 import com.polaris.ai.service.IAiWorkflowService;
+import com.polaris.ai.workflow.langgraph.LangGraph4jEngine;
 import com.polaris.common.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -19,6 +22,38 @@ import java.util.List;
 @Slf4j
 @Service
 public class AiWorkflowServiceImpl extends ServiceImpl<AiWorkflowMapper, AiWorkflow> implements IAiWorkflowService {
+
+    @Autowired
+    @Lazy
+    private LangGraph4jEngine langGraph4jEngine;
+
+    @Override
+    public boolean save(AiWorkflow entity) {
+        fillGraphJson(entity);
+        return super.save(entity);
+    }
+
+    @Override
+    public boolean updateById(AiWorkflow entity) {
+        fillGraphJson(entity);
+        return super.updateById(entity);
+    }
+
+    private void fillGraphJson(AiWorkflow entity) {
+        if (entity != null) {
+            String nodes = entity.getNodes();
+            String graphJson = entity.getGraphJson();
+            if (StringUtils.isNotEmpty(nodes) && StringUtils.isEmpty(graphJson)) {
+                try {
+                    log.info(">>> [AiWorkflowServiceImpl] 检测到 nodes 存在且 graphJson 为空，自动开始编译填充...");
+                    String converted = langGraph4jEngine.convertNodesToGraphJson(nodes);
+                    entity.setGraphJson(converted);
+                } catch (Exception e) {
+                    log.error(">>> [AiWorkflowServiceImpl] 自动填充 graphJson 发生异常", e);
+                }
+            }
+        }
+    }
 
     @Override
     public AiWorkflow selectWorkflowByCode(String workflowCode) {

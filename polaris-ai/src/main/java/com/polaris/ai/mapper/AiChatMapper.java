@@ -48,7 +48,7 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      * @param knowledgeBaseId 知识库 ID
      * @param userId          用户 ID
      */
-    int updateConversationConfig(@Param("id") Long id, @Param("model") String model, @Param("knowledgeBaseId") Long knowledgeBaseId, @Param("userId") Long userId);
+    int updateConversationConfig(@Param("id") Long id, @Param("model") String model, @Param("modelConfigId") Long modelConfigId, @Param("knowledgeBaseId") Long knowledgeBaseId, @Param("userId") Long userId);
 
     /**
      * 逻辑删除会话（将 status 置为 0，不物理删除）
@@ -102,6 +102,14 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
     List<AiMessage> selectMessagesByConversationId(Long conversationId);
 
     /**
+     * 根据会话 ID 查询该会话下最新的一条带有图片附件的用户消息
+     *
+     * @param conversationId 会话 ID
+     * @return 消息实体
+     */
+    AiMessage selectLatestUserMessageWithImage(@Param("conversationId") Long conversationId);
+
+    /**
      * 物理删除指定会话下的所有消息
      * 通常在删除会话时级联调用，先删消息再删会话
      *
@@ -109,4 +117,21 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      * @return 影响行数
      */
     int deleteMessagesByConversationId(Long conversationId);
+
+    /**
+     * 逻辑删除指定的会话列表（限制只能删除当前用户的会话）
+     *
+     * @param ids    会话 ID 列表
+     * @param userId 用户 ID
+     * @return 影响行数
+     */
+    int deleteConversationsBatch(@Param("ids") List<Long> ids, @Param("userId") Long userId);
+
+    /**
+     * 物理删除多个会话下的所有消息
+     *
+     * @param conversationIds 会话 ID 列表
+     * @return 影响行数
+     */
+    int deleteMessagesByConversationIds(@Param("conversationIds") List<Long> conversationIds);
 }

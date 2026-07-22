@@ -21,15 +21,14 @@ import java.util.List;
 
 /**
  * AI 模型配置控制器
- * 
+ *
  * @author polaris
  */
 @ApiGroup(ApiVersionConstants.VERSION_2_0_0)
 @Tag(name = "AI模型管理")
 @RestController
 @RequestMapping("/ai/model")
-public class AiModelConfigController extends BaseController
-{
+public class AiModelConfigController extends BaseController {
     @Autowired
     private IAiModelConfigService modelConfigService;
 
@@ -41,8 +40,7 @@ public class AiModelConfigController extends BaseController
      */
     @Operation(summary = "查询模型配置列表")
     @GetMapping("/list")
-    public ResultData<Page<AiModelConfig>> list(AiModelConfig config)
-    {
+    public ResultData<Page<AiModelConfig>> list(AiModelConfig config) {
         startPage();
         List<AiModelConfig> list = modelConfigService.selectModelConfigList(config);
         return ok(getDataPage(list));
@@ -53,8 +51,7 @@ public class AiModelConfigController extends BaseController
      */
     @Operation(summary = "查询当前用户可用的大模型列表")
     @GetMapping("/list/available")
-    public ResultData<List<AiModelConfig>> listAvailable()
-    {
+    public ResultData<List<AiModelConfig>> listAvailable() {
         Long userId = SecurityUtils.getUserId();
         boolean isAdmin = SecurityUtils.isAdmin(userId);
         Long deptId = null;
@@ -72,8 +69,7 @@ public class AiModelConfigController extends BaseController
      */
     @Operation(summary = "获取模型配置详情")
     @GetMapping("/{id}")
-    public ResultData getInfo(@PathVariable Long id)
-    {
+    public ResultData getInfo(@PathVariable Long id) {
         return ok(modelConfigService.selectModelConfigById(id));
     }
 
@@ -83,8 +79,7 @@ public class AiModelConfigController extends BaseController
     @Operation(summary = "新增模型配置")
     @Log(title = "模型管理", businessType = BusinessType.INSERT)
     @PostMapping
-    public ResultData add(@RequestBody AiModelConfig config)
-    {
+    public ResultData add(@RequestBody AiModelConfig config) {
         config.setCreateBy(SecurityUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
@@ -92,14 +87,11 @@ public class AiModelConfigController extends BaseController
         if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
             config.setSearchKey(null);
         }
-        // 如果新增配置时指定为默认，则先清空其他默认状态
-        if ("1".equals(config.getIsDefault())) {
-            modelConfigService.cleanDefaultChatStatus();
+        // 如果新增配置时指定为默认模型，则先清空同部门（或全局）下该类型（modelType）的其他默认状态
+        if ("1".equals(config.getIsDefault()) && config.getModelType() != null) {
+            modelConfigService.cleanDefaultStatus(config.getModelType(), config.getDeptId());
         }
-        if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigService.cleanDefaultEmbeddingStatus();
-        }
-        
+
         int result = modelConfigService.insertModelConfig(config);
         modelFactory.clearCache(); // 清除工厂缓存以应用最新配置
         return toAjaxResult(result);
@@ -111,8 +103,21 @@ public class AiModelConfigController extends BaseController
     @Operation(summary = "修改模型配置")
     @Log(title = "模型管理", businessType = BusinessType.UPDATE)
     @PutMapping
-    public ResultData edit(@RequestBody AiModelConfig config)
-    {
+    public ResultData edit(@RequestBody AiModelConfig config) {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(config.getId());
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可编辑
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
         config.setUpdateBy(SecurityUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
@@ -120,12 +125,9 @@ public class AiModelConfigController extends BaseController
         if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
             config.setSearchKey(null);
         }
-        // 如果更新为默认，先清空其他默认状态
-        if ("1".equals(config.getIsDefault())) {
-            modelConfigService.cleanDefaultChatStatus();
-        }
-        if ("1".equals(config.getIsDefaultEmbedding())) {
-            modelConfigService.cleanDefaultEmbeddingStatus();
+        // 如果更新为默认模型，先清空同部门（或全局）下该类型（modelType）的其他默认状态
+        if ("1".equals(config.getIsDefault()) && config.getModelType() != null) {
+            modelConfigService.cleanDefaultStatus(config.getModelType(), config.getDeptId());
         }
 
         int result = modelConfigService.updateModelConfig(config);
@@ -139,8 +141,21 @@ public class AiModelConfigController extends BaseController
     @Operation(summary = "删除模型配置")
     @Log(title = "模型管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/{id}")
-    public ResultData remove(@PathVariable Long id)
-    {
+    public ResultData remove(@PathVariable Long id) {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可删除
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者删除");
+            }
+        }
+
         int result = modelConfigService.deleteModelConfigById(id);
         modelFactory.clearCache(); // 清除工厂缓存
         return toAjaxResult(result);
@@ -153,9 +168,22 @@ public class AiModelConfigController extends BaseController
     @Log(title = "模型管理", businessType = BusinessType.UPDATE)
     @Transactional(rollbackFor = Exception.class)
     @PutMapping("/{id}/default")
-    public ResultData setDefaultChat(@PathVariable Long id)
-    {
-        modelConfigService.cleanDefaultChatStatus();
+    public ResultData setDefaultChat(@PathVariable Long id) {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可操作
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
+        modelConfigService.cleanDefaultStatus("CHAT", existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
         config.setIsDefault("1");
@@ -171,12 +199,56 @@ public class AiModelConfigController extends BaseController
     @Log(title = "模型管理", businessType = BusinessType.UPDATE)
     @Transactional(rollbackFor = Exception.class)
     @PutMapping("/{id}/defaultEmbedding")
-    public ResultData setDefaultEmbedding(@PathVariable Long id)
-    {
-        modelConfigService.cleanDefaultEmbeddingStatus();
+    public ResultData setDefaultEmbedding(@PathVariable Long id) {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验：仅超管或创建者可操作
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
+        modelConfigService.cleanDefaultStatus("EMBEDDING", existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
-        config.setIsDefaultEmbedding("1");
+        config.setIsDefault("1");
+        int result = modelConfigService.updateModelConfig(config);
+        modelFactory.clearCache();
+        return toAjaxResult(result);
+    }
+
+    /**
+     * 设为默认绘图模型
+     */
+    @Operation(summary = "设为默认绘图模型")
+    @Log(title = "模型管理", businessType = BusinessType.UPDATE)
+    @Transactional(rollbackFor = Exception.class)
+    @PutMapping("/{id}/defaultImage")
+    public ResultData setDefaultImage(@PathVariable Long id) {
+        AiModelConfig existing = modelConfigService.selectModelConfigById(id);
+        if (existing == null) {
+            return ResultData.fail("模型配置不存在");
+        }
+
+        // 公共模型权限校验
+        if (existing.getDeptId() == null) {
+            boolean isAdmin = SecurityUtils.isAdmin();
+            String username = SecurityUtils.getUsername();
+            if (!isAdmin && !username.equals(existing.getCreateBy())) {
+                return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
+            }
+        }
+
+        modelConfigService.cleanDefaultStatus("IMAGE", existing.getDeptId());
+        AiModelConfig config = new AiModelConfig();
+        config.setId(id);
+        config.setIsDefault("1");
         int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache();
         return toAjaxResult(result);
