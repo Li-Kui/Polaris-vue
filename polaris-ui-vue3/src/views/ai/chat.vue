@@ -402,7 +402,7 @@
                         </div>
                         <div class="img-hover-actions">
                           <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(task.imageUrl))" />
-                          <el-button round size="small" icon="Refresh" title="重新生成" class="btn-img-regenerate" @click="handleRegenerate(task.prompt)">重新生成</el-button>
+                          <el-button round size="small" icon="Refresh" title="重新生成" class="btn-img-regenerate" @click="handleRegenerate(task, msg, index)">重新生成</el-button>
                         </div>
                       </div>
 
@@ -449,7 +449,7 @@
                           size="small" 
                           class="btn-regenerate"
                           icon="Refresh"
-                          @click="handleRegenerate(task.prompt)"
+                          @click="handleRegenerate(task, msg, index)"
                         >重新生成</el-button>
                       </div>
                     </div>
@@ -577,7 +577,7 @@
                       </div>
                     </div>
                   </div>
-                  <span class="user-text">{{ msg.content }}</span>
+                  <span class="user-text">{{ cleanUserContent(msg.content) }}</span>
                 </div>
               </div>
 
@@ -1372,9 +1372,85 @@ export default {
       document.body.removeChild(a);
     },
 
-    handleRegenerate(prompt) {
-      this.inputText = `帮我画：${prompt}`;
-      this.handleSend();
+    handleRegenerate(task, msg, msgIndex) {
+      if (this.isStreaming || this.uploadingAttachment) {
+        this.$message.warning('正在对话或上传中，请稍候...')
+        return
+      }
+
+      // 兼容 prompt 纯字符串或 task 对象的入参
+      let promptText = ''
+      if (typeof task === 'string') {
+        promptText = task
+      } else if (task && task.prompt) {
+        promptText = task.prompt
+      } else if (msg && msg.content) {
+        promptText = msg.content
+      }
+
+      if (!promptText) return
+
+      // 1. 优先提取当前任务或对应历史 user 消息中的参考原图
+      let attachedFiles = []
+      if (task && typeof task === 'object' && (task.fileUrl || task.refImageUrls)) {
+        const urls = (task.fileUrl || task.refImageUrls).split(',')
+        const names = (task.fileName || '').split(',')
+        attachedFiles = urls.map((url, i) => ({
+          name: names[i] || `原参考图${i + 1}.jpg`,
+          url: url
+        })).filter(f => f.url)
+      }
+
+      // 如果任务本身未记录，向上追溯上一条 user 消息的附件
+      if (attachedFiles.length === 0 && msgIndex !== undefined && msgIndex > 0) {
+        for (let i = msgIndex - 1; i >= 0; i--) {
+          const prevMsg = this.messages[i]
+          if (prevMsg && prevMsg.role === 'user' && prevMsg.fileUrl) {
+            const names = (prevMsg.fileName || '').split(',')
+            const urls = prevMsg.fileUrl.split(',')
+            attachedFiles = names.map((name, i) => ({
+              name: name || `原参考图${i + 1}.jpg`,
+              url: urls[i] || ''
+            })).filter(f => f.url)
+            break
+          }
+        }
+      }
+
+      // 如果没有传递 msgIndex，兜底遍历找到最后一条包含附件的 user 消息
+      if (attachedFiles.length === 0 && this.messages && this.messages.length > 0) {
+        for (let i = this.messages.length - 1; i >= 0; i--) {
+          const m = this.messages[i]
+          if (m && m.role === 'user' && m.fileUrl) {
+            const names = (m.fileName || '').split(',')
+            const urls = m.fileUrl.split(',')
+            attachedFiles = names.map((name, i) => ({
+              name: name || `原参考图${i + 1}.jpg`,
+              url: urls[i] || ''
+            })).filter(f => f.url)
+            break
+          }
+        }
+      }
+
+      // 2. 清理 Prompt 前缀，将其填入输入框，并载入参考原图附件
+      let cleanPrompt = promptText
+      if (cleanPrompt.startsWith('帮我画：')) {
+        cleanPrompt = cleanPrompt.replace('帮我画：', '')
+      } else if (cleanPrompt.startsWith('帮我画')) {
+        cleanPrompt = cleanPrompt.replace('帮我画', '')
+      }
+
+      this.inputText = cleanPrompt.trim()
+      this.attachments = attachedFiles
+
+      // 3. 自动滚动并聚焦到输入框，供用户修改调整后再发送
+      this.$nextTick(() => {
+        this.scrollToBottom()
+        this.focusInput()
+      })
+
+      this.$message.info('提示词与参考原图已装载至输入框，可修改提示词后按 Enter 重新生成')
     },
 
     getStepName(message, code) {
@@ -1925,9 +2001,6 @@ export default {
 
       // 追加用户气泡
       let displayContent = text
-      if (attachedFiles.length > 0) {
-        displayContent += '\n\n📎 附件: ' + attachedFiles.map(f => f.name).join(', ')
-      }
       this.messages.push({
         role: 'user',
         content: displayContent,
@@ -2893,6 +2966,11 @@ export default {
     // ──────────────────────────────────────────
     // 附件上传逻辑
     // ──────────────────────────────────────────
+    cleanUserContent(content) {
+      if (!content) return ''
+      return content.split('\n\n📎 附件:')[0].split('\n📎 附件:')[0].split('📎 附件:')[0].trim()
+    },
+
     beforeAttachmentUpload(file) {
       if (this.isStreaming) {
         this.$message.warning('正在对话中，暂不支持上传附件')
