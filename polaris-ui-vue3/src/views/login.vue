@@ -197,8 +197,8 @@
             <span class="polaris-star-spark">✦</span>
           </div>
 
-          <div class="auth-title">北辰星轨重构同步中...</div>
-          <div class="auth-sub">POLARIS NODE ALIGNMENT & DECRYPTION</div>
+          <div class="auth-title">正在登录系统，请稍候...</div>
+          <div class="auth-sub">系统安全验证与资源初始化中</div>
           
           <!-- 解密滚动日志控制台 -->
           <div class="auth-terminal-log">
@@ -213,8 +213,8 @@
             <div class="progress-bar-fill" :style="{ width: authProgress + '%' }"></div>
           </div>
           <div class="progress-info-row">
-            <span class="progress-percentage">{{ authProgress }}% SYNCHRONIZED</span>
-            <span class="progress-hz">Polaris-IV Matrix</span>
+            <span class="progress-percentage">{{ authProgress }}% 已完成加载</span>
+            <span class="progress-hz">北辰 AI 管理系统</span>
           </div>
         </div>
       </div>
@@ -337,6 +337,14 @@
       :mode="'pop'"
       @success="handleVerifySuccess"
     />
+
+    <!-- 页脚备案号与版权 -->
+    <div class="login-footer">
+      <span>Copyright © 2018-2026 Polaris All Rights Reserved.</span>
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" class="beian-link">
+        湘ICP备2026028400号-1
+      </a>
+    </div>
   </div>
 </template>
 
@@ -381,12 +389,12 @@ const loginRules = {
 }
 
 const consoleLogs = [
-  { tag: 'POLARIS', text: 'INITIATING COMPASS ORIENTATION...' },
-  { tag: 'NODE', text: 'CONNECTING TO BEICHEN QUANTUM MATRIX [GRID-01]' },
-  { tag: 'DECRYPT', text: 'SYNCHRONIZING URSA MAJOR DECRYPTION CODES' },
-  { tag: 'SENTINEL', text: 'POLARIS SENTINEL ACTIVE. SHIELD ENGAGED' },
-  { tag: 'COGNITIVE', text: 'ALIGNING NEURAL COGNITION PATHWAYS' },
-  { tag: 'SUCCESS', text: 'STELLAR COGNITIVE MATRIX SHIELD ALIGNED.' }
+  { tag: '身份验证', text: '正在验证安全凭证与身份信息...' },
+  { tag: '安全通道', text: '正在建立加密传输通道 [SEC-01]' },
+  { tag: '工作空间', text: '正在加载个人工作区与系统配置...' },
+  { tag: 'AI 引擎', text: '正在同步 AI 大模型服务与引擎节点...' },
+  { tag: '数据同步', text: '正在初始化用户权限与知识库连接...' },
+  { tag: '加载成功', text: '验证完成，即将为您进入北辰 AI 管理系统！' }
 ]
 
 // ===== 引力波控制 =====
@@ -2714,5 +2722,38 @@ body, .login-container {
 @keyframes logLineIn {
   0% { opacity: 0; transform: translateY(5px); }
   100% { opacity: 1; transform: translateY(0); }
+}
+
+.login-footer {
+  position: absolute;
+  bottom: 18px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--polaris-text-sub, rgba(148, 163, 184, 0.85));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  pointer-events: auto;
+
+  span {
+    opacity: 0.85;
+  }
+
+  .beian-link {
+    color: inherit;
+    text-decoration: none;
+    transition: all 0.2s ease;
+    opacity: 0.85;
+
+    &:hover {
+      color: #6366f1;
+      text-decoration: underline;
+      opacity: 1;
+    }
+  }
 }
 </style>
