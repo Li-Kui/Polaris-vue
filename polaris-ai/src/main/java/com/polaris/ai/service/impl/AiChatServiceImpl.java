@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -86,6 +87,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Autowired
     private AiToolRegistry toolRegistry;
+
+    @Autowired
+    private com.polaris.ai.router.IntentRouter intentRouter;
 
     @Autowired
     private SsePushHelper sseHelper;
@@ -291,14 +295,27 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 aiChatMapper.updateConversationTitle(conversationId, autoTitle, userId);
             }
 
-            // 4. 智能体检测与上下文构建
+            // 4. 动态解绑与智能体检测上下文构建（防御漏洞 2：防止历史 agentCode 持久化锁定）
+            String effectiveAgentCode = agentCode;
+            if (agentCode != null) {
+                String trimmed = agentCode.trim();
+                effectiveAgentCode = trimmed.isEmpty() ? null : trimmed;
+                if (!java.util.Objects.equals(conv.getAgentCode(), effectiveAgentCode)) {
+                    conv.setAgentCode(effectiveAgentCode);
+                    aiChatMapper.updateConversationConfig(conversationId, conv.getModel(), conv.getModelConfigId(), conv.getKnowledgeBaseId(), effectiveAgentCode, conv.getWorkflowCode(), userId);
+                    log.info(">>> [AiChatService] 会话 {} 智能体配置动态切换更新为: {}", conversationId, effectiveAgentCode);
+                }
+            } else {
+                effectiveAgentCode = conv.getAgentCode();
+            }
+
             com.polaris.ai.domain.AiAgent selectedAgent = null;
-            if (agentCode != null && !agentCode.trim().isEmpty()) {
+            if (effectiveAgentCode != null && !effectiveAgentCode.trim().isEmpty()) {
                 try {
-                    selectedAgent = agentService.selectAgentByCode(agentCode);
-                    log.info(">>> 当前对话使用专属智能体: {} ({})", selectedAgent.getAgentName(), agentCode);
+                    selectedAgent = agentService.selectAgentByCode(effectiveAgentCode);
+                    log.info(">>> 当前对话使用专属智能体: {} ({})", selectedAgent.getAgentName(), effectiveAgentCode);
                 } catch (Exception e) {
-                    log.error(">>> 查询指定智能体失败: {}", agentCode, e);
+                    log.error(">>> 查询指定智能体失败: {}", effectiveAgentCode, e);
                 }
             }
 
@@ -339,22 +356,64 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 } catch (Exception e) {
                     log.error(">>> 查询模型配置失败，无法提取工具配置: {}", e.getMessage());
                 }
-                if (Boolean.TRUE.equals(enableSearch)) {
-                    if (enabledTools == null || enabledTools.trim().isEmpty()) {
-                        enabledTools = "web_search";
-                    } else if (!enabledTools.contains("web_search")) {
-                        enabledTools = enabledTools + ",web_search";
+                Map<ToolSpecification, ToolExecutor> tools = new HashMap<>();
+
+                // 1. 如果用户显式选择了智能体 (Hard Route)，沿用智能体及模型绑定的显式工具
+                if (selectedAgent != null) {
+                    if (selectedAgent.getTools() != null && !selectedAgent.getTools().trim().isEmpty()) {
+                        if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                            enabledTools = selectedAgent.getTools();
+                        } else {
+                            enabledTools = enabledTools + "," + selectedAgent.getTools();
+                        }
+                    }
+                    if (Boolean.TRUE.equals(enableSearch)) {
+                        if (enabledTools == null || enabledTools.trim().isEmpty()) {
+                            enabledTools = "web_search";
+                        } else if (!enabledTools.contains("web_search")) {
+                            enabledTools = enabledTools + ",web_search";
+                        }
+                    }
+                    tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
+                } else {
+                    // 2. 未选择智能体 (Soft Route 软路由模式)
+                    com.polaris.ai.router.IntentRouter.RouteDecision decision = intentRouter.route(userInput, conversationId);
+                    log.info(">>> [AiChatService] 自动意图识别结果: {}, 原因: {}", decision.getType(), decision.getReason());
+
+                    if (decision.getType() == com.polaris.ai.router.IntentRouter.RouteType.TOOL_CALL || Boolean.TRUE.equals(enableSearch)) {
+                        // 使用 Tool-RAG 依据语义动态精准按需加载 Top-N 工具（受 1200 Tokens 全局预算保护）
+                        tools = toolRegistry.getRetrievedTools(userInput, securityContext, searchKey, 5);
+
+                        // 补全显式开启的联网搜索
+                        if (Boolean.TRUE.equals(enableSearch)) {
+                            Map<ToolSpecification, ToolExecutor> searchTools = toolRegistry.getContextAwareTools(securityContext, "web_search", searchKey);
+                            tools.putAll(searchTools);
+                        }
+                    } else if (enabledTools != null && !enabledTools.trim().isEmpty()) {
+                        tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
                     }
                 }
 
-                if (selectedAgent != null && selectedAgent.getTools() != null && !selectedAgent.getTools().trim().isEmpty()) {
-                    if (enabledTools == null || enabledTools.trim().isEmpty()) {
-                        enabledTools = selectedAgent.getTools();
-                    } else {
-                        enabledTools = enabledTools + "," + selectedAgent.getTools();
+                // 3. 第二阶：多轮对话工具 Schema 历史只读 Slim 降维防护（降维立省 80% 历史工具 Token 占用，防止 Prompt 爆表）
+                java.util.Set<String> historicalToolNames = extractHistoricalToolNames(messages);
+                if (!historicalToolNames.isEmpty()) {
+                    Map<ToolSpecification, ToolExecutor> historicalSlimTools = toolRegistry.getSlimToolsForHistory(historicalToolNames, securityContext, searchKey);
+                    if (historicalSlimTools != null && !historicalSlimTools.isEmpty()) {
+                        // 优先保留当次匹配到的全量 Schema，若当次未匹配到的历史旧工具，补充入 Slim 降维规范
+                        for (Map.Entry<ToolSpecification, ToolExecutor> entry : historicalSlimTools.entrySet()) {
+                            boolean alreadyExists = false;
+                            for (ToolSpecification existingSpec : tools.keySet()) {
+                                if (existingSpec.name().equals(entry.getKey().name())) {
+                                    alreadyExists = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyExists) {
+                                tools.put(entry.getKey(), entry.getValue());
+                            }
+                        }
                     }
                 }
-                Map<ToolSpecification, ToolExecutor> tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
 
                 StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModelConfigId());
 
@@ -621,14 +680,39 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         }
                     }
                 } else {
-                    list.add(UserMessage.from(m.getContent()));
+                    // assistant 消息转为 LangChain4j 的 AiMessage 类型
+                    list.add(AiMessage.from(m.getContent()));
                 }
-            } else {
-                // assistant 消息转为 LangChain4j 的 AiMessage 类型
-                list.add(AiMessage.from(m.getContent()));
             }
         }
         return list;
     }
 
+    /**
+     * 辅助提取多轮对话历史消息中出现过的工具类/方法名称集合
+     */
+    private java.util.Set<String> extractHistoricalToolNames(List<ChatMessage> messages) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        if (messages == null || messages.isEmpty()) {
+            return names;
+        }
+        for (ChatMessage msg : messages) {
+            if (msg instanceof dev.langchain4j.data.message.AiMessage) {
+                dev.langchain4j.data.message.AiMessage aiMsg = (dev.langchain4j.data.message.AiMessage) msg;
+                if (aiMsg.hasToolExecutionRequests()) {
+                    for (dev.langchain4j.agent.tool.ToolExecutionRequest req : aiMsg.toolExecutionRequests()) {
+                        if (req != null && req.name() != null) {
+                            names.add(req.name());
+                        }
+                    }
+                }
+            } else if (msg instanceof dev.langchain4j.data.message.ToolExecutionResultMessage) {
+                dev.langchain4j.data.message.ToolExecutionResultMessage toolMsg = (dev.langchain4j.data.message.ToolExecutionResultMessage) msg;
+                if (toolMsg.toolName() != null) {
+                    names.add(toolMsg.toolName());
+                }
+            }
+        }
+        return names;
+    }
 }

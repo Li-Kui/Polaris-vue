@@ -29,7 +29,7 @@ public class SysUserTools implements AiTool {
      * @param phonenumber 要检索的手机号码（可选，支持模糊查询）
      * @return 用户列表
      */
-    @Tool("根据条件检索系统中的用户列表，返回包含用户ID、账号、昵称、邮箱、手机号等信息的列表。如果不输入任何参数，则默认查询所有用户。")
+    @Tool("根据条件检索或分析系统中的用户列表与用户数据（支持生成用户分析报告、统计用户数量、查看账号、昵称、邮箱、手机号等）。如果不输入任何参数，则默认获取全量用户数据以供统计与分析。")
     public List<SysUser> queryUserList(
             @P("要检索的登录账号，支持模糊查询，非必填") String userName,
             @P("要检索的手机号码，支持模糊查询，非必填") String phonenumber

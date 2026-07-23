@@ -174,6 +174,35 @@
             <span>模型: {{ currentConvModel }}</span>
           </el-tag>
           <el-tag
+            v-if="selectedAgentCode"
+            effect="light"
+            size="default"
+            type="primary"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;"
+          >
+            <el-icon class="tag-icon"><cpu /></el-icon>
+            <span>智能体: {{ getSelectedAgentOrWorkflowLabel() }}</span>
+          </el-tag>
+          <el-tag
+            v-else-if="selectedWorkflowCode"
+            effect="light"
+            size="default"
+            type="warning"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;"
+          >
+            <el-icon class="tag-icon"><connection /></el-icon>
+            <span>工作流: {{ getSelectedAgentOrWorkflowLabel() }}</span>
+          </el-tag>
+          <el-tag
+            v-else
+            effect="plain"
+            size="default"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle; background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.3); color: #6366f1;"
+          >
+            <el-icon class="tag-icon"><operation /></el-icon>
+            <span>自动路由模式</span>
+          </el-tag>
+          <el-tag
             v-if="currentKbName"
             class="kb-indicator-tag"
             effect="dark"
@@ -238,7 +267,7 @@
               <el-select
                 v-model="selectedWorkflowCode"
                 clearable
-                placeholder="常规对话模式"
+                placeholder="自动智能路由模式 (无需指定)"
                 size="default"
                 style="width: 100%;"
               >
@@ -249,6 +278,10 @@
                   :value="item.workflowCode"
                 />
               </el-select>
+              <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                <el-icon><info-filled /></el-icon>
+                <span>未选时自动识别意图按需加载工具，所选智能体与工作流 100% 优先执行</span>
+              </div>
             </div>
 
             <el-button
@@ -755,63 +788,116 @@
               <el-popover
                 v-model:visible="showWorkflowPopover"
                 placement="top-start"
-                title="选择 AI 智能体 / 工作流"
-                width="260"
+                width="340"
                 trigger="click"
-                popper-class="pill-selector-popper popper-workflow"
+                popper-class="pill-selector-popper popper-workflow-modern"
                 @show="handleShowAgentWorkflowPopover"
               >
                 <template #reference>
                   <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode || selectedAgentCode }]">
-                    <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><chat-dot-round v-else /></el-icon>
+                    <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><operation v-else /></el-icon>
                     <span class="pill-label">{{ getSelectedAgentOrWorkflowLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
                   </button>
                 </template>
-                <div class="popper-selector-list">
-                  <!-- 1. 常规对话 -->
-                  <div
-                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode && !selectedAgentCode }]"
-                    @click="selectMode('', ''); showWorkflowPopover = false"
-                  >
-                    <el-icon class="item-icon"><chat-dot-round /></el-icon>
-                    <span class="item-name">直接常规提问</span>
-                    <el-icon v-if="!selectedWorkflowCode && !selectedAgentCode" class="check-icon"><check /></el-icon>
+
+                <div class="popover-modern-container">
+                  <!-- 顶部三段式 Segmented Tab 切页导航 -->
+                  <div class="popover-tabs-nav">
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'auto' }]"
+                      @click="popoverTab = 'auto'"
+                    >
+                      <el-icon><operation /></el-icon> ⚡ 自动路由
+                    </button>
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'agent' }]"
+                      @click="popoverTab = 'agent'"
+                    >
+                      <el-icon><cpu /></el-icon> 智能体 ({{ agents ? agents.length : 0 }})
+                    </button>
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'workflow' }]"
+                      @click="popoverTab = 'workflow'"
+                    >
+                      <el-icon><connection /></el-icon> 工作流 ({{ workflows ? workflows.length : 0 }})
+                    </button>
                   </div>
 
-                  <!-- 2. 专属智能体列表 -->
-                  <template v-if="agents && agents.length > 0">
-                    <div class="popper-group-header">
-                      <el-icon><cpu /></el-icon> 专属 AI 智能体
-                    </div>
+                  <!-- 内容区 A：自动智能路由模式 -->
+                  <div v-if="popoverTab === 'auto'" class="popover-tab-body">
                     <div
-                      v-for="item in agents"
-                      :key="item.agentCode"
-                      :class="['popper-selector-item', { 'is-active': selectedAgentCode === item.agentCode }]"
-                      @click="selectMode('agent', item.agentCode); showWorkflowPopover = false"
+                      :class="['auto-mode-card', { active: !selectedWorkflowCode && !selectedAgentCode }]"
+                      @click="selectMode('', ''); showWorkflowPopover = false"
                     >
-                      <el-icon class="item-icon"><cpu /></el-icon>
-                      <span class="item-name" :title="item.description">{{ item.agentName }}</span>
-                      <el-icon v-if="selectedAgentCode === item.agentCode" class="check-icon"><check /></el-icon>
+                      <div class="card-head">
+                        <div class="head-left">
+                          <el-icon class="mode-icon"><operation /></el-icon>
+                          <span class="mode-title">自动智能路由模式</span>
+                        </div>
+                        <el-icon v-if="!selectedWorkflowCode && !selectedAgentCode" class="check-icon"><check /></el-icon>
+                      </div>
+                      <div class="card-desc">
+                        无需手动挑选。提问时系统自动识别意图，按需精准装配最佳工具（如用户查询、AI生图、联网搜索等）。
+                      </div>
                     </div>
-                  </template>
+                  </div>
 
-                  <!-- 3. 智能体工作流列表 -->
-                  <template v-if="workflows && workflows.length > 0">
-                    <div class="popper-group-header">
-                      <el-icon><connection /></el-icon> 智能体工作流
+                  <!-- 内容区 B：智能体列表 (带搜索框与固定高度滚动) -->
+                  <div v-else-if="popoverTab === 'agent'" class="popover-tab-body">
+                    <div class="popover-search-row">
+                      <el-input
+                        v-model="agentSearchKey"
+                        placeholder="搜索智能体名称..."
+                        size="small"
+                        prefix-icon="Search"
+                        clearable
+                      />
                     </div>
-                    <div
-                      v-for="item in workflows"
-                      :key="item.workflowCode"
-                      :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
-                      @click="selectMode('workflow', item.workflowCode); showWorkflowPopover = false"
-                    >
-                      <el-icon class="item-icon"><connection /></el-icon>
-                      <span class="item-name" :title="item.description">{{ item.workflowName }}</span>
-                      <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                    <div class="popover-scroll-list">
+                      <div v-if="filteredAgents.length === 0" class="empty-hint">未找到匹配的智能体</div>
+                      <div
+                        v-for="item in filteredAgents"
+                        :key="item.agentCode"
+                        :class="['popover-list-item', { active: selectedAgentCode === item.agentCode }]"
+                        @click="selectMode('agent', item.agentCode); showWorkflowPopover = false"
+                      >
+                        <div class="item-left">
+                          <el-icon class="item-icon"><cpu /></el-icon>
+                          <span class="item-name" :title="item.agentName">{{ item.agentName }}</span>
+                        </div>
+                        <el-icon v-if="selectedAgentCode === item.agentCode" class="check-icon"><check /></el-icon>
+                      </div>
                     </div>
-                  </template>
+                  </div>
+
+                  <!-- 内容区 C：工作流列表 (带搜索框与固定高度滚动) -->
+                  <div v-else-if="popoverTab === 'workflow'" class="popover-tab-body">
+                    <div class="popover-search-row">
+                      <el-input
+                        v-model="workflowSearchKey"
+                        placeholder="搜索工作流名称..."
+                        size="small"
+                        prefix-icon="Search"
+                        clearable
+                      />
+                    </div>
+                    <div class="popover-scroll-list">
+                      <div v-if="filteredWorkflows.length === 0" class="empty-hint">未找到匹配的工作流</div>
+                      <div
+                        v-for="item in filteredWorkflows"
+                        :key="item.workflowCode"
+                        :class="['popover-list-item', { active: selectedWorkflowCode === item.workflowCode }]"
+                        @click="selectMode('workflow', item.workflowCode); showWorkflowPopover = false"
+                      >
+                        <div class="item-left">
+                          <el-icon class="item-icon"><connection /></el-icon>
+                          <span class="item-name" :title="item.workflowName">{{ item.workflowName }}</span>
+                        </div>
+                        <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </el-popover>
 
@@ -1118,6 +1204,11 @@ export default {
       showKbPopover: false,
       showWorkflowPopover: false,
 
+      // 现代化 Popover 智能体与工作流 Tab 选项卡及搜索
+      popoverTab: 'auto',
+      agentSearchKey: '',
+      workflowSearchKey: '',
+
       conversations: [],
       loadingConvs: false,
       creatingConv: false,
@@ -1213,6 +1304,22 @@ export default {
       if (!this.selectedModelConfigId) return false
       const m = this.models.find(item => item.id === this.selectedModelConfigId)
       return m && m.enableSearch === '1'
+    },
+    filteredAgents() {
+      if (!this.agentSearchKey) return this.agents || []
+      const k = this.agentSearchKey.toLowerCase().trim()
+      return (this.agents || []).filter(a =>
+        (a.agentName && a.agentName.toLowerCase().includes(k)) ||
+        (a.agentCode && a.agentCode.toLowerCase().includes(k))
+      )
+    },
+    filteredWorkflows() {
+      if (!this.workflowSearchKey) return this.workflows || []
+      const k = this.workflowSearchKey.toLowerCase().trim()
+      return (this.workflows || []).filter(w =>
+        (w.workflowName && w.workflowName.toLowerCase().includes(k)) ||
+        (w.workflowCode && w.workflowCode.toLowerCase().includes(k))
+      )
     },
     canStop() {
       if (this.isStreaming) return true
@@ -1858,7 +1965,7 @@ export default {
       this.loadAgents()
     },
 
-    selectMode(type, code) {
+    async selectMode(type, code) {
       if (type === 'agent') {
         this.selectedAgentCode = code
         this.selectedWorkflowCode = ''
@@ -1868,6 +1975,9 @@ export default {
       } else {
         this.selectedAgentCode = ''
         this.selectedWorkflowCode = ''
+      }
+      if (this.currentConvId) {
+        await this.handleModelOrKbChange()
       }
     },
 
@@ -1880,7 +1990,7 @@ export default {
         const wf = this.workflows.find(w => w.workflowCode === this.selectedWorkflowCode)
         return wf ? wf.workflowName : '工作流'
       }
-      return '常规对话'
+      return '自动智能模式'
     },
 
     async loadToolDictionary() {
@@ -1935,6 +2045,11 @@ export default {
       if (c) {
         this.selectedModelConfigId = c.modelConfigId || null
         this.selectedKbId = c.knowledgeBaseId || null
+        this.selectedAgentCode = c.agentCode || ''
+        this.selectedWorkflowCode = c.workflowCode || ''
+      } else {
+        this.selectedAgentCode = ''
+        this.selectedWorkflowCode = ''
       }
       await this.loadMessageList(id)
     },
@@ -1959,10 +2074,16 @@ export default {
     },
 
     async handleModelOrKbChange() {
-      // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库配置
+      // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库、智能体与工作流配置
       if (this.currentConvId) {
         try {
-          const res = await updateConversationConfig(this.currentConvId, this.selectedModelConfigId, this.selectedKbId)
+          const res = await updateConversationConfig(
+            this.currentConvId,
+            this.selectedModelConfigId,
+            this.selectedKbId,
+            this.selectedAgentCode,
+            this.selectedWorkflowCode
+          )
           if (res.code === 200) {
             // 重新刷新会话列表以更新顶部状态条等数据的显示
             await this.loadConvList()
@@ -6453,6 +6574,235 @@ export default {
     font-size: 12px;
     opacity: 0.8;
   }
+}
+
+/* 现代化 Tab 切换 + 搜索 + 固定高度平滑滚动 Popover */
+:global(.popper-workflow-modern) {
+  padding: 10px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
+}
+
+.popover-modern-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popover-tabs-nav {
+  display: flex;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px;
+  border-radius: 10px;
+  gap: 3px;
+
+  :global(.dark) &,
+  :global(.theme-dark) & {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .tab-nav-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--el-text-color-secondary);
+    padding: 6px 0;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+
+    &:hover {
+      color: var(--el-text-color-primary);
+    }
+
+    &.active {
+      background: var(--el-bg-color, #ffffff);
+      color: #6366f1;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+
+      :global(.dark) &,
+      :global(.theme-dark) & {
+        background: #1e293b;
+        color: #818cf8;
+      }
+    }
+  }
+}
+
+.popover-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auto-mode-card {
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.09);
+  }
+
+  &.active {
+    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.12);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+
+    .head-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #6366f1;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .check-icon {
+      color: #6366f1;
+      font-weight: bold;
+    }
+  }
+
+  .card-desc {
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.4;
+  }
+}
+
+.popover-search-row {
+  margin-bottom: 2px;
+}
+
+.popover-scroll-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+  }
+
+  .empty-hint {
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .popover-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+
+    &:hover {
+      background: var(--el-fill-color-light, rgba(0, 0, 0, 0.04));
+    }
+
+    &.active {
+      background: rgba(99, 102, 241, 0.1);
+      color: #6366f1;
+      font-weight: 600;
+
+      .item-icon {
+        color: #6366f1;
+      }
+    }
+
+    .item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+
+      .item-icon {
+        font-size: 14px;
+        color: var(--el-text-color-secondary);
+        flex-shrink: 0;
+      }
+
+      .item-name {
+        font-size: 12.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+
+    .check-icon {
+      color: #6366f1;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+  }
+}
+
+/* 顶部 Header 状态 Tag 强力修正（彻底解决 Element Plus el-tag 内部文字与图标换行错位 Bug） */
+.header-tags-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+}
+
+.header-tags-row :deep(.el-tag),
+.header-tags-row .el-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  padding: 0 10px !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+
+.header-tags-row :deep(.el-tag__content),
+.header-tags-row .el-tag__content {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  height: 100% !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.header-tags-row :deep(.tag-icon),
+.header-tags-row .tag-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-right: 2px !important;
+  font-size: 14px !important;
 }
 </style>
 

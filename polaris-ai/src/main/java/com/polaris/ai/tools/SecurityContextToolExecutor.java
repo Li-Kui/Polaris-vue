@@ -39,6 +39,14 @@ public class SecurityContextToolExecutor {
     }
 
     /**
+     * 将原始 ToolExecutor 包装为具备安全上下文传播能力的 Executor
+     */
+    public static ToolExecutor wrapExecutor(ToolExecutor originalExecutor, SecurityContext securityContext, String searchKey) {
+        SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
+        return new PropagatingExecutor(originalExecutor, securityContext, simpleAttrs, searchKey, null, null);
+    }
+
+    /**
      * 构建按 Agent 级别过滤的工具集（带安全上下文传播）
      *
      * @param allTools        所有注册的 AI 工具实例
