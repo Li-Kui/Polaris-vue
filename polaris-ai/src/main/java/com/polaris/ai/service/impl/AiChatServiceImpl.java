@@ -158,7 +158,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     }
 
     @Override
-    public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId) {
+    public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, String agentCode, String workflowCode, Long userId) {
         String modelName = null;
         if (modelConfigId != null) {
             com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
@@ -166,7 +166,12 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 modelName = cfg.getModelName();
             }
         }
-        return aiChatMapper.updateConversationConfig(id, modelName, modelConfigId, knowledgeBaseId, userId);
+        return aiChatMapper.updateConversationConfig(id, modelName, modelConfigId, knowledgeBaseId, agentCode, workflowCode, userId);
+    }
+
+    @Override
+    public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId) {
+        return updateConversationConfig(id, modelConfigId, knowledgeBaseId, null, null, userId);
     }
 
     /**

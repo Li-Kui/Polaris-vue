@@ -105,7 +105,7 @@ public class AiChatController extends BaseController {
     }
 
     /**
-     * 更新会话配置（大模型和知识库）
+     * 更新会话配置（大模型和知识库、智能体、工作流）
      * PUT /ai/chat/conversations/{id}/config
      */
     @Operation(summary = "更新会话配置")
@@ -114,9 +114,11 @@ public class AiChatController extends BaseController {
     public ResultData updateConversationConfig(
             @PathVariable Long id,
             @RequestParam(required = false) Long modelConfigId,
-            @RequestParam(required = false) Long knowledgeBaseId) {
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(required = false) String agentCode,
+            @RequestParam(required = false) String workflowCode) {
         Long userId = SecurityUtils.getUserId();
-        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, userId);
+        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, agentCode, workflowCode, userId);
         return ok();
     }
 
