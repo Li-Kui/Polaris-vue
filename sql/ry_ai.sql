@@ -285,6 +285,7 @@ CREATE TABLE `ai_report` (
   `agent_code` varchar(64) DEFAULT NULL COMMENT '关联智能体编码',
   `report_content` longtext COMMENT '报告Markdown正文',
   `report_stats` text COMMENT '统计指标JSON',
+  `refined_schema` longtext COMMENT '重塑美化JSON',
   `user_id` bigint(20) DEFAULT NULL COMMENT '所属用户ID',
   `status` char(1) DEFAULT '0' COMMENT '状态（0正常 1归档）',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0存在 2删除）',
@@ -295,6 +296,9 @@ CREATE TABLE `ai_report` (
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI分析报告归档表';
+
+-- 增量更新语句 (已安装系统可通过此命令增量加列)
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_schema` longtext COMMENT '重塑美化JSON' AFTER `report_stats`;
 
 -- ----------------------------
 -- 13. Ruoyi 系统菜单数据 (AI分析报告中心菜单)

@@ -66,6 +66,12 @@ public class AiReport extends BaseEntity {
     private String reportStats;
 
     /**
+     * 重塑美化 JSON 结构体
+     */
+    @Schema(description = "重塑美化 JSON 结构体")
+    private String refinedSchema;
+
+    /**
      * 所属用户ID
      */
     @Schema(description = "所属用户ID")
