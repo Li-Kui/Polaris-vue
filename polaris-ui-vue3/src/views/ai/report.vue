@@ -54,7 +54,7 @@
             <span class="report-code-pill">{{ scope.row.reportCode || 'REP-' + scope.row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="报告标题" prop="reportTitle" min-width="240" show-overflow-tooltip>
+        <el-table-column label="报告标题" prop="reportTitle" min-width="120" show-overflow-tooltip>
           <template #default="scope">
             <span class="report-title-link" @click="handlePreview(scope.row)">
               {{ scope.row.reportTitle }}
@@ -81,12 +81,27 @@
             <span class="user-name-text">{{ scope.row.createBy || 'admin' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="center" width="200" fixed="right">
+        <el-table-column label="操作" align="center" width="240" fixed="right">
           <template #default="scope">
-            <el-button size="small" type="primary" link icon="View" @click="handlePreview(scope.row)">
-              查看美化报告
+            <el-button 
+              size="small" 
+              type="primary" 
+              link 
+              :icon="refiningId === scope.row.id ? 'Loading' : 'View'"
+              :loading="refiningId === scope.row.id"
+              :disabled="refiningId !== null && refiningId !== scope.row.id"
+              @click="handlePreview(scope.row)"
+            >
+              {{ refiningId === scope.row.id ? 'AI 美化中...' : '查看美化报告' }}
             </el-button>
-            <el-button size="small" type="danger" link icon="Delete" @click="handleDelete(scope.row)">
+            <el-button 
+              size="small" 
+              type="danger" 
+              link 
+              icon="Delete" 
+              :disabled="refiningId === scope.row.id" 
+              @click="handleDelete(scope.row)"
+            >
               删除
             </el-button>
           </template>
@@ -103,13 +118,15 @@
       </div>
     </div>
 
-    <!-- 报告在线预览大屏抽屉 (高质感商业分析与图表化展示) -->
-    <el-drawer
+    <!-- 报告在线预览大屏弹窗 (高质感商业分析与图表化展示) -->
+    <el-dialog
       v-model="previewVisible"
-      size="80%"
-      class="report-preview-drawer"
+      width="1100px"
+      top="4vh"
+      class="report-preview-dialog"
       :destroy-on-close="true"
       :before-close="handleDrawerClose"
+      append-to-body
     >
       <template #header>
         <div class="drawer-header-custom">
@@ -118,19 +135,9 @@
               <el-icon><data-board /></el-icon>
             </span>
             <span class="drawer-title">{{ reportTitle || currentReport.reportTitle }}</span>
-            <el-tag size="small" type="primary" effect="dark" class="drawer-badge">高质感数据大屏</el-tag>
+            <el-tag size="small" type="primary" effect="plain" class="drawer-badge">高质感数据大屏</el-tag>
           </div>
           <div class="drawer-actions">
-            <el-button 
-              type="warning" 
-              size="small" 
-              icon="MagicStick" 
-              :loading="refining"
-              @click="handleAiRefine"
-              class="refine-btn"
-            >
-              {{ refining ? 'AI 正在深度重塑...' : 'AI 智能重塑美化' }}
-            </el-button>
             <el-button type="primary" size="small" icon="Download" @click="handlePrint">
               导出 PDF 报告
             </el-button>
@@ -252,13 +259,13 @@
           </div>
         </div>
       </div>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import * as echarts from 'echarts'
-import {delReport, listReports, refineReport} from '@/api/ai/report'
+import {delReport, listReports, refineReport, updateReport} from '@/api/ai/report'
 
 export default {
   name: 'AiReport',
@@ -285,6 +292,7 @@ export default {
       activeChartType: 'bar',
       reportChartInstance: null,
       refining: false,
+      refiningId: null,
       refinedSchema: null
     }
   },
@@ -332,18 +340,116 @@ export default {
     },
 
     // ──────────────────────────────────────────
-    // 报告详情解析与美化渲染逻辑
+    // 报告详情解析与美化渲染逻辑 (深度美化结果保存至 refinedSchema)
     // ──────────────────────────────────────────
-    handlePreview(row) {
+    async handlePreview(row) {
+      if (this.refiningId !== null) return
+
       this.currentReport = row
       this.refinedSchema = null
       this.parseAndInitReportData(row.reportContent)
-      this.previewVisible = true
 
-      if (this.hasChartData) {
-        this.$nextTick(() => {
-          this.initReportChart()
-        })
+      // 1. 若当前报告已存在持久化的美化结果 (refinedSchema 字段非空)，直接快速呈现
+      if (row.refinedSchema) {
+        try {
+          let schema = typeof row.refinedSchema === 'object' ? row.refinedSchema : JSON.parse(row.refinedSchema)
+          this.applyRefinedSchema(schema)
+          this.previewVisible = true
+          if (this.hasChartData) {
+            this.$nextTick(() => {
+              this.initReportChart()
+            })
+          }
+          return
+        } catch (e) {
+          console.warn('解析已保存的美化字段失败，重新触发 AI 智能美化:', e)
+        }
+      }
+
+      // 2. 若未生成过美化数据，则数据栏显示“AI美化中...”，调用大模型美化并持久化写回数据库
+      this.refiningId = row.id
+
+      this.$notify({
+        title: 'AI 深度重塑美化中...',
+        message: `正在为您智能提炼分析《${row.reportTitle || '报告'}》，构建结构化看板与图表...`,
+        type: 'info',
+        duration: 3500
+      })
+
+      try {
+        if (this.reportContent) {
+          const res = await refineReport(this.reportContent)
+          if (res.code === 200 && res.data) {
+            let schema = null
+            if (typeof res.data === 'object') {
+              schema = res.data
+            } else {
+              let cleanText = String(res.data)
+              const firstBrace = cleanText.indexOf('{')
+              const lastBrace = cleanText.lastIndexOf('}')
+              if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                cleanText = cleanText.substring(firstBrace, lastBrace + 1)
+              }
+              schema = JSON.parse(cleanText)
+            }
+
+            this.applyRefinedSchema(schema)
+
+            // 持久化保存美化结果到数据库的 refinedSchema 字段
+            const schemaStr = JSON.stringify(schema)
+            row.refinedSchema = schemaStr
+            updateReport({
+              id: row.id,
+              refinedSchema: schemaStr
+            }).catch(err => {
+              console.error('保存美化结果字段到数据库失败:', err)
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('AI 重塑处理异常，降级展示基础图表与 Markdown 内容:', err)
+      } finally {
+        this.refiningId = null
+        this.previewVisible = true
+
+        if (this.hasChartData) {
+          this.$nextTick(() => {
+            this.initReportChart()
+          })
+        }
+      }
+    },
+
+    applyRefinedSchema(schema) {
+      if (!schema) return
+      this.refinedSchema = schema
+
+      // 更新 KPI 统计卡片
+      if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
+        this.reportStats = schema.kpiCards.map(k => ({
+          label: k.label || k.title || '核心指标',
+          value: k.value || '0',
+          emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
+          color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
+        }))
+      }
+
+      // 更新 ECharts 动态数据图表
+      if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
+        const viz = schema.visualizations[0]
+        if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
+          this.hasChartData = true
+          this.chartConfig = {
+            xAxisData: viz.chartData.categories,
+            series: viz.chartData.series.map(s => ({
+              name: s.name,
+              type: viz.chartType === 'line' ? 'line' : 'bar',
+              data: s.data,
+              barMaxWidth: 30
+            })),
+            legendData: viz.chartData.series.map(s => s.name)
+          }
+        }
       }
     },
 
@@ -1007,8 +1113,61 @@ export default {
 }
 
 /* ──────────────────────────────────────────
-   抽屉与美化数据大屏光暗自适应
+   弹窗与美化数据大屏光暗自适应
    ────────────────────────────────────────── */
+:deep(.report-preview-dialog) {
+  width: 1100px !important;
+  max-width: calc(100vw - 48px) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  background: #ffffff;
+
+  @media (max-width: 1150px) {
+    width: calc(100vw - 48px) !important;
+  }
+
+  @media (max-width: 768px) {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .el-dialog__header {
+    padding: 16px 24px;
+    margin-right: 0;
+    border-bottom: 1px solid #f1f5f9;
+    background: #ffffff;
+  }
+
+  .el-dialog__headerbtn {
+    top: 18px;
+    right: 20px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+
+    .el-icon {
+      font-size: 18px;
+      color: #64748b;
+    }
+
+    &:hover {
+      background-color: #f1f5f9;
+
+      .el-icon {
+        color: #0f172a;
+      }
+    }
+  }
+
+  .el-dialog__body {
+    padding: 12px 16px 20px;
+    background: #f8fafc;
+  }
+}
+
 .drawer-header-custom {
   display: flex;
   justify-content: space-between;
@@ -1048,15 +1207,28 @@ export default {
 
   .drawer-badge {
     font-size: 11px;
-    border-radius: 4px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 3px 10px;
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #2563eb !important;
+    border: 1px solid rgba(59, 130, 246, 0.25) !important;
+
+    :deep(html.dark) &,
+    :deep(.dark) &,
+    .dark & {
+      background: rgba(59, 130, 246, 0.2) !important;
+      color: #93c5fd !important;
+      border-color: rgba(59, 130, 246, 0.4) !important;
+    }
   }
 }
 
 .drawer-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-right: 20px;
+  gap: 12px;
+  margin-right: 56px;
 
   .refine-btn {
     background: linear-gradient(135deg, #f59e0b, #d97706) !important;
@@ -1121,17 +1293,23 @@ export default {
 }
 
 .report-drawer-body {
-  padding: 10px 20px 30px;
+  padding: 8px 6px 16px;
+  max-height: calc(88vh - 75px);
+  overflow-y: auto;
 }
 
 .paper-preview-box {
   background: #ffffff;
-  padding: 36px 44px;
+  padding: 28px 36px;
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   border: 1px solid #e2e8f0;
   color: #1e293b;
   transition: all 0.3s;
+
+  @media (max-width: 768px) {
+    padding: 18px 20px;
+  }
 
   :deep(html.dark) &,
   :deep(.dark) &,
@@ -1825,18 +2003,24 @@ html.dark .report-table,
 <style lang="scss">
 html.dark,
 .dark {
+  .report-preview-dialog,
   .report-preview-drawer {
+    background: #0f172a !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+
+    .el-dialog__header,
     .el-drawer__header {
       background: #0f172a !important;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
       margin-bottom: 0 !important;
     }
+    .el-dialog__body,
     .el-drawer__body {
       background: #090d16 !important;
     }
+    .el-dialog__headerbtn,
     .el-drawer__close-btn {
       color: #94a3b8 !important;
-      margin-left: 16px !important;
       width: 32px;
       height: 32px;
       border-radius: 8px;
@@ -1845,7 +2029,7 @@ html.dark,
       justify-content: center;
       transition: all 0.25s ease;
 
-      .el-icon, i, svg {
+      .el-dialog__close, .el-icon, i, svg {
         color: #94a3b8 !important;
         font-size: 18px;
         transition: color 0.25s ease;
@@ -1854,7 +2038,7 @@ html.dark,
       &:hover {
         background-color: rgba(255, 255, 255, 0.12) !important;
 
-        .el-icon, i, svg {
+        .el-dialog__close, .el-icon, i, svg {
           color: #ffffff !important;
         }
       }

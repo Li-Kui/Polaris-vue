@@ -57,7 +57,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         if (report.getReportCode() == null || report.getReportCode().trim().isEmpty()) {
             report.setReportCode("REP-" + System.currentTimeMillis());
         }
-        return save(report);
+        return saveOrUpdate(report);
     }
 
     @Override
