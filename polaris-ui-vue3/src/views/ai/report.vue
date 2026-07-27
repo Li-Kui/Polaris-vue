@@ -965,9 +965,370 @@ export default {
       }
     },
 
-    // 导出 / 打印 PDF 报告
-    handlePrint() {
-      window.print()
+    waitForImageLoaded(img) {
+      if (img.complete) return Promise.resolve()
+      return new Promise(resolve => {
+        img.onload = resolve
+        img.onerror = resolve
+      })
+    },
+
+    async waitForReportRenderReady() {
+      await this.$nextTick()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await new Promise(resolve => setTimeout(resolve, 350))
+    },
+
+    expandPdfExportContainers(element) {
+      const containers = [element]
+      const dialogBody = element.closest('.el-dialog__body')
+      const dialog = element.closest('.el-dialog')
+      if (dialogBody) containers.push(dialogBody)
+      if (dialog) containers.push(dialog)
+
+      const snapshots = containers.map(node => ({
+        node,
+        style: {
+          maxHeight: node.style.maxHeight,
+          height: node.style.height,
+          overflow: node.style.overflow,
+          overflowY: node.style.overflowY
+        }
+      }))
+
+      snapshots.forEach(({ node }) => {
+        node.style.maxHeight = 'none'
+        node.style.height = 'auto'
+        node.style.overflow = 'visible'
+        node.style.overflowY = 'visible'
+      })
+
+      return () => {
+        snapshots.forEach(({ node, style }) => {
+          node.style.maxHeight = style.maxHeight
+          node.style.height = style.height
+          node.style.overflow = style.overflow
+          node.style.overflowY = style.overflowY
+        })
+      }
+    },
+
+    async createChartSnapshots(element) {
+      const snapshots = []
+      const chartContainers = Array.from(element.querySelectorAll('.chart-mount-container, #pretty-report-chart'))
+
+      for (const container of chartContainers) {
+        const chart = echarts.getInstanceByDom(container)
+        const canvas = container.querySelector('canvas')
+
+        if (!chart && !canvas) continue
+
+        try {
+          if (chart) {
+            chart.resize()
+            await new Promise(resolve => requestAnimationFrame(resolve))
+          }
+
+          const dataUrl = chart
+            ? chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
+            : canvas.toDataURL('image/png')
+
+          if (!dataUrl) continue
+
+          const previousPosition = container.style.position
+          const previousOverflow = container.style.overflow
+          container.style.position = previousPosition || 'relative'
+          container.style.overflow = 'hidden'
+
+          const wrapper = document.createElement('div')
+          wrapper.className = 'pdf-chart-snapshot-wrap'
+          wrapper.style.cssText = 'position:absolute;inset:0;z-index:20;background:#fff;display:flex;align-items:center;justify-content:center;pointer-events:none;'
+
+          const img = new Image()
+          img.className = 'pdf-chart-snapshot-img'
+          img.alt = 'chart snapshot'
+          img.src = dataUrl
+          img.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;'
+          wrapper.appendChild(img)
+          container.appendChild(wrapper)
+          await this.waitForImageLoaded(img)
+
+          snapshots.push({ container, wrapper, previousPosition, previousOverflow })
+        } catch (err) {
+          console.warn('图表快照生成失败，跳过该图表:', err)
+        }
+      }
+
+      return () => {
+        snapshots.forEach(({ container, wrapper, previousPosition, previousOverflow }) => {
+          if (wrapper && wrapper.parentNode) wrapper.parentNode.removeChild(wrapper)
+          container.style.position = previousPosition
+          container.style.overflow = previousOverflow
+        })
+      }
+    },
+
+    getPdfMetaInfo() {
+      const report = this.currentReport || {}
+      return {
+        code: report.reportCode || (report.id ? 'REP-' + report.id : ''),
+        date: report.createTime || '',
+        author: report.createBy || 'admin'
+      }
+    },
+
+    collectPdfTemplateBlocks(reportNode) {
+      const blocks = []
+      const banner = reportNode.querySelector('.engine-report-banner')
+      const blockContainer = reportNode.querySelector('.engine-blocks-container')
+
+      if (banner) blocks.push({ type: 'banner', node: banner.cloneNode(true) })
+      if (blockContainer) {
+        Array.from(blockContainer.children).forEach(node => {
+          blocks.push({ type: 'content', node: node.cloneNode(true) })
+        })
+      }
+
+      return blocks
+    },
+
+    escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    },
+
+    applyScopedAttrs(sourceNode, targetNode) {
+      Array.from(sourceNode.attributes || []).forEach(attr => {
+        if (attr.name.startsWith('data-v-')) {
+          targetNode.setAttribute(attr.name, attr.value)
+        }
+      })
+    },
+
+    createPdfTemplatePage({ title, metaInfo, pageNumber, widthPx, heightPx, sourceNode }) {
+      const page = document.createElement('div')
+      page.className = 'pdf-report-page'
+      page.style.cssText = [
+        'width:' + widthPx + 'px',
+        'height:' + heightPx + 'px',
+        'box-sizing:border-box',
+        'padding:30px 40px 24px',
+        'background:#ffffff',
+        'color:#0f172a',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif',
+        'display:flex',
+        'flex-direction:column',
+        'overflow:hidden'
+      ].join(';')
+
+      const header = document.createElement('div')
+      header.className = 'pdf-report-header'
+      header.style.cssText = 'height:56px;display:flex;align-items:flex-start;justify-content:space-between;border-bottom:1px solid #e2e8f0;margin-bottom:18px;flex:0 0 auto;'
+      const escapedTitle = this.escapeHtml(title)
+      const escapedCode = this.escapeHtml(metaInfo.code || '-')
+      const escapedAuthor = this.escapeHtml(metaInfo.author || '-')
+      const escapedDate = this.escapeHtml(metaInfo.date || '')
+      header.innerHTML = [
+        '<div style="min-width:0;">',
+        '<div style="font-size:18px;font-weight:800;color:#0f172a;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px;">' + escapedTitle + '</div>',
+        '<div style="margin-top:7px;font-size:11px;color:#64748b;">报告编号：' + escapedCode + '　分析者：' + escapedAuthor + '</div>',
+        '</div>',
+        '<div style="font-size:11px;color:#64748b;text-align:right;line-height:1.7;white-space:nowrap;">',
+        '<div>Polaris-AI</div>',
+        '<div>' + escapedDate + '</div>',
+        '</div>'
+      ].join('')
+
+      const body = document.createElement('div')
+      body.className = 'pdf-report-body'
+      body.style.cssText = 'flex:1 1 auto;min-height:0;overflow:hidden;background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);border-radius:10px;padding:16px;box-sizing:border-box;'
+
+      const engine = document.createElement('div')
+      engine.className = 'polaris-report-engine theme-glass-light pdf-template-engine'
+      engine.style.cssText = 'width:100%;padding:0;background:transparent;border-radius:0;box-shadow:none;color:#1e293b;'
+      this.applyScopedAttrs(sourceNode, engine)
+
+      const blockContainer = document.createElement('div')
+      blockContainer.className = 'engine-blocks-container'
+      blockContainer.style.cssText = 'display:flex;flex-direction:column;gap:16px;'
+      const sourceBlockContainer = sourceNode.querySelector('.engine-blocks-container')
+      if (sourceBlockContainer) this.applyScopedAttrs(sourceBlockContainer, blockContainer)
+
+      engine.appendChild(blockContainer)
+      body.appendChild(engine)
+
+      const footer = document.createElement('div')
+      footer.className = 'pdf-report-footer'
+      footer.style.cssText = 'height:28px;display:flex;align-items:flex-end;justify-content:space-between;border-top:1px solid #e2e8f0;margin-top:16px;font-size:10px;color:#94a3b8;flex:0 0 auto;'
+      footer.innerHTML = '<span>Polaris-AI 深度可视化诊断报告</span><span class="pdf-page-number">第 ' + pageNumber + ' 页</span>'
+
+      page.appendChild(header)
+      page.appendChild(body)
+      page.appendChild(footer)
+
+      return { page, body, engine, blockContainer, footer }
+    },
+
+    appendPdfBlockToPage(pageInfo, block) {
+      if (block.type === 'banner') {
+        pageInfo.engine.insertBefore(block.node, pageInfo.blockContainer)
+      } else {
+        pageInfo.blockContainer.appendChild(block.node)
+      }
+    },
+
+    removePdfBlockFromPage(pageInfo, block) {
+      if (block.node && block.node.parentNode) {
+        block.node.parentNode.removeChild(block.node)
+      }
+    },
+
+    pageHasPdfContent(pageInfo) {
+      return !!pageInfo.body.querySelector('.engine-report-banner, .engine-blocks-container > *')
+    },
+
+    buildPdfTemplate(reportNode, title) {
+      const widthPx = 794
+      const heightPx = 1123
+      const metaInfo = this.getPdfMetaInfo()
+      const blocks = this.collectPdfTemplateBlocks(reportNode)
+
+      const root = document.createElement('div')
+      root.className = 'pdf-report-template-root'
+      root.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + widthPx + 'px;background:#f8fafc;z-index:-1;'
+      document.body.appendChild(root)
+
+      const pages = []
+      const createPage = () => {
+        const pageInfo = this.createPdfTemplatePage({
+          title,
+          metaInfo,
+          pageNumber: pages.length + 1,
+          widthPx,
+          heightPx,
+          sourceNode: reportNode
+        })
+        root.appendChild(pageInfo.page)
+        pages.push(pageInfo)
+        return pageInfo
+      }
+
+      let currentPage = createPage()
+
+      blocks.forEach(block => {
+        this.appendPdfBlockToPage(currentPage, block)
+
+        if (currentPage.body.scrollHeight <= currentPage.body.clientHeight) return
+
+        this.removePdfBlockFromPage(currentPage, block)
+
+        if (this.pageHasPdfContent(currentPage)) {
+          currentPage = createPage()
+          this.appendPdfBlockToPage(currentPage, block)
+        } else {
+          this.appendPdfBlockToPage(currentPage, block)
+        }
+
+        if (currentPage.body.scrollHeight > currentPage.body.clientHeight) {
+          const blockHeight = block.node.getBoundingClientRect().height || currentPage.body.scrollHeight
+          const availableHeight = currentPage.body.clientHeight - 4
+          const scale = Math.max(0.72, Math.min(1, availableHeight / Math.max(blockHeight, 1)))
+          if (scale < 1) {
+            const wrapper = document.createElement('div')
+            wrapper.className = 'pdf-scaled-oversize-block'
+            wrapper.style.cssText = 'height:' + Math.ceil(blockHeight * scale) + 'px;overflow:hidden;'
+            block.node.parentNode.insertBefore(wrapper, block.node)
+            block.node.parentNode.removeChild(block.node)
+            wrapper.appendChild(block.node)
+            block.node.style.transform = 'scale(' + scale + ')'
+            block.node.style.transformOrigin = 'top left'
+            block.node.style.width = (100 / scale) + '%'
+          }
+        }
+      })
+
+      pages.forEach((pageInfo, index) => {
+        const pageNumber = pageInfo.footer.querySelector('.pdf-page-number')
+        if (pageNumber) pageNumber.textContent = '第 ' + (index + 1) + ' / ' + pages.length + ' 页'
+      })
+
+      return { root, pages, widthPx, heightPx }
+    },
+
+    // 导出 / 打印 PDF 报告（前端渲染截图方案，1:1 保留大屏样式与图表）
+    async handlePrint() {
+      const element = document.getElementById('report-drawer-print-area')
+      if (!element) {
+        this.$message.warning('报告预览区域未就绪，请稍后再试')
+        return
+      }
+
+      this.$message({ message: '正在生成 PDF，图表较多时请耐心等候...', type: 'info', duration: 3000 })
+
+      let restoreContainers = null
+      let restoreCharts = null
+      let pdfTemplate = null
+
+      try {
+        document.body.classList.add('pdf-exporting-report')
+        restoreContainers = this.expandPdfExportContainers(element)
+
+        // 等待 DOM 重排与 ECharts 图表渲染完成，再把 canvas 固化为图片，避免 PDF 空图表
+        await this.waitForReportRenderReady()
+        restoreCharts = await this.createChartSnapshots(element)
+        await this.waitForReportRenderReady()
+
+        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+          import('html2canvas'),
+          import('jspdf')
+        ])
+        const title = this.cleanDialogTitle || 'AI分析报告'
+        const reportNode = element.querySelector('.polaris-report-engine') || element
+        pdfTemplate = this.buildPdfTemplate(reportNode, title)
+        await this.waitForReportRenderReady()
+
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+        const pageWidth = pdf.internal.pageSize.getWidth()
+        const pageHeight = pdf.internal.pageSize.getHeight()
+
+        for (let pageIndex = 0; pageIndex < pdfTemplate.pages.length; pageIndex++) {
+          const canvas = await html2canvas(pdfTemplate.pages[pageIndex].page, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            scrollX: 0,
+            scrollY: 0,
+            x: 0,
+            y: 0,
+            width: pdfTemplate.widthPx,
+            height: pdfTemplate.heightPx,
+            windowWidth: pdfTemplate.widthPx,
+            windowHeight: pdfTemplate.heightPx
+          })
+          const imageData = canvas.toDataURL('image/jpeg', 0.98)
+
+          if (pageIndex > 0) pdf.addPage()
+          pdf.addImage(imageData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST')
+        }
+
+        pdf.save(title.replace(/[\\/:*?"<>|]/g, '_') + '.pdf')
+        this.$message.success('PDF 导出成功')
+      } catch (err) {
+        console.error('PDF 导出失败:', err)
+        this.$message.error('PDF 导出失败: ' + err.message)
+      } finally {
+        if (pdfTemplate && pdfTemplate.root && pdfTemplate.root.parentNode) {
+          pdfTemplate.root.parentNode.removeChild(pdfTemplate.root)
+        }
+        if (restoreCharts) restoreCharts()
+        if (restoreContainers) restoreContainers()
+        document.body.classList.remove('pdf-exporting-report')
+      }
     }
   }
 }
@@ -2048,6 +2409,18 @@ html.dark .report-table,
   }
   .drawer-actions, .refine-btn {
     display: none !important;
+  }
+
+  // 防止表格在分页时行被从中间截断
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  thead {
+    display: table-header-group;
   }
 }
 </style>

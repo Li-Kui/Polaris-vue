@@ -322,9 +322,18 @@ export default {
 
     displayCharts() {
       const charts = []
+      const validChartTypes = ['bar', 'line', 'pie', 'radar', 'scatter', 'gauge']
+
       if (this.structuredSchema) {
         if (this.structuredSchema.visualizations && Array.isArray(this.structuredSchema.visualizations)) {
-          charts.push(...this.structuredSchema.visualizations)
+          // 数据清洗：确保每个图表都有有效的 chartType
+          const validViz = this.structuredSchema.visualizations
+            .filter(v => v && typeof v === 'object')
+            .map(v => ({
+              ...v,
+              chartType: validChartTypes.includes(v.chartType) ? v.chartType : 'bar'
+            }))
+          charts.push(...validViz)
         } else if (this.structuredSchema.chartData) {
           charts.push({
             title: this.structuredSchema.chartTitle || '数据趋势分析大屏',
@@ -336,6 +345,10 @@ export default {
 
       if (this.content && this.content.includes('::: chart')) {
         const mdCharts = this.parseChartDirectives(this.content)
+          .map(v => ({
+            ...v,
+            chartType: validChartTypes.includes(v.chartType) ? v.chartType : 'bar'
+          }))
         charts.push(...mdCharts)
       }
 
@@ -685,6 +698,9 @@ export default {
       }
 
       const isPie = block.chartType === 'pie'
+      // 确保 chartType 是有效的 ECharts 类型
+      const validChartTypes = ['bar', 'line', 'pie', 'radar', 'scatter', 'gauge']
+      const chartType = validChartTypes.includes(block.chartType) ? block.chartType : 'bar'
 
       return {
         tooltip: { trigger: isPie ? 'item' : 'axis', axisPointer: { type: 'shadow' } },
@@ -708,7 +724,7 @@ export default {
         series: [{
           name: '数量',
           data: seriesData,
-          type: block.chartType || 'bar',
+          type: chartType,
           smooth: true,
           barWidth: '38%',
           itemStyle: {

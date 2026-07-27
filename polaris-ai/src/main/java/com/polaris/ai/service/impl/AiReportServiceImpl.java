@@ -36,6 +36,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     @Autowired
     private AiModelFactory modelFactory;
 
+
     @Override
     public boolean saveReport(AiReport report) {
         if (report == null) {
@@ -237,4 +238,5 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         }
         return emitter;
     }
+
 }
