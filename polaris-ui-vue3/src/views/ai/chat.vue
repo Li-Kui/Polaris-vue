@@ -2962,9 +2962,11 @@ export default {
 
         this.reportChartInstance = echarts.init(chartDom)
 
+        const isPie = this.activeChartType === 'pie'
+
         const option = {
           tooltip: {
-            trigger: 'axis',
+            trigger: isPie ? 'item' : 'axis',
             axisPointer: { type: 'shadow' }
           },
           legend: {
@@ -2982,13 +2984,17 @@ export default {
           xAxis: {
             type: 'category',
             data: this.chartConfig.xAxisData,
-            axisLabel: { interval: 0, rotate: 15, color: '#6b7280' },
-            axisLine: { lineStyle: { color: '#e5e7eb' } }
+            show: !isPie,
+            axisLabel: { show: !isPie, interval: 0, rotate: 15, color: '#6b7280' },
+            axisLine: { show: !isPie, lineStyle: { color: '#e5e7eb' } },
+            axisTick: { show: !isPie }
           },
           yAxis: {
             type: 'value',
-            axisLabel: { color: '#6b7280' },
-            splitLine: { lineStyle: { type: 'dashed', color: '#f3f4f6' } }
+            show: !isPie,
+            axisLabel: { show: !isPie, color: '#6b7280' },
+            splitLine: { show: !isPie, lineStyle: { type: 'dashed', color: '#f3f4f6' } },
+            axisTick: { show: !isPie }
           },
           color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
           series: this.chartConfig.series.map(s => ({
