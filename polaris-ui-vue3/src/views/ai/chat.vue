@@ -336,7 +336,7 @@
                 <!-- AI：正常内容 -->
                 <div v-else-if="msg.role === 'assistant'">
                   <div v-if="msg.statusMsg" class="loading-status-text" style="margin-bottom: 8px;">
-                    <el-icon class="is-loading"><loading /></el-icon> {{ msg.statusMsg }}
+                    <el-icon v-if="isActiveStatus(msg.statusMsg)" class="is-loading"><loading /></el-icon> {{ msg.statusMsg }}
                   </div>
                   <!-- 智能体工作流执行步骤 -->
                   <div v-if="msg.workflowSteps && msg.workflowSteps.length > 0" class="workflow-steps-container">
@@ -496,6 +496,35 @@
                     class="markdown-body"
                     v-html="renderMarkdown(msg.content)"
                   ></div>
+                  <div v-if="msg.searchSources && msg.searchSources.length" class="search-sources-panel">
+                    <div class="search-sources-header" @click="toggleSearchSources(msg)">
+                      <div class="search-sources-title">
+                        <el-icon><search /></el-icon>
+                        <span>已搜索 {{ msg.searchSourceCount || msg.searchSources.length }} 个网页</span>
+                      </div>
+                      <div class="search-sources-action">
+                        <span>{{ msg.searchSourcesExpanded ? '收起来源' : '查看来源' }}</span>
+                        <el-icon :class="['source-collapse-arrow', { 'is-active': msg.searchSourcesExpanded }]"><arrow-down /></el-icon>
+                      </div>
+                    </div>
+                    <div v-if="msg.searchQuery && msg.searchSourcesExpanded" class="search-query">{{ msg.searchQuery }}</div>
+                    <div v-if="msg.searchSourcesExpanded" class="search-source-list">
+                      <a
+                        v-for="source in msg.searchSources"
+                        :key="source.index || source.url"
+                        class="search-source-item"
+                        :href="source.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span class="source-index">{{ source.index }}</span>
+                        <span class="source-body">
+                          <span class="source-title">{{ source.title || source.url }}</span>
+                          <span class="source-url">{{ getSourceHost(source.url) }}</span>
+                        </span>
+                      </a>
+                    </div>
+                  </div>
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
                     <div class="report-card-body">
@@ -2481,6 +2510,16 @@ export default {
                   this.$nextTick(() => this.scrollToBottom())
                 } else if (event === 'status') {
                   this.messages[aiIndex].statusMsg = data || ''
+                } else if (event === 'search_sources') {
+                  try {
+                    const payload = JSON.parse(data || '{}')
+                    this.messages[aiIndex].searchQuery = payload.query || ''
+                    this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
+                    this.messages[aiIndex].searchSources = payload.sources || []
+                    this.$nextTick(() => this.scrollToBottom())
+                  } catch (err) {
+                    console.warn('解析联网搜索来源失败', err)
+                  }
                 } else if (event === 'done') {
                   this.messages[aiIndex].streaming = false
                   this.isStreaming = false
@@ -2527,6 +2566,38 @@ export default {
       }
     },
 
+    getSourceHost(url) {
+      if (!url) return ''
+      try {
+        return new URL(url).hostname.replace(/^www\./, '')
+      } catch (e) {
+        return url
+      }
+    },
+
+    isActiveStatus(statusMsg) {
+      return !!statusMsg && !statusMsg.startsWith('已搜索') && !statusMsg.startsWith('未搜索')
+    },
+
+    toggleSearchSources(msg) {
+      msg.searchSourcesExpanded = !msg.searchSourcesExpanded
+    },
+
+    normalizeMarkdownSyntax(text) {
+      if (!text) return ''
+      return text
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => {
+          let normalized = line
+          normalized = normalized.replace(/^(#{1,4})([^#\s].*)$/, '$1 $2')
+          normalized = normalized.replace(/^(\s*)[-*](\S.*)$/, '$1- $2')
+          normalized = normalized.replace(/^(\s*\d+\.)(\S.*)$/, '$1 $2')
+          return normalized
+        })
+        .join('\n')
+    },
+
     abortStream() {
       if (this.currentReader) {
         try {
@@ -2552,7 +2623,7 @@ export default {
       if (!text) return ''
       
       // 全局工具/节点/智能体英文方法名动态自动识别与替换为中文名称
-      let cleanText = text
+      let cleanText = this.normalizeMarkdownSyntax(text)
       if (this.toolDictionary && Object.keys(this.toolDictionary).length > 0) {
         // 对 key 长度由长到短排序，防止长词的子串被部分替换发生混乱
         const keys = Object.keys(this.toolDictionary).sort((a, b) => b.length - a.length)
@@ -2579,10 +2650,10 @@ export default {
       html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
 
       // 4. 标题 (Markdown #, ##, ###, ####) - 去掉尾部 $ 锚点，强健匹配，并支持至少一个空格分割
-      html = html.replace(/^#\s+(.+)/gm, '<h1>$1</h1>')
-      html = html.replace(/^##\s+(.+)/gm, '<h2>$1</h2>')
-      html = html.replace(/^###\s+(.+)/gm, '<h3>$1</h3>')
       html = html.replace(/^####\s+(.+)/gm, '<h4>$1</h4>')
+      html = html.replace(/^###\s+(.+)/gm, '<h3>$1</h3>')
+      html = html.replace(/^##\s+(.+)/gm, '<h2>$1</h2>')
+      html = html.replace(/^#\s+(.+)/gm, '<h1>$1</h1>')
 
       // 5. 粗体与斜体
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -4695,6 +4766,119 @@ export default {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.03) !important;
 }
 
+.search-sources-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--polaris-inner-border);
+}
+
+.search-sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--polaris-text-main);
+  background: rgba(99, 102, 241, 0.06);
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.1);
+  }
+}
+
+.search-sources-title,
+.search-sources-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-sources-action {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--polaris-text-sub);
+}
+
+.source-collapse-arrow {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+
+  &.is-active {
+    transform: rotate(-180deg);
+  }
+}
+
+.search-query {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--polaris-text-sub);
+}
+
+.search-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.search-source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--polaris-inner-border);
+  border-radius: 8px;
+  color: var(--polaris-text-main);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.05);
+  transition: border-color 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: var(--polaris-brand-color);
+    background: rgba(99, 102, 241, 0.08);
+  }
+}
+
+.source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--polaris-brand-color);
+}
+
+.source-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.source-url {
+  font-size: 11.5px;
+  color: var(--polaris-text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .has-error {
   border-color: var(--polaris-danger-color) !important;
   background: rgba(239, 68, 68, 0.05) !important;
@@ -4894,6 +5078,55 @@ export default {
 }
 
 /* Markdown 代码高亮 */
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.85;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 18px 0 10px;
+  line-height: 1.35;
+  color: var(--polaris-text-main);
+  letter-spacing: 0;
+}
+
+.markdown-body :deep(h1) {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.markdown-body :deep(h2) {
+  padding-left: 10px;
+  border-left: 3px solid var(--polaris-brand-color);
+  font-size: 17px;
+  font-weight: 760;
+}
+
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 8px 0 14px;
+  padding-left: 22px;
+}
+
+.markdown-body :deep(li) {
+  margin: 4px 0;
+  padding-left: 2px;
+}
+
+.markdown-body :deep(strong) {
+  font-weight: 760;
+  color: var(--polaris-text-main);
+}
+
 .markdown-body :deep(pre.code-block) {
   background: #0f172a !important;
   color: #e2e8f0 !important;

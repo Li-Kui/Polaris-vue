@@ -2,6 +2,7 @@ package com.polaris.ai.tools;
 
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.ai.utils.SearchKeyHolder;
+import com.polaris.ai.utils.ToolSseHolder;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
@@ -44,6 +45,11 @@ public class SecurityContextToolExecutor {
     public static ToolExecutor wrapExecutor(ToolExecutor originalExecutor, SecurityContext securityContext, String searchKey) {
         SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
         return new PropagatingExecutor(originalExecutor, securityContext, simpleAttrs, searchKey, null, null);
+    }
+
+    public static ToolExecutor wrapExecutor(ToolExecutor originalExecutor, SecurityContext securityContext, String searchKey, SseEmitter emitter) {
+        SimpleRequestAttributes simpleAttrs = new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
+        return new PropagatingExecutor(originalExecutor, securityContext, simpleAttrs, searchKey, emitter, null);
     }
 
     /**
@@ -135,6 +141,16 @@ public class SecurityContextToolExecutor {
             String enabledTools,
             String searchKey) {
 
+        return getAllTools(allTools, securityContext, enabledTools, searchKey, null);
+    }
+
+    public static Map<ToolSpecification, ToolExecutor> getAllTools(
+            List<? extends AiTool> allTools,
+            SecurityContext securityContext,
+            String enabledTools,
+            String searchKey,
+            SseEmitter emitter) {
+
         Map<ToolSpecification, ToolExecutor> map = new HashMap<>();
         if (allTools == null || allTools.isEmpty()) {
             return map;
@@ -178,7 +194,7 @@ public class SecurityContextToolExecutor {
                     ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(method);
                     ToolExecutor originalExecutor = new DefaultToolExecutor(toolObj, method);
                     ToolExecutor wrappedExecutor = new PropagatingExecutor(
-                            originalExecutor, securityContext, simpleAttrs, searchKey, null, null);
+                            originalExecutor, securityContext, simpleAttrs, searchKey, emitter, null);
                     map.put(spec, wrappedExecutor);
                 }
             }
@@ -235,11 +251,13 @@ public class SecurityContextToolExecutor {
                     RequestContextHolder.setRequestAttributes(requestAttributes);
                 }
                 SearchKeyHolder.set(searchKey);
+                ToolSseHolder.set(emitter);
                 com.polaris.ai.utils.ChatContextHolder.setConversationId(conversationId);
                 com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
                 return delegate.execute(request, memoryId);
             } finally {
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
+                ToolSseHolder.clear();
                 SearchKeyHolder.clear();
                 RequestContextHolder.resetRequestAttributes();
                 if (previousAttributes != null) {

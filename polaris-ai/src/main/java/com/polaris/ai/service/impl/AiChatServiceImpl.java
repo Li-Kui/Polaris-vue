@@ -374,7 +374,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                             enabledTools = enabledTools + ",web_search";
                         }
                     }
-                    tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
+                    tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey, emitter);
                 } else {
                     // 2. 未选择智能体 (Soft Route 软路由模式)
                     com.polaris.ai.router.IntentRouter.RouteDecision decision = intentRouter.route(userInput, conversationId);
@@ -382,22 +382,22 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
                     if (decision.getType() == com.polaris.ai.router.IntentRouter.RouteType.TOOL_CALL || Boolean.TRUE.equals(enableSearch)) {
                         // 使用 Tool-RAG 依据语义动态精准按需加载 Top-N 工具（受 1200 Tokens 全局预算保护）
-                        tools = toolRegistry.getRetrievedTools(userInput, securityContext, searchKey, 5);
+                        tools = toolRegistry.getRetrievedTools(userInput, securityContext, searchKey, 5, emitter);
 
                         // 补全显式开启的联网搜索
                         if (Boolean.TRUE.equals(enableSearch)) {
-                            Map<ToolSpecification, ToolExecutor> searchTools = toolRegistry.getContextAwareTools(securityContext, "web_search", searchKey);
+                            Map<ToolSpecification, ToolExecutor> searchTools = toolRegistry.getContextAwareTools(securityContext, "web_search", searchKey, emitter);
                             tools.putAll(searchTools);
                         }
                     } else if (enabledTools != null && !enabledTools.trim().isEmpty()) {
-                        tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey);
+                        tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey, emitter);
                     }
                 }
 
                 // 3. 第二阶：多轮对话工具 Schema 历史只读 Slim 降维防护（降维立省 80% 历史工具 Token 占用，防止 Prompt 爆表）
                 java.util.Set<String> historicalToolNames = extractHistoricalToolNames(messages);
                 if (!historicalToolNames.isEmpty()) {
-                    Map<ToolSpecification, ToolExecutor> historicalSlimTools = toolRegistry.getSlimToolsForHistory(historicalToolNames, securityContext, searchKey);
+                    Map<ToolSpecification, ToolExecutor> historicalSlimTools = toolRegistry.getSlimToolsForHistory(historicalToolNames, securityContext, searchKey, emitter);
                     if (historicalSlimTools != null && !historicalSlimTools.isEmpty()) {
                         // 优先保留当次匹配到的全量 Schema，若当次未匹配到的历史旧工具，补充入 Slim 降维规范
                         for (Map.Entry<ToolSpecification, ToolExecutor> entry : historicalSlimTools.entrySet()) {

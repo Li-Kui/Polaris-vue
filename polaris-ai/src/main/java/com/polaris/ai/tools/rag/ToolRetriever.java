@@ -17,6 +17,7 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextRefreshedEvent;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.lang.reflect.Method;
 import java.util.*;
@@ -131,6 +132,10 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
      * @return 过滤并封装后的 ToolSpecification 与 ToolExecutor 映射
      */
     public Map<ToolSpecification, ToolExecutor> retrieveTools(String userPrompt, SecurityContext securityContext, String searchKey, int topN) {
+        return retrieveTools(userPrompt, securityContext, searchKey, topN, null);
+    }
+
+    public Map<ToolSpecification, ToolExecutor> retrieveTools(String userPrompt, SecurityContext securityContext, String searchKey, int topN, SseEmitter emitter) {
         Map<ToolSpecification, ToolExecutor> result = new HashMap<>();
         if (userPrompt == null || userPrompt.trim().isEmpty() || registeredToolMetadata.isEmpty()) {
             return result;
@@ -172,7 +177,7 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
             }
             ToolExecutor originalExecutor = new DefaultToolExecutor(meta.getTargetBean(), meta.getTargetMethod());
             // 封装安全上下文传播执行器
-            ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey);
+            ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey, emitter);
             result.put(meta.getSpecification(), wrappedExecutor);
             currentTokens += cost;
             count++;
@@ -187,6 +192,10 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
      * 根据多轮历史调用的工具名称集合，装配并保留 Slim 瘦身模式的历史工具 Schema（第二阶：降维立省 80% Token 消耗）
      */
     public Map<ToolSpecification, ToolExecutor> getSlimToolsByNames(Set<String> toolNames, SecurityContext securityContext, String searchKey) {
+        return getSlimToolsByNames(toolNames, securityContext, searchKey, null);
+    }
+
+    public Map<ToolSpecification, ToolExecutor> getSlimToolsByNames(Set<String> toolNames, SecurityContext securityContext, String searchKey, SseEmitter emitter) {
         Map<ToolSpecification, ToolExecutor> result = new HashMap<>();
         if (toolNames == null || toolNames.isEmpty() || registeredToolMetadata.isEmpty()) {
             return result;
@@ -199,7 +208,7 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
                     continue;
                 }
                 ToolExecutor originalExecutor = new DefaultToolExecutor(meta.getTargetBean(), meta.getTargetMethod());
-                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey);
+                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey, emitter);
                 // 使用 Slim 精简降维 Schema，擦除复杂的参数详细描述
                 ToolSpecification slimSpec = meta.getSlimSpecification() != null ? meta.getSlimSpecification() : meta.getSpecification();
                 result.put(slimSpec, wrappedExecutor);
