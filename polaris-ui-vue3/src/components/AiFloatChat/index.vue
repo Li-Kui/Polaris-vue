@@ -129,8 +129,11 @@
 
               <!-- 气泡 -->
               <div :class="['bubble', msg.role + '-bubble', { 'has-error': msg.error }]">
-                <div v-if="msg.loading" class="loading-dots">
-                  <span></span><span></span><span></span>
+                <div v-if="msg.loading" class="loading-wrap">
+                  <div class="loading-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div v-if="msg.statusMsg" class="loading-status-text">{{ msg.statusMsg }}</div>
                 </div>
                 <div v-else-if="msg.error" class="error-text">
                   <el-icon><warning /></el-icon> {{ msg.error }}
@@ -148,7 +151,31 @@
                     </el-collapse-transition>
                   </div>
                   <!-- 正文 -->
+                  <div v-if="msg.statusMsg" class="loading-status-text inline-status">{{ msg.statusMsg }}</div>
                   <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+                  <div v-if="msg.searchSources && msg.searchSources.length" class="search-sources-panel">
+                    <div class="search-sources-header" @click="toggleSearchSources(msg)">
+                      <span>已搜索 {{ msg.searchSourceCount || msg.searchSources.length }} 个网页</span>
+                      <span class="search-sources-action">{{ msg.searchSourcesExpanded ? '收起' : '来源' }}</span>
+                    </div>
+                    <div v-if="msg.searchQuery && msg.searchSourcesExpanded" class="search-query">{{ msg.searchQuery }}</div>
+                    <div v-if="msg.searchSourcesExpanded" class="search-source-list">
+                      <a
+                        v-for="source in msg.searchSources"
+                        :key="source.index || source.url"
+                        class="search-source-item"
+                        :href="source.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span class="source-index">{{ source.index }}</span>
+                        <span class="source-body">
+                          <span class="source-title">{{ source.title || source.url }}</span>
+                          <span class="source-url">{{ getSourceHost(source.url) }}</span>
+                        </span>
+                      </a>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -496,6 +523,18 @@ export default {
                 const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
                 this.messages[aiIndex].reasoningContent = (this.messages[aiIndex].reasoningContent || '') + processedData
                 this.$nextTick(() => this.scrollToBottom())
+              } else if (event === 'status') {
+                this.messages[aiIndex].statusMsg = data || ''
+              } else if (event === 'search_sources') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  this.messages[aiIndex].searchQuery = payload.query || ''
+                  this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
+                  this.messages[aiIndex].searchSources = payload.sources || []
+                  this.$nextTick(() => this.scrollToBottom())
+                } catch (err) {
+                  console.warn('解析联网搜索来源失败', err)
+                }
               } else if (event === 'done') {
                 this.isStreaming = false
                 this.currentReader = null
@@ -529,6 +568,31 @@ export default {
           lastMsg.loading = false
         }
       }
+    },
+    getSourceHost(url) {
+      if (!url) return ''
+      try {
+        return new URL(url).hostname.replace(/^www\./, '')
+      } catch (e) {
+        return url
+      }
+    },
+    toggleSearchSources(msg) {
+      msg.searchSourcesExpanded = !msg.searchSourcesExpanded
+    },
+    normalizeMarkdownSyntax(text) {
+      if (!text) return ''
+      return text
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => {
+          let normalized = line
+          normalized = normalized.replace(/^(#{1,4})([^#\s].*)$/, '$1 $2')
+          normalized = normalized.replace(/^(\s*)[-*](\S.*)$/, '$1- $2')
+          normalized = normalized.replace(/^(\s*\d+\.)(\S.*)$/, '$1 $2')
+          return normalized
+        })
+        .join('\n')
     },
     abortStream() {
       if (this.currentReader) {
@@ -564,7 +628,7 @@ export default {
     },
     renderMarkdown(text) {
       if (!text) return ''
-      let html = this.escapeHtml(text)
+      let html = this.escapeHtml(this.normalizeMarkdownSyntax(text))
 
       // 1. 代码块
       html = html.replace(
@@ -576,10 +640,10 @@ export default {
       html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
 
       // 3. 标题
-      html = html.replace(/^#\s*(.*?)$/gm, '<h4>$1</h4>')
-      html = html.replace(/^##\s*(.*?)$/gm, '<h4>$1</h4>')
-      html = html.replace(/^###\s*(.*?)$/gm, '<h5>$1</h5>')
-      html = html.replace(/^####\s*(.*?)$/gm, '<h6>$1</h6>')
+      html = html.replace(/^####\s+(.+)$/gm, '<h6>$1</h6>')
+      html = html.replace(/^###\s+(.+)$/gm, '<h5>$1</h5>')
+      html = html.replace(/^##\s+(.+)$/gm, '<h4>$1</h4>')
+      html = html.replace(/^#\s+(.+)$/gm, '<h4>$1</h4>')
 
       // 4. 粗体与斜体
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -644,11 +708,11 @@ export default {
       html = lines.join('\n')
 
       // 6. 列表
-      html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+      html = html.replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
       html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ul>${m}</ul>`)
       html = html.replace(/<\/ul>\s*<ul>/g, '')
 
-      html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      html = html.replace(/^\s*\d+\. (.+)$/gm, '<li>$1</li>')
       html = html.replace(/(<li>[\s\S]*?<\/li>)/g, m => `<ol>${m}</ol>`)
       html = html.replace(/<\/ol>\s*<ol>/g, '')
 
@@ -1147,6 +1211,108 @@ export default {
   gap: 6px;
 }
 
+.loading-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.loading-status-text {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+
+  &.inline-status {
+    margin-bottom: 8px;
+  }
+}
+
+.search-sources-panel {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.search-sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #e2e8f0;
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.search-sources-action {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.search-query {
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.search-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 9px;
+}
+
+.search-source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #f1f5f9;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--el-color-primary);
+}
+
+.source-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.source-title {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.source-url {
+  font-size: 11px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* loading 三点动画 */
 .loading-dots {
   display: flex;
@@ -1317,6 +1483,20 @@ export default {
 /* Markdown 样式 */
 .markdown-body {
   font-size: 13px;
+  line-height: 1.7;
+
+  :deep(h4), :deep(h5), :deep(h6) {
+    margin: 12px 0 7px 0;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #f8fafc;
+    letter-spacing: 0;
+  }
+
+  :deep(h4) {
+    padding-left: 8px;
+    border-left: 3px solid var(--el-color-primary);
+  }
 
   :deep(p) {
     margin: 0 0 8px 0;
@@ -1347,25 +1527,12 @@ export default {
   }
 
   :deep(ul), :deep(ol) {
-    margin: 4px 0 8px 0;
+    margin: 6px 0 10px 0;
     padding-left: 20px;
   }
 
   :deep(li) {
-    margin-bottom: 2px;
-  }
-
-  :deep(blockquote) {
-    border-left: 4px solid rgba(255, 255, 255, 0.15);
-    padding-left: 8px;
-    color: rgba(255, 255, 255, 0.5);
-    margin: 6px 0;
-    font-style: italic;
-  }
-
-  :deep(h4), :deep(h5), :deep(h6) {
-    margin: 10px 0 6px 0;
-    font-weight: 600;
+    margin-bottom: 4px;
   }
 
   /* 表格 */

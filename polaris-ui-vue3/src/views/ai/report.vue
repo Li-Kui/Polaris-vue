@@ -54,7 +54,7 @@
             <span class="report-code-pill">{{ scope.row.reportCode || 'REP-' + scope.row.id }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="报告标题" prop="reportTitle" min-width="240" show-overflow-tooltip>
+        <el-table-column label="报告标题" prop="reportTitle" min-width="120" show-overflow-tooltip>
           <template #default="scope">
             <span class="report-title-link" @click="handlePreview(scope.row)">
               {{ scope.row.reportTitle }}
@@ -81,12 +81,27 @@
             <span class="user-name-text">{{ scope.row.createBy || 'admin' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="center" width="200" fixed="right">
+        <el-table-column label="操作" align="center" width="240" fixed="right">
           <template #default="scope">
-            <el-button size="small" type="primary" link icon="View" @click="handlePreview(scope.row)">
-              查看美化报告
+            <el-button 
+              size="small" 
+              type="primary" 
+              link 
+              :icon="refiningId === scope.row.id ? 'Loading' : 'View'"
+              :loading="refiningId === scope.row.id"
+              :disabled="refiningId !== null && refiningId !== scope.row.id"
+              @click="handlePreview(scope.row)"
+            >
+              {{ refiningId === scope.row.id ? 'AI 美化中...' : '查看美化报告' }}
             </el-button>
-            <el-button size="small" type="danger" link icon="Delete" @click="handleDelete(scope.row)">
+            <el-button 
+              size="small" 
+              type="danger" 
+              link 
+              icon="Delete" 
+              :disabled="refiningId === scope.row.id" 
+              @click="handleDelete(scope.row)"
+            >
               删除
             </el-button>
           </template>
@@ -103,165 +118,65 @@
       </div>
     </div>
 
-    <!-- 报告在线预览大屏抽屉 (高质感商业分析与图表化展示) -->
-    <el-drawer
+    <!-- 报告在线预览大屏弹窗 (高质感商业分析与图表化展示) -->
+    <el-dialog
       v-model="previewVisible"
-      size="80%"
-      class="report-preview-drawer"
-      :destroy-on-close="true"
-      :before-close="handleDrawerClose"
+      width="1100px"
+      top="4vh"
+      class="report-preview-dialog"
+      :show-close="false"
+      @close="handleCloseReportModal"
+      append-to-body
     >
       <template #header>
-        <div class="drawer-header-custom">
+        <div class="drawer-header-custom" style="position: relative; z-index: 10;">
           <div class="drawer-title-box">
             <span class="drawer-icon-glow">
               <el-icon><data-board /></el-icon>
             </span>
-            <span class="drawer-title">{{ reportTitle || currentReport.reportTitle }}</span>
-            <el-tag size="small" type="primary" effect="dark" class="drawer-badge">高质感数据大屏</el-tag>
+            <span class="drawer-title">{{ cleanDialogTitle }}</span>
+            <el-tag size="small" type="primary" effect="plain" class="drawer-badge">高质感数据大屏</el-tag>
           </div>
-          <div class="drawer-actions">
-            <el-button 
-              type="warning" 
-              size="small" 
-              icon="MagicStick" 
-              :loading="refining"
-              @click="handleAiRefine"
-              class="refine-btn"
-            >
-              {{ refining ? 'AI 正在深度重塑...' : 'AI 智能重塑美化' }}
-            </el-button>
+          <div class="drawer-actions" style="display: flex; align-items: center; gap: 12px; position: relative; z-index: 50;">
             <el-button type="primary" size="small" icon="Download" @click="handlePrint">
               导出 PDF 报告
             </el-button>
+            <button 
+              type="button"
+              class="custom-close-btn"
+              title="关闭弹窗"
+              @click.stop.prevent="handleCloseReportModal"
+              @mousedown.stop.prevent="handleCloseReportModal"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
           </div>
         </div>
       </template>
 
-      <div id="report-drawer-print-area" class="report-drawer-body">
-        <div class="paper-preview-box">
-          <!-- 头部装饰条 -->
-          <div class="paper-header-decoration">
-            <span class="confidential-badge">
-              <el-icon><lock /></el-icon> 内部报告 · Polaris-AI 智能可视化分析引擎
-            </span>
-            <span class="serial-code">编号：{{ currentReport.reportCode || 'REP-' + currentReport.id }}</span>
-          </div>
-
-          <h1 class="paper-title">{{ reportTitle || currentReport.reportTitle }}</h1>
-
-          <div class="paper-meta">
-            <span><el-icon><user /></el-icon> 创建人：{{ currentReport.createBy || 'admin' }}</span>
-            <span><el-icon><calendar /></el-icon> 归档时间：{{ currentReport.createTime }}</span>
-            <span v-if="currentReport.agentCode"><el-icon><cpu /></el-icon> 智能体：{{ currentReport.agentCode }}</span>
-          </div>
-
-          <el-divider class="paper-divider" />
-
-          <!-- AI 智能提炼的高管极简摘要 Banner -->
-          <div v-if="refinedSchema && refinedSchema.executiveSummary" class="executive-summary-banner">
-            <div class="summary-header">
-              <el-icon><opportunity /></el-icon>
-              <span>高管极简摘要与决策建议 (Executive Summary)</span>
-            </div>
-            <div class="summary-body">
-              {{ refinedSchema.executiveSummary }}
-            </div>
-          </div>
-
-          <!-- KPI 核心指标概览卡片 (Stat Cards) -->
-          <div v-if="reportStats" class="report-stats-row">
-            <div 
-              v-for="(stat, idx) in reportStats" 
-              :key="idx" 
-              class="stat-card" 
-              :class="'stat-card-' + stat.color"
-            >
-              <div class="stat-icon-wrapper">
-                <span class="stat-emoji">{{ stat.emoji }}</span>
-              </div>
-              <div class="stat-info">
-                <div class="stat-value">{{ stat.value }}</div>
-                <div class="stat-label">{{ stat.label }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- AI 智能提取的核心发现 Key Findings -->
-          <div v-if="refinedSchema && refinedSchema.keyFindings && refinedSchema.keyFindings.length > 0" class="key-findings-section">
-            <div class="findings-header">
-              <el-icon><star /></el-icon>
-              <span>核心关键发现与研判 (Key Findings)</span>
-            </div>
-            <ul class="findings-list">
-              <li v-for="(finding, idx) in refinedSchema.keyFindings" :key="idx">
-                <span class="finding-num">{{ idx + 1 }}</span>
-                <span class="finding-text">{{ finding }}</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- 动态 ECharts 数据可视化图表卡片 -->
-          <div v-if="hasChartData" class="report-chart-section">
-            <div class="chart-section-header">
-              <div class="chart-title-group">
-                <el-icon class="chart-header-icon"><histogram /></el-icon>
-                <span>数据维度与对比可视化图表</span>
-              </div>
-              <div class="chart-toggle-group">
-                <el-radio-group v-model="activeChartType" size="small" @change="switchChartType">
-                  <el-radio-button label="bar">柱状图</el-radio-button>
-                  <el-radio-button label="line">趋势图</el-radio-button>
-                </el-radio-group>
-              </div>
-            </div>
-            <div id="pretty-report-chart" class="pretty-chart-box"></div>
-          </div>
-
-          <!-- 正文卡片分段展示 (渲染 Markdown 与高质感渐变表头 Vue 表格) -->
-          <div class="paper-content-v2-container">
-            <div v-for="(section, idx) in reportSections" :key="idx" class="report-content-card">
-              <div class="markdown-body report-markdown-content" v-html="renderMarkdown(section)"></div>
-            </div>
-          </div>
-
-          <!-- AI 行动计划看板 (Action Plan) -->
-          <div v-if="refinedSchema && refinedSchema.actionPlan && refinedSchema.actionPlan.length > 0" class="report-action-plan-section">
-            <div class="action-plan-header">
-              <el-icon style="color: #10b981;"><checked /></el-icon>
-              <span>建议改进与行动计划看板 (Action Plan)</span>
-            </div>
-            <el-table :data="refinedSchema.actionPlan" border stripe style="width: 100%;">
-              <el-table-column label="优先级" prop="priority" width="100" align="center">
-                <template #default="scope">
-                  <el-tag :type="scope.row.priority === 'P1' ? 'danger' : (scope.row.priority === 'P2' ? 'warning' : 'info')" effect="dark" size="small">
-                    {{ scope.row.priority }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="改进措施 / 行动建议" prop="action" min-width="240" />
-              <el-table-column label="建议责任部门/人" prop="owner" width="160" align="center" />
-            </el-table>
-          </div>
-
-          <!-- 页脚声明 -->
-          <div class="paper-footer">
-            <div class="footer-gradient-line"></div>
-            <p class="footer-disclaimer">本报告由 Polaris-AI 数据分析引擎结构化渲染，数据真实有效，仅供决策参考</p>
-            <p class="footer-brand">Powered by <strong>Polaris-Vue</strong> · AI Report Visualization Engine</p>
-          </div>
-        </div>
+      <div id="report-drawer-print-area" class="report-drawer-body" v-if="previewVisible">
+        <!-- 默认且唯一展示最新 PolarisReportEngine 极简美化渲染大屏 -->
+        <PolarisReportEngine
+          :report-title="cleanDialogTitle"
+          :meta-info="{ author: currentReport.createBy || 'admin', date: currentReport.createTime, code: currentReport.reportCode || ('REP-' + currentReport.id) }"
+          :structured-schema="refinedSchema"
+          :content="reportContent"
+        />
       </div>
-    </el-drawer>
+    </el-dialog>
   </div>
 </template>
 
 <script>
 import * as echarts from 'echarts'
-import {delReport, listReports, refineReport} from '@/api/ai/report'
+import {delReport, listReports, refineReport, updateReport} from '@/api/ai/report'
+import PolarisReportEngine from './report/PolarisReportEngine.vue'
 
 export default {
   name: 'AiReport',
+  components: {
+    PolarisReportEngine
+  },
   data() {
     return {
       loading: false,
@@ -274,6 +189,7 @@ export default {
         reportTitle: undefined,
         agentCode: undefined
       },
+      renderEngineMode: 'engine',
       previewVisible: false,
       currentReport: {},
       reportContent: '',
@@ -285,7 +201,14 @@ export default {
       activeChartType: 'bar',
       reportChartInstance: null,
       refining: false,
+      refiningId: null,
       refinedSchema: null
+    }
+  },
+  computed: {
+    cleanDialogTitle() {
+      const raw = (this.currentReport && this.currentReport.reportTitle) || this.reportTitle || 'AI 智能数据分析报告'
+      return raw.replace(/^[#\s\*\📊\📈\🛡️\💰]+/, '').replace(/^#{1,4}\s*/, '').trim()
     }
   },
   created() {
@@ -295,6 +218,95 @@ export default {
     this.destroyChart()
   },
   methods: {
+    handleOpenDEADemo() {
+      this.currentReport = {
+        id: 'DEA-2026-DEMO',
+        reportTitle: '2026 北辰 AI 全流程业务增长与智能体效能深度诊断报告',
+        reportCode: 'DEA-ULTIMATE-001',
+        createBy: 'Polaris-AI 资深专家组',
+        createTime: '2026-07-24 17:30',
+        agentCode: 'POLARIS-EXPERT-AGENT'
+      }
+      this.reportTitle = '2026 北辰 AI 全流程业务增长与智能体效能深度诊断报告'
+      this.refinedSchema = {
+        executiveSummary: '本季度通过部署 Polaris-AI 智能体矩阵，企业自动化研报生成效率提升 340%，客服响应沉淀周期缩短 65%。海外 AI SaaS 业务贡献了主要净新增收入。',
+        compareMatrix: {
+          title: "传统 Markdown 渲染 VS 【Polaris-AI 智能可视化大屏】 深度对比",
+          columns: [
+            {
+              title: "传统 Markdown 渲染",
+              style: "default",
+              points: [
+                "大段白底黑字长文本，缺乏视觉层次与区分度",
+                "无法直接流式呈现高颜值 KPI 大屏与手势交互",
+                "静态表单缺乏数字增长与图表入场动画",
+                "导出 PDF 容易断行分割错位"
+              ]
+            },
+            {
+              title: "【Polaris-AI 智能可视化大屏】",
+              style: "highlight",
+              badge: "推荐标杆",
+              points: [
+                "智能语义识别：自动构建双栏对比/SWOT四象限矩阵/行动看板",
+                "渐进流式加载：支持 ::: 指令卡片实时弹出与骨架屏",
+                "动态可视化 DSL：ECharts / SVG / 拓扑图秒级自适应渲染",
+                "无损 1:1 矢量导出，杂志级高级视觉审美质感"
+              ]
+            }
+          ]
+        },
+        swot: {
+          strengths: ['具备自主研报动态编排渲染引擎', '大模型响应延时降至 180ms', '深度整合 Vue3 + Element Plus 商业全家桶'],
+          weaknesses: ['部分复杂多维桑基图需要持续优化算力', '移动端手势下钻适配待加强'],
+          opportunities: ['企业级 AI 自动化报告市场迎来爆破期', '出海多语言定制化报告需求旺盛'],
+          threats: ['开源大模型轻量化替代竞争', '数据安全与合规审计监管趋严']
+        },
+        actionPlan: [
+          { priority: 'P1', action: '全面上线 D+E+A 渐进式智能美化引擎，全量替换传统纯文本 Markdown 渲染', owner: '前端研发组', deadline: '2026-08-01' },
+          { priority: 'P1', action: '增强后端 AI 智能体指令输出稳定性，控制 Directive 识别成功率 >99.5%', owner: 'Polaris-AI 后端团队', deadline: '2026-08-05' },
+          { priority: 'P2', action: '集成 Vega-Lite 极简 DSL 拓展更多复合拓扑关系图', owner: '数据可视化小分队', deadline: '2026-08-15' }
+        ]
+      }
+      this.reportContent = `
+::: executive-summary
+本报告综合评估了北辰 AI 平台引入 【Polaris-AI 智能可视化大屏】 后的多项关键指标表现。数据显示，卡片式智能排版与矢量 DSL 可视化极大地提升了决策层对研报的阅读完成率。
+:::
+
+::: kpi-group
+- kpi: 智能报告阅读完成率
+  value: 94.8%
+  change: +38.2%
+  type: success
+  emoji: 📈
+- kpi: AI 研报排版耗时
+  value: 120ms
+  change: -85.0%
+  type: primary
+  emoji: ⚡
+- kpi: 高管满意度评分
+  value: 4.95 / 5.0
+  change: +12.4%
+  type: warning
+  emoji: 🏆
+- kpi: 活跃分析智能体数
+  value: 28 个
+  change: +6 个
+  type: success
+  emoji: 🤖
+:::
+
+::: chart
+{
+  "title": "2026 季度 AI 报告美化使用率与满意度走势",
+  "categories": ["Q1 基础版", "Q2 卡片版", "Q3 终极版大屏", "Q4 预测"],
+  "values": [320, 580, 940, 1280],
+  "chartType": "line"
+}
+:::
+`
+      this.previewVisible = true
+    },
     getList() {
       this.loading = true
       listReports(this.queryParams).then(res => {
@@ -332,18 +344,116 @@ export default {
     },
 
     // ──────────────────────────────────────────
-    // 报告详情解析与美化渲染逻辑
+    // 报告详情解析与美化渲染逻辑 (深度美化结果保存至 refinedSchema)
     // ──────────────────────────────────────────
-    handlePreview(row) {
+    async handlePreview(row) {
+      if (this.refiningId !== null) return
+
       this.currentReport = row
       this.refinedSchema = null
       this.parseAndInitReportData(row.reportContent)
-      this.previewVisible = true
 
-      if (this.hasChartData) {
-        this.$nextTick(() => {
-          this.initReportChart()
-        })
+      // 1. 若当前报告已存在持久化的美化结果 (refinedSchema 字段非空)，直接快速呈现
+      if (row.refinedSchema) {
+        try {
+          let schema = typeof row.refinedSchema === 'object' ? row.refinedSchema : JSON.parse(row.refinedSchema)
+          this.applyRefinedSchema(schema)
+          this.previewVisible = true
+          if (this.hasChartData) {
+            this.$nextTick(() => {
+              this.initReportChart()
+            })
+          }
+          return
+        } catch (e) {
+          console.warn('解析已保存的美化字段失败，重新触发 AI 智能美化:', e)
+        }
+      }
+
+      // 2. 若未生成过美化数据，则数据栏显示“AI美化中...”，调用大模型美化并持久化写回数据库
+      this.refiningId = row.id
+
+      this.$notify({
+        title: 'AI 深度重塑美化中...',
+        message: `正在为您智能提炼分析《${row.reportTitle || '报告'}》，构建结构化看板与图表...`,
+        type: 'info',
+        duration: 3500
+      })
+
+      try {
+        if (this.reportContent) {
+          const res = await refineReport(this.reportContent)
+          if (res.code === 200 && res.data) {
+            let schema = null
+            if (typeof res.data === 'object') {
+              schema = res.data
+            } else {
+              let cleanText = String(res.data)
+              const firstBrace = cleanText.indexOf('{')
+              const lastBrace = cleanText.lastIndexOf('}')
+              if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+                cleanText = cleanText.substring(firstBrace, lastBrace + 1)
+              }
+              schema = JSON.parse(cleanText)
+            }
+
+            this.applyRefinedSchema(schema)
+
+            // 持久化保存美化结果到数据库的 refinedSchema 字段
+            const schemaStr = JSON.stringify(schema)
+            row.refinedSchema = schemaStr
+            updateReport({
+              id: row.id,
+              refinedSchema: schemaStr
+            }).catch(err => {
+              console.error('保存美化结果字段到数据库失败:', err)
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('AI 重塑处理异常，降级展示基础图表与 Markdown 内容:', err)
+      } finally {
+        this.refiningId = null
+        this.previewVisible = true
+
+        if (this.hasChartData) {
+          this.$nextTick(() => {
+            this.initReportChart()
+          })
+        }
+      }
+    },
+
+    applyRefinedSchema(schema) {
+      if (!schema) return
+      this.refinedSchema = schema
+
+      // 更新 KPI 统计卡片
+      if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
+        this.reportStats = schema.kpiCards.map(k => ({
+          label: k.label || k.title || '核心指标',
+          value: k.value || '0',
+          emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
+          color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
+        }))
+      }
+
+      // 更新 ECharts 动态数据图表
+      if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
+        const viz = schema.visualizations[0]
+        if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
+          this.hasChartData = true
+          this.chartConfig = {
+            xAxisData: viz.chartData.categories,
+            series: viz.chartData.series.map(s => ({
+              name: s.name,
+              type: viz.chartType === 'line' ? 'line' : 'bar',
+              data: s.data,
+              barMaxWidth: 30
+            })),
+            legendData: viz.chartData.series.map(s => s.name)
+          }
+        }
       }
     },
 
@@ -366,6 +476,17 @@ export default {
         normalizedContent = normalizedContent.substring(firstHeadingIndex).trim()
       } else {
         normalizedContent = normalizedContent.replace(/^(好的|收到|已为您|以下是为您|好的，已|好的，我|已成功|首先)[^\n\:]*[\:\：\n]\s*/gi, '').trim()
+      }
+
+      // 清洗第一行可能重复的裸标题，避免大屏标题区与内容区重复
+      const lines = normalizedContent.split('\n')
+      if (lines.length > 0 && /^#{1,3}\s+/.test(lines[0])) {
+        const extractedTitle = lines[0].replace(/^#{1,3}\s+/, '').replace(/[\📊\📈\🛡️\💰]/g, '').trim()
+        if (extractedTitle) {
+          this.reportTitle = extractedTitle
+        }
+        lines.shift()
+        normalizedContent = lines.join('\n').trim()
       }
 
       this.reportContent = normalizedContent
@@ -558,10 +679,12 @@ export default {
 
         this.reportChartInstance = echarts.init(chartDom, isDark ? 'dark' : null)
 
+        const isPie = this.activeChartType === 'pie'
+
         const option = {
           backgroundColor: 'transparent',
           tooltip: {
-            trigger: 'axis',
+            trigger: isPie ? 'item' : 'axis',
             axisPointer: { type: 'shadow' }
           },
           legend: {
@@ -580,13 +703,17 @@ export default {
           xAxis: {
             type: 'category',
             data: this.chartConfig.xAxisData,
-            axisLabel: { interval: 0, rotate: 15, color: textColor },
-            axisLine: { lineStyle: { color: axisLineColor } }
+            show: !isPie,
+            axisLabel: { show: !isPie, interval: 0, rotate: 15, color: textColor },
+            axisLine: { show: !isPie, lineStyle: { color: axisLineColor } },
+            axisTick: { show: !isPie }
           },
           yAxis: {
             type: 'value',
-            axisLabel: { color: textColor },
-            splitLine: { lineStyle: { type: 'dashed', color: splitLineColor } }
+            show: !isPie,
+            axisLabel: { show: !isPie, color: textColor },
+            splitLine: { show: !isPie, lineStyle: { type: 'dashed', color: splitLineColor } },
+            axisTick: { show: !isPie }
           },
           color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
           series: this.chartConfig.series.map(s => ({
@@ -618,9 +745,12 @@ export default {
       }
     },
 
-    handleDrawerClose(done) {
-      this.destroyChart()
+    handleCloseReportModal() {
       this.previewVisible = false
+    },
+
+    handleDrawerClose(done) {
+      this.handleCloseReportModal()
       if (done) done()
     },
 
@@ -835,9 +965,370 @@ export default {
       }
     },
 
-    // 导出 / 打印 PDF 报告
-    handlePrint() {
-      window.print()
+    waitForImageLoaded(img) {
+      if (img.complete) return Promise.resolve()
+      return new Promise(resolve => {
+        img.onload = resolve
+        img.onerror = resolve
+      })
+    },
+
+    async waitForReportRenderReady() {
+      await this.$nextTick()
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      await new Promise(resolve => setTimeout(resolve, 350))
+    },
+
+    expandPdfExportContainers(element) {
+      const containers = [element]
+      const dialogBody = element.closest('.el-dialog__body')
+      const dialog = element.closest('.el-dialog')
+      if (dialogBody) containers.push(dialogBody)
+      if (dialog) containers.push(dialog)
+
+      const snapshots = containers.map(node => ({
+        node,
+        style: {
+          maxHeight: node.style.maxHeight,
+          height: node.style.height,
+          overflow: node.style.overflow,
+          overflowY: node.style.overflowY
+        }
+      }))
+
+      snapshots.forEach(({ node }) => {
+        node.style.maxHeight = 'none'
+        node.style.height = 'auto'
+        node.style.overflow = 'visible'
+        node.style.overflowY = 'visible'
+      })
+
+      return () => {
+        snapshots.forEach(({ node, style }) => {
+          node.style.maxHeight = style.maxHeight
+          node.style.height = style.height
+          node.style.overflow = style.overflow
+          node.style.overflowY = style.overflowY
+        })
+      }
+    },
+
+    async createChartSnapshots(element) {
+      const snapshots = []
+      const chartContainers = Array.from(element.querySelectorAll('.chart-mount-container, #pretty-report-chart'))
+
+      for (const container of chartContainers) {
+        const chart = echarts.getInstanceByDom(container)
+        const canvas = container.querySelector('canvas')
+
+        if (!chart && !canvas) continue
+
+        try {
+          if (chart) {
+            chart.resize()
+            await new Promise(resolve => requestAnimationFrame(resolve))
+          }
+
+          const dataUrl = chart
+            ? chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#ffffff' })
+            : canvas.toDataURL('image/png')
+
+          if (!dataUrl) continue
+
+          const previousPosition = container.style.position
+          const previousOverflow = container.style.overflow
+          container.style.position = previousPosition || 'relative'
+          container.style.overflow = 'hidden'
+
+          const wrapper = document.createElement('div')
+          wrapper.className = 'pdf-chart-snapshot-wrap'
+          wrapper.style.cssText = 'position:absolute;inset:0;z-index:20;background:#fff;display:flex;align-items:center;justify-content:center;pointer-events:none;'
+
+          const img = new Image()
+          img.className = 'pdf-chart-snapshot-img'
+          img.alt = 'chart snapshot'
+          img.src = dataUrl
+          img.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain;'
+          wrapper.appendChild(img)
+          container.appendChild(wrapper)
+          await this.waitForImageLoaded(img)
+
+          snapshots.push({ container, wrapper, previousPosition, previousOverflow })
+        } catch (err) {
+          console.warn('图表快照生成失败，跳过该图表:', err)
+        }
+      }
+
+      return () => {
+        snapshots.forEach(({ container, wrapper, previousPosition, previousOverflow }) => {
+          if (wrapper && wrapper.parentNode) wrapper.parentNode.removeChild(wrapper)
+          container.style.position = previousPosition
+          container.style.overflow = previousOverflow
+        })
+      }
+    },
+
+    getPdfMetaInfo() {
+      const report = this.currentReport || {}
+      return {
+        code: report.reportCode || (report.id ? 'REP-' + report.id : ''),
+        date: report.createTime || '',
+        author: report.createBy || 'admin'
+      }
+    },
+
+    collectPdfTemplateBlocks(reportNode) {
+      const blocks = []
+      const banner = reportNode.querySelector('.engine-report-banner')
+      const blockContainer = reportNode.querySelector('.engine-blocks-container')
+
+      if (banner) blocks.push({ type: 'banner', node: banner.cloneNode(true) })
+      if (blockContainer) {
+        Array.from(blockContainer.children).forEach(node => {
+          blocks.push({ type: 'content', node: node.cloneNode(true) })
+        })
+      }
+
+      return blocks
+    },
+
+    escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    },
+
+    applyScopedAttrs(sourceNode, targetNode) {
+      Array.from(sourceNode.attributes || []).forEach(attr => {
+        if (attr.name.startsWith('data-v-')) {
+          targetNode.setAttribute(attr.name, attr.value)
+        }
+      })
+    },
+
+    createPdfTemplatePage({ title, metaInfo, pageNumber, widthPx, heightPx, sourceNode }) {
+      const page = document.createElement('div')
+      page.className = 'pdf-report-page'
+      page.style.cssText = [
+        'width:' + widthPx + 'px',
+        'height:' + heightPx + 'px',
+        'box-sizing:border-box',
+        'padding:30px 40px 24px',
+        'background:#ffffff',
+        'color:#0f172a',
+        'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif',
+        'display:flex',
+        'flex-direction:column',
+        'overflow:hidden'
+      ].join(';')
+
+      const header = document.createElement('div')
+      header.className = 'pdf-report-header'
+      header.style.cssText = 'height:56px;display:flex;align-items:flex-start;justify-content:space-between;border-bottom:1px solid #e2e8f0;margin-bottom:18px;flex:0 0 auto;'
+      const escapedTitle = this.escapeHtml(title)
+      const escapedCode = this.escapeHtml(metaInfo.code || '-')
+      const escapedAuthor = this.escapeHtml(metaInfo.author || '-')
+      const escapedDate = this.escapeHtml(metaInfo.date || '')
+      header.innerHTML = [
+        '<div style="min-width:0;">',
+        '<div style="font-size:18px;font-weight:800;color:#0f172a;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:520px;">' + escapedTitle + '</div>',
+        '<div style="margin-top:7px;font-size:11px;color:#64748b;">报告编号：' + escapedCode + '　分析者：' + escapedAuthor + '</div>',
+        '</div>',
+        '<div style="font-size:11px;color:#64748b;text-align:right;line-height:1.7;white-space:nowrap;">',
+        '<div>Polaris-AI</div>',
+        '<div>' + escapedDate + '</div>',
+        '</div>'
+      ].join('')
+
+      const body = document.createElement('div')
+      body.className = 'pdf-report-body'
+      body.style.cssText = 'flex:1 1 auto;min-height:0;overflow:hidden;background:linear-gradient(135deg,#f8fafc 0%,#f1f5f9 100%);border-radius:10px;padding:16px;box-sizing:border-box;'
+
+      const engine = document.createElement('div')
+      engine.className = 'polaris-report-engine theme-glass-light pdf-template-engine'
+      engine.style.cssText = 'width:100%;padding:0;background:transparent;border-radius:0;box-shadow:none;color:#1e293b;'
+      this.applyScopedAttrs(sourceNode, engine)
+
+      const blockContainer = document.createElement('div')
+      blockContainer.className = 'engine-blocks-container'
+      blockContainer.style.cssText = 'display:flex;flex-direction:column;gap:16px;'
+      const sourceBlockContainer = sourceNode.querySelector('.engine-blocks-container')
+      if (sourceBlockContainer) this.applyScopedAttrs(sourceBlockContainer, blockContainer)
+
+      engine.appendChild(blockContainer)
+      body.appendChild(engine)
+
+      const footer = document.createElement('div')
+      footer.className = 'pdf-report-footer'
+      footer.style.cssText = 'height:28px;display:flex;align-items:flex-end;justify-content:space-between;border-top:1px solid #e2e8f0;margin-top:16px;font-size:10px;color:#94a3b8;flex:0 0 auto;'
+      footer.innerHTML = '<span>Polaris-AI 深度可视化诊断报告</span><span class="pdf-page-number">第 ' + pageNumber + ' 页</span>'
+
+      page.appendChild(header)
+      page.appendChild(body)
+      page.appendChild(footer)
+
+      return { page, body, engine, blockContainer, footer }
+    },
+
+    appendPdfBlockToPage(pageInfo, block) {
+      if (block.type === 'banner') {
+        pageInfo.engine.insertBefore(block.node, pageInfo.blockContainer)
+      } else {
+        pageInfo.blockContainer.appendChild(block.node)
+      }
+    },
+
+    removePdfBlockFromPage(pageInfo, block) {
+      if (block.node && block.node.parentNode) {
+        block.node.parentNode.removeChild(block.node)
+      }
+    },
+
+    pageHasPdfContent(pageInfo) {
+      return !!pageInfo.body.querySelector('.engine-report-banner, .engine-blocks-container > *')
+    },
+
+    buildPdfTemplate(reportNode, title) {
+      const widthPx = 794
+      const heightPx = 1123
+      const metaInfo = this.getPdfMetaInfo()
+      const blocks = this.collectPdfTemplateBlocks(reportNode)
+
+      const root = document.createElement('div')
+      root.className = 'pdf-report-template-root'
+      root.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + widthPx + 'px;background:#f8fafc;z-index:-1;'
+      document.body.appendChild(root)
+
+      const pages = []
+      const createPage = () => {
+        const pageInfo = this.createPdfTemplatePage({
+          title,
+          metaInfo,
+          pageNumber: pages.length + 1,
+          widthPx,
+          heightPx,
+          sourceNode: reportNode
+        })
+        root.appendChild(pageInfo.page)
+        pages.push(pageInfo)
+        return pageInfo
+      }
+
+      let currentPage = createPage()
+
+      blocks.forEach(block => {
+        this.appendPdfBlockToPage(currentPage, block)
+
+        if (currentPage.body.scrollHeight <= currentPage.body.clientHeight) return
+
+        this.removePdfBlockFromPage(currentPage, block)
+
+        if (this.pageHasPdfContent(currentPage)) {
+          currentPage = createPage()
+          this.appendPdfBlockToPage(currentPage, block)
+        } else {
+          this.appendPdfBlockToPage(currentPage, block)
+        }
+
+        if (currentPage.body.scrollHeight > currentPage.body.clientHeight) {
+          const blockHeight = block.node.getBoundingClientRect().height || currentPage.body.scrollHeight
+          const availableHeight = currentPage.body.clientHeight - 4
+          const scale = Math.max(0.72, Math.min(1, availableHeight / Math.max(blockHeight, 1)))
+          if (scale < 1) {
+            const wrapper = document.createElement('div')
+            wrapper.className = 'pdf-scaled-oversize-block'
+            wrapper.style.cssText = 'height:' + Math.ceil(blockHeight * scale) + 'px;overflow:hidden;'
+            block.node.parentNode.insertBefore(wrapper, block.node)
+            block.node.parentNode.removeChild(block.node)
+            wrapper.appendChild(block.node)
+            block.node.style.transform = 'scale(' + scale + ')'
+            block.node.style.transformOrigin = 'top left'
+            block.node.style.width = (100 / scale) + '%'
+          }
+        }
+      })
+
+      pages.forEach((pageInfo, index) => {
+        const pageNumber = pageInfo.footer.querySelector('.pdf-page-number')
+        if (pageNumber) pageNumber.textContent = '第 ' + (index + 1) + ' / ' + pages.length + ' 页'
+      })
+
+      return { root, pages, widthPx, heightPx }
+    },
+
+    // 导出 / 打印 PDF 报告（前端渲染截图方案，1:1 保留大屏样式与图表）
+    async handlePrint() {
+      const element = document.getElementById('report-drawer-print-area')
+      if (!element) {
+        this.$message.warning('报告预览区域未就绪，请稍后再试')
+        return
+      }
+
+      this.$message({ message: '正在生成 PDF，图表较多时请耐心等候...', type: 'info', duration: 3000 })
+
+      let restoreContainers = null
+      let restoreCharts = null
+      let pdfTemplate = null
+
+      try {
+        document.body.classList.add('pdf-exporting-report')
+        restoreContainers = this.expandPdfExportContainers(element)
+
+        // 等待 DOM 重排与 ECharts 图表渲染完成，再把 canvas 固化为图片，避免 PDF 空图表
+        await this.waitForReportRenderReady()
+        restoreCharts = await this.createChartSnapshots(element)
+        await this.waitForReportRenderReady()
+
+        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+          import('html2canvas'),
+          import('jspdf')
+        ])
+        const title = this.cleanDialogTitle || 'AI分析报告'
+        const reportNode = element.querySelector('.polaris-report-engine') || element
+        pdfTemplate = this.buildPdfTemplate(reportNode, title)
+        await this.waitForReportRenderReady()
+
+        const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' })
+        const pageWidth = pdf.internal.pageSize.getWidth()
+        const pageHeight = pdf.internal.pageSize.getHeight()
+
+        for (let pageIndex = 0; pageIndex < pdfTemplate.pages.length; pageIndex++) {
+          const canvas = await html2canvas(pdfTemplate.pages[pageIndex].page, {
+            scale: 2,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff',
+            scrollX: 0,
+            scrollY: 0,
+            x: 0,
+            y: 0,
+            width: pdfTemplate.widthPx,
+            height: pdfTemplate.heightPx,
+            windowWidth: pdfTemplate.widthPx,
+            windowHeight: pdfTemplate.heightPx
+          })
+          const imageData = canvas.toDataURL('image/jpeg', 0.98)
+
+          if (pageIndex > 0) pdf.addPage()
+          pdf.addImage(imageData, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST')
+        }
+
+        pdf.save(title.replace(/[\\/:*?"<>|]/g, '_') + '.pdf')
+        this.$message.success('PDF 导出成功')
+      } catch (err) {
+        console.error('PDF 导出失败:', err)
+        this.$message.error('PDF 导出失败: ' + err.message)
+      } finally {
+        if (pdfTemplate && pdfTemplate.root && pdfTemplate.root.parentNode) {
+          pdfTemplate.root.parentNode.removeChild(pdfTemplate.root)
+        }
+        if (restoreCharts) restoreCharts()
+        if (restoreContainers) restoreContainers()
+        document.body.classList.remove('pdf-exporting-report')
+      }
     }
   }
 }
@@ -1007,13 +1498,97 @@ export default {
 }
 
 /* ──────────────────────────────────────────
-   抽屉与美化数据大屏光暗自适应
+   弹窗与美化数据大屏光暗自适应
    ────────────────────────────────────────── */
+:deep(.report-preview-dialog) {
+  width: 1100px !important;
+  max-width: calc(100vw - 48px) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  background: #ffffff;
+
+  @media (max-width: 1150px) {
+    width: calc(100vw - 48px) !important;
+  }
+
+  @media (max-width: 768px) {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .el-dialog__header {
+    padding: 14px 16px 14px 24px;
+    margin-right: 0;
+    border-bottom: 1px solid #f1f5f9;
+    background: #ffffff;
+  }
+
+  .el-dialog__headerbtn {
+    display: none !important;
+    pointer-events: none !important;
+    top: 18px;
+    right: 20px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+
+    .el-icon {
+      font-size: 18px;
+      color: #64748b;
+    }
+
+    &:hover {
+      background-color: #f1f5f9;
+
+      .el-icon {
+        color: #0f172a;
+      }
+    }
+  }
+
+  .el-dialog__body {
+    padding: 12px 16px 20px;
+    background: #f8fafc;
+  }
+}
+
 .drawer-header-custom {
   display: flex;
   justify-content: space-between;
   align-items: center;
   width: 100%;
+}
+
+.custom-close-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 50% !important;
+  background-color: #f87171 !important;
+  color: #ffffff !important;
+  border: none !important;
+  cursor: pointer !important;
+  font-size: 15px !important;
+  line-height: 1 !important;
+  padding: 0 !important;
+  margin-left: 10px !important;
+  margin-right: -4px !important;
+  transition: all 0.2s ease !important;
+  z-index: 99 !important;
+  position: relative !important;
+
+  &:hover {
+    background-color: #ef4444 !important;
+    transform: scale(1.1) !important;
+  }
+  &:active {
+    transform: scale(0.92) !important;
+  }
 }
 
 .drawer-title-box {
@@ -1048,15 +1623,28 @@ export default {
 
   .drawer-badge {
     font-size: 11px;
-    border-radius: 4px;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 3px 10px;
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: #2563eb !important;
+    border: 1px solid rgba(59, 130, 246, 0.25) !important;
+
+    :deep(html.dark) &,
+    :deep(.dark) &,
+    .dark & {
+      background: rgba(59, 130, 246, 0.2) !important;
+      color: #93c5fd !important;
+      border-color: rgba(59, 130, 246, 0.4) !important;
+    }
   }
 }
 
 .drawer-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-right: 20px;
+  gap: 12px;
+  //margin-right: 56px;
 
   .refine-btn {
     background: linear-gradient(135deg, #f59e0b, #d97706) !important;
@@ -1121,17 +1709,23 @@ export default {
 }
 
 .report-drawer-body {
-  padding: 10px 20px 30px;
+  padding: 8px 6px 16px;
+  max-height: calc(88vh - 75px);
+  overflow-y: auto;
 }
 
 .paper-preview-box {
   background: #ffffff;
-  padding: 36px 44px;
+  padding: 28px 36px;
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
   border: 1px solid #e2e8f0;
   color: #1e293b;
   transition: all 0.3s;
+
+  @media (max-width: 768px) {
+    padding: 18px 20px;
+  }
 
   :deep(html.dark) &,
   :deep(.dark) &,
@@ -1816,6 +2410,18 @@ html.dark .report-table,
   .drawer-actions, .refine-btn {
     display: none !important;
   }
+
+  // 防止表格在分页时行被从中间截断
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+  thead {
+    display: table-header-group;
+  }
 }
 </style>
 
@@ -1823,20 +2429,36 @@ html.dark .report-table,
    暗黑模式 (Dark Mode) 全局深度穿透兼容防护
    ────────────────────────────────────────── -->
 <style lang="scss">
+.report-preview-dialog {
+  .el-dialog__headerbtn {
+    display: none !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+}
+
 html.dark,
 .dark {
+  .report-preview-dialog,
   .report-preview-drawer {
+    background: #0f172a !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+
+    .el-dialog__header,
     .el-drawer__header {
       background: #0f172a !important;
       border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
       margin-bottom: 0 !important;
     }
+    .el-dialog__body,
     .el-drawer__body {
       background: #090d16 !important;
     }
+    .el-dialog__headerbtn,
     .el-drawer__close-btn {
       color: #94a3b8 !important;
-      margin-left: 16px !important;
       width: 32px;
       height: 32px;
       border-radius: 8px;
@@ -1845,7 +2467,7 @@ html.dark,
       justify-content: center;
       transition: all 0.25s ease;
 
-      .el-icon, i, svg {
+      .el-dialog__close, .el-icon, i, svg {
         color: #94a3b8 !important;
         font-size: 18px;
         transition: color 0.25s ease;
@@ -1854,7 +2476,7 @@ html.dark,
       &:hover {
         background-color: rgba(255, 255, 255, 0.12) !important;
 
-        .el-icon, i, svg {
+        .el-dialog__close, .el-icon, i, svg {
           color: #ffffff !important;
         }
       }
@@ -2013,6 +2635,297 @@ html.dark,
 
     .finding-text {
       color: #cbd5e1 !important;
+    }
+  }
+}
+
+/* ============================================
+   PolarisReportEngine 组件暗黑模式深度适配
+   (由于 append-to-body 弹窗，需在 report.vue 全局覆盖)
+   ============================================ */
+html.dark,
+.dark {
+  /* 引擎整体容器 */
+  .polaris-report-engine.theme-glass-light {
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
+
+    /* Banner 头部 */
+    .engine-report-banner {
+      background: linear-gradient(135deg, #020617 0%, #0f172a 100%) !important;
+      border-color: rgba(99, 102, 241, 0.3) !important;
+
+      .banner-badge {
+        background: rgba(99, 102, 241, 0.3) !important;
+        color: #a5b4fc !important;
+        border-color: rgba(165, 180, 252, 0.4) !important;
+      }
+
+      .banner-chip {
+        background: rgba(255, 255, 255, 0.1) !important;
+        color: #94a3b8 !important;
+      }
+
+      .banner-title {
+        color: #f8fafc !important;
+      }
+
+      .banner-meta {
+        color: #64748b !important;
+      }
+    }
+
+    /* 摘要卡片 */
+    .summary-glass-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border-color: rgba(245, 158, 11, 0.4) !important;
+      border-left-color: #f59e0b !important;
+
+      .card-header {
+        color: #fbbf24 !important;
+      }
+
+      .summary-content {
+        color: #e2e8f0 !important;
+      }
+    }
+
+    /* KPI 统计卡片网格 */
+    .kpi-grid-container {
+      .kpi-stat-card {
+        background: rgba(30, 41, 59, 0.8) !important;
+        border-color: rgba(255, 255, 255, 0.1) !important;
+
+        .kpi-stat-icon {
+          background: rgba(59, 130, 246, 0.2) !important;
+          color: #60a5fa !important;
+        }
+
+        .kpi-label {
+          color: #94a3b8 !important;
+        }
+
+        .kpi-value {
+          color: #f8fafc !important;
+        }
+      }
+    }
+
+    /* 对比矩阵卡片 */
+    .compare-matrix-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
+
+      .card-header {
+        color: #f8fafc !important;
+      }
+
+      .compare-column {
+        background: rgba(15, 23, 42, 0.6) !important;
+        border-color: rgba(255, 255, 255, 0.1) !important;
+
+        .column-title {
+          color: #e2e8f0 !important;
+        }
+
+        .column-list li {
+          color: #cbd5e1 !important;
+        }
+
+        &.compare-type-highlight {
+          background: rgba(59, 130, 246, 0.15) !important;
+          border-color: rgba(96, 165, 250, 0.4) !important;
+        }
+      }
+    }
+
+    /* 图表卡片 */
+    .chart-block-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
+
+      .card-header {
+        color: #f8fafc !important;
+      }
+    }
+
+    /* SWOT 矩阵卡片 */
+    .swot-matrix-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border-color: rgba(255, 255, 255, 0.1) !important;
+
+      .card-header {
+        color: #f8fafc !important;
+      }
+
+      .swot-box {
+        border-color: rgba(255, 255, 255, 0.1) !important;
+
+        .swot-tag {
+          color: #e2e8f0 !important;
+        }
+
+        ul li {
+          color: #cbd5e1 !important;
+        }
+      }
+
+      .swot-s {
+        background: rgba(16, 185, 129, 0.12) !important;
+        .swot-tag { background: rgba(16, 185, 129, 0.25) !important; }
+        li::before { background: #34d399 !important; }
+      }
+
+      .swot-w {
+        background: rgba(239, 68, 68, 0.12) !important;
+        .swot-tag { background: rgba(239, 68, 68, 0.25) !important; }
+        li::before { background: #f87171 !important; }
+      }
+
+      .swot-o {
+        background: rgba(59, 130, 246, 0.12) !important;
+        .swot-tag { background: rgba(59, 130, 246, 0.25) !important; }
+        li::before { background: #60a5fa !important; }
+      }
+
+      .swot-t {
+        background: rgba(245, 158, 11, 0.12) !important;
+        .swot-tag { background: rgba(245, 158, 11, 0.25) !important; }
+        li::before { background: #fbbf24 !important; }
+      }
+    }
+
+    /* 智能章节卡片 - 左侧蓝色色条 */
+    .smart-section-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      border-left: 4px solid #6366f1 !important;
+
+      .section-card-header {
+        border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+
+        .section-badge-dot {
+          background: #818cf8 !important;
+        }
+
+        .section-title {
+          color: #f8fafc !important;
+        }
+      }
+
+      /* 内嵌表格 - 深度穿透 Element Plus 样式 */
+      .el-table {
+        --el-table-bg-color: transparent !important;
+        --el-table-tr-bg-color: transparent !important;
+        --el-table-header-bg-color: rgba(15, 23, 42, 0.9) !important;
+        --el-table-row-hover-bg-color: rgba(99, 102, 241, 0.12) !important;
+        --el-table-border-color: rgba(255, 255, 255, 0.1) !important;
+
+        background: transparent !important;
+
+        th.el-table__cell {
+          background: rgba(15, 23, 42, 0.9) !important;
+          color: #e2e8f0 !important;
+          border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        td.el-table__cell {
+          color: #e2e8f0 !important;
+          border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+          background: transparent !important;
+        }
+
+        .el-table__row {
+          background: transparent !important;
+
+          &:hover > td {
+            background: rgba(99, 102, 241, 0.12) !important;
+          }
+        }
+
+        .el-table__row--striped td.el-table__cell {
+          background: rgba(30, 41, 59, 0.5) !important;
+        }
+
+        .el-table--border .el-table__cell {
+          border-right-color: rgba(255, 255, 255, 0.08) !important;
+        }
+      }
+
+      .table-inline-code {
+        background: rgba(99, 102, 241, 0.2) !important;
+        color: #a5b4fc !important;
+      }
+    }
+
+    /* Markdown 正文 */
+    .markdown-body {
+      color: #e2e8f0 !important;
+
+      .highlight-strong {
+        color: #f8fafc !important;
+      }
+
+      .pill-code {
+        background: rgba(99, 102, 241, 0.2) !important;
+        color: #a5b4fc !important;
+      }
+
+      .custom-li .li-dot {
+        background: #818cf8 !important;
+      }
+
+      .custom-num-item .num-badge {
+        background: #6366f1 !important;
+      }
+    }
+
+    /* 行动计划看板 - 深色表头 + 左侧绿色色条 */
+    .action-plan-card {
+      background: rgba(30, 41, 59, 0.8) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+      border-left: 4px solid #10b981 !important;
+
+      .card-header {
+        color: #10b981 !important;
+
+        .header-icon.glow-emerald {
+          color: #10b981 !important;
+        }
+      }
+
+      .el-table {
+        --el-table-bg-color: transparent !important;
+        --el-table-tr-bg-color: transparent !important;
+        --el-table-header-bg-color: transparent !important;
+        --el-table-row-hover-bg-color: rgba(16, 185, 129, 0.12) !important;
+        --el-table-border-color: rgba(255, 255, 255, 0.1) !important;
+
+        background: transparent !important;
+
+        th.el-table__cell {
+          background: rgba(15, 23, 42, 0.9) !important;
+          color: #e2e8f0 !important;
+          border-bottom-color: rgba(255, 255, 255, 0.1) !important;
+        }
+
+        td.el-table__cell {
+          color: #e2e8f0 !important;
+          border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+          background: transparent !important;
+        }
+
+        .el-table__row {
+          background: transparent !important;
+
+          &:hover > td {
+            background: rgba(16, 185, 129, 0.12) !important;
+          }
+        }
+
+        .el-table__row--striped td.el-table__cell {
+          background: rgba(16, 185, 129, 0.08) !important;
+        }
+      }
     }
   }
 }

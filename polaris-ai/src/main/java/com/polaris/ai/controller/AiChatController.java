@@ -105,7 +105,7 @@ public class AiChatController extends BaseController {
     }
 
     /**
-     * 更新会话配置（大模型和知识库）
+     * 更新会话配置（大模型和知识库、智能体、工作流）
      * PUT /ai/chat/conversations/{id}/config
      */
     @Operation(summary = "更新会话配置")
@@ -114,9 +114,11 @@ public class AiChatController extends BaseController {
     public ResultData updateConversationConfig(
             @PathVariable Long id,
             @RequestParam(required = false) Long modelConfigId,
-            @RequestParam(required = false) Long knowledgeBaseId) {
+            @RequestParam(required = false) Long knowledgeBaseId,
+            @RequestParam(required = false) String agentCode,
+            @RequestParam(required = false) String workflowCode) {
         Long userId = SecurityUtils.getUserId();
-        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, userId);
+        aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, agentCode, workflowCode, userId);
         return ok();
     }
 
@@ -199,7 +201,18 @@ public class AiChatController extends BaseController {
                              @RequestParam(required = false) String fileUrl,
                              @RequestParam(required = false) String agentCode,
                              @RequestParam(required = false, defaultValue = "false") Boolean enableSearch) {
-        SseEmitter emitter = new SseEmitter(0L);
+        SseEmitter emitter = new SseEmitter(180_000L);
+        java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        emitter.onCompletion(() -> isCancelled.set(true));
+        emitter.onTimeout(() -> {
+            isCancelled.set(true);
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        });
+        emitter.onError(e -> isCancelled.set(true));
+
         Long userId = SecurityUtils.getUserId();
 
         // 抓取当前主线程的域名与端口，利用 polaris-common 的 ServletUtils 规避跨模块依赖
@@ -224,7 +237,7 @@ public class AiChatController extends BaseController {
                 SecurityContextHolder.setContext(context);
                 // 将域名设置到 ThreadLocal 中
                 com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
-                aiChatService.chat(conversationId, message, fileUrl, agentCode, enableSearch, userId, emitter);
+                aiChatService.chat(conversationId, message, fileUrl, agentCode, enableSearch, userId, emitter, isCancelled);
             } finally {
                 // 清理 ThreadLocal
                 com.polaris.ai.utils.BaseUrlHolder.clear();

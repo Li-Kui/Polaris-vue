@@ -45,10 +45,19 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      *
      * @param id              会话 ID
      * @param model           大模型名称
+     * @param modelConfigId   模型配置 ID
      * @param knowledgeBaseId 知识库 ID
+     * @param agentCode       智能体 Code
+     * @param workflowCode    工作流 Code
      * @param userId          用户 ID
      */
-    int updateConversationConfig(@Param("id") Long id, @Param("model") String model, @Param("modelConfigId") Long modelConfigId, @Param("knowledgeBaseId") Long knowledgeBaseId, @Param("userId") Long userId);
+    int updateConversationConfig(@Param("id") Long id,
+                                 @Param("model") String model,
+                                 @Param("modelConfigId") Long modelConfigId,
+                                 @Param("knowledgeBaseId") Long knowledgeBaseId,
+                                 @Param("agentCode") String agentCode,
+                                 @Param("workflowCode") String workflowCode,
+                                 @Param("userId") Long userId);
 
     /**
      * 逻辑删除会话（将 status 置为 0，不物理删除）

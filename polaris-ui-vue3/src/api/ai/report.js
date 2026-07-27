@@ -44,6 +44,17 @@ export function delReport(id) {
 }
 
 /**
+ * 修改更新分析报告
+ */
+export function updateReport(data) {
+  return request({
+    url: '/ai/report',
+    method: 'put',
+    data: data
+  })
+}
+
+/**
  * AI 智能体美化重塑报告 (同步后备)
  */
 export function refineReport(content) {
@@ -102,3 +113,4 @@ export async function refineReportStream(content, { onChunk, onComplete, onError
     else throw err
   }
 }
+

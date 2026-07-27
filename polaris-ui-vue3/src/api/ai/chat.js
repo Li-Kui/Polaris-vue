@@ -26,12 +26,12 @@ export function renameConversation(id, title) {
   })
 }
 
-// 更新会话的大模型和知识库配置
-export function updateConversationConfig(id, modelConfigId, knowledgeBaseId) {
+// 更新会话的大模型、知识库、智能体与工作流配置
+export function updateConversationConfig(id, modelConfigId, knowledgeBaseId, agentCode, workflowCode) {
   return request({
     url: `/ai/chat/conversations/${id}/config`,
     method: 'put',
-    params: { modelConfigId, knowledgeBaseId }
+    params: { modelConfigId, knowledgeBaseId, agentCode, workflowCode }
   })
 }
 

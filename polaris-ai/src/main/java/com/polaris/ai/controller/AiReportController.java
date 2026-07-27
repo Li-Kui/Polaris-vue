@@ -46,6 +46,17 @@ public class AiReportController extends BaseController {
     }
 
     /**
+     * 修改更新分析报告 (保存美化结构体字段)
+     * PUT /ai/report
+     */
+    @Operation(summary = "修改更新分析报告")
+    @Log(title = "报告管理", businessType = BusinessType.UPDATE)
+    @PutMapping
+    public ResultData<Boolean> updateReport(@RequestBody AiReport report) {
+        return ok(reportService.updateById(report));
+    }
+
+    /**
      * 分页查询我的报告列表
      * GET /ai/report/list
      */

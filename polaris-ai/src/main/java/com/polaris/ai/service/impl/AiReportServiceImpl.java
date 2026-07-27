@@ -36,6 +36,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     @Autowired
     private AiModelFactory modelFactory;
 
+
     @Override
     public boolean saveReport(AiReport report) {
         if (report == null) {
@@ -57,7 +58,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         if (report.getReportCode() == null || report.getReportCode().trim().isEmpty()) {
             report.setReportCode("REP-" + System.currentTimeMillis());
         }
-        return save(report);
+        return saveOrUpdate(report);
     }
 
     @Override
@@ -92,16 +93,18 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             }
 
             String prompt = "你是一个全领域高级商业与技术报告重塑专家。\n" +
-                    "你的任务是将用户提供的任意领域的原始 Markdown 报告（包括安全审计、财务对比、竞品研究、项目汇报等），深度提炼并转化为结构化的 JSON 报告。\n\n" +
-                    "【重塑规则】：\n" +
+                    "你的任务是将用户提供的原始 Markdown 报告，深度提炼并转化为符合现代高级 UI 可视化大屏要求的结构化 JSON。\n\n" +
+                    "【输出规则 - 严格遵守】：\n" +
                     "1. 绝对忠实于原文数据与事实，不得虚构或篡改任何数据与结论。\n" +
-                    "2. 自动识别报告所属领域 (SECURITY | FINANCIAL | COMPETITION | PROJECT | OPERATIONAL | GENERAL)。\n" +
-                    "3. 提炼出 150 字以内的高管摘要 (executiveSummary)，概括最核心发现与决策建议。\n" +
-                    "4. 抽取 2-4 个最关键的 KPI 衡量指标 (kpiCards)，格式如：[{\"label\":\"高危风险\",\"value\":\"1项\",\"status\":\"danger\"}]。\n" +
-                    "5. 智能识别数据图表类型 (visualizations)，格式如：[{\"chartType\":\"bar|line|pie|radar\",\"title\":\"图表标题\",\"description\":\"说明\",\"chartData\":{\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"数据\",\"data\":[10,20]}]}}]。\n" +
-                    "6. 提取明确的行动计划 (actionPlan)，格式如：[{\"priority\":\"P1\",\"action\":\"建议措施\",\"owner\":\"责任部门\"}]。\n\n" +
+                    "2. 所有文本值必须是纯净的显示文本，不得包含任何 Markdown 标记（如 **、*、`、#）。\n" +
+                    "3. 所有文本值不得包含 JSON 键名作为内容（如 \"status\"、\"primary\" 不能出现在 value 中）。\n" +
+                    "4. status 字段只允许使用语义化中文值：\"正常\"、\"危险\"、\"警告\"、\"一般\"、\"无\"。\n" +
+                    "5. 提取 150 字以内的高管摘要 (executiveSummary)，概括核心发现与决策建议。\n" +
+                    "6. 提取 3-4 个关键 KPI 衡量指标 (kpiCards)，格式为数组：[{\"label\":\"用户总数\",\"value\":\"3人\",\"status\":\"正常\"}]。\n" +
+                    "7. 如果原文包含表格或多维数据，务必提炼为可视化图表 (visualizations)，格式为：[{\"chartType\":\"bar|line|pie\",\"title\":\"维度分布图\",\"chartData\":{\"categories\":[\"研发\",\"测试\"],\"series\":[{\"name\":\"人数\",\"data\":[1,2]}]}}]。\n" +
+                    "8. 提取明确的建议与行动计划 (actionPlan)，格式为：[{\"priority\":\"P1\",\"action\":\"建议措施\",\"owner\":\"责任部门\",\"deadline\":\"近期\"}]。\n\n" +
                     "【原始报告内容】：\n" + reportContent + "\n\n" +
-                    "请仅输出紧凑标准的 JSON 格式，字符串键名(Key)与值内部绝不要包含多余的裸换行符(raw newlines)，不要输出额外的解释或 Markdown 代码块包裹。";
+                    "请仅输出标准的 JSON 格式，所有字符串值必须是纯净的中文或英文显示文本，绝不要包含 Markdown 标记或原始字段名。";
 
             StringBuilder resultBuffer = new StringBuilder();
             CountDownLatch latch = new CountDownLatch(1);
@@ -186,15 +189,18 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
             String prompt = "你是一个全领域高级商业与技术报告重塑专家。\n" +
                     "你的任务是将用户提供的任意领域的原始 Markdown 报告（包括安全审计、财务对比、竞品研究、项目汇报等），深度提炼并转化为结构化的 JSON 报告。\n\n" +
-                    "【重塑规则】：\n" +
+                    "【输出规则 - 严格遵守】：\n" +
                     "1. 绝对忠实于原文数据与事实，不得虚构或篡改任何数据与结论。\n" +
-                    "2. 自动识别报告所属领域 (SECURITY | FINANCIAL | COMPETITION | PROJECT | OPERATIONAL | GENERAL)。\n" +
-                    "3. 提炼出 150 字以内的高管摘要 (executiveSummary)，概括最核心发现与决策建议。\n" +
-                    "4. 抽取 2-4 个最关键的 KPI 衡量指标 (kpiCards)，格式如：[{\"label\":\"高危风险\",\"value\":\"1项\",\"status\":\"danger\"}]。\n" +
-                    "5. 智能识别数据图表类型 (visualizations)，格式如：[{\"chartType\":\"bar|line|pie|radar\",\"title\":\"图表标题\",\"description\":\"说明\",\"chartData\":{\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"数据\",\"data\":[10,20]}]}}]。\n" +
-                    "6. 提取明确的行动计划 (actionPlan)，格式如：[{\"priority\":\"P1\",\"action\":\"建议措施\",\"owner\":\"责任部门\"}]。\n\n" +
+                    "2. 所有文本值（label、action、description 等）必须是纯净的显示文本，不得包含任何 Markdown 标记（如 **、*、`、#）。\n" +
+                    "3. 所有文本值不得包含 JSON 键名作为内容（如 \"status\"、\"primary\" 不能出现在 value 中）。\n" +
+                    "4. status 字段只允许使用以下语义化中文值：\"正常\"、\"危险\"、\"警告\"、\"一般\"、\"无\"。\n" +
+                    "5. 自动识别报告所属领域 (SECURITY | FINANCIAL | COMPETITION | PROJECT | OPERATIONAL | GENERAL)。\n" +
+                    "6. 提炼出 150 字以内的高管摘要 (executiveSummary)，概括最核心发现与决策建议。\n" +
+                    "7. 抽取 2-4 个最关键的 KPI 衡量指标 (kpiCards)，格式如：[{\"label\":\"高危风险\",\"value\":\"1项\",\"status\":\"危险\"}]。\n" +
+                    "8. 智能识别数据图表类型 (visualizations)，格式如：[{\"chartType\":\"bar|line|pie|radar\",\"title\":\"图表标题\",\"description\":\"说明\",\"chartData\":{\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"数据\",\"data\":[10,20]}]}}]。\n" +
+                    "9. 提取明确的行动计划 (actionPlan)，格式如：[{\"priority\":\"P1\",\"action\":\"建议措施\",\"owner\":\"责任部门\"}]。\n\n" +
                     "【原始报告内容】：\n" + reportContent + "\n\n" +
-                    "请仅输出紧凑标准的 JSON 格式，字符串键名(Key)与值内部绝不要包含多余的裸换行符(raw newlines)，不要输出额外的解释或 Markdown 代码块包裹。";
+                    "请仅输出紧凑标准的 JSON 格式，所有字符串值必须是纯净的中文或英文显示文本，绝不要包含 Markdown 标记或原始字段名。";
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
 
@@ -232,4 +238,5 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         }
         return emitter;
     }
+
 }

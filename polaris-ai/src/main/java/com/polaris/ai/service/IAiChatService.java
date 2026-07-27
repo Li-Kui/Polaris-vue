@@ -58,15 +58,30 @@ public interface IAiChatService extends IService<AiConversation>
     int renameConversation(Long id, String title, Long userId);
 
     /**
+     * 更新会话配置（修改选中的大模型、绑定的知识库、智能体或工作流）
+     *
+     * @param id              会话 ID
+     * @param modelConfigId   模型配置 ID
+     * @param knowledgeBaseId 知识库 ID
+     * @param agentCode       智能体 Code
+     * @param workflowCode    工作流 Code
+     * @param userId          用户 ID
+     * @return 影响行数
+     */
+    int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, String agentCode, String workflowCode, Long userId);
+
+    /**
      * 更新会话配置（修改选中的大模型或绑定的知识库）
      *
      * @param id              会话 ID
-     * @param model           大模型名称
+     * @param modelConfigId   模型配置 ID
      * @param knowledgeBaseId 知识库 ID
      * @param userId          用户 ID
      * @return 影响行数
      */
-    int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId);
+    default int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, Long userId) {
+        return updateConversationConfig(id, modelConfigId, knowledgeBaseId, null, null, userId);
+    }
 
     /**
      * 删除会话（逻辑删除会话 + 物理删除该会话下所有消息）
@@ -100,4 +115,11 @@ public interface IAiChatService extends IService<AiConversation>
      * @param emitter        SSE 发发射器，由 Controller 创建并传入
      */
     void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter);
+
+    /**
+     * 发送消息并以 SSE 流式返回 AI 回复（支持断流取消标记）
+     */
+    default void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+        chat(conversationId, userMessage, fileUrl, agentCode, enableSearch, userId, emitter);
+    }
 }

@@ -174,6 +174,35 @@
             <span>模型: {{ currentConvModel }}</span>
           </el-tag>
           <el-tag
+            v-if="selectedAgentCode"
+            effect="light"
+            size="default"
+            type="primary"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;"
+          >
+            <el-icon class="tag-icon"><cpu /></el-icon>
+            <span>智能体: {{ getSelectedAgentOrWorkflowLabel() }}</span>
+          </el-tag>
+          <el-tag
+            v-else-if="selectedWorkflowCode"
+            effect="light"
+            size="default"
+            type="warning"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle;"
+          >
+            <el-icon class="tag-icon"><connection /></el-icon>
+            <span>工作流: {{ getSelectedAgentOrWorkflowLabel() }}</span>
+          </el-tag>
+          <el-tag
+            v-else
+            effect="plain"
+            size="default"
+            style="display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; vertical-align: middle; background: rgba(99, 102, 241, 0.1); border-color: rgba(99, 102, 241, 0.3); color: #6366f1;"
+          >
+            <el-icon class="tag-icon"><operation /></el-icon>
+            <span>自动路由模式</span>
+          </el-tag>
+          <el-tag
             v-if="currentKbName"
             class="kb-indicator-tag"
             effect="dark"
@@ -238,7 +267,7 @@
               <el-select
                 v-model="selectedWorkflowCode"
                 clearable
-                placeholder="常规对话模式"
+                placeholder="自动智能路由模式 (无需指定)"
                 size="default"
                 style="width: 100%;"
               >
@@ -249,6 +278,10 @@
                   :value="item.workflowCode"
                 />
               </el-select>
+              <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px;">
+                <el-icon><info-filled /></el-icon>
+                <span>未选时自动识别意图按需加载工具，所选智能体与工作流 100% 优先执行</span>
+              </div>
             </div>
 
             <el-button
@@ -303,7 +336,7 @@
                 <!-- AI：正常内容 -->
                 <div v-else-if="msg.role === 'assistant'">
                   <div v-if="msg.statusMsg" class="loading-status-text" style="margin-bottom: 8px;">
-                    <el-icon class="is-loading"><loading /></el-icon> {{ msg.statusMsg }}
+                    <el-icon v-if="isActiveStatus(msg.statusMsg)" class="is-loading"><loading /></el-icon> {{ msg.statusMsg }}
                   </div>
                   <!-- 智能体工作流执行步骤 -->
                   <div v-if="msg.workflowSteps && msg.workflowSteps.length > 0" class="workflow-steps-container">
@@ -368,6 +401,7 @@
                   </div>
                   <!-- 如果是画图任务标识的消息 -->
                   <div v-if="isImageTaskMessage(msg.content)" class="image-task-panel">
+                    <div v-if="extractTextBeforeTaskJson(msg.content)" class="markdown-body text-before-task" v-html="renderMarkdown(extractTextBeforeTaskJson(msg.content))"></div>
                     <div v-for="task in parseTaskInfos(msg.content)" :key="task.taskId" class="image-task-card-wrapper">
                       <!-- 骨架屏加载态 -->
                       <div v-if="task.isPending || task.status === '0'" class="image-skeleton-card">
@@ -462,6 +496,35 @@
                     class="markdown-body"
                     v-html="renderMarkdown(msg.content)"
                   ></div>
+                  <div v-if="msg.searchSources && msg.searchSources.length" class="search-sources-panel">
+                    <div class="search-sources-header" @click="toggleSearchSources(msg)">
+                      <div class="search-sources-title">
+                        <el-icon><search /></el-icon>
+                        <span>已搜索 {{ msg.searchSourceCount || msg.searchSources.length }} 个网页</span>
+                      </div>
+                      <div class="search-sources-action">
+                        <span>{{ msg.searchSourcesExpanded ? '收起来源' : '查看来源' }}</span>
+                        <el-icon :class="['source-collapse-arrow', { 'is-active': msg.searchSourcesExpanded }]"><arrow-down /></el-icon>
+                      </div>
+                    </div>
+                    <div v-if="msg.searchQuery && msg.searchSourcesExpanded" class="search-query">{{ msg.searchQuery }}</div>
+                    <div v-if="msg.searchSourcesExpanded" class="search-source-list">
+                      <a
+                        v-for="source in msg.searchSources"
+                        :key="source.index || source.url"
+                        class="search-source-item"
+                        :href="source.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span class="source-index">{{ source.index }}</span>
+                        <span class="source-body">
+                          <span class="source-title">{{ source.title || source.url }}</span>
+                          <span class="source-url">{{ getSourceHost(source.url) }}</span>
+                        </span>
+                      </a>
+                    </div>
+                  </div>
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
                     <div class="report-card-body">
@@ -754,63 +817,116 @@
               <el-popover
                 v-model:visible="showWorkflowPopover"
                 placement="top-start"
-                title="选择 AI 智能体 / 工作流"
-                width="260"
+                width="340"
                 trigger="click"
-                popper-class="pill-selector-popper popper-workflow"
+                popper-class="pill-selector-popper popper-workflow-modern"
                 @show="handleShowAgentWorkflowPopover"
               >
                 <template #reference>
                   <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode || selectedAgentCode }]">
-                    <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><chat-dot-round v-else /></el-icon>
+                    <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><operation v-else /></el-icon>
                     <span class="pill-label">{{ getSelectedAgentOrWorkflowLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
                   </button>
                 </template>
-                <div class="popper-selector-list">
-                  <!-- 1. 常规对话 -->
-                  <div
-                    :class="['popper-selector-item', { 'is-active': !selectedWorkflowCode && !selectedAgentCode }]"
-                    @click="selectMode('', ''); showWorkflowPopover = false"
-                  >
-                    <el-icon class="item-icon"><chat-dot-round /></el-icon>
-                    <span class="item-name">直接常规提问</span>
-                    <el-icon v-if="!selectedWorkflowCode && !selectedAgentCode" class="check-icon"><check /></el-icon>
+
+                <div class="popover-modern-container">
+                  <!-- 顶部三段式 Segmented Tab 切页导航 -->
+                  <div class="popover-tabs-nav">
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'auto' }]"
+                      @click="popoverTab = 'auto'"
+                    >
+                      <el-icon><operation /></el-icon> ⚡ 自动路由
+                    </button>
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'agent' }]"
+                      @click="popoverTab = 'agent'"
+                    >
+                      <el-icon><cpu /></el-icon> 智能体 ({{ agents ? agents.length : 0 }})
+                    </button>
+                    <button
+                      :class="['tab-nav-btn', { active: popoverTab === 'workflow' }]"
+                      @click="popoverTab = 'workflow'"
+                    >
+                      <el-icon><connection /></el-icon> 工作流 ({{ workflows ? workflows.length : 0 }})
+                    </button>
                   </div>
 
-                  <!-- 2. 专属智能体列表 -->
-                  <template v-if="agents && agents.length > 0">
-                    <div class="popper-group-header">
-                      <el-icon><cpu /></el-icon> 专属 AI 智能体
-                    </div>
+                  <!-- 内容区 A：自动智能路由模式 -->
+                  <div v-if="popoverTab === 'auto'" class="popover-tab-body">
                     <div
-                      v-for="item in agents"
-                      :key="item.agentCode"
-                      :class="['popper-selector-item', { 'is-active': selectedAgentCode === item.agentCode }]"
-                      @click="selectMode('agent', item.agentCode); showWorkflowPopover = false"
+                      :class="['auto-mode-card', { active: !selectedWorkflowCode && !selectedAgentCode }]"
+                      @click="selectMode('', ''); showWorkflowPopover = false"
                     >
-                      <el-icon class="item-icon"><cpu /></el-icon>
-                      <span class="item-name" :title="item.description">{{ item.agentName }}</span>
-                      <el-icon v-if="selectedAgentCode === item.agentCode" class="check-icon"><check /></el-icon>
+                      <div class="card-head">
+                        <div class="head-left">
+                          <el-icon class="mode-icon"><operation /></el-icon>
+                          <span class="mode-title">自动智能路由模式</span>
+                        </div>
+                        <el-icon v-if="!selectedWorkflowCode && !selectedAgentCode" class="check-icon"><check /></el-icon>
+                      </div>
+                      <div class="card-desc">
+                        无需手动挑选。提问时系统自动识别意图，按需精准装配最佳工具（如用户查询、AI生图、联网搜索等）。
+                      </div>
                     </div>
-                  </template>
+                  </div>
 
-                  <!-- 3. 智能体工作流列表 -->
-                  <template v-if="workflows && workflows.length > 0">
-                    <div class="popper-group-header">
-                      <el-icon><connection /></el-icon> 智能体工作流
+                  <!-- 内容区 B：智能体列表 (带搜索框与固定高度滚动) -->
+                  <div v-else-if="popoverTab === 'agent'" class="popover-tab-body">
+                    <div class="popover-search-row">
+                      <el-input
+                        v-model="agentSearchKey"
+                        placeholder="搜索智能体名称..."
+                        size="small"
+                        prefix-icon="Search"
+                        clearable
+                      />
                     </div>
-                    <div
-                      v-for="item in workflows"
-                      :key="item.workflowCode"
-                      :class="['popper-selector-item', { 'is-active': selectedWorkflowCode === item.workflowCode }]"
-                      @click="selectMode('workflow', item.workflowCode); showWorkflowPopover = false"
-                    >
-                      <el-icon class="item-icon"><connection /></el-icon>
-                      <span class="item-name" :title="item.description">{{ item.workflowName }}</span>
-                      <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                    <div class="popover-scroll-list">
+                      <div v-if="filteredAgents.length === 0" class="empty-hint">未找到匹配的智能体</div>
+                      <div
+                        v-for="item in filteredAgents"
+                        :key="item.agentCode"
+                        :class="['popover-list-item', { active: selectedAgentCode === item.agentCode }]"
+                        @click="selectMode('agent', item.agentCode); showWorkflowPopover = false"
+                      >
+                        <div class="item-left">
+                          <el-icon class="item-icon"><cpu /></el-icon>
+                          <span class="item-name" :title="item.agentName">{{ item.agentName }}</span>
+                        </div>
+                        <el-icon v-if="selectedAgentCode === item.agentCode" class="check-icon"><check /></el-icon>
+                      </div>
                     </div>
-                  </template>
+                  </div>
+
+                  <!-- 内容区 C：工作流列表 (带搜索框与固定高度滚动) -->
+                  <div v-else-if="popoverTab === 'workflow'" class="popover-tab-body">
+                    <div class="popover-search-row">
+                      <el-input
+                        v-model="workflowSearchKey"
+                        placeholder="搜索工作流名称..."
+                        size="small"
+                        prefix-icon="Search"
+                        clearable
+                      />
+                    </div>
+                    <div class="popover-scroll-list">
+                      <div v-if="filteredWorkflows.length === 0" class="empty-hint">未找到匹配的工作流</div>
+                      <div
+                        v-for="item in filteredWorkflows"
+                        :key="item.workflowCode"
+                        :class="['popover-list-item', { active: selectedWorkflowCode === item.workflowCode }]"
+                        @click="selectMode('workflow', item.workflowCode); showWorkflowPopover = false"
+                      >
+                        <div class="item-left">
+                          <el-icon class="item-icon"><connection /></el-icon>
+                          <span class="item-name" :title="item.workflowName">{{ item.workflowName }}</span>
+                        </div>
+                        <el-icon v-if="selectedWorkflowCode === item.workflowCode" class="check-icon"><check /></el-icon>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </el-popover>
 
@@ -1117,6 +1233,11 @@ export default {
       showKbPopover: false,
       showWorkflowPopover: false,
 
+      // 现代化 Popover 智能体与工作流 Tab 选项卡及搜索
+      popoverTab: 'auto',
+      agentSearchKey: '',
+      workflowSearchKey: '',
+
       conversations: [],
       loadingConvs: false,
       creatingConv: false,
@@ -1212,6 +1333,22 @@ export default {
       if (!this.selectedModelConfigId) return false
       const m = this.models.find(item => item.id === this.selectedModelConfigId)
       return m && m.enableSearch === '1'
+    },
+    filteredAgents() {
+      if (!this.agentSearchKey) return this.agents || []
+      const k = this.agentSearchKey.toLowerCase().trim()
+      return (this.agents || []).filter(a =>
+        (a.agentName && a.agentName.toLowerCase().includes(k)) ||
+        (a.agentCode && a.agentCode.toLowerCase().includes(k))
+      )
+    },
+    filteredWorkflows() {
+      if (!this.workflowSearchKey) return this.workflows || []
+      const k = this.workflowSearchKey.toLowerCase().trim()
+      return (this.workflows || []).filter(w =>
+        (w.workflowName && w.workflowName.toLowerCase().includes(k)) ||
+        (w.workflowCode && w.workflowCode.toLowerCase().includes(k))
+      )
     },
     canStop() {
       if (this.isStreaming) return true
@@ -1337,7 +1474,7 @@ export default {
 
       // 3. 捕获系统的异步轮询任务
       try {
-        const regex = /\{[\s\S]*?"taskId"\s*:\s*"img_[\s\S]*?"[\s\S]*?\}/g;
+        const regex = /\{[\s\S]*?"taskId"\s*:\s*"(img_[a-zA-Z0-9_]+?)"[\s\S]*?\}/g;
         let match;
         while ((match = regex.exec(content)) !== null) {
           try {
@@ -1376,17 +1513,17 @@ export default {
         console.error(">>> 匹配任务正则表达式异常: ", err);
       }
 
-      // 如果一个符合格式的都没匹配到，且包含特定关键词，则返回一个占位加载中对象
-      if (results.length === 0) {
-        return [{ isPending: true }];
-      }
-
       return results;
     },
     // 保留单任务兼容方法，避免外部零星引用导致报错
     parseTaskInfo(content) {
       const infos = this.parseTaskInfos(content);
       return infos.length > 0 ? infos[0] : { isPending: true };
+    },
+    extractTextBeforeTaskJson(content) {
+      if (!content) return '';
+      let cleaned = content.replace(/\{[\s\S]*?"taskId"\s*:\s*"(img_[a-zA-Z0-9_]+?)"[\s\S]*?\}/g, '');
+      return cleaned.trim();
     },
 
     startPolling(taskId) {
@@ -1857,7 +1994,7 @@ export default {
       this.loadAgents()
     },
 
-    selectMode(type, code) {
+    async selectMode(type, code) {
       if (type === 'agent') {
         this.selectedAgentCode = code
         this.selectedWorkflowCode = ''
@@ -1867,6 +2004,9 @@ export default {
       } else {
         this.selectedAgentCode = ''
         this.selectedWorkflowCode = ''
+      }
+      if (this.currentConvId) {
+        await this.handleModelOrKbChange()
       }
     },
 
@@ -1879,7 +2019,7 @@ export default {
         const wf = this.workflows.find(w => w.workflowCode === this.selectedWorkflowCode)
         return wf ? wf.workflowName : '工作流'
       }
-      return '常规对话'
+      return '自动智能模式'
     },
 
     async loadToolDictionary() {
@@ -1934,6 +2074,11 @@ export default {
       if (c) {
         this.selectedModelConfigId = c.modelConfigId || null
         this.selectedKbId = c.knowledgeBaseId || null
+        this.selectedAgentCode = c.agentCode || ''
+        this.selectedWorkflowCode = c.workflowCode || ''
+      } else {
+        this.selectedAgentCode = ''
+        this.selectedWorkflowCode = ''
       }
       await this.loadMessageList(id)
     },
@@ -1958,10 +2103,16 @@ export default {
     },
 
     async handleModelOrKbChange() {
-      // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库配置
+      // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库、智能体与工作流配置
       if (this.currentConvId) {
         try {
-          const res = await updateConversationConfig(this.currentConvId, this.selectedModelConfigId, this.selectedKbId)
+          const res = await updateConversationConfig(
+            this.currentConvId,
+            this.selectedModelConfigId,
+            this.selectedKbId,
+            this.selectedAgentCode,
+            this.selectedWorkflowCode
+          )
           if (res.code === 200) {
             // 重新刷新会话列表以更新顶部状态条等数据的显示
             await this.loadConvList()
@@ -2359,6 +2510,16 @@ export default {
                   this.$nextTick(() => this.scrollToBottom())
                 } else if (event === 'status') {
                   this.messages[aiIndex].statusMsg = data || ''
+                } else if (event === 'search_sources') {
+                  try {
+                    const payload = JSON.parse(data || '{}')
+                    this.messages[aiIndex].searchQuery = payload.query || ''
+                    this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
+                    this.messages[aiIndex].searchSources = payload.sources || []
+                    this.$nextTick(() => this.scrollToBottom())
+                  } catch (err) {
+                    console.warn('解析联网搜索来源失败', err)
+                  }
                 } else if (event === 'done') {
                   this.messages[aiIndex].streaming = false
                   this.isStreaming = false
@@ -2405,6 +2566,38 @@ export default {
       }
     },
 
+    getSourceHost(url) {
+      if (!url) return ''
+      try {
+        return new URL(url).hostname.replace(/^www\./, '')
+      } catch (e) {
+        return url
+      }
+    },
+
+    isActiveStatus(statusMsg) {
+      return !!statusMsg && !statusMsg.startsWith('已搜索') && !statusMsg.startsWith('未搜索')
+    },
+
+    toggleSearchSources(msg) {
+      msg.searchSourcesExpanded = !msg.searchSourcesExpanded
+    },
+
+    normalizeMarkdownSyntax(text) {
+      if (!text) return ''
+      return text
+        .replace(/\r\n/g, '\n')
+        .split('\n')
+        .map(line => {
+          let normalized = line
+          normalized = normalized.replace(/^(#{1,4})([^#\s].*)$/, '$1 $2')
+          normalized = normalized.replace(/^(\s*)[-*](\S.*)$/, '$1- $2')
+          normalized = normalized.replace(/^(\s*\d+\.)(\S.*)$/, '$1 $2')
+          return normalized
+        })
+        .join('\n')
+    },
+
     abortStream() {
       if (this.currentReader) {
         try {
@@ -2430,7 +2623,7 @@ export default {
       if (!text) return ''
       
       // 全局工具/节点/智能体英文方法名动态自动识别与替换为中文名称
-      let cleanText = text
+      let cleanText = this.normalizeMarkdownSyntax(text)
       if (this.toolDictionary && Object.keys(this.toolDictionary).length > 0) {
         // 对 key 长度由长到短排序，防止长词的子串被部分替换发生混乱
         const keys = Object.keys(this.toolDictionary).sort((a, b) => b.length - a.length)
@@ -2457,10 +2650,10 @@ export default {
       html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>')
 
       // 4. 标题 (Markdown #, ##, ###, ####) - 去掉尾部 $ 锚点，强健匹配，并支持至少一个空格分割
-      html = html.replace(/^#\s+(.+)/gm, '<h1>$1</h1>')
-      html = html.replace(/^##\s+(.+)/gm, '<h2>$1</h2>')
-      html = html.replace(/^###\s+(.+)/gm, '<h3>$1</h3>')
       html = html.replace(/^####\s+(.+)/gm, '<h4>$1</h4>')
+      html = html.replace(/^###\s+(.+)/gm, '<h3>$1</h3>')
+      html = html.replace(/^##\s+(.+)/gm, '<h2>$1</h2>')
+      html = html.replace(/^#\s+(.+)/gm, '<h1>$1</h1>')
 
       // 5. 粗体与斜体
       html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -2840,9 +3033,11 @@ export default {
 
         this.reportChartInstance = echarts.init(chartDom)
 
+        const isPie = this.activeChartType === 'pie'
+
         const option = {
           tooltip: {
-            trigger: 'axis',
+            trigger: isPie ? 'item' : 'axis',
             axisPointer: { type: 'shadow' }
           },
           legend: {
@@ -2860,13 +3055,17 @@ export default {
           xAxis: {
             type: 'category',
             data: this.chartConfig.xAxisData,
-            axisLabel: { interval: 0, rotate: 15, color: '#6b7280' },
-            axisLine: { lineStyle: { color: '#e5e7eb' } }
+            show: !isPie,
+            axisLabel: { show: !isPie, interval: 0, rotate: 15, color: '#6b7280' },
+            axisLine: { show: !isPie, lineStyle: { color: '#e5e7eb' } },
+            axisTick: { show: !isPie }
           },
           yAxis: {
             type: 'value',
-            axisLabel: { color: '#6b7280' },
-            splitLine: { lineStyle: { type: 'dashed', color: '#f3f4f6' } }
+            show: !isPie,
+            axisLabel: { show: !isPie, color: '#6b7280' },
+            splitLine: { show: !isPie, lineStyle: { type: 'dashed', color: '#f3f4f6' } },
+            axisTick: { show: !isPie }
           },
           color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
           series: this.chartConfig.series.map(s => ({
@@ -4567,6 +4766,119 @@ export default {
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.03) !important;
 }
 
+.search-sources-panel {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--polaris-inner-border);
+}
+
+.search-sources-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--polaris-text-main);
+  background: rgba(99, 102, 241, 0.06);
+  transition: background 0.2s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.1);
+  }
+}
+
+.search-sources-title,
+.search-sources-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-sources-action {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--polaris-text-sub);
+}
+
+.source-collapse-arrow {
+  font-size: 12px;
+  transition: transform 0.2s ease;
+
+  &.is-active {
+    transform: rotate(-180deg);
+  }
+}
+
+.search-query {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--polaris-text-sub);
+}
+
+.search-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.search-source-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--polaris-inner-border);
+  border-radius: 8px;
+  color: var(--polaris-text-main);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.05);
+  transition: border-color 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: var(--polaris-brand-color);
+    background: rgba(99, 102, 241, 0.08);
+  }
+}
+
+.source-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--polaris-brand-color);
+}
+
+.source-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.source-url {
+  font-size: 11.5px;
+  color: var(--polaris-text-sub);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .has-error {
   border-color: var(--polaris-danger-color) !important;
   background: rgba(239, 68, 68, 0.05) !important;
@@ -4766,6 +5078,55 @@ export default {
 }
 
 /* Markdown 代码高亮 */
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.85;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 18px 0 10px;
+  line-height: 1.35;
+  color: var(--polaris-text-main);
+  letter-spacing: 0;
+}
+
+.markdown-body :deep(h1) {
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.markdown-body :deep(h2) {
+  padding-left: 10px;
+  border-left: 3px solid var(--polaris-brand-color);
+  font-size: 17px;
+  font-weight: 760;
+}
+
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  font-size: 15px;
+  font-weight: 720;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 8px 0 14px;
+  padding-left: 22px;
+}
+
+.markdown-body :deep(li) {
+  margin: 4px 0;
+  padding-left: 2px;
+}
+
+.markdown-body :deep(strong) {
+  font-weight: 760;
+  color: var(--polaris-text-main);
+}
+
 .markdown-body :deep(pre.code-block) {
   background: #0f172a !important;
   color: #e2e8f0 !important;
@@ -6452,6 +6813,235 @@ export default {
     font-size: 12px;
     opacity: 0.8;
   }
+}
+
+/* 现代化 Tab 切换 + 搜索 + 固定高度平滑滚动 Popover */
+:global(.popper-workflow-modern) {
+  padding: 10px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15) !important;
+}
+
+.popover-modern-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.popover-tabs-nav {
+  display: flex;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px;
+  border-radius: 10px;
+  gap: 3px;
+
+  :global(.dark) &,
+  :global(.theme-dark) & {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .tab-nav-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--el-text-color-secondary);
+    padding: 6px 0;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.2s ease;
+
+    &:hover {
+      color: var(--el-text-color-primary);
+    }
+
+    &.active {
+      background: var(--el-bg-color, #ffffff);
+      color: #6366f1;
+      font-weight: 700;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+
+      :global(.dark) &,
+      :global(.theme-dark) & {
+        background: #1e293b;
+        color: #818cf8;
+      }
+    }
+  }
+}
+
+.popover-tab-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auto-mode-card {
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.09);
+  }
+
+  &.active {
+    border-color: #6366f1;
+    background: rgba(99, 102, 241, 0.12);
+  }
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+
+    .head-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #6366f1;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .check-icon {
+      color: #6366f1;
+      font-weight: bold;
+    }
+  }
+
+  .card-desc {
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.4;
+  }
+}
+
+.popover-search-row {
+  margin-bottom: 2px;
+}
+
+.popover-scroll-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 2px;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+  }
+
+  .empty-hint {
+    font-size: 12px;
+    color: var(--el-text-color-placeholder);
+    text-align: center;
+    padding: 20px 0;
+  }
+
+  .popover-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+
+    &:hover {
+      background: var(--el-fill-color-light, rgba(0, 0, 0, 0.04));
+    }
+
+    &.active {
+      background: rgba(99, 102, 241, 0.1);
+      color: #6366f1;
+      font-weight: 600;
+
+      .item-icon {
+        color: #6366f1;
+      }
+    }
+
+    .item-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      overflow: hidden;
+
+      .item-icon {
+        font-size: 14px;
+        color: var(--el-text-color-secondary);
+        flex-shrink: 0;
+      }
+
+      .item-name {
+        font-size: 12.5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+
+    .check-icon {
+      color: #6366f1;
+      font-weight: bold;
+      flex-shrink: 0;
+    }
+  }
+}
+
+/* 顶部 Header 状态 Tag 强力修正（彻底解决 Element Plus el-tag 内部文字与图标换行错位 Bug） */
+.header-tags-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  flex-wrap: nowrap !important;
+}
+
+.header-tags-row :deep(.el-tag),
+.header-tags-row .el-tag {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  padding: 0 10px !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+
+.header-tags-row :deep(.el-tag__content),
+.header-tags-row .el-tag__content {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  height: 100% !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+}
+
+.header-tags-row :deep(.tag-icon),
+.header-tags-row .tag-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin-right: 2px !important;
+  font-size: 14px !important;
 }
 </style>
 
