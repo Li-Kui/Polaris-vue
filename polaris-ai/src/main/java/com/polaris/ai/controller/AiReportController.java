@@ -53,7 +53,7 @@ public class AiReportController extends BaseController {
     @Log(title = "报告管理", businessType = BusinessType.UPDATE)
     @PutMapping
     public ResultData<Boolean> updateReport(@RequestBody AiReport report) {
-        return ok(reportService.updateById(report));
+        return ok(reportService.updateReport(report));
     }
 
     /**
@@ -75,7 +75,7 @@ public class AiReportController extends BaseController {
     @Operation(summary = "获取报告详情")
     @GetMapping("/{id}")
     public ResultData<AiReport> getInfo(@PathVariable Long id) {
-        return ok(reportService.getById(id));
+        return ok(reportService.getReportById(id));
     }
 
     /**
@@ -86,11 +86,31 @@ public class AiReportController extends BaseController {
     @Log(title = "报告管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/{id}")
     public ResultData<Boolean> remove(@PathVariable Long id) {
-        return ok(reportService.removeById(id));
+        return ok(reportService.removeReport(id));
     }
 
     /**
-     * 调用 AI 智能体深度重塑美化报告
+     * 报告中心创建或复用异步美化任务
+     * POST /ai/report/{id}/refine
+     */
+    @Operation(summary = "创建或复用报告中心 AI 美化任务")
+    @PostMapping("/{id}/refine")
+    public ResultData<java.util.Map<String, Object>> refineReportById(@PathVariable Long id) {
+        return ok(reportService.startRefineReport(id));
+    }
+
+    /**
+     * 查询报告中心美化任务状态
+     * GET /ai/report/{id}/refine-status
+     */
+    @Operation(summary = "查询报告中心 AI 美化状态")
+    @GetMapping("/{id}/refine-status")
+    public ResultData<java.util.Map<String, Object>> refineReportStatus(@PathVariable Long id) {
+        return ok(reportService.getRefineStatus(id));
+    }
+
+    /**
+     * 调用 AI 智能体深度重塑美化报告（兼容现有调用方）
      * POST /ai/report/refine
      */
     @Operation(summary = "AI 智能美化重塑报告")

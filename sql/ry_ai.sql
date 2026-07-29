@@ -286,6 +286,13 @@ CREATE TABLE `ai_report` (
   `report_content` longtext COMMENT '报告Markdown正文',
   `report_stats` text COMMENT '统计指标JSON',
   `refined_schema` longtext COMMENT '重塑美化JSON',
+  `refine_status` varchar(16) DEFAULT 'NONE' COMMENT '美化处理状态',
+  `refined_source_hash` varchar(64) DEFAULT NULL COMMENT '美化结果对应的原文SHA-256',
+  `refine_schema_version` varchar(32) DEFAULT NULL COMMENT '美化结果Schema版本',
+  `refine_prompt_version` varchar(32) DEFAULT NULL COMMENT '美化Prompt版本',
+  `refine_started_at` datetime DEFAULT NULL COMMENT '美化任务开始时间',
+  `refined_at` datetime DEFAULT NULL COMMENT '美化完成时间',
+  `refine_error` varchar(500) DEFAULT NULL COMMENT '美化失败原因',
   `user_id` bigint(20) DEFAULT NULL COMMENT '所属用户ID',
   `status` char(1) DEFAULT '0' COMMENT '状态（0正常 1归档）',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0存在 2删除）',
@@ -297,8 +304,15 @@ CREATE TABLE `ai_report` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI分析报告归档表';
 
--- 增量更新语句 (已安装系统可通过此命令增量加列)
+-- 已安装系统升级脚本：请在确认目标列不存在后执行，重复执行会因列已存在而失败。
 -- ALTER TABLE `ai_report` ADD COLUMN `refined_schema` longtext COMMENT '重塑美化JSON' AFTER `report_stats`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_status` varchar(16) NOT NULL DEFAULT 'NONE' COMMENT '美化处理状态' AFTER `refined_schema`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_source_hash` varchar(64) DEFAULT NULL COMMENT '美化结果对应的原文SHA-256' AFTER `refine_status`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_schema_version` varchar(32) DEFAULT NULL COMMENT '美化结果Schema版本' AFTER `refined_source_hash`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_prompt_version` varchar(32) DEFAULT NULL COMMENT '美化Prompt版本' AFTER `refine_schema_version`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_at` datetime DEFAULT NULL COMMENT '美化完成时间' AFTER `refine_prompt_version`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_error` varchar(500) DEFAULT NULL COMMENT '美化失败原因' AFTER `refined_at`;
+-- UPDATE `ai_report` SET `refine_status` = 'NONE' WHERE `refine_status` IS NULL OR `refine_status` = '';
 
 -- ----------------------------
 -- 13. Ruoyi 系统菜单数据 (AI分析报告中心菜单)

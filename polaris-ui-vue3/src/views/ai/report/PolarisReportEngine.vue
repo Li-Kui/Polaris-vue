@@ -37,13 +37,13 @@
           v-for="(item, kIdx) in displayKpis" 
           :key="kIdx"
           class="kpi-stat-card"
-          :class="'kpi-theme-' + (item.status || item.type || 'primary')"
+          :class="'kpi-theme-' + normalizeStatus(item.status || item.type)"
         >
           <div class="kpi-stat-icon">
             <span v-if="item.emoji">{{ item.emoji }}</span>
-            <el-icon v-else-if="item.status === 'danger' || item.status === 'error'"><warning-filled /></el-icon>
-            <el-icon v-else-if="item.status === 'warning'"><warn-triangle-filled /></el-icon>
-            <el-icon v-else-if="item.status === 'success'"><circle-check-filled /></el-icon>
+            <el-icon v-else-if="normalizeStatus(item.status || item.type) === 'danger'"><warning-filled /></el-icon>
+            <el-icon v-else-if="normalizeStatus(item.status || item.type) === 'warning'"><warn-triangle-filled /></el-icon>
+            <el-icon v-else-if="normalizeStatus(item.status || item.type) === 'success'"><circle-check-filled /></el-icon>
             <el-icon v-else><data-analysis /></el-icon>
           </div>
           <div class="kpi-stat-body">
@@ -275,33 +275,16 @@ export default {
         }
       }
 
-      const extracted = []
-
-      // 提取 ::: kpi-group 指令
+      // 报告中心不根据关键词猜测 KPI。只有原文明确提供了 kpi-group 指令，
+      // 或后端返回了结构化 kpiCards，才展示指标卡片。
       if (this.content && this.content.includes('::: kpi-group')) {
         const match = this.content.match(/:::\s*kpi-group\s*([\s\S]*?):::/)
         if (match) {
-          return this.parseYamlOrKpiItems(match[1].trim())
+          const items = this.parseYamlOrKpiItems(match[1].trim())
+          return items.length > 0 ? items : null
         }
       }
 
-      // 从用户报告中自动提取风险/用户关键指标
-      if (this.content) {
-        if (this.content.includes('高危') || this.content.includes('高风险') || this.content.includes('R-001')) {
-          extracted.push({ label: '高危风险隐患', value: '1 项', status: 'danger', emoji: '🚨' })
-        }
-        if (this.content.includes('中危')) {
-          extracted.push({ label: '中危警告事项', value: '2 项', status: 'warning', emoji: '⚠️' })
-        }
-        if (this.content.includes('用户总数') || this.content.includes('当前系统有效用户')) {
-          extracted.push({ label: '系统有效用户数', value: '3 人', status: 'primary', emoji: '👥' })
-        }
-        if (this.content.includes('正常') || this.content.includes('状态正常')) {
-          extracted.push({ label: '账号激活覆盖率', value: '100%', status: 'success', emoji: '✅' })
-        }
-      }
-
-      if (extracted.length > 0) return extracted
       return null
     },
 
@@ -322,17 +305,12 @@ export default {
 
     displayCharts() {
       const charts = []
-      const validChartTypes = ['bar', 'line', 'pie', 'radar', 'scatter', 'gauge']
+      const validChartTypes = ['bar', 'line', 'pie']
 
       if (this.structuredSchema) {
         if (this.structuredSchema.visualizations && Array.isArray(this.structuredSchema.visualizations)) {
-          // 数据清洗：确保每个图表都有有效的 chartType
           const validViz = this.structuredSchema.visualizations
-            .filter(v => v && typeof v === 'object')
-            .map(v => ({
-              ...v,
-              chartType: validChartTypes.includes(v.chartType) ? v.chartType : 'bar'
-            }))
+            .filter(v => v && typeof v === 'object' && validChartTypes.includes(v.chartType))
           charts.push(...validViz)
         } else if (this.structuredSchema.chartData) {
           charts.push({
@@ -343,23 +321,10 @@ export default {
         }
       }
 
-      if (this.content && this.content.includes('::: chart')) {
-        const mdCharts = this.parseChartDirectives(this.content)
-          .map(v => ({
-            ...v,
-            chartType: validChartTypes.includes(v.chartType) ? v.chartType : 'bar'
-          }))
-        charts.push(...mdCharts)
-      }
-
-      // 如果报告里没有传图表，但有"部门"或分类数据，自动生成自适应数据饼图/柱状图
-      if (charts.length === 0 && this.content && (this.content.includes('部门') || this.content.includes('研发部门'))) {
-        charts.push({
-          title: '系统用户部门分布与账号状态对比图',
-          chartType: 'bar',
-          categories: ['研发部门', '测试部门', '未分配部门'],
-          values: [1, 1, 1]
-        })
+      // 结构化美化结果优先。只有没有结构化图表时，才解析原文中的显式图表指令，避免重复展示。
+      if (charts.length === 0 && this.content && this.content.includes('::: chart')) {
+        charts.push(...this.parseChartDirectives(this.content)
+          .filter(v => v && typeof v === 'object' && validChartTypes.includes(v.chartType)))
       }
 
       return charts
@@ -445,6 +410,10 @@ export default {
       val = val.replace(/\s{2,}/g, ' ').trim()
 
       return val || '-'
+    },
+
+    normalizeStatus(rawVal) {
+      return this.mapStatusToDisplay(rawVal) || 'primary'
     },
 
     // 状态值语义化映射
@@ -613,7 +582,13 @@ export default {
 
     formatMarkdownText(text) {
       if (!text) return ''
-      let html = text
+      const escaped = String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+      let html = escaped
         .replace(/^(?:---|[*]{3,}|_{3,})\s*$/gm, '')
         .replace(/\*\*(.*?)\*\*/g, '<strong class="highlight-strong">$1</strong>')
         .replace(/`([^`\n]+)`/g, '<code class="pill-code">$1</code>')
@@ -681,60 +656,86 @@ export default {
     },
 
     buildEchartOption(block) {
-      let categories = []
-      let seriesData = []
+      const validChartTypes = ['bar', 'line', 'pie']
+      const chartType = validChartTypes.includes(block.chartType) ? block.chartType : 'bar'
+      const source = block.chartData
+      let categories = Array.isArray(block.categories) ? block.categories : []
+      let series = []
 
-      if (block.chartData) {
-        if (block.chartData.categories && block.chartData.series) {
-          categories = block.chartData.categories
-          seriesData = block.chartData.series[0] ? block.chartData.series[0].data : []
-        } else if (Array.isArray(block.chartData)) {
-          categories = block.chartData.map(d => d.name || d.label)
-          seriesData = block.chartData.map(d => d.value)
-        }
-      } else {
-        categories = block.categories || ['研发部门', '测试部门', '未分配部门']
-        seriesData = block.values || [1, 1, 1]
+      if (source && !Array.isArray(source) && Array.isArray(source.categories)) {
+        categories = source.categories
       }
 
-      const isPie = block.chartType === 'pie'
-      // 确保 chartType 是有效的 ECharts 类型
-      const validChartTypes = ['bar', 'line', 'pie', 'radar', 'scatter', 'gauge']
-      const chartType = validChartTypes.includes(block.chartType) ? block.chartType : 'bar'
+      if (Array.isArray(source)) {
+        categories = source.map(item => item && (item.name || item.label)).filter(Boolean)
+        const values = source.slice(0, categories.length).map(item => Number(item && item.value)).filter(Number.isFinite)
+        series = [{ name: block.seriesName || '数量', data: values }]
+      } else if (source && Array.isArray(source.series)) {
+        series = source.series
+          .filter(item => item && Array.isArray(item.data))
+          .map(item => ({
+            name: item.name || '数量',
+            data: item.data.slice(0, categories.length)
+          }))
+      } else if (Array.isArray(block.values)) {
+        series = [{
+          name: block.seriesName || '数量',
+          data: block.values.slice(0, categories.length)
+        }]
+      }
+
+      // 没有完整分类和数值数据时不绘制伪图表。
+      if (categories.length === 0 || series.length === 0 || series.every(item => item.data.length === 0)) {
+        return { title: block.title || '', series: [] }
+      }
+
+      if (chartType === 'pie') {
+        const pieSeries = series[0]
+        return {
+          tooltip: { trigger: 'item' },
+          legend: { bottom: 0 },
+          series: [{
+            name: pieSeries.name,
+            type: 'pie',
+            radius: ['35%', '68%'],
+            center: ['50%', '45%'],
+            data: categories.map((name, index) => ({
+              name,
+              value: pieSeries.data[index]
+            })),
+            label: { formatter: '{b}: {c}' }
+          }]
+        }
+      }
 
       return {
-        tooltip: { trigger: isPie ? 'item' : 'axis', axisPointer: { type: 'shadow' } },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
         grid: { top: 40, left: 40, right: 30, bottom: 40, containLabel: true },
         xAxis: {
           type: 'category',
           data: categories,
-          show: !isPie,
-          axisLine: { show: !isPie, lineStyle: { color: '#94a3b8' } },
-          axisLabel: { show: !isPie, color: '#475569', fontSize: 13 },
-          axisTick: { show: !isPie }
+          axisLine: { lineStyle: { color: '#94a3b8' } },
+          axisLabel: { color: '#475569', fontSize: 13 },
+          axisTick: { show: true }
         },
         yAxis: {
           type: 'value',
-          show: !isPie,
           axisLine: { show: false },
-          splitLine: { show: !isPie, lineStyle: { color: 'rgba(226, 232, 240, 0.8)', type: 'dashed' } },
-          axisLabel: { show: !isPie, color: '#94a3b8' },
-          axisTick: { show: !isPie }
+          splitLine: { lineStyle: { color: 'rgba(226, 232, 240, 0.8)', type: 'dashed' } },
+          axisLabel: { color: '#94a3b8' },
+          axisTick: { show: false }
         },
-        series: [{
-          name: '数量',
-          data: seriesData,
+        series: series.map((item, index) => ({
+          name: item.name,
+          data: item.data,
           type: chartType,
-          smooth: true,
+          smooth: chartType === 'line',
           barWidth: '38%',
           itemStyle: {
-            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: '#6366f1' },
-              { offset: 1, color: '#a5b4fc' }
-            ]),
-            borderRadius: [8, 8, 0, 0]
+            color: ['#6366f1', '#10b981', '#f59e0b', '#ef4444'][index % 4],
+            borderRadius: chartType === 'bar' ? [8, 8, 0, 0] : 0
           }
-        }]
+        }))
       }
     },
 
