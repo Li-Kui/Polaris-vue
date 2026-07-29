@@ -2,6 +2,7 @@ package com.polaris.ai.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.polaris.ai.domain.AiReport;
+import com.polaris.ai.domain.AiReportRef;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
@@ -16,7 +17,7 @@ public interface IAiReportService extends IService<AiReport> {
     /**
      * 保存报告
      */
-    boolean saveReport(AiReport report);
+    AiReportRef saveReport(AiReport report);
 
     /**
      * 条件查询报告列表

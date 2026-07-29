@@ -1,6 +1,7 @@
 package com.polaris.ai.controller;
 
 import com.polaris.ai.domain.AiReport;
+import com.polaris.ai.domain.AiReportRef;
 import com.polaris.ai.service.IAiReportService;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.annotation.Log;
@@ -41,7 +42,7 @@ public class AiReportController extends BaseController {
     @Operation(summary = "归档保存分析报告")
     @Log(title = "报告管理", businessType = BusinessType.INSERT)
     @PostMapping
-    public ResultData<Boolean> saveReport(@RequestBody AiReport report) {
+    public ResultData<AiReportRef> saveReport(@RequestBody AiReport report) {
         return ok(reportService.saveReport(report));
     }
 

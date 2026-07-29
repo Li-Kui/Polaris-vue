@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.domain.AiReport;
+import com.polaris.ai.domain.AiReportRef;
 import com.polaris.ai.mapper.AiReportMapper;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.service.IAiReportService;
@@ -61,17 +62,20 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public boolean saveReport(AiReport report) {
+    public AiReportRef saveReport(AiReport report) {
         if (report == null) {
-            return false;
+            throw new ServiceException("报告内容不能为空", HttpStatus.BAD_REQUEST);
         }
         if (report.getId() != null) {
             throw new ServiceException("归档接口不允许覆盖已有报告", HttpStatus.BAD_REQUEST);
         }
         Long userId = SecurityUtils.getUserId();
+        String username = SecurityUtils.getUsername();
         report.setUserId(userId);
-        report.setCreateBy(SecurityUtils.getUsername());
+        report.setCreateBy(username);
+        report.setUpdateBy(username);
         report.setCreateTime(new Date());
+        report.setUpdateTime(new Date());
         if (report.getAgentCode() == null || report.getAgentCode().trim().isEmpty()) {
             report.setAgentCode("POLARIS-ANALYST");
         }
@@ -81,7 +85,14 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         validateReportContent(report.getReportContent());
         report.setRefineStatus(REFINE_STATUS_NONE);
         report.setRefineError("");
-        return save(report);
+        report.setRefinedSchema(null);
+        report.setRefinedSourceHash(null);
+        report.setRefineSchemaVersion(null);
+        report.setRefinePromptVersion(null);
+        if (!save(report)) {
+            throw new ServiceException("报告归档失败", HttpStatus.ERROR);
+        }
+        return new AiReportRef(report.getId(), report.getReportCode(), report.getReportTitle(), report.getRefineStatus());
     }
 
     @Override

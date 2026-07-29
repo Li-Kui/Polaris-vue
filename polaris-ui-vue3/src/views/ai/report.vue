@@ -1143,8 +1143,12 @@ export default {
   }
 
   .el-dialog__body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     padding: 12px 16px 20px;
     background: #f8fafc;
+    box-sizing: border-box;
   }
 }
 
@@ -1303,8 +1307,13 @@ export default {
 
 .report-drawer-body {
   padding: 8px 6px 16px;
+  height: calc(88vh - 75px);
   max-height: calc(88vh - 75px);
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .paper-preview-box {

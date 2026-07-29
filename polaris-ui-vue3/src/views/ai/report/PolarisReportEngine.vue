@@ -149,10 +149,11 @@
       </div>
 
       <!-- 2.7 完美提取并美化所有 Markdown 数据表格与段落 -->
-      <div 
-        v-for="(section, sIdx) in parsedSmartSections" 
-        :key="'section-' + sIdx"
-        class="smart-section-card"
+      <template v-if="!hasStructuredPresentation">
+        <div
+          v-for="(section, sIdx) in parsedSmartSections"
+          :key="'section-' + sIdx"
+          class="smart-section-card"
       >
         <div class="section-card-header" v-if="section.title">
           <span class="section-badge-dot"></span>
@@ -198,8 +199,9 @@
         </div>
 
         <!-- 文本列表 -->
-        <div v-if="section.htmlContent" class="section-html-body markdown-body" v-html="section.htmlContent"></div>
-      </div>
+          <div v-if="section.htmlContent" class="section-html-body markdown-body" v-html="section.htmlContent"></div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -275,17 +277,17 @@ export default {
         }
       }
 
-      // 报告中心不根据关键词猜测 KPI。只有原文明确提供了 kpi-group 指令，
-      // 或后端返回了结构化 kpiCards，才展示指标卡片。
       if (this.content && this.content.includes('::: kpi-group')) {
         const match = this.content.match(/:::\s*kpi-group\s*([\s\S]*?):::/)
         if (match) {
           const items = this.parseYamlOrKpiItems(match[1].trim())
-          return items.length > 0 ? items : null
+          if (items.length > 0) return items
         }
       }
 
-      return null
+      // AI 任务尚未完成时，至少把报告顶部的短键值数据转成指标卡，
+      // 避免原始报告退化为未排版的长文本。
+      return this.extractInlineKpis(this.content)
     },
 
     displayCompare() {
@@ -359,6 +361,21 @@ export default {
     parsedSmartSections() {
       if (!this.content) return []
       return this.transformMarkdownToSmartSections(this.content)
+    },
+
+    hasStructuredPresentation() {
+      if (!this.structuredSchema || typeof this.structuredSchema !== 'object') return false
+      return Boolean(
+        this.structuredSchema.executiveSummary ||
+        (Array.isArray(this.structuredSchema.kpiCards) && this.structuredSchema.kpiCards.length) ||
+        (Array.isArray(this.structuredSchema.kpiGroup) && this.structuredSchema.kpiGroup.length) ||
+        (Array.isArray(this.structuredSchema.reportStats) && this.structuredSchema.reportStats.length) ||
+        (Array.isArray(this.structuredSchema.visualizations) && this.structuredSchema.visualizations.length) ||
+        this.structuredSchema.chartData ||
+        this.structuredSchema.compareMatrix ||
+        this.structuredSchema.swot ||
+        (Array.isArray(this.structuredSchema.actionPlan) && this.structuredSchema.actionPlan.length)
+      )
     }
   },
   watch: {
@@ -480,8 +497,9 @@ export default {
       if (!cleanText) return []
 
       const sections = []
-      // 按 # / ## / ### / #### 划分小节
-      const rawSections = cleanText.split(/(?=^#{1,4}\s+)/gm)
+      // 兼容标准 Markdown 和模型常见的无空格标题：##标题、###📊标题
+      const headingPattern = '^#{1,4}(?=\\s|[^#\\s])'
+      const rawSections = cleanText.split(new RegExp('(?=' + headingPattern + ')', 'gm'))
 
       rawSections.forEach(secText => {
         secText = secText.trim()
@@ -490,7 +508,7 @@ export default {
         let title = ''
         let body = secText
 
-        const headerMatch = secText.match(/^(#{1,4})\s+(.+)$/m)
+        const headerMatch = secText.match(/^(#{1,4})(?:\s+|(?=[^#\s]))(.+)$/m)
         if (headerMatch) {
           // 清理标题：移除 #、*、emoji 等装饰符
           title = headerMatch[2]
@@ -578,6 +596,25 @@ export default {
         tableData: rows.length > 0 ? { headers, rows } : null,
         remainingText: remainingText
       }
+    },
+
+    extractInlineKpis(text) {
+      if (!text) return null
+      const items = []
+      const seen = new Set()
+      String(text).split(/\r?\n/).forEach(line => {
+        const normalized = line.trim().replace(/^[-*]\s+/, '').replace(/^\d+[.)、]\s*/, '')
+        const match = normalized.match(/^(?:\*\*)?([^：:|]{2,18})(?:\*\*)?\s*[：:]\s*([^，。；;\n]{1,40})/)
+        if (!match) return
+        const label = match[1].replace(/[*_`#📊📈🛡️💰📋📝]/g, '').trim()
+        const value = match[2].replace(/[*_`]/g, '').trim()
+        if (!label || !value || seen.has(label)) return
+        // 只提取明显的报告指标，避免把普通句子全部变成卡片。
+        if (!/(时间|日期|总数|数量|人数|用户|部门|活跃|状态|完整性|覆盖率|比例|金额|收入|成本|增长|占比|风险|评分|得分)/.test(label)) return
+        seen.add(label)
+        items.push({ label, value, desc: '', status: 'info' })
+      })
+      return items.length > 0 ? items.slice(0, 8) : null
     },
 
     formatMarkdownText(text) {

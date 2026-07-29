@@ -985,9 +985,6 @@
               <span class="toolbar-report-id">NO. {{ currentReportId }}</span>
             </div>
             <div class="toolbar-right">
-              <el-button class="toolbar-btn" size="small" type="warning" plain :loading="aiRefining" @click="handleAiRefineReport">
-                <el-icon v-if="!aiRefining"><magic-stick /></el-icon> ✨ AI 深度重塑美化
-              </el-button>
               <el-button class="toolbar-btn" size="small" type="primary" plain @click="handleSaveReportToDb">
                 <el-icon><folder-add /></el-icon> 保存至云端
               </el-button>
@@ -1039,127 +1036,12 @@
         </transition>
 
         <div id="report-print-area" class="report-preview-page">
-          <div class="report-paper">
-            <!-- 页眉装饰条 -->
-            <div class="paper-header-v2">
-              <div class="header-gradient-bar"></div>
-              <div class="header-info-row">
-                <span class="confidential-tag-v2">
-                  <el-icon><lock /></el-icon> 内部报告 · AI 智能分析
-                </span>
-                <span class="report-serial-v2">编号：AI-REP-{{ currentReportId }}</span>
-              </div>
-            </div>
-
-            <!-- 标题区 -->
-            <div class="paper-title-area-v2">
-              <div class="paper-badge-v2">
-                <el-icon><notebook /></el-icon>
-                <span>ANALYSIS REPORT</span>
-              </div>
-              <h1 class="paper-title-v2">{{ reportTitle }}</h1>
-              <div class="paper-meta-v2">
-                <div class="meta-item">
-                  <el-icon><user /></el-icon>
-                  <span>生成人：admin</span>
-                </div>
-                <div class="meta-item">
-                  <el-icon><calendar /></el-icon>
-                  <span>生成时间：{{ formatReportTime() }}</span>
-                </div>
-                <div class="meta-item">
-                  <el-icon><chat-dot-round /></el-icon>
-                  <span>会话来源：{{ currentUserName }} 的分析请求</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 统计概览卡片 -->
-            <div v-if="reportStats" class="report-stats-row">
-              <div v-for="(stat, idx) in reportStats" :key="idx" class="stat-card" :class="'stat-card-' + stat.color">
-                <div class="stat-icon-box">
-                  <span class="stat-emoji">{{ stat.emoji }}</span>
-                </div>
-                <div class="stat-info">
-                  <span class="stat-value">{{ stat.value }}</span>
-                  <span class="stat-label">{{ stat.label }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 精美分隔线 -->
-            <div class="paper-divider-v2">
-              <span class="divider-dot"></span>
-              <span class="divider-dot"></span>
-              <span class="divider-dot"></span>
-            </div>
-
-            <!-- ECharts 可视化数据图表 -->
-            <div v-if="hasChartData" class="report-chart-section-v2">
-              <div class="chart-section-header">
-                <div class="chart-section-title">
-                  <span class="section-icon-wrapper">
-                    <el-icon><trend-charts /></el-icon>
-                  </span>
-                  <span>数据可视化分析</span>
-                </div>
-                <div class="chart-type-switcher">
-                  <el-radio-group v-if="chartConfig && chartConfig.mode !== 'pie'" v-model="activeChartType" size="small" @change="switchChartType">
-                    <el-radio-button label="bar"><el-icon><histogram /></el-icon> 柱状图</el-radio-button>
-                    <el-radio-button label="line"><el-icon><data-line /></el-icon> 折线图</el-radio-button>
-                  </el-radio-group>
-                  <span v-else class="chart-type-badge">
-                    <el-icon><pie-chart /></el-icon> 分布统计
-                  </span>
-                </div>
-              </div>
-              <div id="pretty-report-chart" class="pretty-chart-box-v2"></div>
-            </div>
-
-            <!-- AI 智能提炼的高管极简摘要 Banner -->
-            <div v-if="refinedSchema && refinedSchema.executiveSummary" class="executive-summary-banner" style="margin-bottom: 20px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 8px;">
-              <div class="summary-header" style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #0369a1; font-size: 15px; margin-bottom: 8px;">
-                <el-icon><opportunity /></el-icon>
-                <span>高管极简摘要与决策建议 (Executive Summary)</span>
-              </div>
-              <div class="summary-body" style="color: #334155; font-size: 14px; line-height: 1.6;">
-                {{ refinedSchema.executiveSummary }}
-              </div>
-            </div>
-
-            <!-- 正文内容卡片化分段展示 -->
-            <div class="paper-content-v2-container">
-              <div v-for="(section, idx) in reportSections" :key="idx" class="report-content-card">
-                <div class="markdown-body" v-html="renderMarkdown(section)"></div>
-              </div>
-            </div>
-
-            <!-- AI 智能提取的行动计划看板 (Action Plan) -->
-            <div v-if="refinedSchema && refinedSchema.actionPlan && refinedSchema.actionPlan.length > 0" class="report-action-plan-section" style="margin-top: 25px; background: #fafafa; border: 1px solid #f0f0f0; padding: 20px; border-radius: 8px;">
-              <div class="action-plan-header" style="display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">
-                <el-icon style="color: #10b981;"><checked /></el-icon>
-                <span>建议改进与行动计划看板 (Action Plan)</span>
-              </div>
-              <el-table :data="refinedSchema.actionPlan" border stripe style="width: 100%;">
-                <el-table-column label="优先级" prop="priority" width="100" align="center">
-                  <template #default="scope">
-                    <el-tag :type="scope.row.priority === 'P1' ? 'danger' : (scope.row.priority === 'P2' ? 'warning' : 'info')" effect="dark" size="small">
-                      {{ scope.row.priority }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="改进措施 / 行动建议" prop="action" min-width="220" />
-                <el-table-column label="建议责任部门/人" prop="owner" width="160" align="center" />
-              </el-table>
-            </div>
-
-            <!-- 页脚 -->
-            <div class="paper-footer-v2">
-              <div class="footer-gradient-line"></div>
-              <p class="footer-disclaimer">本报告由 AI 大模型内容引擎分析生成，仅供参考，不构成最终决策依据</p>
-              <p class="footer-brand">Powered by <strong>Polaris-AI</strong> · {{ formatReportTime() }}</p>
-            </div>
-          </div>
+          <PolarisReportEngine
+            :report-title="reportTitle"
+            :meta-info="{ author: currentUserName, date: formatReportTime(), code: currentReportId }"
+            :structured-schema="refinedSchema"
+            :content="reportContent"
+          />
         </div>
       </div>
     </transition>
@@ -1209,11 +1091,15 @@ import {
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
 import {listActiveWorkflows} from '@/api/ai/workflow'
-import {refineReport, saveReport} from '@/api/ai/report'
+import {getRefineStatus, refineReportById, saveReport} from '@/api/ai/report'
+import PolarisReportEngine from './report/PolarisReportEngine.vue'
 import request from '@/utils/request'
 
 export default {
   name: 'AiChat',
+  components: {
+    PolarisReportEngine
+  },
   data() {
     return {
       // 知识库选项与当前选择
@@ -2896,7 +2782,7 @@ export default {
       let normalizedContent = content ? content.replace(/\r\n/g, '\n').trim() : ''
 
       // 自动过滤报告第一个 Markdown 标题 (# 或 ##) 之前的所有 AI 客套与过程说明段落
-      const firstHeadingIndex = normalizedContent.search(/^#{1,3}\s+/m)
+      const firstHeadingIndex = normalizedContent.search(/^#{1,3}(?=\s|[^#\s])/m)
       if (firstHeadingIndex > 0) {
         normalizedContent = normalizedContent.substring(firstHeadingIndex).trim()
       } else {
@@ -2915,7 +2801,8 @@ export default {
         this.reportTitle = currentConv ? currentConv.title : '智能数据分析报告'
       }
 
-      this.currentReportId = Math.random().toString(36).substring(2, 10).toUpperCase()
+      // 尚未归档时不伪造数据库 ID；真正的报告 ID 在首次保存或美化时由后端返回。
+      this.currentReportId = ''
 
       // 3. 超强容错正文拆分逻辑（支持 ##一、/ ## 1. / ### 各种二级、三级标题格式）
       if (normalizedContent) {
@@ -2927,8 +2814,8 @@ export default {
           cleanContent = cleanContent.replace(/^[\s\*\-\>]*[\*\_]*(报告生成时间|评估人|评估范围|生成时间|报告时间|报告编号|编制部门|报告作者|创建人|评估对象|评估周期)[\*\_]*\s*[\：\:][^\n]*\n?/gi, '').trim()
         }
 
-        // 使用宽泛正则拆分章节：匹配行首的 ## 或 ### 标题
-        const rawSections = cleanContent.split(/(?=^#{2,3}\s*[^\n]+)/gm)
+        // 兼容标准 Markdown 和模型常见的无空格标题：##标题、###📊标题
+        const rawSections = cleanContent.split(/(?=^#{2,3}(?=\s|[^#\s])[^\n]*)/gm)
         let parsedSections = rawSections
           .map(s => s.trim())
           .filter(s => {
@@ -2968,8 +2855,15 @@ export default {
 
       // 4. 精准提取指标卡片
       this.reportStats = this.extractReportStats(normalizedContent)
+      this.refinedSchema = null
+      if (this.reportRefineTimer) {
+        clearTimeout(this.reportRefineTimer)
+        this.reportRefineTimer = null
+      }
 
       this.reportVisible = true
+      // 点击“查看报告”即进入深度重塑，完成后直接展示精美报告。
+      this.$nextTick(() => this.handleAiRefineReport())
 
       // 5. 解析表格数据并初始化图表
       const parsed = this.parseTablesForCharts(normalizedContent)
@@ -3095,6 +2989,10 @@ export default {
         this.reportChartInstance.dispose()
         this.reportChartInstance = null
       }
+      if (this.reportRefineTimer) {
+        clearTimeout(this.reportRefineTimer)
+        this.reportRefineTimer = null
+      }
       this.reportVisible = false
     },
 
@@ -3146,33 +3044,68 @@ export default {
       }
     },
 
+    async ensureReportArchived() {
+      if (this.currentReportId && /^\d+$/.test(String(this.currentReportId))) {
+        return Number(this.currentReportId)
+      }
+      if (!this.reportContent) {
+        throw new Error('报告内容为空')
+      }
+      const currentConv = (this.conversations || []).find(c => c.id === this.currentConvId)
+      const agentCodeToSave = this.selectedAgentCode || (currentConv && currentConv.agentCode) || 'POLARIS-ANALYST'
+      const res = await saveReport({
+        reportCode: 'CHAT-' + Date.now(),
+        reportTitle: this.reportTitle || 'AI 智能分析报告',
+        conversationId: this.currentConvId,
+        agentCode: agentCodeToSave,
+        reportContent: this.reportContent,
+        reportStats: JSON.stringify(this.reportStats || [])
+      })
+      if (!res || res.code !== 200 || !res.data || !res.data.id) {
+        throw new Error((res && res.msg) || '报告归档失败')
+      }
+      this.currentReportId = res.data.id
+      return Number(res.data.id)
+    },
+
     async handleSaveReportToDb() {
       if (!this.reportContent) {
         this.$message.warning('无法保存，报告内容为空')
         return
       }
       try {
-        const currentConv = (this.conversations || []).find(c => c.id === this.currentConvId)
-        const agentCodeToSave = this.selectedAgentCode || (currentConv && currentConv.agentCode) || 'POLARIS-ANALYST'
-        const payload = {
-          reportCode: 'REP-' + (this.currentReportId || Date.now()),
-          reportTitle: this.reportTitle || 'AI 智能分析报告',
-          conversationId: this.currentConvId,
-          agentCode: agentCodeToSave,
-          reportContent: this.reportContent,
-          reportStats: JSON.stringify(this.reportStats || []),
-          createTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
-        }
-        const res = await saveReport(payload)
-        if (res.code === 200 || res.data) {
-          this.$message.success('报告已成功保存归档至数据库！可在“报告中心”随时查阅。')
-        } else {
-          this.$message.error(res.msg || '保存报告失败')
-        }
+        await this.ensureReportArchived()
+        this.$message.success('报告已成功保存归档至数据库！可在“报告中心”随时查阅。')
       } catch (err) {
         console.error('保存报告失败', err)
         this.$message.error('保存报告出现异常：' + (err.message || '网络连接超时'))
       }
+    },
+
+    async pollChatRefineStatus(reportId) {
+      const startedAt = Date.now()
+      while (this.reportVisible && String(this.currentReportId) === String(reportId) && Date.now() - startedAt < 90000) {
+        await new Promise(resolve => {
+          this.reportRefineTimer = setTimeout(() => {
+            this.reportRefineTimer = null
+            resolve()
+          }, 1500)
+        })
+        if (!this.reportVisible) return
+        const res = await getRefineStatus(reportId)
+        if (!res || res.code !== 200 || !res.data) {
+          throw new Error((res && res.msg) || 'AI 美化状态查询失败')
+        }
+        if (res.data.status === 'SUCCESS') {
+          if (!res.data.schema) throw new Error('AI 美化结果为空')
+          this.refinedSchema = res.data.schema
+          return
+        }
+        if (res.data.status === 'FAILED') {
+          throw new Error(res.data.error || 'AI 美化失败')
+        }
+      }
+      throw new Error('AI 美化超时，请稍后在报告中心重试')
     },
 
     async handleAiRefineReport() {
@@ -3180,88 +3113,41 @@ export default {
         this.$message.warning('报告内容为空，无法美化')
         return
       }
+      if (this.aiRefining) return
       this.aiRefining = true
       this.aiRefineStep = 1
       this.aiRefinementInProgress = true
-
-      // 动态推进思考步骤看板
       const t1 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 2 }, 1500)
       const t2 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 3 }, 3500)
 
       try {
-        const res = await refineReport(this.reportContent)
-        if (res.code === 200 && res.data) {
-          let schema = null
-          if (typeof res.data === 'object') {
-            schema = res.data
-          } else {
-            let cleanText = String(res.data)
-            const firstBrace = cleanText.indexOf('{')
-            const lastBrace = cleanText.lastIndexOf('}')
-            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-              cleanText = cleanText.substring(firstBrace, lastBrace + 1)
-            }
-            schema = JSON.parse(cleanText)
-          }
-
-          console.log('>>> [原生对象解析成功]:', schema)
-          this.refinedSchema = schema
-          this.aiRefineStep = 4 // 完成所有步骤
-
-          if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
-            this.reportStats = schema.kpiCards.map(k => ({
-              label: k.label || k.title,
-              value: k.value || '0',
-              emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
-              color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
-            }))
-          }
-
-          if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
-            const viz = schema.visualizations[0]
-            if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
-              this.hasChartData = true
-              this.chartConfig = {
-                xAxisData: viz.chartData.categories,
-                series: viz.chartData.series.map(s => ({
-                  name: s.name,
-                  type: viz.chartType === 'line' ? 'line' : 'bar',
-                  data: s.data,
-                  barMaxWidth: 30
-                })),
-                legendData: viz.chartData.series.map(s => s.name)
-              }
-              this.$nextTick(() => {
-                this.initReportChart()
-              })
-            }
-          }
-
-          setTimeout(() => {
-            this.aiRefining = false
-            this.aiRefinementInProgress = false
-            this.$forceUpdate()
-            this.$message.success('✨ AI 已成功重塑分析报告！提炼高管摘要与可视化图表。')
-          }, 600)
-
-        } else {
-          this.aiRefining = false
-          this.aiRefinementInProgress = false
-          this.$message.error(res.msg || 'AI 美化重塑失败')
+        const reportId = await this.ensureReportArchived()
+        const taskRes = await refineReportById(reportId)
+        if (!taskRes || taskRes.code !== 200 || !taskRes.data) {
+          throw new Error((taskRes && taskRes.msg) || 'AI 美化任务创建失败')
         }
+        if (taskRes.data.status === 'SUCCESS' && taskRes.data.schema) {
+          this.refinedSchema = taskRes.data.schema
+        } else if (taskRes.data.status === 'FAILED') {
+          throw new Error(taskRes.data.error || 'AI 美化失败')
+        } else {
+          await this.pollChatRefineStatus(reportId)
+        }
+        this.aiRefineStep = 4
+        this.$message.success('✨ AI 已成功重塑分析报告，结果已同步至报告中心。')
       } catch (err) {
-        this.aiRefining = false
-        this.aiRefinementInProgress = false
         console.error('AI 重塑报告失败', err)
-        this.$message.error('AI 重塑报告失败，请稍后重试')
+        this.$message.error(err.message || 'AI 重塑报告失败，请稍后重试')
       } finally {
         clearTimeout(t1)
         clearTimeout(t2)
+        this.aiRefining = false
+        this.aiRefinementInProgress = false
       }
     },
 
     handleDownloadHtmlReport() {
-      const reportElement = document.querySelector('#report-print-area .report-paper')
+      const reportElement = document.getElementById('report-print-area')
       if (!reportElement) {
         this.$message.warning('报告渲染失败')
         return
@@ -5756,20 +5642,20 @@ export default {
 /* ========== 📄 通用精美报告预览局部面板 (不遮挡侧边栏) ========== */
 .pretty-report-panel-local {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 90;
   background: var(--polaris-bg);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
   box-shadow: -4px 0 30px rgba(0, 0, 0, 0.05);
 }
 
 /* — 精致工具栏 — */
 .report-toolbar-v2 {
+  flex: 0 0 auto;
   background: var(--polaris-card-bg);
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
@@ -5778,8 +5664,8 @@ export default {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04) !important;
   z-index: 10;
   position: relative;
+  box-sizing: border-box;
   padding: 10px 20px;
-  max-width: 900px;
   width: calc(100% - 64px);
   margin: 16px auto 0;
 }
@@ -5789,7 +5675,6 @@ export default {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  max-width: 900px;
   margin: 0 auto;
   box-sizing: border-box;
 }
@@ -5941,8 +5826,12 @@ export default {
 .report-preview-page {
   background: var(--polaris-bg) !important;
   padding: 16px 32px 32px;
+  overflow-x: hidden;
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
 }
 
 /* — 报告仿真纸张设计 — */
