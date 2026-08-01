@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.tools.base.AiToolPermission;
 import com.polaris.ai.utils.SearchKeyHolder;
 import com.polaris.ai.utils.ToolSseHolder;
 import dev.langchain4j.agent.tool.Tool;
@@ -20,6 +21,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 
 /**
  * AI 联网搜索工具，通过原生 HTTP 调用 Tavily API 实现免除 Maven 外部依赖下载冲突的困扰
@@ -33,7 +35,9 @@ public class WebSearchTools implements AiTool {
     private static final String TAVILY_API_URL = "https://api.tavily.com/search";
 
     @Tool("当用户需要获取最新的网络实时信息、新闻、天气或进行事实核对时，调用此工具搜索互联网")
+    @AiToolPermission
     public String searchWeb(String query) {
+        ToolSseHolder.ensureActive();
         log.info(">>> [WebSearchTools] 触发联网搜索工具, query: {}", query);
         sendSse("status", "正在联网搜索...");
         String apiKey = SearchKeyHolder.get();
@@ -61,6 +65,7 @@ public class WebSearchTools implements AiTool {
             conn.setReadTimeout(20000);
             conn.setDoOutput(true);
 
+            ToolSseHolder.ensureActive();
             try (OutputStream os = conn.getOutputStream()) {
                 byte[] input = jsonRequestBody.getBytes(StandardCharsets.UTF_8);
                 os.write(input, 0, input.length);
@@ -77,6 +82,7 @@ public class WebSearchTools implements AiTool {
                     new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
                 String responseLine;
                 while ((responseLine = br.readLine()) != null) {
+                    ToolSseHolder.ensureActive();
                     response.append(responseLine.trim());
                 }
             }
@@ -118,6 +124,8 @@ public class WebSearchTools implements AiTool {
             log.info(">>> [WebSearchTools] 联网搜索成功，已将网页片段喂给大模型进行提炼...");
             return formattedResult.toString();
 
+        } catch (CancellationException e) {
+            throw e;
         } catch (Exception e) {
             log.error(">>> [WebSearchTools] 联网搜索出现异常: ", e);
             sendSse("status", "联网搜索执行失败");
@@ -125,14 +133,36 @@ public class WebSearchTools implements AiTool {
         }
     }
 
-    private void sendSse(String event, String data) {
-        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter = ToolSseHolder.get();
-        if (emitter == null) {
+    void sendSse(String event, String data) {
+        ToolSseHolder.Context context = ToolSseHolder.getContext();
+        if (context == null || context.emitter() == null) {
             return;
         }
+        if (context.isCancelled()) {
+            throw new CancellationException("工作流工具执行已取消");
+        }
         try {
-            emitter.send(org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event().name(event).data(data));
+            if (context.isWorkflow()) {
+                Object payload = data;
+                if ("search_sources".equals(event)) {
+                    payload = JSON.parseObject(data);
+                } else if ("status".equals(event)) {
+                    payload = Map.of("message", data);
+                }
+                context.workflowPublisher().send(
+                        context.emitter(), context.executionId(), event, context.nodeId(), payload);
+            } else {
+                context.emitter().send(
+                        org.springframework.web.servlet.mvc.method.annotation.SseEmitter.event()
+                                .name(event).data(data));
+            }
         } catch (Exception e) {
+            if (context.isWorkflow()) {
+                if (context.workflowCancelled() != null) {
+                    context.workflowCancelled().set(true);
+                }
+                throw new CancellationException("工作流 SSE 连接已断开");
+            }
             log.warn(">>> [WebSearchTools] SSE 推送搜索状态失败: {}", event);
         }
     }

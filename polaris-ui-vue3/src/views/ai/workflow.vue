@@ -329,6 +329,7 @@
                   <el-dropdown-menu>
                     <el-dropdown-item command="agent"><el-icon><cpu /></el-icon> 智能体节点</el-dropdown-item>
                     <el-dropdown-item command="classifier"><el-icon><share /></el-icon> 意图分类节点</el-dropdown-item>
+                    <el-dropdown-item v-if="javaExecutors.length" command="java"><el-icon><connection /></el-icon> Java 业务节点</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -386,8 +387,8 @@
                     <el-form-item label="分支出口（选择目标节点，含义自动预填可改）">
                       <div class="branch-list" style="width:100%;">
                         <div v-for="(b, bi) in popover.node.branches" :key="b.slug" class="branch-item" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
-                          <el-select v-model="b.targetRef" size="small" placeholder="目标节点" style="width:120px;" @change="onBranchTargetChange(b)">
-                            <el-option v-for="t in classifierTargets" :key="t.ref" :label="t.name" :value="t.ref" />
+                          <el-select v-model="b.targetId" size="small" placeholder="目标节点" style="width:120px;" @change="onBranchTargetChange(b)">
+                            <el-option v-for="t in classifierTargets" :key="t.id" :label="t.name" :value="t.id" />
                           </el-select>
                           <el-input v-model="b.label" size="small" placeholder="分支含义" style="flex:1;" @change="syncClassifierBranches" />
                           <el-button size="small" circle icon="Close" @click="removeBranch(bi)" />
@@ -397,7 +398,7 @@
                     </el-form-item>
                     <el-form-item label="默认兜底路径（都不匹配时走）">
                       <el-select v-model="popover.node.defaultTarget" size="small" placeholder="可不设" clearable style="width:100%;" @change="syncClassifierBranches">
-                        <el-option v-for="t in classifierTargets" :key="t.ref" :label="t.name" :value="t.ref" />
+                        <el-option v-for="t in classifierTargets" :key="t.id" :label="t.name" :value="t.id" />
                       </el-select>
                     </el-form-item>
                     <div class="popover-divider"></div>
@@ -407,11 +408,11 @@
                   <el-form v-else label-position="top" size="small">
                     <el-form-item label="指向执行组件/智能体">
                       <el-select v-model="popover.node.ref" placeholder="请选择智能体 / 代码组件" style="width:100%;" @change="onPopoverRefChange">
-                        <el-option-group label="AI 智能体">
+                        <el-option-group v-if="popover.node.type === 'agent'" label="AI 智能体">
                           <el-option v-for="item in activeAgents" :key="item.id" :label="item.agentName" :value="item.agentCode" />
                         </el-option-group>
-                        <el-option-group label="系统 Java 节点">
-                          <el-option label="[系统任务] (sys_task)" value="sys_task" />
+                        <el-option-group v-if="popover.node.type === 'java'" label="系统 Java 节点">
+                          <el-option v-for="item in javaExecutors" :key="item.code" :label="item.name" :value="item.code" />
                         </el-option-group>
                       </el-select>
                     </el-form-item>
@@ -427,7 +428,7 @@
                     <div class="popover-divider"></div>
                     <el-button type="danger" size="small" icon="Delete" style="width:100%;" @click="deletePopoverNode">删除此节点</el-button>
                   </el-form>
-                  <div v-if="popover.node.type !== 'classifier' && popover.node.ref && popover.node.ref !== 'sys_task' && getAgentByCode(popover.node.ref)" class="popover-agent-props">
+                  <div v-if="popover.node.type === 'agent' && popover.node.ref && getAgentByCode(popover.node.ref)" class="popover-agent-props">
                     <div class="prop-group">
                       <span class="prop-label-title"><el-icon><cpu /></el-icon> 底座大模型</span>
                       <el-tag size="small" type="primary" effect="plain" style="width:100%;text-align:center;font-family:monospace;">
@@ -443,8 +444,8 @@
                       <div class="popover-prompt-preview">{{ getAgentByCode(popover.node.ref).systemPrompt }}</div>
                     </div>
                   </div>
-                  <div v-else-if="popover.node.ref === 'sys_task'" class="popover-agent-props">
-                    <el-tag size="small" type="success" effect="plain" style="width:100%;text-align:center;">本地 Java 业务处理任务</el-tag>
+                  <div v-else-if="popover.node.type === 'java' && popover.node.ref" class="popover-agent-props">
+                    <el-tag size="small" type="success" effect="plain" style="width:100%;text-align:center;">{{ getJavaExecutorName(popover.node.ref) }}</el-tag>
                   </div>
                 </div>
               </div>
@@ -536,10 +537,26 @@
         <el-alert type="warning" :closable="false" show-icon style="margin-bottom:10px;">
           试运行会真实调用大模型，产生 token 消耗；不会写入任何聊天会话记录。
         </el-alert>
-        <el-input v-model="testRun.input" type="textarea" :rows="2" placeholder="输入一句测试问题，如：帮我查一下最近的登录日志" :disabled="testRun.running" />
+        <el-input v-model="testRun.input" type="textarea" :rows="2" placeholder="输入一句测试问题，如：帮我查一下最近的登录日志" :disabled="testRun.running || !!testRun.approvalId" />
         <div style="margin-top:10px;">
-          <el-button type="primary" :loading="testRun.running" @click="startTestRun">开始测试</el-button>
+          <el-button type="primary" :loading="testRun.running" :disabled="!!testRun.approvalId" @click="startTestRun">开始测试</el-button>
           <el-button v-if="testRun.running" @click="stopTestRun">停止</el-button>
+        </div>
+        <div v-if="testRun.approvalId" class="test-run-approval">
+          <div class="test-run-approval-title">节点 {{ getNodeDisplayName(testRun.approvalNodeId) || testRun.approvalNodeId }} 等待审批</div>
+          <el-input
+            v-model="testRun.approvalFeedback"
+            type="textarea"
+            :rows="2"
+            maxlength="2000"
+            show-word-limit
+            placeholder="审批意见（可选）"
+            :disabled="testRun.running"
+          />
+          <div class="test-run-approval-actions">
+            <el-button type="success" icon="CircleCheck" :loading="testRun.running" @click="decideTestRun(true)">通过并继续</el-button>
+            <el-button type="danger" plain icon="CircleClose" :disabled="testRun.running" @click="decideTestRun(false)">驳回并结束</el-button>
+          </div>
         </div>
         <div class="test-run-logs" style="margin-top:12px;max-height:260px;overflow:auto;">
           <div v-for="(log, i) in testRun.logs" :key="i" :class="['test-log-item', 'log-' + log.type]">
@@ -560,10 +577,19 @@
 </div>
 </template>
 <script>
-import {addWorkflow, delWorkflow, getWorkflow, listWorkflow, updateWorkflow} from "@/api/ai/workflow";
+import {
+  addWorkflow,
+  cancelWorkflowExecution,
+  delWorkflow,
+  getWorkflow,
+  listWorkflow,
+  listWorkflowExecutors,
+  streamWorkflowExecution,
+  streamWorkflowTestApproval,
+  updateWorkflow
+} from "@/api/ai/workflow";
 import {listAllAgents} from "@/api/ai/agent";
 import {listAvailableModel} from "@/api/ai/model";
-import {getToken} from '@/utils/auth';
 import {Setting as SettingIcon} from '@element-plus/icons-vue'
 import draggable from "vuedraggable/dist/vuedraggable.common"
 import {VueFlow} from '@vue-flow/core'
@@ -586,6 +612,7 @@ export default {
       total: 0,
       workflowList: [],
       activeAgents: [],
+      javaExecutors: [],
       availableModels: [],
       testRun: {
         visible: false,
@@ -593,7 +620,11 @@ export default {
         running: false,
         logs: [],
         activeNodeId: null,
-        reader: null
+        controller: null,
+        executionId: null,
+        approvalId: null,
+        approvalNodeId: null,
+        approvalFeedback: ''
       },
       graph: {
         nodes: [],
@@ -658,28 +689,28 @@ export default {
     },
     currentNodeConditionalEdges() {
       if (this.activeStepIndex === null || !this.nodeSteps[this.activeStepIndex]) return [];
-      const currentRef = this.nodeSteps[this.activeStepIndex].ref;
-      if (!currentRef) return [];
-      return this.graph.edges.filter(e => e.from === currentRef && e.condition != null && e.condition.trim() !== "");
+      const currentId = this.nodeSteps[this.activeStepIndex].id;
+      if (!currentId) return [];
+      return this.graph.edges.filter(e => e.from === currentId && e.condition != null && e.condition.trim() !== "");
     },
     currentNodeDefaultPath: {
       get() {
         if (this.activeStepIndex === null || !this.nodeSteps[this.activeStepIndex]) return "";
-        const currentRef = this.nodeSteps[this.activeStepIndex].ref;
-        if (!currentRef) return "";
-        const edge = this.graph.edges.find(e => e.from === currentRef && (e.condition == null || e.condition.trim() === ""));
+        const currentId = this.nodeSteps[this.activeStepIndex].id;
+        if (!currentId) return "";
+        const edge = this.graph.edges.find(e => e.from === currentId && (e.condition == null || e.condition.trim() === ""));
         return edge ? edge.to : "";
       },
       set(val) {
         if (this.activeStepIndex === null || !this.nodeSteps[this.activeStepIndex]) return;
-        const currentRef = this.nodeSteps[this.activeStepIndex].ref;
-        if (!currentRef) return;
-        let edge = this.graph.edges.find(e => e.from === currentRef && (e.condition == null || e.condition.trim() === ""));
+        const currentId = this.nodeSteps[this.activeStepIndex].id;
+        if (!currentId) return;
+        let edge = this.graph.edges.find(e => e.from === currentId && (e.condition == null || e.condition.trim() === ""));
         if (edge) {
           edge.to = val;
         } else {
           this.graph.edges.push({
-            from: currentRef,
+            from: currentId,
             to: val,
             condition: null
           });
@@ -687,25 +718,30 @@ export default {
       }
     },
     previewNodes() {
-      return this.graph.nodes.filter(n => n.ref);
+      return this.graph.nodes.filter(n => n.id);
     },
     // 分类节点可选的目标节点（排除自己和 Start，追加 End）
     classifierTargets() {
-      const self = this.popover.node ? this.popover.node.ref : null;
+      const self = this.popover.node ? this.popover.node.id : null;
       const list = this.graph.nodes
-        .filter(n => n.ref && n.ref !== self)
+        .filter(n => n.id && n.id !== self)
         .map(n => ({
-          ref: n.ref,
-          name: n.type === 'classifier' ? (n.clfName || '意图分类') : (this.getAgentShortName(n.ref) || n.ref)
+          id: n.id,
+          name: n.type === 'classifier' ? (n.clfName || '意图分类')
+            : n.type === 'java' ? (this.getJavaExecutorName(n.ref) || n.ref || n.id)
+            : (this.getAgentShortName(n.ref) || n.ref || n.id)
         }));
-      list.push({ ref: '__end__', name: 'End（结束）' });
+      list.push({ id: '__end__', name: 'End（结束）' });
       return list;
     }
   },
   async created() {
     // 先加载智能体/模型，保证迷你拓扑图节点名可正确解析
-    await Promise.all([this.loadActiveAgents(), this.loadAvailableModels()]);
+    await Promise.all([this.loadActiveAgents(), this.loadAvailableModels(), this.loadJavaExecutors()]);
     this.getList();
+  },
+  beforeUnmount() {
+    this.stopTestRun();
   },
   methods: {
     async getList() {
@@ -746,6 +782,14 @@ export default {
         console.error(err);
       }
     },
+    async loadJavaExecutors() {
+      try {
+        const res = await listWorkflowExecutors();
+        if (res.code === 200) this.javaExecutors = res.data || [];
+      } catch (err) {
+        console.error(err);
+      }
+    },
     parseNodes(row) {
       if (row.graphJson) {
         try {
@@ -763,15 +807,23 @@ export default {
     },
     getAgentShortName(node) {
       const code = (node && typeof node === 'object') ? node.ref : node;
-      if (code === 'sys_task') {
-        return "系统任务";
-      }
       const agent = this.activeAgents.find(a => a.agentCode === code);
       return agent ? agent.agentName : code;
     },
     getAgentByCode(node) {
       const code = (node && typeof node === 'object') ? node.ref : node;
       return this.activeAgents.find(a => a.agentCode === code);
+    },
+    getJavaExecutorName(code) {
+      const executor = this.javaExecutors.find(item => item.code === code);
+      return executor ? executor.name : code;
+    },
+    getNodeDisplayName(nodeId) {
+      const node = this.graph.nodes.find(n => n.id === nodeId);
+      if (!node) return nodeId;
+      if (node.type === 'classifier') return node.clfName || '意图分类';
+      if (node.type === 'java') return this.getJavaExecutorName(node.ref) || node.ref || nodeId;
+      return this.getAgentShortName(node.ref) || node.ref || nodeId;
     },
     // 构建列表卡片的只读迷你拓扑图（分层布局 + SVG 坐标）
     buildMiniGraph(item) {
@@ -785,15 +837,16 @@ export default {
         try { arr = JSON.parse(item.nodes) || []; } catch (e) {}
         const gnodes = arr.map(x => {
           const ref = typeof x === 'string' ? x : (x.ref || x.id);
-          return { ref, id: ref, type: ref === 'sys_task' ? 'java' : 'agent' };
+          const type = this.javaExecutors.some(executor => executor.code === ref) ? 'java' : 'agent';
+          return { ref, id: ref, type };
         });
         const gedges = [];
         for (let i = 0; i < gnodes.length - 1; i++) {
-          gedges.push({ from: gnodes[i].ref, to: gnodes[i + 1].ref });
+          gedges.push({ from: gnodes[i].id, to: gnodes[i + 1].id });
         }
         if (gnodes.length) {
-          gedges.unshift({ from: '__start__', to: gnodes[0].ref });
-          gedges.push({ from: gnodes[gnodes.length - 1].ref, to: '__end__' });
+          gedges.unshift({ from: '__start__', to: gnodes[0].id });
+          gedges.push({ from: gnodes[gnodes.length - 1].id, to: '__end__' });
         }
         graph = { nodes: gnodes, edges: gedges };
       }
@@ -805,20 +858,20 @@ export default {
       if (nodes.length > 0) {
         const hasStartEdge = edges.some(e => e.from === '__start__');
         if (!hasStartEdge) {
-          const firstNode = nodes[0].ref || nodes[0].id;
+          const firstNode = nodes[0].id;
           edges.unshift({ from: '__start__', to: firstNode });
         }
         const hasEndEdge = edges.some(e => e.to === '__end__');
         if (!hasEndEdge) {
-          const lastNode = nodes[nodes.length - 1].ref || nodes[nodes.length - 1].id;
+          const lastNode = nodes[nodes.length - 1].id;
           edges.push({ from: lastNode, to: '__end__' });
         }
       }
-      const allIds = ['__start__', ...nodes.map(n => n.ref || n.id), '__end__'];
+      const allIds = ['__start__', ...nodes.map(n => n.id), '__end__'];
       const nodeMap = {};
-      nodes.forEach(n => { nodeMap[n.ref || n.id] = n; });
+      nodes.forEach(n => { nodeMap[n.id] = n; });
 
-      // BFS 分层（取最长路径层级，保证汇合节点排在下游）
+      // BFS 分层使用首次到达层级，条件循环不会把预览图高度无限抬高。
       const level = { '__start__': 0 };
       const adj = {};
       edges.forEach(e => { (adj[e.from] = adj[e.from] || []).push(e.to); });
@@ -829,7 +882,7 @@ export default {
         const cur = queue.shift();
         (adj[cur] || []).forEach(to => {
           const nl = (level[cur] || 0) + 1;
-          if (level[to] == null || nl > level[to]) {
+          if (level[to] == null) {
             level[to] = nl;
             queue.push(to);
           }
@@ -859,7 +912,9 @@ export default {
         const n = nodeMap[id];
         const type = isTerm ? 'term' : (n ? (n.type || 'agent') : 'agent');
         const name = isTerm ? (id === '__start__' ? '开始' : '结束')
-          : (type === 'classifier' ? (n.clfName || '意图分类') : (this.getAgentShortName(id) || id));
+          : (type === 'classifier' ? (n.clfName || '意图分类')
+            : type === 'java' ? (this.getJavaExecutorName(n.ref) || n.ref || id)
+            : (this.getAgentShortName(n.ref) || n.ref || id));
         return { id, x: pos[id].x, y: pos[id].y, type, name };
       });
 
@@ -900,9 +955,9 @@ export default {
       const validNodes = this.previewNodes;
       if (nodeIndex < 0 || nodeIndex >= validNodes.length) return '';
       // 查找从前一节点（或 __start__）到当前节点的边上是否有 condition
-      const fromRef = nodeIndex === 0 ? '__start__' : validNodes[nodeIndex - 1].ref;
-      const toRef = validNodes[nodeIndex].ref;
-      const edge = this.graph.edges.find(e => e.from === fromRef && e.to === toRef && e.condition);
+      const fromId = nodeIndex === 0 ? '__start__' : validNodes[nodeIndex - 1].id;
+      const toId = validNodes[nodeIndex].id;
+      const edge = this.graph.edges.find(e => e.from === fromId && e.to === toId && e.condition);
       return edge ? edge.condition : '';
     },
     toggleStatus(row) {
@@ -966,17 +1021,24 @@ export default {
       };
       this.handleQuery();
     },
+    generateNodeId(type = 'node') {
+      let id;
+      do {
+        id = `${type}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      } while (this.graph.nodes.some(node => node.id === id));
+      return id;
+    },
     addNodeStep(nodeType = 'agent') {
       // el-dropdown 的 command 会传字符串；直接点击（非分类场景）时兜底为 agent
       if (typeof nodeType !== 'string') nodeType = 'agent';
       const isClassifier = nodeType === 'classifier';
+      const isJava = nodeType === 'java';
       const uid = Date.now() + '_' + Math.random().toString(36).substr(2, 5);
-      // 分类节点创建即分配稳定 ref（clf_xx），无需选择智能体即可连线
-      const clfRef = isClassifier ? ('clf_' + Math.random().toString(36).substr(2, 6)) : '';
+      const nodeId = this.generateNodeId(isClassifier ? 'classifier' : 'node');
       const newStep = {
         _uid: uid,
-        id: clfRef,
-        ref: clfRef,
+        id: nodeId,
+        ref: '',
         type: nodeType,
         requireApproval: false,
         timeoutSeconds: 120,
@@ -988,15 +1050,16 @@ export default {
       };
       this.graph.nodes.push(newStep);
 
-      // 直接往 vfNodes push 占位节点（agent 节点 ref 为空时 buildVfGraph 会过滤掉，所以手动加）
+      // 直接加入画布，保留用户放置新节点时的位置。
       const centerX = 300 + Math.random() * 200;
       const centerY = 200 + Math.random() * 100;
       this.vfNodes.push({
-        id: isClassifier ? clfRef : uid,
+        id: nodeId,
         type: 'default',
         position: { x: centerX, y: centerY },
         data: { label: isClassifier ? '意图分类' : '未配置节点' },
-        class: isClassifier ? 'vf-node-classifier' : 'vf-node-agent vf-node-unconfigured',
+        class: isClassifier ? 'vf-node-classifier'
+          : isJava ? 'vf-node-java vf-node-unconfigured' : 'vf-node-agent vf-node-unconfigured',
         draggable: true,
         connectable: true,
         selectable: true,
@@ -1009,14 +1072,14 @@ export default {
       this.edgeEditor.visible = false;
     },
     deleteNodeStep(index) {
-      const ref = this.graph.nodes[index] && this.graph.nodes[index].ref;
+      const nodeId = this.graph.nodes[index] && this.graph.nodes[index].id;
       this.graph.nodes.splice(index, 1);
-      if (ref) {
-        this.graph.edges = this.graph.edges.filter(e => e.from !== ref && e.to !== ref);
+      if (nodeId) {
+        this.graph.edges = this.graph.edges.filter(e => e.from !== nodeId && e.to !== nodeId);
         // 清理分类节点中引用该已删除节点的 branches 分支出口
         this.graph.nodes.forEach(n => {
           if (n.type === 'classifier' && n.branches) {
-            n.branches = n.branches.filter(b => b.targetRef !== ref);
+            n.branches = n.branches.filter(b => b.targetId !== nodeId);
           }
         });
       }
@@ -1024,18 +1087,18 @@ export default {
       this.buildVfGraph();
     },
     addBranchRoute(stepIndex) {
-      const currentRef = this.nodeSteps[stepIndex].ref;
-      if (!currentRef) return;
+      const currentId = this.nodeSteps[stepIndex].id;
+      if (!currentId) return;
       this.graph.edges.push({
-        from: currentRef,
+        from: currentId,
         to: "__end__",
         condition: "新路由"
       });
     },
     deleteBranchRoute(stepIndex, routeIndex) {
-      const currentRef = this.nodeSteps[stepIndex].ref;
-      if (!currentRef) return;
-      const conditionalEdges = this.graph.edges.filter(e => e.from === currentRef && e.condition != null);
+      const currentId = this.nodeSteps[stepIndex].id;
+      if (!currentId) return;
+      const conditionalEdges = this.graph.edges.filter(e => e.from === currentId && e.condition != null);
       if (conditionalEdges[routeIndex]) {
         const edge = conditionalEdges[routeIndex];
         const idx = this.graph.edges.indexOf(edge);
@@ -1045,62 +1108,61 @@ export default {
       }
     },
     syncEdges() {
-      // 获取当前所有合法的节点编码集合
-      const activeRefs = new Set(this.nodeSteps.map(n => n.ref).filter(Boolean));
-      activeRefs.add("__end__");
+      const activeIds = new Set(this.nodeSteps.map(n => n.id).filter(Boolean));
+      activeIds.add("__end__");
 
       // 分类节点：其所有出边（多分支）原样保留，绝不折叠或串行覆盖
-      const classifierRefs = new Set(
-        this.nodeSteps.filter(n => n.type === 'classifier' && n.ref).map(n => n.ref)
+      const classifierIds = new Set(
+        this.nodeSteps.filter(n => n.type === 'classifier' && n.id).map(n => n.id)
       );
 
       // 一旦工作流进入图模式（存在分类节点），完全关闭自动串行补边，
       // 边由用户显式建立（分类面板配置 / 手动拖线），仅清理指向已删除节点的悬空边。
-      if (classifierRefs.size > 0) {
+      if (classifierIds.size > 0) {
         this.graph.edges = this.graph.edges.filter(
-          e => (e.from === '__start__' || activeRefs.has(e.from)) && activeRefs.has(e.to)
+          e => (e.from === '__start__' || activeIds.has(e.from)) && activeIds.has(e.to)
         );
         return;
       }
 
       const classifierEdges = this.graph.edges.filter(
-        e => classifierRefs.has(e.from) && activeRefs.has(e.to)
+        e => classifierIds.has(e.from) && activeIds.has(e.to)
       );
 
       // 1. 保留所有合法的条件出边 (源节点开启了 branchMode，目标节点也存在；分类节点已单独处理)
       const conditionalEdges = this.graph.edges.filter(e => {
         if (e.condition == null || e.condition.trim() === "") return false;
-        if (classifierRefs.has(e.from)) return false;
-        const fromNode = this.nodeSteps.find(n => n.ref === e.from);
-        return fromNode && fromNode.branchMode && activeRefs.has(e.to);
+        if (classifierIds.has(e.from)) return false;
+        const fromNode = this.nodeSteps.find(n => n.id === e.from);
+        return fromNode && fromNode.branchMode && activeIds.has(e.to);
       });
 
       const normalEdges = [];
 
       // start → 第一个节点
-      if (this.nodeSteps.length > 0 && this.nodeSteps[0].ref) {
-        normalEdges.push({ from: "__start__", to: this.nodeSteps[0].ref, condition: null });
+      if (this.nodeSteps.length > 0 && this.nodeSteps[0].id) {
+        normalEdges.push({ from: "__start__", to: this.nodeSteps[0].id, condition: null });
       }
 
       this.nodeSteps.forEach((step, index) => {
-        const fromNode = step.ref;
+        const fromNode = step.id;
         if (!fromNode) return;
 
         // 分类节点出边已原样保留，跳过串行/分支补边
-        if (classifierRefs.has(fromNode)) return;
+        if (classifierIds.has(fromNode)) return;
 
         if (step.branchMode) {
           // 分支节点：只追加用户已明确设置的兜底路径边，不自动串下一个数组项
           const existingDefault = this.graph.edges.find(
             e => e.from === fromNode && (e.condition == null || e.condition.trim() === "")
           );
-          if (existingDefault && activeRefs.has(existingDefault.to) && existingDefault.to !== fromNode) {
+          if (existingDefault && activeIds.has(existingDefault.to) && existingDefault.to !== fromNode) {
             normalEdges.push({ from: fromNode, to: existingDefault.to, condition: null });
           }
           // 若用户还没设置兜底路径，不追加任何默认串行边（等用户在右侧面板选择）
         } else {
           // 非分支节点：串行连到下一个节点或 __end__
-          const target = index < this.nodeSteps.length - 1 ? this.nodeSteps[index + 1].ref : "__end__";
+          const target = index < this.nodeSteps.length - 1 ? this.nodeSteps[index + 1].id : "__end__";
           if (target) {
             normalEdges.push({ from: fromNode, to: target, condition: null });
           }
@@ -1110,10 +1172,6 @@ export default {
       this.graph.edges = [...classifierEdges, ...conditionalEdges, ...normalEdges];
     },
     handleRefChange() {
-      if (this.activeStepIndex !== null && this.nodeSteps[this.activeStepIndex]) {
-        const step = this.nodeSteps[this.activeStepIndex];
-        step.id = step.ref;
-      }
       this.syncEdges();
     },
     handleBranchModeChange() {
@@ -1126,25 +1184,31 @@ export default {
     // 保存时序列化 graph 数据，过滤掉前端临时属性
     buildGraphJsonForSubmit() {
       const cleanNodes = this.graph.nodes
-        .filter(n => n.ref)
+        .filter(n => n.id && (n.type === 'classifier' || n.ref))
         .map(n => {
           const base = {
-            id: n.ref,
-            ref: n.ref,
+            id: n.id,
+            ref: n.ref || null,
             type: n.type || 'agent',
             requireApproval: !!n.requireApproval,
             timeoutSeconds: n.timeoutSeconds || 120
           };
           if (n.type === 'classifier') {
-            base.branches = (n.branches || []).filter(b => b.label && b.label.trim());
+            base.branches = (n.branches || [])
+              .filter(b => b.slug && b.label && b.label.trim())
+              .map(b => ({ slug: b.slug, label: b.label.trim() }));
             base.modelConfigId = n.modelConfigId || null;
             base.clfName = n.clfName || '意图分类';
           }
           return base;
         });
+      const nodeIds = new Set(cleanNodes.map(node => node.id));
+      nodeIds.add('__start__');
+      nodeIds.add('__end__');
+      const cleanEdges = this.graph.edges.filter(edge => nodeIds.has(edge.from) && nodeIds.has(edge.to));
       return JSON.stringify({
         nodes: cleanNodes,
-        edges: this.graph.edges,
+        edges: cleanEdges,
         maxIterations: this.graph.maxIterations || 10
       });
     },
@@ -1156,17 +1220,17 @@ export default {
 
     // ── Vue Flow 画布交互 ──────────────────────────────────────────
     buildVfGraph() {
-      const nodes = this.graph.nodes.filter(n => n.ref);
+      const nodes = this.graph.nodes.filter(n => n.id);
       const rawEdges = this.graph.edges || [];
       const NODE_W = 110;
       const NODE_H = 32;
-      const allIds = ['__start__', ...nodes.map(n => n.ref), '__end__'];
+      const allIds = ['__start__', ...nodes.map(n => n.id), '__end__'];
       const idSet = new Set(allIds);
 
       const seenKey = new Set();
       const edges = rawEdges.filter(e => {
         if (!idSet.has(e.from) || !idSet.has(e.to)) return false;
-        const k = `${e.from}=>${e.to}`;
+        const k = `${e.from}=>${e.to}=>${e.condition || ''}`;
         if (seenKey.has(k)) return false;
         seenKey.add(k);
         return true;
@@ -1185,18 +1249,24 @@ export default {
       const newNodes = allIds.map(id => {
         const p = g.node(id);
         const isTerm = id === '__start__' || id === '__end__';
-        const stepNode = this.graph.nodes.find(n => n.ref === id);
+        const stepNode = this.graph.nodes.find(n => n.id === id);
         const isClassifier = stepNode && stepNode.type === 'classifier';
+        const isJava = stepNode && stepNode.type === 'java';
+        const isUnconfigured = stepNode && !isClassifier && !stepNode.ref;
         const label = isTerm ? (id === '__start__' ? 'Start' : 'End')
           : isClassifier ? (stepNode.clfName || '意图分类')
-          : (this.getAgentShortName(id) || id);
+          : isUnconfigured ? '未配置节点'
+          : isJava ? (this.getJavaExecutorName(stepNode.ref) || stepNode.ref || id)
+          : (this.getAgentShortName(stepNode.ref) || stepNode.ref || id);
         const existing = this.vfNodes.find(n => n.id === id);
         return {
           id,
           type: 'default',
           position: existing ? existing.position : { x: p.x - p.width / 2, y: p.y - p.height / 2 },
           data: { label },
-          class: isTerm ? 'vf-node-terminal' : isClassifier ? 'vf-node-classifier' : 'vf-node-agent',
+          class: isTerm ? 'vf-node-terminal' : isClassifier ? 'vf-node-classifier'
+            : isJava ? (isUnconfigured ? 'vf-node-java vf-node-unconfigured' : 'vf-node-java')
+            : isUnconfigured ? 'vf-node-agent vf-node-unconfigured' : 'vf-node-agent',
           draggable: !isTerm,
           connectable: true,
           selectable: !isTerm,
@@ -1207,7 +1277,7 @@ export default {
       const newEdges = edges.map((e, i) => {
         let cond = (e.condition && e.condition.trim()) ? e.condition.trim() : '';
         // 分类节点出边：把 slug 显示成分支中文名（仅改显示，graph.edges 里仍存 slug）
-        const srcNode = this.graph.nodes.find(n => n.ref === e.from);
+        const srcNode = this.graph.nodes.find(n => n.id === e.from);
         if (cond && srcNode && srcNode.type === 'classifier' && srcNode.branches) {
           const br = srcNode.branches.find(b => b.slug === cond);
           if (br) cond = br.label;
@@ -1216,6 +1286,7 @@ export default {
           id: `vfe-${e.from}-${e.to}-${i}`,
           source: e.from,
           target: e.to,
+          data: { condition: e.condition || null },
           type: 'smoothstep',
           label: cond,
           labelStyle: { fontSize: '11px', fontWeight: 700, fill: cond ? '#f59e0b' : '#a5b4fc' },
@@ -1228,15 +1299,13 @@ export default {
         };
       });
 
-      // 保留当前 vfNodes 里的占位节点（未配置 ref，id = _uid），不被覆盖
-      const placeholders = this.vfNodes.filter(n => n.class && n.class.includes('vf-node-unconfigured'));
-      this.vfNodes = [...newNodes, ...placeholders];
+      this.vfNodes = newNodes;
       this.vfEdges = newEdges;
     },
 
     // 拖拽节点后同步位置到 graph.nodes
     onNodeDragStop({ node }) {
-      const step = this.graph.nodes.find(n => n.ref === node.id);
+      const step = this.graph.nodes.find(n => n.id === node.id);
       if (step) step._vfPos = { ...node.position };
     },
 
@@ -1249,25 +1318,25 @@ export default {
       const exists = this.graph.edges.find(e => e.from === source && e.to === target);
       if (exists) return;
 
-      const sourceNode = this.graph.nodes.find(n => n.ref === source || n._uid === source);
+      const sourceNode = this.graph.nodes.find(n => n.id === source);
       const isClassifier = sourceNode && sourceNode.type === 'classifier';
       let slug = null;
 
       // 如果源节点是分类路由节点，联动在 sourceNode.branches 自动新增分支
       if (isClassifier) {
         if (!sourceNode.branches) sourceNode.branches = [];
-        const hasBranch = sourceNode.branches.some(b => b.targetRef === target);
+        const hasBranch = sourceNode.branches.some(b => b.targetId === target);
         if (!hasBranch) {
           slug = 'br_' + Math.random().toString(36).substr(2, 6);
-          const targetNode = this.graph.nodes.find(n => n.ref === target || n._uid === target);
+          const targetNode = this.graph.nodes.find(n => n.id === target);
           const targetName = targetNode ? (targetNode.clfName || this.getAgentShortName(targetNode.ref) || target) : target;
           sourceNode.branches.push({
             slug,
             label: targetName,
-            targetRef: target
+            targetId: target
           });
         } else {
-          const br = sourceNode.branches.find(b => b.targetRef === target);
+          const br = sourceNode.branches.find(b => b.targetId === target);
           if (br) slug = br.slug;
         }
       }
@@ -1283,11 +1352,12 @@ export default {
 
       // 直接往 vfEdges push，不重建整图（防止占位节点被覆盖）
       const edgeStyle = isClassifier ? { stroke: '#f59e0b', strokeWidth: 2 } : { stroke: '#818cf8', strokeWidth: 2 };
-      const condLabel = isClassifier ? (sourceNode.branches.find(b => b.targetRef === target)?.label || '') : '';
+      const condLabel = isClassifier ? (sourceNode.branches.find(b => b.targetId === target)?.label || '') : '';
       this.vfEdges.push({
         id: `vfe-${source}-${target}-${Date.now()}`,
         source,
         target,
+        data: { condition: slug },
         type: 'smoothstep',
         label: condLabel,
         animated: isClassifier,
@@ -1299,11 +1369,12 @@ export default {
     // 双击边打开条件编辑浮层
     onEdgeDoubleClick({ edge }) {
       const sourceRef = edge.source;
-      const sourceNode = this.graph.nodes.find(n => n.ref === sourceRef);
+      const sourceNode = this.graph.nodes.find(n => n.id === sourceRef);
       const isClassifierSource = sourceNode && sourceNode.type === 'classifier';
       // 找到 graph.edges 里对应的真实边，读取其原始 condition（画布 label 分类节点显示的是中文名）
       const ve = this.vfEdges.find(v => v.id === edge.id);
-      const ge = ve ? this.graph.edges.find(e => e.from === ve.source && e.to === ve.target) : null;
+      const ge = ve ? this.graph.edges.find(e => e.from === ve.source && e.to === ve.target
+        && (e.condition || null) === (ve.data?.condition || null)) : null;
       const rawCondition = ge && ge.condition ? ge.condition : '';
 
       this.edgeEditor.edgeId = edge.id;
@@ -1319,7 +1390,8 @@ export default {
     confirmEdgeEdit() {
       const ge = this.graph.edges.find(e => {
         const expectedId = this.vfEdges.find(ve => ve.id === this.edgeEditor.edgeId);
-        return expectedId && e.from === expectedId.source && e.to === expectedId.target;
+        return expectedId && e.from === expectedId.source && e.to === expectedId.target
+          && (e.condition || null) === (expectedId.data?.condition || null);
       });
       if (ge) {
         if (this.edgeEditor.sourceBranches) {
@@ -1328,7 +1400,7 @@ export default {
         } else {
           // 非分类节点：沿用原逻辑
           ge.condition = this.edgeEditor.isCondition ? (this.edgeEditor.condition.trim() || null) : null;
-          const sourceNode = this.graph.nodes.find(n => n.ref === ge.from);
+          const sourceNode = this.graph.nodes.find(n => n.id === ge.from);
           if (sourceNode && ge.condition) sourceNode.branchMode = true;
         }
       }
@@ -1340,11 +1412,12 @@ export default {
     deleteEdgeFromEditor() {
       const ve = this.vfEdges.find(e => e.id === this.edgeEditor.edgeId);
       if (ve) {
-        this.graph.edges = this.graph.edges.filter(e => !(e.from === ve.source && e.to === ve.target));
+        this.graph.edges = this.graph.edges.filter(e => !(e.from === ve.source && e.to === ve.target
+          && (e.condition || null) === (ve.data?.condition || null)));
         // 若源节点是分类路由节点，联动清理分支定义
-        const sourceNode = this.graph.nodes.find(n => n.ref === ve.source);
+        const sourceNode = this.graph.nodes.find(n => n.id === ve.source);
         if (sourceNode && sourceNode.type === 'classifier' && sourceNode.branches) {
-          sourceNode.branches = sourceNode.branches.filter(b => b.targetRef !== ve.target);
+          sourceNode.branches = sourceNode.branches.filter(b => b.slug !== ve.data?.condition);
         }
       }
       this.edgeEditor.visible = false;
@@ -1354,7 +1427,7 @@ export default {
     // 点击节点：计算浮层位置并显示
     onCanvasNodeClick({ node }) {
       if (node.id === '__start__' || node.id === '__end__') return;
-      const step = this.graph.nodes.find(n => n.ref === node.id || n._uid === node.id);
+      const step = this.graph.nodes.find(n => n.id === node.id);
       if (!step) return;
       this.popover = { visible: true, node: step, x: 0, y: 0 };
       this.edgeEditor.visible = false;
@@ -1377,10 +1450,6 @@ export default {
     // 浮层里修改了 ref
     onPopoverRefChange() {
       if (!this.popover.node) return;
-      const step = this.popover.node;
-      step.id = step.ref;
-      // 移除旧的占位 vfNode（id = _uid），buildVfGraph 会用新 ref 重建
-      this.vfNodes = this.vfNodes.filter(n => n.id !== step._uid && n.id !== step.ref);
       this.syncEdges();
       this.buildVfGraph();
     },
@@ -1396,7 +1465,7 @@ export default {
       this.popover.node.branches.push({
         slug: 'br_' + Math.random().toString(36).substr(2, 6),
         label: '',
-        targetRef: ''
+        targetId: ''
       });
     },
 
@@ -1408,8 +1477,8 @@ export default {
 
     // 分类节点：选中目标节点后自动预填含义（用户未手填时）
     onBranchTargetChange(branch) {
-      if (branch && branch.targetRef && (!branch.label || !branch.label.trim())) {
-        const t = this.classifierTargets.find(x => x.ref === branch.targetRef);
+      if (branch && branch.targetId && (!branch.label || !branch.label.trim())) {
+        const t = this.classifierTargets.find(x => x.id === branch.targetId);
         if (t) branch.label = t.name;
       }
       this.syncClassifierBranches();
@@ -1418,19 +1487,19 @@ export default {
     // 分类节点：把分支 + 默认路径同步为该节点的出边（画布只读展示）
     syncClassifierBranches() {
       const node = this.popover.node;
-      if (!node || node.type !== 'classifier' || !node.ref) return;
-      const selfRef = node.ref;
+      if (!node || node.type !== 'classifier' || !node.id) return;
+      const selfId = node.id;
       // 先移除该分类节点原有的所有出边
-      this.graph.edges = this.graph.edges.filter(e => e.from !== selfRef);
+      this.graph.edges = this.graph.edges.filter(e => e.from !== selfId);
       // 每条有目标的分支 → 一条带 slug condition 的边
       (node.branches || []).forEach(b => {
-        if (b.targetRef) {
-          this.graph.edges.push({ from: selfRef, to: b.targetRef, condition: b.slug });
+        if (b.targetId) {
+          this.graph.edges.push({ from: selfId, to: b.targetId, condition: b.slug });
         }
       });
       // 默认兜底路径 → 一条 condition 为空的边
       if (node.defaultTarget) {
-        this.graph.edges.push({ from: selfRef, to: node.defaultTarget, condition: null });
+        this.graph.edges.push({ from: selfId, to: node.defaultTarget, condition: null });
       }
       this.buildVfGraph();
     },
@@ -1451,6 +1520,7 @@ export default {
       this.testRun.visible = true;
       this.testRun.logs = [];
       this.testRun.input = '';
+      this.resetTestRunApproval();
     },
 
     async startTestRun() {
@@ -1462,55 +1532,39 @@ export default {
       this.testRun.logs = [];
       this.clearNodeHighlight();
 
-      const baseUrl = import.meta.env.VITE_APP_BASE_API || '';
-      const threadId = 'test_' + Date.now();
-      // 不传 conversationId → 后端跳过存消息，不污染真实会话
-      const url = `${baseUrl}/ai/workflow/stream?workflowCode=${encodeURIComponent(this.form.workflowCode)}&message=${encodeURIComponent(this.testRun.input)}&threadId=${threadId}`;
-      const token = getToken();
+      const controller = new AbortController();
+      this.testRun.controller = controller;
+      this.testRun.executionId = null;
+      this.resetTestRunApproval();
 
       try {
-        const response = await fetch(url, { method: 'GET', headers: { Authorization: 'Bearer ' + token } });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const reader = response.body.getReader();
-        this.testRun.reader = reader;
-        const decoder = new TextDecoder('utf-8');
-        let buffer = '';
-        let sseEvent = null;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              sseEvent = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
-              const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5);
-              this.handleTestRunEvent(sseEvent || 'message', data);
-            }
-          }
-        }
+        await streamWorkflowExecution({
+          workflowCode: this.form.workflowCode,
+          message: this.testRun.input,
+          testRun: true
+        }, (event, envelope) => this.handleTestRunEvent(event, envelope), controller.signal);
       } catch (err) {
-        this.testRun.logs.push({ type: 'error', text: '执行失败: ' + err.message });
+        if (err.name !== 'AbortError') {
+          this.testRun.logs.push({ type: 'error', text: '执行失败: ' + err.message });
+        }
       } finally {
         this.testRun.running = false;
-        this.testRun.reader = null;
+        this.testRun.controller = null;
       }
     },
 
-    handleTestRunEvent(event, data) {
-      const parts = data.split('|');
-      const nodeCode = parts[0];
+    handleTestRunEvent(event, envelope) {
+      const payload = envelope.payload || {};
+      const nodeCode = envelope.nodeId || '';
+      this.testRun.executionId = envelope.executionId || this.testRun.executionId;
       if (event === 'node_start') {
-        const nodeName = parts[1] || nodeCode;
-        this.testRun.logs.push({ type: 'start', text: `执行节点：${this.getAgentShortName(nodeCode) || nodeName}` });
+        const nodeName = payload.nodeName || nodeCode;
+        this.testRun.logs.push({ type: 'start', text: `执行节点：${this.getNodeDisplayName(nodeCode) || nodeName}` });
         this.highlightNode(nodeCode);
       } else if (event === 'node_route') {
-        const decision = parts[1] || '';
+        const decision = payload.route || '';
         let label = decision;
-        const srcNode = this.graph.nodes.find(n => n.ref === nodeCode);
+        const srcNode = this.graph.nodes.find(n => n.id === nodeCode);
         if (srcNode && srcNode.branches) {
           const br = srcNode.branches.find(b => b.slug === decision);
           if (br) label = br.label;
@@ -1518,24 +1572,92 @@ export default {
         this.testRun.logs.push({ type: 'route', text: `分类判定 → ${label || '（无匹配，走默认路径）'}` });
         this.highlightRoute(nodeCode, decision);
       } else if (event === 'node_done') {
-        this.testRun.logs.push({ type: 'done', text: `节点完成：${this.getAgentShortName(nodeCode) || nodeCode}` });
+        this.testRun.logs.push({ type: 'done', text: `节点完成：${this.getNodeDisplayName(nodeCode) || nodeCode}` });
+      } else if (event === 'status') {
+        if (payload.message) {
+          this.testRun.logs.push({ type: 'route', text: payload.message });
+        }
+      } else if (event === 'search_sources') {
+        this.testRun.logs.push({
+          type: 'route',
+          text: `联网搜索完成：${payload.count || (payload.sources || []).length} 个来源`
+        });
       } else if (event === 'workflow_done') {
         this.testRun.logs.push({ type: 'done', text: '✓ 工作流执行完成' });
         this.testRun.running = false;
+        this.testRun.executionId = null;
+        this.resetTestRunApproval();
+      } else if (event === 'workflow_rejected') {
+        this.testRun.logs.push({ type: 'error', text: '试运行已驳回并结束' });
+        this.testRun.running = false;
+        this.testRun.executionId = null;
+        this.resetTestRunApproval();
       } else if (event === 'error') {
-        this.testRun.logs.push({ type: 'error', text: data });
+        this.testRun.logs.push({ type: 'error', text: payload.message || '工作流执行失败' });
         this.testRun.running = false;
       } else if (event === 'node_error') {
-        this.testRun.logs.push({ type: 'error', text: `节点异常：${parts[1] || nodeCode}` });
+        this.testRun.logs.push({ type: 'error', text: `节点异常：${payload.message || nodeCode}` });
+      } else if (event === 'node_interrupt') {
+        this.testRun.logs.push({ type: 'route', text: `等待审批：${nodeCode}` });
+        this.testRun.approvalId = payload.approvalId;
+        this.testRun.approvalNodeId = nodeCode;
+        this.testRun.approvalFeedback = '';
+        this.testRun.running = false;
+      } else if (event === 'execution_resumed') {
+        this.resetTestRunApproval();
       }
     },
 
+    async decideTestRun(approve) {
+      if (!this.testRun.executionId || !this.testRun.approvalId || this.testRun.running) {
+        return;
+      }
+      const executionId = this.testRun.executionId;
+      const approvalId = this.testRun.approvalId;
+      const controller = new AbortController();
+      this.testRun.controller = controller;
+      this.testRun.running = true;
+      this.testRun.logs.push({
+        type: 'route',
+        text: approve ? '审批通过，继续执行' : '审批驳回，结束试运行'
+      });
+      try {
+        await streamWorkflowTestApproval(
+          executionId,
+          approvalId,
+          { approve, feedback: this.testRun.approvalFeedback.trim() },
+          (event, envelope) => this.handleTestRunEvent(event, envelope),
+          controller.signal
+        );
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          this.testRun.logs.push({ type: 'error', text: '审批失败: ' + err.message });
+        }
+      } finally {
+        this.testRun.running = false;
+        if (this.testRun.controller === controller) {
+          this.testRun.controller = null;
+        }
+      }
+    },
+
+    resetTestRunApproval() {
+      this.testRun.approvalId = null;
+      this.testRun.approvalNodeId = null;
+      this.testRun.approvalFeedback = '';
+    },
+
     stopTestRun() {
-      if (this.testRun.reader) {
-        try { this.testRun.reader.cancel(); } catch (e) {}
-        this.testRun.reader = null;
+      if (this.testRun.executionId) {
+        cancelWorkflowExecution(this.testRun.executionId).catch(() => {});
+      }
+      if (this.testRun.controller) {
+        this.testRun.controller.abort();
+        this.testRun.controller = null;
       }
       this.testRun.running = false;
+      this.testRun.executionId = null;
+      this.resetTestRunApproval();
       this.clearNodeHighlight();
     },
 
@@ -1550,8 +1672,7 @@ export default {
     highlightRoute(fromId, decision) {
       this.vfEdges = this.vfEdges.map(e => {
         if (e.source !== fromId) return e;
-        const ge = this.graph.edges.find(g => g.from === e.source && g.to === e.target);
-        const cond = ge && ge.condition ? ge.condition : '';
+        const cond = e.data?.condition || '';
         const isActive = decision ? (cond === decision) : (!cond);
         if (!isActive) return e;
         return { ...e, animated: true, style: { ...e.style, stroke: '#22c55e', strokeWidth: 3 } };
@@ -1568,16 +1689,16 @@ export default {
     deletePopoverNode() {
       const step = this.popover.node;
       if (!step) return;
-      const ref = step.ref;
+      const nodeId = step.id;
       const uid = step._uid;
       // 从 graph.nodes 删除
       const idx = this.graph.nodes.findIndex(n => n._uid === uid);
       if (idx !== -1) this.graph.nodes.splice(idx, 1);
       // 删除关联边
-      if (ref) this.graph.edges = this.graph.edges.filter(e => e.from !== ref && e.to !== ref);
+      if (nodeId) this.graph.edges = this.graph.edges.filter(e => e.from !== nodeId && e.to !== nodeId);
       // 从 vfNodes 删除占位或正式节点
-      this.vfNodes = this.vfNodes.filter(n => n.id !== uid && n.id !== ref);
-      this.vfEdges = this.vfEdges.filter(e => e.source !== ref && e.target !== ref);
+      this.vfNodes = this.vfNodes.filter(n => n.id !== uid && n.id !== nodeId);
+      this.vfEdges = this.vfEdges.filter(e => e.source !== nodeId && e.target !== nodeId);
       this.popover.visible = false;
       this.syncEdges();
     },
@@ -1630,6 +1751,8 @@ export default {
 
         if (graphObj && graphObj.nodes) {
           this.graph = graphObj;
+          if (!Array.isArray(this.graph.edges)) this.graph.edges = [];
+          if (!this.graph.maxIterations) this.graph.maxIterations = 10;
           const edgesByFrom = {};
           if (this.graph.edges) {
             this.graph.edges.forEach(e => {
@@ -1637,35 +1760,42 @@ export default {
               edgesByFrom[e.from].push(e);
             });
           }
-          this.graph.nodes = this.graph.nodes.map(n => {
-            const stepRef = n.ref || n.id;
+          const usedIds = new Set();
+          this.graph.nodes = this.graph.nodes.map((n, index) => {
+            const stepRef = n.ref || (n.type !== 'classifier' ? n.id : '');
+            let stepId = n.id || n.ref || `node_${index + 1}`;
+            while (usedIds.has(stepId)) stepId = this.generateNodeId(n.type === 'classifier' ? 'classifier' : 'node');
+            usedIds.add(stepId);
             const step = {
               _uid: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+              id: stepId,
               ref: stepRef,
-              type: n.type || ('sys_task' === stepRef ? 'java' : 'agent'),
+              type: n.type || (this.javaExecutors.some(executor => executor.code === stepRef) ? 'java' : 'agent'),
               requireApproval: !!n.requireApproval,
               timeoutSeconds: n.timeoutSeconds || 120,
               branchMode: false,
               routes: [],
               defaultPath: "",
-              branches: n.type === 'classifier' ? (n.branches || []) : undefined,
+              branches: n.type === 'classifier'
+                ? (n.branches || []).map(branch => ({ ...branch, targetId: branch.targetId || branch.targetRef || '' }))
+                : undefined,
               defaultTarget: n.type === 'classifier' ? '' : undefined,
               modelConfigId: n.modelConfigId || null,
               clfName: n.clfName || (n.type === 'classifier' ? '意图分类' : undefined)
             };
-            const outEdges = edgesByFrom[stepRef] || [];
+            const outEdges = edgesByFrom[stepId] || [];
             const conditionalEdges = outEdges.filter(e => e.condition != null && e.condition.trim() !== "");
             const defaultEdge = outEdges.find(e => e.condition == null || e.condition.trim() === "");
             if (n.type === 'classifier') {
               // 分类节点：从边反推每条分支的目标节点与默认兜底路径
               (step.branches || []).forEach(b => {
                 const edge = conditionalEdges.find(e => e.condition === b.slug);
-                b.targetRef = edge ? edge.to : '';
+                b.targetId = edge ? edge.to : '';
               });
               if (defaultEdge) step.defaultTarget = defaultEdge.to;
             } else if (conditionalEdges.length > 0) {
               step.branchMode = true;
-              step.routes = conditionalEdges.map(e => ({ condition: e.condition, targetRef: e.to }));
+              step.routes = conditionalEdges.map(e => ({ condition: e.condition, targetId: e.to }));
               if (defaultEdge) step.defaultPath = defaultEdge.to;
             }
             return step;
@@ -1678,8 +1808,11 @@ export default {
               const refCode = typeof item === 'string' ? item : (item.ref || item.id);
               return {
                 _uid: Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                id: this.generateNodeId('node'),
                 ref: refCode,
-                type: typeof item === 'string' ? ('sys_task' === item ? 'java' : 'agent') : (item.type || ('sys_task' === refCode ? 'java' : 'agent')),
+                type: typeof item === 'string'
+                  ? (this.javaExecutors.some(executor => executor.code === item) ? 'java' : 'agent')
+                  : (item.type || (this.javaExecutors.some(executor => executor.code === refCode) ? 'java' : 'agent')),
                 requireApproval: typeof item === 'string' ? false : !!item.requireApproval,
                 timeoutSeconds: typeof item === 'string' ? 120 : (item.timeoutSeconds || 120),
                 branchMode: false,
@@ -1687,6 +1820,7 @@ export default {
                 defaultPath: ""
               };
             });
+            this.syncEdges();
           } catch (e) {
             this.nodeSteps = [];
           }
@@ -1714,7 +1848,8 @@ export default {
             return;
           }
           for (let i = 0; i < this.nodeSteps.length; i++) {
-            if (!this.nodeSteps[i] || !this.nodeSteps[i].ref) {
+            if (!this.nodeSteps[i] || !this.nodeSteps[i].id
+              || (this.nodeSteps[i].type !== 'classifier' && !this.nodeSteps[i].ref)) {
               this.$message.warning(`步骤 ${i + 1} 未绑定任何节点，请选择`);
               return;
             }
@@ -1724,8 +1859,8 @@ export default {
             return;
           }
           
-          this.form.nodes = JSON.stringify(this.nodeSteps);
           this.form.graphJson = this.buildGraphJsonFromSteps();
+          this.form.nodes = JSON.stringify(JSON.parse(this.form.graphJson).nodes);
           try {
             let res;
             if (this.form.id != null) {
@@ -2218,12 +2353,42 @@ export default {
     }
   }
 }
+.vue-flow-editor :deep(.vue-flow__node.vf-node-java) {
+  background: rgba(16, 185, 129, 0.08) !important;
+  border-color: rgba(16, 185, 129, 0.55) !important;
+  color: #047857 !important;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(16, 185, 129, 0.14) !important;
+    border-color: rgba(52, 211, 153, 0.65) !important;
+    color: #6ee7b7 !important;
+  }
+}
 .vue-flow-editor :deep(.vue-flow__node.vf-node-active) {
   animation: nodePulse 1.2s ease-in-out infinite;
 }
 @keyframes nodePulse {
   0%, 100% { box-shadow: 0 0 0 3px #10b981, 0 0 12px rgba(16,185,129,0.3); }
   50% { box-shadow: 0 0 0 4px #10b981, 0 0 22px rgba(16,185,129,0.6); }
+}
+.test-run-approval {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: rgba(245, 158, 11, 0.06);
+}
+.test-run-approval-title {
+  margin-bottom: 10px;
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 600;
+}
+.test-run-approval-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
 }
 .test-log-item {
   display: flex;

@@ -27,6 +27,10 @@ public class AiMessage
     @Schema(description = "所属会话 ID，关联 ai_conversation 表")
     private Long conversationId;
 
+    /** 关联的工作流执行 ID，用于精确更新流式回复。 */
+    @Schema(description = "关联的工作流执行 ID")
+    private String workflowExecutionId;
+
     /**
      * 消息角色
      * user      —— 用户发送的消息

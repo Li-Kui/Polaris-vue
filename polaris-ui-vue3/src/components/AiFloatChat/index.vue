@@ -164,7 +164,7 @@
                         v-for="source in msg.searchSources"
                         :key="source.index || source.url"
                         class="search-source-item"
-                        :href="source.url"
+                        :href="safeSourceUrl(source.url)"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -265,9 +265,10 @@ import {getToken} from '@/utils/auth'
 import {listAvailableModel} from '@/api/ai/model'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {createConversation, updateConversationConfig} from '@/api/ai/chat'
-import {listActiveWorkflows} from '@/api/ai/workflow'
+import {cancelWorkflowExecution, listActiveWorkflows, streamWorkflowExecution} from '@/api/ai/workflow'
 
 import useSettingsStore from '@/store/modules/settings'
+import {sanitizeUrl} from '@/utils/safeUrl'
 
 export default {
   name: 'AiFloatChat',
@@ -299,7 +300,9 @@ export default {
       enableWebSearch: false,
 
       currentReader: null,
-      sseEventBuffer: null
+      sseEventBuffer: null,
+      workflowAbortController: null,
+      currentWorkflowExecutionId: null
     }
   },
   computed: {
@@ -459,8 +462,8 @@ export default {
       const isWorkflowMode = !!this.selectedWorkflowCode
 
       try {
-        // 只有非工作流模式，首条消息才懒加载创建会话
-        if (!isWorkflowMode && !this.currentConvId) {
+        // 普通聊天和工作流都必须绑定会话，保证消息与待审批执行可恢复。
+        if (!this.currentConvId) {
           const convRes = await createConversation(this.selectedModelName, this.selectedKbId)
           if (convRes.code === 200) {
             this.currentConvId = convRes.data.id
@@ -471,13 +474,49 @@ export default {
 
         const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
         const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
-        
-        let url = ''
+
         if (isWorkflowMode) {
-          url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}`
-        } else {
-          url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
+          const workflowController = new AbortController()
+          this.workflowAbortController = workflowController
+          this.messages[aiIndex].loading = false
+          await streamWorkflowExecution({
+            workflowCode: this.selectedWorkflowCode,
+            message: text,
+            conversationId: this.currentConvId,
+            testRun: false
+          }, (event, envelope) => {
+            const payload = envelope.payload || {}
+            if (envelope.executionId) {
+              this.currentWorkflowExecutionId = envelope.executionId
+            }
+            if (event === 'node_chunk') {
+              this.messages[aiIndex].content += payload.text || ''
+            } else if (event === 'node_thinking') {
+              this.messages[aiIndex].reasoningContent =
+                (this.messages[aiIndex].reasoningContent || '') + (payload.text || '')
+            } else if (event === 'status') {
+              this.messages[aiIndex].statusMsg = payload.message || ''
+            } else if (event === 'search_sources') {
+              this.messages[aiIndex].searchQuery = payload.query || ''
+              this.messages[aiIndex].searchSourceCount =
+                payload.count || (payload.sources || []).length
+              this.messages[aiIndex].searchSources = payload.sources || []
+            } else if (event === 'workflow_done') {
+              this.messages[aiIndex].content = payload.result || this.messages[aiIndex].content
+              this.currentWorkflowExecutionId = null
+            } else if (event === 'node_interrupt') {
+              this.messages[aiIndex].content += '\n\n工作流正在等待人工审批，请在 AI 对话页面处理。'
+              this.workflowAbortController = null
+            } else if (event === 'error') {
+              throw new Error(payload.message || '工作流执行失败')
+            }
+            this.$nextTick(() => this.scrollToBottom())
+          }, workflowController.signal)
+          return
         }
+
+        let url = ''
+        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
         const token = getToken()
 
         const response = await fetch(url, {
@@ -577,6 +616,9 @@ export default {
         return url
       }
     },
+    safeSourceUrl(url) {
+      return sanitizeUrl(url, { allowMailto: false, allowRelative: false })
+    },
     toggleSearchSources(msg) {
       msg.searchSourcesExpanded = !msg.searchSourcesExpanded
     },
@@ -595,6 +637,14 @@ export default {
         .join('\n')
     },
     abortStream() {
+      if (this.workflowAbortController) {
+        this.workflowAbortController.abort()
+        this.workflowAbortController = null
+        if (this.currentWorkflowExecutionId) {
+          cancelWorkflowExecution(this.currentWorkflowExecutionId).catch(() => {})
+          this.currentWorkflowExecutionId = null
+        }
+      }
       if (this.currentReader) {
         try {
           this.currentReader.cancel()
@@ -666,7 +716,9 @@ export default {
           const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
           href = baseUrl + url
         }
-        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+        href = sanitizeUrl(href)
+        if (!href) return text
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
       })
 
       // 5. 表格

@@ -2,14 +2,14 @@ package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.domain.AiWorkflow;
 import com.polaris.ai.mapper.AiWorkflowMapper;
 import com.polaris.ai.service.IAiWorkflowService;
-import com.polaris.ai.workflow.langgraph.LangGraph4jEngine;
+import com.polaris.ai.workflow.langgraph.GraphTopology;
+import com.polaris.common.exception.ServiceException;
 import com.polaris.common.utils.StringUtils;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -19,39 +19,55 @@ import java.util.List;
  *
  * @author polaris
  */
-@Slf4j
 @Service
 public class AiWorkflowServiceImpl extends ServiceImpl<AiWorkflowMapper, AiWorkflow> implements IAiWorkflowService {
 
     @Autowired
-    @Lazy
-    private LangGraph4jEngine langGraph4jEngine;
+    private ObjectMapper objectMapper;
 
     @Override
     public boolean save(AiWorkflow entity) {
-        fillGraphJson(entity);
+        validateGraphJson(entity == null ? null : entity.getGraphJson(), true);
+        entity.setVersion(1);
         return super.save(entity);
     }
 
     @Override
     public boolean updateById(AiWorkflow entity) {
-        fillGraphJson(entity);
-        return super.updateById(entity);
+        if (entity == null || entity.getId() == null) {
+            throw new ServiceException("工作流 ID 不能为空");
+        }
+        if (StringUtils.isNotEmpty(entity.getGraphJson())) {
+            validateGraphJson(entity.getGraphJson(), true);
+        }
+        if (entity.getVersion() == null) {
+            AiWorkflow current = getById(entity.getId());
+            if (current == null) {
+                throw new ServiceException("工作流不存在");
+            }
+            entity.setVersion(current.getVersion() == null ? 1 : current.getVersion());
+        }
+        boolean updated = super.updateById(entity);
+        if (!updated) {
+            throw new ServiceException("工作流已被其他用户修改，请刷新后重试");
+        }
+        return true;
     }
 
-    private void fillGraphJson(AiWorkflow entity) {
-        if (entity != null) {
-            String nodes = entity.getNodes();
-            String graphJson = entity.getGraphJson();
-            if (StringUtils.isNotEmpty(nodes) && StringUtils.isEmpty(graphJson)) {
-                try {
-                    log.info(">>> [AiWorkflowServiceImpl] 检测到 nodes 存在且 graphJson 为空，自动开始编译填充...");
-                    String converted = langGraph4jEngine.convertNodesToGraphJson(nodes);
-                    entity.setGraphJson(converted);
-                } catch (Exception e) {
-                    log.error(">>> [AiWorkflowServiceImpl] 自动填充 graphJson 发生异常", e);
-                }
+    private void validateGraphJson(String graphJson, boolean required) {
+        if (StringUtils.isEmpty(graphJson)) {
+            if (required) {
+                throw new ServiceException("工作流图配置不能为空");
             }
+            return;
+        }
+        try {
+            GraphTopology topology = objectMapper.readValue(graphJson, GraphTopology.class);
+            topology.validate();
+        } catch (IllegalArgumentException e) {
+            throw new ServiceException(e.getMessage());
+        } catch (Exception e) {
+            throw new ServiceException("工作流图配置无法解析");
         }
     }
 

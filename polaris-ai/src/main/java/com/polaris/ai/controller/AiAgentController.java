@@ -148,7 +148,7 @@ public class AiAgentController extends BaseController {
     @GetMapping({"/list/all", "/active/list"})
     public ResultData<List<AiAgent>> listAll() {
         AiAgent query = new AiAgent();
-        query.setStatus("0");
+        query.setStatus("1");
         List<AiAgent> list = agentService.selectAgentList(query);
         if (list == null || list.isEmpty()) {
             list = agentService.list();

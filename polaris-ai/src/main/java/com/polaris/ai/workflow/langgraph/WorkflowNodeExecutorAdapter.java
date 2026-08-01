@@ -33,7 +33,7 @@ public class WorkflowNodeExecutorAdapter {
      * @return LangGraph4j 可用的 NodeAction
      */
     public static NodeAction<PolarisAgentState> adapt(
-            WorkflowNodeExecutor executor, SseEmitter emitter) {
+            String nodeInstanceId, WorkflowNodeExecutor executor, SseEmitter emitter) {
 
         return state -> {
             String nodeCode = executor.getNodeCode();
@@ -55,6 +55,7 @@ public class WorkflowNodeExecutorAdapter {
                 String nodeOutput = legacyContext.getOutput();
                 newOutput = currentLatest.isEmpty() ? nodeOutput : (currentLatest + "\n\n" + nodeOutput);
             }
+            newOutput = LangGraph4jEngine.capLatestOutput(newOutput, 30_000);
             updates.put(PolarisAgentState.LATEST_OUTPUT, newOutput);
             if (legacyContext.getRouteDecision() != null) {
                 updates.put(PolarisAgentState.ROUTE_DECISION, legacyContext.getRouteDecision());
@@ -62,7 +63,7 @@ public class WorkflowNodeExecutorAdapter {
 
             Map<String, Object> vars = new HashMap<>(legacyContext.getVariables());
             if (legacyContext.getOutput() != null) {
-                vars.put(nodeCode + "_output", legacyContext.getOutput());
+                vars.put(nodeInstanceId + "_output", legacyContext.getOutput());
             }
             updates.put(PolarisAgentState.VARIABLES, vars);
 

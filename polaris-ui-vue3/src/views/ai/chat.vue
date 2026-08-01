@@ -513,7 +513,7 @@
                         v-for="source in msg.searchSources"
                         :key="source.index || source.url"
                         class="search-source-item"
-                        :href="source.url"
+                        :href="safeSourceUrl(source.url)"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -1090,10 +1090,17 @@ import {
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
-import {listActiveWorkflows} from '@/api/ai/workflow'
+import {
+  cancelWorkflowExecution,
+  listActiveWorkflows,
+  listPendingWorkflowApprovals,
+  streamWorkflowApproval,
+  streamWorkflowExecution
+} from '@/api/ai/workflow'
 import {getRefineStatus, refineReportById, saveReport} from '@/api/ai/report'
 import PolarisReportEngine from './report/PolarisReportEngine.vue'
 import request from '@/utils/request'
+import {sanitizeUrl} from '@/utils/safeUrl'
 
 export default {
   name: 'AiChat',
@@ -1114,7 +1121,8 @@ export default {
       workflows: [],
       agents: [],
       toolDictionary: {},
-      currentWorkflowThreadId: null,
+      currentWorkflowExecutionId: null,
+      workflowAbortController: null,
       showModelPopover: false,
       showKbPopover: false,
       showWorkflowPopover: false,
@@ -1605,6 +1613,136 @@ export default {
       };
       return map[toolName] || toolName;
     },
+    handleWorkflowEvent(message, event, envelope) {
+      const payload = envelope.payload || {}
+      const nodeCode = envelope.nodeId || ''
+      if (envelope.executionId) {
+        message.executionId = envelope.executionId
+        message.workflowExecutionId = envelope.executionId
+        this.currentWorkflowExecutionId = envelope.executionId
+      }
+      const steps = message.workflowSteps || []
+      let step = nodeCode ? steps.find(item => item.code === nodeCode) : null
+
+      if (event === 'execution_started' || event === 'execution_resumed') {
+        message.loading = false
+        message.streaming = true
+      } else if (event === 'node_start') {
+        if (!step) {
+          step = {
+            code: nodeCode,
+            name: payload.nodeName || nodeCode,
+            status: 'running',
+            content: '',
+            thinking: ''
+          }
+          steps.push(step)
+        } else {
+          step.status = 'running'
+        }
+        message.content = ''
+        message.statusMsg = `智能体「${step.name}」正在处理...`
+      } else if (event === 'node_tool') {
+        if (step) step.activeTool = payload.toolName || ''
+        message.statusMsg = `正在调用工具: ${this.translateToolName(payload.toolName || '')}`
+      } else if (event === 'status') {
+        message.statusMsg = payload.message || ''
+      } else if (event === 'search_sources') {
+        message.searchQuery = payload.query || ''
+        message.searchSourceCount = payload.count || (payload.sources || []).length
+        message.searchSources = payload.sources || []
+      } else if (event === 'node_thinking') {
+        if (step) step.thinking = (step.thinking || '') + (payload.text || '')
+      } else if (event === 'node_chunk') {
+        const chunk = payload.text || ''
+        if (step) step.content = (step.content || '') + chunk
+        message.content = step ? step.content : (message.content || '') + chunk
+      } else if (event === 'node_route') {
+        if (step) step.route = payload.route || ''
+      } else if (event === 'node_done') {
+        if (step) {
+          step.status = 'success'
+          step.activeTool = null
+        }
+        message.statusMsg = ''
+      } else if (event === 'node_error') {
+        if (step) {
+          step.status = 'error'
+          step.content = (step.content || '') + `\n\n节点异常: ${payload.message || '执行异常'}`
+        }
+      } else if (event === 'node_interrupt') {
+        if (step) step.status = 'paused'
+        message.workflowSteps = steps
+        message.statusMsg = ''
+        message.requireApproval = true
+        message.executionId = envelope.executionId
+        message.workflowExecutionId = envelope.executionId
+        message.approvalId = payload.approvalId
+        message.currentNodeCode = nodeCode
+        message.approved = null
+        message.approvalFeedback = ''
+        message.streaming = false
+        this.isStreaming = false
+        this.workflowAbortController = null
+      } else if (event === 'workflow_done') {
+        message.content = payload.result || message.content
+        message.requireApproval = false
+        message.streaming = false
+        message.statusMsg = ''
+        this.isStreaming = false
+        this.currentWorkflowExecutionId = null
+        this.workflowAbortController = null
+        this.loadConvList()
+      } else if (event === 'workflow_rejected') {
+        message.requireApproval = false
+        message.streaming = false
+        message.statusMsg = '工作流已驳回'
+        this.isStreaming = false
+        this.currentWorkflowExecutionId = null
+        this.workflowAbortController = null
+      } else if (event === 'error') {
+        throw new Error(payload.message || '工作流执行失败')
+      }
+      message.workflowSteps = steps
+      this.$nextTick(() => this.scrollToBottom())
+    },
+
+    async restorePendingWorkflowApprovals() {
+      if (!this.currentConvId || !this.messages.length) return
+      try {
+        const res = await listPendingWorkflowApprovals()
+        const pending = (res.data || []).filter(item =>
+          Number(item.conversation_id ?? item.conversationId) === Number(this.currentConvId))
+        for (const approval of pending) {
+          const executionId = approval.execution_id || approval.executionId
+          let message = this.messages.find(item =>
+            item.role === 'assistant' && item.workflowExecutionId === executionId)
+          if (!message) {
+            message = {
+              role: 'assistant',
+              content: '工作流已挂起，正在等待人工审核确认。',
+              workflowExecutionId: executionId,
+              loading: false,
+              streaming: false,
+              error: null,
+              workflowSteps: []
+            }
+            this.messages.push(message)
+          }
+          if (message) {
+            message.workflowExecutionId = executionId
+            message.executionId = executionId
+            message.approvalId = approval.approval_id || approval.approvalId
+            message.currentNodeCode = approval.node_instance_id || approval.nodeInstanceId
+            message.requireApproval = true
+            message.approved = null
+            message.approvalFeedback = ''
+          }
+        }
+      } catch (error) {
+        console.warn('恢复待审批工作流失败', error)
+      }
+    },
     generateUuid() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
@@ -1614,174 +1752,38 @@ export default {
 
     async submitApproval(message, approve) {
       const feedback = (message.approvalFeedback || '').trim()
+      const submittedApprovalId = message.approvalId
+      const workflowController = new AbortController()
+      this.workflowAbortController = workflowController
+      this.currentWorkflowExecutionId = message.executionId
+      this.isStreaming = true
       message.status = 'resuming'
-      
-      const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
-      const url = `${baseUrl}/ai/workflow/resume?workflowCode=${message.workflowCode}&threadId=${message.threadId}&conversationId=${this.currentConvId}`
-      const token = getToken()
-      
+      message.streaming = true
+
       try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({
-            approve: approve,
-            feedback: feedback
-          })
-        })
-        
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || `HTTP ${response.status}`)
+        await streamWorkflowApproval(
+          message.executionId,
+          message.approvalId,
+          { approve, feedback },
+          (event, envelope) => this.handleWorkflowEvent(message, event, envelope),
+          workflowController.signal
+        )
+        if (message.approvalId === submittedApprovalId) {
+          message.approved = approve
+          message.approvalTime = new Date().toLocaleTimeString()
         }
-        
-        message.approved = approve
-        message.approvalTime = new Date().toLocaleTimeString()
         message.status = ''
-        
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder('utf-8')
-        let buffer = ''
-        let currentEvent = ''
-        
-        this.isStreaming = true
-        message.streaming = true
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop()
-          
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              currentEvent = line.slice(6).trim()
-            } else if (line.startsWith('data:')) {
-              let data = ''
-              if (line.startsWith('data: ')) {
-                data = line.slice(6)
-              } else {
-                data = line.slice(5)
-              }
-              const event = currentEvent || 'message'
-              
-              if (event === 'node_start') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const nodeName = parts[1] || nodeCode
-                steps.push({
-                  code: nodeCode,
-                  name: nodeName,
-                  status: 'running',
-                  content: '',
-                  thinking: ''
-                })
-                message.workflowSteps = steps
-                message.content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
-                message.statusMsg = `智能体「${nodeName}」正在处理...`
-              } else if (event === 'node_tool') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const toolName = parts[1] || ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.activeTool = toolName
-                }
-                message.workflowSteps = steps
-                message.statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
-              } else if (event === 'node_thinking') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.thinking = (step.thinking || '') + chunk
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_chunk') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.content = (step.content || '') + chunk
-                }
-                const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
-                const isJson = step && step.content && step.content.trim().startsWith('{');
-                if (!isRouter && !isJson) {
-                  message.content = step ? step.content : (message.content + chunk)
-                } else {
-                  message.content = ''
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_done') {
-                const steps = message.workflowSteps || []
-                const nodeCode = data.trim()
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'success'
-                  step.activeTool = null
-                }
-                message.workflowSteps = steps
-                message.statusMsg = ''
-              } else if (event === 'node_error') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const errMsg = parts[1] || '执行异常'
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'error'
-                  step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_interrupt') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'paused'
-                }
-                message.workflowSteps = steps
-                message.statusMsg = ''
-                message.requireApproval = true
-                message.currentNodeCode = nodeCode
-                message.approved = null
-                message.approvalFeedback = ''
-                
-                this.isStreaming = false
-                message.streaming = false
-                if (reader) {
-                  reader.cancel()
-                }
-                return
-              } else if (event === 'workflow_done') {
-                message.streaming = false
-                this.isStreaming = false
-                this.loadConvList()
-                return
-              } else if (event === 'error') {
-                throw new Error(data.trim() || '工作流执行失败')
-              }
-            }
-          }
-        }
       } catch (err) {
-        console.error('恢复审批流失败', err)
-        this.$message.error('流式恢复失败：' + err.message)
-        message.status = 'error'
+        if (err.name !== 'AbortError') {
+          this.$message.error('流式恢复失败：' + err.message)
+          message.status = 'error'
+        }
+      } finally {
         this.isStreaming = false
         message.streaming = false
+        if (this.workflowAbortController === workflowController) {
+          this.workflowAbortController = null
+        }
       }
     },
 
@@ -2031,12 +2033,14 @@ export default {
           this.messages = (res.data || []).map(m => ({
             role: m.role,
             content: m.content,
+            workflowExecutionId: m.workflowExecutionId || null,
             fileName: m.fileName || null,
             fileUrl: m.fileUrl || null,
             loading: false,
             streaming: false,
             error: null
           }))
+          await this.restorePendingWorkflowApprovals()
           this.$nextTick(() => {
             this.scrollToBottom()
             this.focusInput()
@@ -2202,13 +2206,7 @@ export default {
       const isWorkflowMode = !!this.selectedWorkflowCode
       let url = ''
       if (isWorkflowMode) {
-        const threadId = this.currentWorkflowThreadId || this.generateUuid()
-        this.currentWorkflowThreadId = threadId
-        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
-        if (attachedFiles.length > 0) {
-          const fileUrls = attachedFiles.map(f => f.url).join(',')
-          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
-        }
+        url = ''
       } else {
         url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
         if (this.selectedAgentCode) {
@@ -2222,6 +2220,23 @@ export default {
       const token = getToken()
 
       try {
+        if (isWorkflowMode) {
+          const workflowController = new AbortController()
+          this.workflowAbortController = workflowController
+          this.messages[aiIndex].loading = false
+          this.messages[aiIndex].streaming = true
+          await streamWorkflowExecution({
+            workflowCode: this.selectedWorkflowCode,
+            message: text,
+            conversationId: this.currentConvId,
+            fileUrl: attachedFiles.map(file => file.url).join(',') || null,
+            testRun: false
+          }, (event, envelope) => {
+            this.handleWorkflowEvent(this.messages[aiIndex], event, envelope)
+          }, workflowController.signal)
+          return
+        }
+
         const response = await fetch(url, {
           method: 'GET',
           headers: { Authorization: 'Bearer ' + token }
@@ -2259,162 +2274,36 @@ export default {
               }
               const event = this.sseEventBuffer || 'message'
 
-              if (isWorkflowMode) {
-                // --- 智能体工作流模式专属解析 ---
-                if (event === 'node_start') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const nodeName = parts[1] || nodeCode
-                  steps.push({
-                    code: nodeCode,
-                    name: nodeName,
-                    status: 'running',
-                    content: '',
-                    thinking: ''
-                  })
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
-                  this.messages[aiIndex].statusMsg = `智能体「${nodeName}」正在处理...`
+              if (event === 'message') {
+                const cur = this.messages[aiIndex]
+                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                this.messages[aiIndex].content = cur.content + processedData
+                this.$nextTick(() => this.scrollToBottom())
+              } else if (event === 'reasoning') {
+                const cur = this.messages[aiIndex]
+                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
+                this.$nextTick(() => this.scrollToBottom())
+              } else if (event === 'status') {
+                this.messages[aiIndex].statusMsg = data || ''
+              } else if (event === 'search_sources') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  this.messages[aiIndex].searchQuery = payload.query || ''
+                  this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
+                  this.messages[aiIndex].searchSources = payload.sources || []
                   this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_tool') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const toolName = parts[1] || ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.activeTool = toolName
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_thinking') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.thinking = (step.thinking || '') + chunk
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_chunk') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.content = (step.content || '') + chunk
-                  }
-                  const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
-                  const isJson = step && step.content && step.content.trim().startsWith('{');
-                  if (!isRouter && !isJson) {
-                    this.messages[aiIndex].content = step ? step.content : (cur.content + chunk)
-                  } else {
-                    this.messages[aiIndex].content = ''
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_done') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const nodeCode = data.trim()
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'success'
-                    step.activeTool = null
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = ''
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_error') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const errMsg = parts[1] || '执行异常'
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'error'
-                    step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_interrupt') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'paused'
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = ''
-                  this.messages[aiIndex].requireApproval = true
-                  this.messages[aiIndex].threadId = this.currentWorkflowThreadId
-                  this.messages[aiIndex].workflowCode = this.selectedWorkflowCode
-                  this.messages[aiIndex].currentNodeCode = nodeCode
-                  this.messages[aiIndex].approved = null
-                  this.messages[aiIndex].approvalFeedback = ''
-
-                  this.isStreaming = false
-                  this.messages[aiIndex].streaming = false
-                  this.currentWorkflowThreadId = null // 重置，下次新发时新起
-                  if (this.currentReader) {
-                    this.currentReader.cancel()
-                  }
-                  this.currentReader = null
-                  return
-                } else if (event === 'workflow_done') {
-                  this.messages[aiIndex].streaming = false
-                  this.isStreaming = false
-                  this.currentReader = null
-                  this.loadConvList()
-                  return
-                } else if (event === 'error') {
-                  throw new Error(data.trim() || '工作流执行失败')
+                } catch (err) {
+                  console.warn('解析联网搜索来源失败', err)
                 }
-              } else {
-                // --- 常规聊天问答模式 ---
-                if (event === 'message') {
-                  const cur = this.messages[aiIndex]
-                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  this.messages[aiIndex].content = cur.content + processedData
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'reasoning') {
-                  const cur = this.messages[aiIndex]
-                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'status') {
-                  this.messages[aiIndex].statusMsg = data || ''
-                } else if (event === 'search_sources') {
-                  try {
-                    const payload = JSON.parse(data || '{}')
-                    this.messages[aiIndex].searchQuery = payload.query || ''
-                    this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
-                    this.messages[aiIndex].searchSources = payload.sources || []
-                    this.$nextTick(() => this.scrollToBottom())
-                  } catch (err) {
-                    console.warn('解析联网搜索来源失败', err)
-                  }
-                } else if (event === 'done') {
-                  this.messages[aiIndex].streaming = false
-                  this.isStreaming = false
-                  this.currentReader = null
-                  this.loadConvList()
-                  return
-                } else if (event === 'error') {
-                  throw new Error(data.trim() || 'AI 服务异常')
-                }
+              } else if (event === 'done') {
+                this.messages[aiIndex].streaming = false
+                this.isStreaming = false
+                this.currentReader = null
+                this.loadConvList()
+                return
+              } else if (event === 'error') {
+                throw new Error(data.trim() || 'AI 服务异常')
               }
             } else if (line.trim() === '') {
               this.sseEventBuffer = null
@@ -2460,6 +2349,9 @@ export default {
         return url
       }
     },
+    safeSourceUrl(url) {
+      return sanitizeUrl(url, { allowMailto: false, allowRelative: false })
+    },
 
     isActiveStatus(statusMsg) {
       return !!statusMsg && !statusMsg.startsWith('已搜索') && !statusMsg.startsWith('未搜索')
@@ -2485,6 +2377,14 @@ export default {
     },
 
     abortStream() {
+      if (this.workflowAbortController) {
+        this.workflowAbortController.abort()
+        this.workflowAbortController = null
+        if (this.currentWorkflowExecutionId) {
+          cancelWorkflowExecution(this.currentWorkflowExecutionId).catch(() => {})
+          this.currentWorkflowExecutionId = null
+        }
+      }
       if (this.currentReader) {
         try {
           this.currentReader.cancel()
@@ -2563,7 +2463,9 @@ export default {
           const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
           href = baseUrl + url
         }
-        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+        href = sanitizeUrl(href)
+        if (!href) return text
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
       })
 
       // 7. 无序列表与有序列表（支持任意缩进空格，避免源码外露）

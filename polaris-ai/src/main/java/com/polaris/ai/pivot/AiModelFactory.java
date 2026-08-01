@@ -374,6 +374,33 @@ public class AiModelFactory
     private StreamingChatModel getChatModelInstance(AiModelConfig config)
     {
         String cacheKey = "chat_" + config.getId();
+        return getChatModelInstance(config, cacheKey);
+    }
+
+    /** 使用执行快照参数构建工作流模型；缓存键包含快照指纹，避免复用同 ID 的新配置。 */
+    public StreamingChatModel getWorkflowStreamingModel(AiModelConfig config, String snapshotFingerprint)
+    {
+        return getWorkflowStreamingModel(config, snapshotFingerprint, null);
+    }
+
+    public StreamingChatModel getWorkflowStreamingModel(
+            AiModelConfig config, String snapshotFingerprint, Duration requestTimeout)
+    {
+        if (config == null || config.getId() == null) {
+            throw new IllegalArgumentException("工作流模型快照不完整");
+        }
+        String cacheKey = "workflow_chat_" + config.getId() + "_" + snapshotFingerprint;
+        return getChatModelInstance(config, cacheKey, requestTimeout);
+    }
+
+    private StreamingChatModel getChatModelInstance(AiModelConfig config, String cacheKey)
+    {
+        return getChatModelInstance(config, cacheKey, null);
+    }
+
+    private StreamingChatModel getChatModelInstance(
+            AiModelConfig config, String cacheKey, Duration requestTimeout)
+    {
         return chatCache.computeIfAbsent(cacheKey, key -> {
             log.info(">>> 动态构建聊天模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
             String provider = config.getProvider().toLowerCase();
@@ -392,7 +419,7 @@ public class AiModelFactory
                             .modelName(config.getModelName())
                             .maxTokens(maxTokens)
                             .temperature(temperature)
-                            .timeout(Duration.ofSeconds(120))
+                            .timeout(timeoutOrDefault(requestTimeout, 120))
                             .customHeaders(customHeaders)
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
@@ -404,7 +431,7 @@ public class AiModelFactory
                             .modelName(config.getModelName())
                             .maxTokens(maxTokens)
                             .temperature(temperature)
-                            .timeout(Duration.ofSeconds(120))
+                            .timeout(timeoutOrDefault(requestTimeout, 120))
                             .customHeaders(customHeaders)
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
@@ -416,7 +443,7 @@ public class AiModelFactory
                             .modelName(config.getModelName())
                             .maxTokens(maxTokens)
                             .temperature(temperature)
-                            .timeout(Duration.ofSeconds(120))
+                            .timeout(timeoutOrDefault(requestTimeout, 120))
                             .customHeaders(customHeaders)
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
@@ -429,7 +456,7 @@ public class AiModelFactory
                             .apiKey("ollama")
                             .modelName(config.getModelName())
                             .temperature(temperature)
-                            .timeout(Duration.ofSeconds(180))
+                            .timeout(timeoutOrDefault(requestTimeout, 180))
                             .customHeaders(customHeaders)
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
@@ -443,7 +470,7 @@ public class AiModelFactory
                             .modelName(config.getModelName())
                             .maxTokens(maxTokens)
                             .temperature(temperature)
-                            .timeout(Duration.ofSeconds(120))
+                            .timeout(timeoutOrDefault(requestTimeout, 120))
                             .customHeaders(customHeaders)
                             .returnThinking("1".equals(config.getEnableThinking()))
                             .build();
@@ -452,6 +479,11 @@ public class AiModelFactory
                     throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
             }
         });
+    }
+
+    private Duration timeoutOrDefault(Duration requestTimeout, long defaultSeconds)
+    {
+        return requestTimeout == null ? Duration.ofSeconds(defaultSeconds) : requestTimeout;
     }
 
     private Map<String, String> getCustomHeaders(AiModelConfig config)

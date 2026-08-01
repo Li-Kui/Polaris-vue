@@ -3,7 +3,6 @@ package com.polaris.ai.workflow.langgraph;
 import lombok.Data;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * graphJson 解析后的拓扑结构 DTO
@@ -32,32 +31,114 @@ public class GraphTopology {
         if (nodes == null || nodes.isEmpty()) {
             throw new IllegalArgumentException("graphJson 中 nodes 不能为空");
         }
+        if (nodes.size() > 200) {
+            throw new IllegalArgumentException("工作流节点数量不能超过 200");
+        }
         if (edges == null || edges.isEmpty()) {
             throw new IllegalArgumentException("graphJson 中 edges 不能为空");
         }
+        if (edges.size() > 1000) {
+            throw new IllegalArgumentException("工作流连线数量不能超过 1000");
+        }
+        if (maxIterations < 1 || maxIterations > 1000) {
+            throw new IllegalArgumentException("maxIterations 必须在 1 到 1000 之间");
+        }
 
-        Set<String> nodeIds = nodes.stream()
-                .map(n -> n.getId() != null && !n.getId().isEmpty() ? n.getId() : n.getRef())
-                .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toSet());
-        nodeIds.add("__start__");
-        nodeIds.add("__end__");
+        Map<String, NodeDef> nodesById = new LinkedHashMap<>();
+        for (NodeDef node : nodes) {
+            String id = trim(node.getId());
+            if (id == null) {
+                throw new IllegalArgumentException("节点 id 不能为空");
+            }
+            if (id.length() > 128 || !id.matches("[A-Za-z0-9_.-]+")) {
+                throw new IllegalArgumentException(
+                        "节点 id 仅允许字母、数字、下划线、点和短横线，且不能超过 128 个字符: " + id);
+            }
+            if ("__start__".equals(id) || "__end__".equals(id)) {
+                throw new IllegalArgumentException("节点 id 不能使用系统保留值: " + id);
+            }
+            if (nodesById.putIfAbsent(id, node) != null) {
+                throw new IllegalArgumentException("节点 id 重复: " + id);
+            }
+            node.setId(id);
 
+            String type = trim(node.getType());
+            if (!Set.of("agent", "java", "classifier").contains(type)) {
+                throw new IllegalArgumentException("节点 [" + id + "] 类型无效: " + node.getType());
+            }
+            node.setType(type);
+            if (("agent".equals(type) || "java".equals(type)) && trim(node.getRef()) == null) {
+                throw new IllegalArgumentException("节点 [" + id + "] 缺少引用 ref");
+            }
+            if (node.getTimeoutSeconds() < 1 || node.getTimeoutSeconds() > 1800) {
+                throw new IllegalArgumentException(
+                        "节点 [" + id + "] timeoutSeconds 必须在 1 到 1800 之间");
+            }
+        }
+
+        Map<String, List<EdgeDef>> outgoing = new HashMap<>();
+        Map<String, List<String>> adjacency = new HashMap<>();
+        Map<String, List<String>> reverse = new HashMap<>();
+        Set<String> edgeKeys = new HashSet<>();
+        Set<String> allIds = new HashSet<>(nodesById.keySet());
+        allIds.add("__start__");
+        allIds.add("__end__");
         for (EdgeDef edge : edges) {
-            if (!nodeIds.contains(edge.getFrom())) {
+            String from = trim(edge.getFrom());
+            String to = trim(edge.getTo());
+            String condition = trim(edge.getCondition());
+            if (!allIds.contains(from)) {
                 throw new IllegalArgumentException("边引用了不存在的源节点: " + edge.getFrom());
             }
-            if (!nodeIds.contains(edge.getTo())) {
+            if (!allIds.contains(to)) {
                 throw new IllegalArgumentException("边引用了不存在的目标节点: " + edge.getTo());
+            }
+            if ("__end__".equals(from)) {
+                throw new IllegalArgumentException("__end__ 不能存在出边");
+            }
+            if ("__start__".equals(to)) {
+                throw new IllegalArgumentException("__start__ 不能存在入边");
+            }
+            if (condition != null && condition.length() > 64) {
+                throw new IllegalArgumentException("边 condition 长度不能超过 64");
+            }
+            String edgeKey = from + "\u0000" + to + "\u0000" + Objects.toString(condition, "");
+            if (!edgeKeys.add(edgeKey)) {
+                throw new IllegalArgumentException("存在重复连线: " + from + " -> " + to);
+            }
+            edge.setFrom(from);
+            edge.setTo(to);
+            edge.setCondition(condition);
+            outgoing.computeIfAbsent(from, ignored -> new ArrayList<>()).add(edge);
+            adjacency.computeIfAbsent(from, ignored -> new ArrayList<>()).add(to);
+            reverse.computeIfAbsent(to, ignored -> new ArrayList<>()).add(from);
+        }
+
+        List<EdgeDef> startEdges = outgoing.getOrDefault("__start__", List.of());
+        if (startEdges.size() != 1 || trim(startEdges.get(0).getCondition()) != null) {
+            throw new IllegalArgumentException("工作流必须且只能有一条从 __start__ 出发的无条件连线");
+        }
+        if (!reverse.containsKey("__end__")) {
+            throw new IllegalArgumentException("工作流缺少指向 __end__ 的连线");
+        }
+
+        for (Map.Entry<String, NodeDef> entry : nodesById.entrySet()) {
+            validateOutgoing(entry.getKey(), entry.getValue(),
+                    outgoing.getOrDefault(entry.getKey(), List.of()));
+        }
+
+        Set<String> reachable = traverse("__start__", adjacency);
+        Set<String> canReachEnd = traverse("__end__", reverse);
+        for (String nodeId : nodesById.keySet()) {
+            if (!reachable.contains(nodeId)) {
+                throw new IllegalArgumentException("节点从 __start__ 不可达: " + nodeId);
+            }
+            if (!canReachEnd.contains(nodeId)) {
+                throw new IllegalArgumentException("节点无法到达 __end__: " + nodeId);
             }
         }
 
-        boolean hasStart = edges.stream().anyMatch(e -> "__start__".equals(e.getFrom()));
-        if (!hasStart) {
-            throw new IllegalArgumentException("graphJson 缺少从 __start__ 出发的边");
-        }
-
-        // Kahn 算法：针对无条件自动流转边（不带 condition）做环路死循环检测
+        // 普通边禁止成环；循环必须经过分类节点的条件边并受 maxIterations 保护。
         Map<String, Integer> inDegrees = new HashMap<>();
         Map<String, List<String>> adj = new HashMap<>();
 
@@ -102,32 +183,83 @@ public class GraphTopology {
             }
         }
 
-        // 分类节点校验：每个 classifier 节点必须定义分支，且其出边的 condition 必须命中已定义的 slug
-        for (NodeDef node : nodes) {
-            if (!"classifier".equals(node.getType())) {
-                continue;
-            }
-            String nodeId = node.getId() != null && !node.getId().isEmpty() ? node.getId() : node.getRef();
-            if (node.getBranches() == null || node.getBranches().isEmpty()) {
-                throw new IllegalArgumentException("分类节点 [" + nodeId + "] 未定义任何分支出口");
-            }
-            Set<String> validSlugs = node.getBranches().stream()
-                    .map(BranchDef::getSlug)
-                    .filter(java.util.Objects::nonNull)
-                    .collect(Collectors.toSet());
+    }
 
-            for (EdgeDef edge : edges) {
-                if (!nodeId.equals(edge.getFrom())) {
-                    continue;
-                }
-                String cond = edge.getCondition();
-                // 条件边的 condition 必须是已定义的分支 slug（默认兜底边 condition 为空，跳过）
-                if (cond != null && !cond.trim().isEmpty() && !validSlugs.contains(cond.trim())) {
-                    throw new IllegalArgumentException(
-                            "分类节点 [" + nodeId + "] 的连线条件 '" + cond + "' 不属于已定义的分支，请重新配置");
-                }
+    private void validateOutgoing(String nodeId, NodeDef node, List<EdgeDef> outgoing) {
+        if (!"classifier".equals(node.getType())) {
+            if (outgoing.size() != 1 || trim(outgoing.get(0).getCondition()) != null) {
+                throw new IllegalArgumentException(
+                        "非分类节点 [" + nodeId + "] 必须且只能有一条无条件出边");
+            }
+            return;
+        }
+
+        if (node.getBranches() == null || node.getBranches().isEmpty()) {
+            throw new IllegalArgumentException("分类节点 [" + nodeId + "] 未定义任何分支出口");
+        }
+        Set<String> slugs = new LinkedHashSet<>();
+        for (BranchDef branch : node.getBranches()) {
+            String slug = trim(branch.getSlug());
+            if (slug == null || !slug.matches("[A-Za-z0-9_-]{1,64}")) {
+                throw new IllegalArgumentException("分类节点 [" + nodeId + "] 的分支 slug 格式无效");
+            }
+            if (!slugs.add(slug)) {
+                throw new IllegalArgumentException("分类节点 [" + nodeId + "] 的分支 slug 重复: " + slug);
+            }
+            if (trim(branch.getLabel()) == null || branch.getLabel().length() > 500) {
+                throw new IllegalArgumentException(
+                        "分类节点 [" + nodeId + "] 的分支说明不能为空且不能超过 500 字符");
+            }
+            branch.setSlug(slug);
+        }
+
+        Set<String> edgeConditions = new HashSet<>();
+        int defaultCount = 0;
+        for (EdgeDef edge : outgoing) {
+            String condition = trim(edge.getCondition());
+            if (condition == null) {
+                defaultCount++;
+            } else if (!slugs.contains(condition)) {
+                throw new IllegalArgumentException(
+                        "分类节点 [" + nodeId + "] 的连线条件 '" + condition + "' 不属于已定义的分支");
+            } else if (!edgeConditions.add(condition)) {
+                throw new IllegalArgumentException(
+                        "分类节点 [" + nodeId + "] 的分支连线重复: " + condition);
             }
         }
+        if (defaultCount > 1) {
+            throw new IllegalArgumentException("分类节点 [" + nodeId + "] 最多只能有一条默认出边");
+        }
+        if (!edgeConditions.equals(slugs)) {
+            Set<String> missing = new LinkedHashSet<>(slugs);
+            missing.removeAll(edgeConditions);
+            throw new IllegalArgumentException(
+                    "分类节点 [" + nodeId + "] 存在未连线分支: " + String.join(",", missing));
+        }
+    }
+
+    private Set<String> traverse(String start, Map<String, List<String>> graph) {
+        Set<String> visited = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(start);
+        while (!queue.isEmpty()) {
+            String current = queue.removeFirst();
+            if (!visited.add(current)) {
+                continue;
+            }
+            for (String next : graph.getOrDefault(current, List.of())) {
+                queue.addLast(next);
+            }
+        }
+        return visited;
+    }
+
+    private String trim(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**

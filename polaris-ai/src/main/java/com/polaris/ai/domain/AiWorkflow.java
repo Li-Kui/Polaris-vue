@@ -3,6 +3,7 @@ package com.polaris.ai.domain;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
+import com.baomidou.mybatisplus.annotation.Version;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -45,6 +46,11 @@ public class AiWorkflow extends BaseEntity {
     /** 图拓扑描述JSON（统一格式，替代 nodes） */
     @Schema(description = "图拓扑描述JSON")
     private String graphJson;
+
+    /** 工作流定义版本；每次更新由乐观锁递增。 */
+    @Schema(description = "工作流定义版本")
+    @Version
+    private Integer version;
 
     /** 状态(1启用 0禁用) */
     @Schema(description = "状态(1启用 0禁用)")

@@ -115,16 +115,19 @@ DROP TABLE IF EXISTS `ai_message`;
 CREATE TABLE `ai_message` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '消息id',
   `conversation_id` bigint(20) NOT NULL COMMENT '会话id',
+  `workflow_execution_id` varchar(64) DEFAULT NULL COMMENT '关联的工作流执行ID',
   `role` varchar(20) NOT NULL COMMENT '角色(user/assistant)',
   `content` longtext NOT NULL COMMENT '消息内容',
   `reasoning_content` longtext DEFAULT NULL COMMENT '思考过程内容',
   `tokens` int(11) DEFAULT '0' COMMENT '消耗token数',
-  `file_url` varchar(500) DEFAULT NULL COMMENT '附件文件路径/链接',
+  `file_url` varchar(2000) DEFAULT NULL COMMENT '附件文件路径/链接',
   `file_name` varchar(255) DEFAULT NULL COMMENT '附件原始名称',
   `file_content` longtext DEFAULT NULL COMMENT '附件解析内容',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
-  KEY `idx_conversation_id` (`conversation_id`)
+  KEY `idx_conversation_id` (`conversation_id`),
+  KEY `idx_message_workflow_execution` (`workflow_execution_id`),
+  UNIQUE KEY `uk_message_workflow_role` (`workflow_execution_id`, `role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI对话消息表';
 
 -- ----------------------------
@@ -168,8 +171,9 @@ CREATE TABLE `ai_workflow` (
   `workflow_code` varchar(50) NOT NULL COMMENT '工作流唯一编码',
   `workflow_name` varchar(100) NOT NULL COMMENT '工作流名称',
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
-  `nodes` text NOT NULL COMMENT '流程节点编排JSON (如: ["intent_route", "sys_user_analyst", "reporter"])',
-  `graph_json` text DEFAULT NULL COMMENT '图拓扑描述JSON（统一格式）',
+  `nodes` text DEFAULT NULL COMMENT '旧版流程节点编排JSON（已废弃）',
+  `graph_json` longtext NOT NULL COMMENT '图拓扑描述JSON（统一格式）',
+  `version` int(11) NOT NULL DEFAULT '1' COMMENT '工作流定义版本（乐观锁）',
   `status` char(1) DEFAULT '1' COMMENT '状态(1启用 0禁用)',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志(0存在 2删除)',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
@@ -184,18 +188,91 @@ CREATE TABLE `ai_workflow` (
 -- ----------------------------
 -- Records of ai_workflow
 -- ----------------------------
-INSERT INTO `ai_workflow` (workflow_code, workflow_name, description, nodes, status, create_by, create_time)
+INSERT INTO `ai_workflow` (workflow_code, workflow_name, description, nodes, graph_json, version, status, create_by, create_time)
 VALUES 
-('sys_user_audit', '系统用户安全审计流', '全自动系统用户检索、数据安全分析的一键式流程', '["intent_router", "sys_user_analyst"]', '1', 'admin', NOW());
+('sys_user_audit', '系统用户安全审计流', '全自动系统用户检索、数据安全分析的一键式流程',
+ '["intent_router", "sys_user_analyst"]',
+ '{"nodes":[{"id":"intent_router","type":"agent","ref":"intent_router","timeoutSeconds":120,"requireApproval":false},{"id":"sys_user_analyst","type":"agent","ref":"sys_user_analyst","timeoutSeconds":120,"requireApproval":false}],"edges":[{"from":"__start__","to":"intent_router"},{"from":"intent_router","to":"sys_user_analyst"},{"from":"sys_user_analyst","to":"__end__"}],"maxIterations":10}',
+ 1, '1', 'admin', NOW());
 
 -- ----------------------------
--- 8. Table structure for ai_graph_checkpoint (图工作流执行检查点表)
+-- 8. Table structure for ai_workflow_execution (工作流执行实例表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_graph_checkpoint`;
+DROP TABLE IF EXISTS `ai_workflow_approval`;
+DROP TABLE IF EXISTS `ai_workflow_execution`;
+CREATE TABLE `ai_workflow_execution` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `execution_id` varchar(64) NOT NULL COMMENT '服务端生成的执行ID',
+  `workflow_code` varchar(50) NOT NULL COMMENT '工作流编码',
+  `workflow_version` int(11) NOT NULL COMMENT '执行绑定的工作流版本',
+  `workflow_snapshot` longtext NOT NULL COMMENT '不可变图定义快照',
+  `user_id` bigint(20) NOT NULL COMMENT '执行发起用户ID',
+  `conversation_id` bigint(20) DEFAULT NULL COMMENT '关联会话ID',
+  `test_run` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否为编排编辑器试运行（1是 0否）',
+  `input_text` longtext NOT NULL COMMENT '原始用户输入',
+  `file_url` varchar(2000) DEFAULT NULL COMMENT '附件引用',
+  `status` varchar(32) NOT NULL COMMENT 'QUEUED/RUNNING/WAITING_APPROVAL/SUCCEEDED/FAILED/CANCELLED/REJECTED',
+  `current_node_id` varchar(128) DEFAULT NULL COMMENT '当前等待或执行节点实例ID',
+  `result_text` longtext DEFAULT NULL COMMENT '最终输出',
+  `error_message` varchar(2000) DEFAULT NULL COMMENT '失败原因',
+  `runner_id` varchar(64) DEFAULT NULL COMMENT '当前持有租约的应用实例ID',
+  `lease_until` datetime DEFAULT NULL COMMENT '运行租约到期时间',
+  `heartbeat_time` datetime DEFAULT NULL COMMENT '最近一次运行心跳时间',
+  `event_sequence` bigint(20) NOT NULL DEFAULT '0' COMMENT '执行级SSE单调事件序号',
+  `checkpoint_sequence` bigint(20) NOT NULL DEFAULT '0' COMMENT '执行级检查点单调序号',
+  `lock_version` int(11) NOT NULL DEFAULT '0' COMMENT '状态乐观锁版本',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `finish_time` datetime DEFAULT NULL COMMENT '终止时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_workflow_execution_id` (`execution_id`),
+  KEY `idx_workflow_execution_user_status` (`user_id`, `status`, `create_time`),
+  KEY `idx_workflow_execution_code` (`workflow_code`, `workflow_version`),
+  KEY `idx_workflow_execution_conversation` (`conversation_id`),
+  KEY `idx_workflow_execution_lease` (`status`, `lease_until`),
+  KEY `idx_workflow_execution_finish` (`status`, `finish_time`),
+  CONSTRAINT `chk_workflow_execution_status` CHECK (`status` IN
+    ('QUEUED','RUNNING','WAITING_APPROVAL','SUCCEEDED','FAILED','CANCELLED','REJECTED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI工作流执行实例';
+
+-- ----------------------------
+-- 9. Table structure for ai_workflow_approval (工作流人工审批表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_workflow_approval`;
+CREATE TABLE `ai_workflow_approval` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `approval_id` varchar(64) NOT NULL COMMENT '一次性审批ID',
+  `execution_id` varchar(64) NOT NULL COMMENT '工作流执行ID',
+  `node_instance_id` varchar(128) NOT NULL COMMENT '受保护节点实例ID',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPROVED/REJECTED/CANCELLED',
+  `decision` varchar(32) DEFAULT NULL COMMENT 'approved/rejected/cancelled',
+  `feedback` varchar(2000) DEFAULT NULL COMMENT '审批意见',
+  `reviewer_user_id` bigint(20) DEFAULT NULL COMMENT '审批用户ID',
+  `decision_time` datetime DEFAULT NULL COMMENT '决策时间',
+  `lock_version` int(11) NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_workflow_approval_id` (`approval_id`),
+  KEY `idx_workflow_approval_execution` (`execution_id`, `status`),
+  CONSTRAINT `chk_workflow_approval_status` CHECK (`status` IN
+    ('PENDING','APPROVED','REJECTED','CANCELLED')),
+  CONSTRAINT `fk_workflow_approval_execution` FOREIGN KEY (`execution_id`)
+    REFERENCES `ai_workflow_execution` (`execution_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI工作流人工审批';
+
+-- ----------------------------
+-- 10. Table structure for ai_graph_checkpoint (图工作流执行检查点表)
 -- ----------------------------
 DROP TABLE IF EXISTS `ai_graph_checkpoint`;
 CREATE TABLE `ai_graph_checkpoint` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `thread_id` varchar(128) NOT NULL COMMENT '会话线程ID',
-  `workflow_code` varchar(128) NOT NULL COMMENT '工作流编码',
+  `execution_id` varchar(64) NOT NULL COMMENT '工作流执行ID',
+  `sequence_no` bigint(20) NOT NULL COMMENT '执行内单调检查点序号',
+  `workflow_code` varchar(50) NOT NULL COMMENT '工作流编码',
+  `user_id` bigint(20) NOT NULL COMMENT '执行用户ID',
+  `conversation_id` bigint(20) DEFAULT NULL COMMENT '关联会话ID',
   `checkpoint_id` varchar(128) NOT NULL COMMENT 'checkpoint唯一ID',
   `parent_checkpoint_id` varchar(128) DEFAULT NULL COMMENT '父checkpoint ID',
   `state_json` longtext NOT NULL COMMENT '序列化的AgentState纯数据JSON',
@@ -205,13 +282,19 @@ CREATE TABLE `ai_graph_checkpoint` (
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_thread_checkpoint` (`thread_id`, `checkpoint_id`),
-  KEY `idx_thread_status` (`thread_id`, `status`),
-  KEY `idx_workflow_code` (`workflow_code`)
+  UNIQUE KEY `uk_execution_checkpoint` (`execution_id`, `checkpoint_id`),
+  UNIQUE KEY `uk_execution_sequence` (`execution_id`, `sequence_no`),
+  KEY `idx_execution_status` (`execution_id`, `status`),
+  KEY `idx_checkpoint_user` (`user_id`, `create_time`),
+  KEY `idx_checkpoint_conversation` (`conversation_id`),
+  CONSTRAINT `chk_graph_checkpoint_status` CHECK (`status` IN
+    ('running','paused','done','error','cancelled','rejected')),
+  CONSTRAINT `fk_graph_checkpoint_execution` FOREIGN KEY (`execution_id`)
+    REFERENCES `ai_workflow_execution` (`execution_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='图工作流执行检查点';
 
 -- ----------------------------
--- 9. Table structure for ai_image_task (AI图像生成任务表)
+-- 11. Table structure for ai_image_task (AI图像生成任务表)
 -- ----------------------------
 DROP TABLE IF EXISTS `ai_image_task`;
 CREATE TABLE `ai_image_task` (
@@ -237,7 +320,7 @@ CREATE TABLE `ai_image_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI图像生成任务表';
 
 -- ----------------------------
--- 10. Ruoyi 系统字典数据 (AI相关)
+-- 12. Ruoyi 系统字典数据 (AI相关)
 -- ----------------------------
 -- AI模型用途大分类字典
 INSERT INTO `sys_dict_type` (dict_name, dict_type, status, create_by, create_time) 
@@ -257,7 +340,7 @@ INSERT INTO `sys_dict_data` (dict_sort, dict_label, dict_value, dict_type, statu
 (2, 'AI图像生成', 'image_generate', 'sys_ai_tools', '0', 'admin', NOW());
 
 -- ----------------------------
--- 11. Ruoyi 系统菜单数据 (AI绘图工坊菜单)
+-- 13. Ruoyi 系统菜单数据 (AI绘图工坊菜单)
 -- ----------------------------
 INSERT INTO `sys_menu`
   (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
@@ -269,12 +352,12 @@ VALUES
 -- ----------------------------
 -- 增量升级 SQL 脚本（已有数据库环境直接执行以下部分）
 -- ----------------------------
--- 补齐 ai_conversation 表的智能体与工作流绑定字段
-ALTER TABLE `ai_conversation` ADD COLUMN `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code';
-ALTER TABLE `ai_conversation` ADD COLUMN `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code';
+-- 以下两列已包含在上面的完整建表语句中。老库升级时确认列不存在后单独执行：
+-- ALTER TABLE `ai_conversation` ADD COLUMN `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code';
+-- ALTER TABLE `ai_conversation` ADD COLUMN `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code';
 
 -- ----------------------------
--- 12. Table structure for ai_report (AI分析报告表)
+-- 14. Table structure for ai_report (AI分析报告表)
 -- ----------------------------
 DROP TABLE IF EXISTS `ai_report`;
 CREATE TABLE `ai_report` (
@@ -315,7 +398,7 @@ CREATE TABLE `ai_report` (
 -- UPDATE `ai_report` SET `refine_status` = 'NONE' WHERE `refine_status` IS NULL OR `refine_status` = '';
 
 -- ----------------------------
--- 13. Ruoyi 系统菜单数据 (AI分析报告中心菜单)
+-- 15. Ruoyi 系统菜单数据 (AI分析报告中心菜单)
 -- ----------------------------
 INSERT INTO `sys_menu`
   (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
@@ -323,3 +406,19 @@ INSERT INTO `sys_menu`
 VALUES
   (2051, '报告中心', 1061, 7, 'report', 'ai/report', NULL, 'AiReport',
    1, 0, 'C', '0', '0', 'ai:report:list', 'document', 'admin', NOW(), 'AI分析报告归档管理页面');
+
+-- ----------------------------
+-- 16. 工作流 V2.1 按钮权限
+-- ----------------------------
+INSERT INTO `sys_menu`
+  (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
+   `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+VALUES
+  (2060, '工作流查询', 9, 1, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:list', '#', 'admin', NOW(), ''),
+  (2061, '工作流详情', 9, 2, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:query', '#', 'admin', NOW(), ''),
+  (2062, '工作流新增', 9, 3, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:add', '#', 'admin', NOW(), ''),
+  (2063, '工作流修改', 9, 4, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:edit', '#', 'admin', NOW(), ''),
+  (2064, '工作流删除', 9, 5, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:remove', '#', 'admin', NOW(), ''),
+  (2065, '工作流执行', 9, 6, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:execute', '#', 'admin', NOW(), ''),
+  (2066, '工作流试运行', 9, 7, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:test', '#', 'admin', NOW(), ''),
+  (2067, '工作流审批', 9, 8, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:approve', '#', 'admin', NOW(), '');

@@ -177,7 +177,11 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
             }
             ToolExecutor originalExecutor = new DefaultToolExecutor(meta.getTargetBean(), meta.getTargetMethod());
             // 封装安全上下文传播执行器
-            ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey, emitter);
+            ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(
+                    originalExecutor, meta.getTargetMethod(), securityContext, searchKey, emitter);
+            if (wrappedExecutor == null) {
+                continue;
+            }
             result.put(meta.getSpecification(), wrappedExecutor);
             currentTokens += cost;
             count++;
@@ -208,7 +212,11 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
                     continue;
                 }
                 ToolExecutor originalExecutor = new DefaultToolExecutor(meta.getTargetBean(), meta.getTargetMethod());
-                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey, emitter);
+                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(
+                        originalExecutor, meta.getTargetMethod(), securityContext, searchKey, emitter);
+                if (wrappedExecutor == null) {
+                    continue;
+                }
                 // 使用 Slim 精简降维 Schema，擦除复杂的参数详细描述
                 ToolSpecification slimSpec = meta.getSlimSpecification() != null ? meta.getSlimSpecification() : meta.getSpecification();
                 result.put(slimSpec, wrappedExecutor);
@@ -234,7 +242,11 @@ public class ToolRetriever implements ApplicationListener<ContextRefreshedEvent>
                     continue;
                 }
                 ToolExecutor originalExecutor = new DefaultToolExecutor(meta.getTargetBean(), meta.getTargetMethod());
-                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(originalExecutor, securityContext, searchKey);
+                ToolExecutor wrappedExecutor = SecurityContextToolExecutor.wrapExecutor(
+                        originalExecutor, meta.getTargetMethod(), securityContext, searchKey);
+                if (wrappedExecutor == null) {
+                    continue;
+                }
                 result.put(meta.getSpecification(), wrappedExecutor);
                 log.info(">>> [ToolRetriever] 补充并保留多轮对话历史工具 Schema: {}#{}", meta.getToolClassName(), meta.getMethodName());
             }

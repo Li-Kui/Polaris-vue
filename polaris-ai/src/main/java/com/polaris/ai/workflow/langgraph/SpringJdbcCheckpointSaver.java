@@ -1,6 +1,7 @@
 package com.polaris.ai.workflow.langgraph;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.workflow.runtime.WorkflowExecutionStore;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.checkpoint.AbstractCheckpointSaver;
@@ -22,43 +23,21 @@ import java.util.*;
 public class SpringJdbcCheckpointSaver extends AbstractCheckpointSaver {
 
     private final JdbcTemplate jdbcTemplate;
+    private final WorkflowExecutionStore executionStore;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public SpringJdbcCheckpointSaver(JdbcTemplate jdbcTemplate) {
+    public SpringJdbcCheckpointSaver(
+            JdbcTemplate jdbcTemplate, WorkflowExecutionStore executionStore) {
         this.jdbcTemplate = jdbcTemplate;
-    }
-
-    /**
-     * 自动检测并创建检查点表（系统启动时执行，具幂等性）
-     */
-    public void setup() {
-        try {
-            String sql = "CREATE TABLE IF NOT EXISTS ai_graph_checkpoint (" +
-                    "id BIGINT PRIMARY KEY AUTO_INCREMENT," +
-                    "thread_id VARCHAR(128) NOT NULL," +
-                    "checkpoint_id VARCHAR(128) NOT NULL," +
-                    "parent_checkpoint_id VARCHAR(128)," +
-                    "state_json LONGTEXT NOT NULL," +
-                    "metadata_json TEXT," +
-                    "status VARCHAR(20) DEFAULT 'running'," +
-                    "create_time DATETIME DEFAULT CURRENT_TIMESTAMP," +
-                    "update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP," +
-                    "UNIQUE KEY uk_thread_checkpoint (thread_id, checkpoint_id)," +
-                    "INDEX idx_thread_status (thread_id, status)" +
-                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;";
-            jdbcTemplate.execute(sql);
-            log.info(">>> [LangGraph4j] SpringJdbcCheckpointSaver 检查点数据库表校验/初始化成功");
-        } catch (Exception e) {
-            log.error(">>> [LangGraph4j] 自动建表失败，请检查数据库用户 DDL 权限！", e);
-            throw new RuntimeException("数据库建表失败", e);
-        }
+        this.executionStore = executionStore;
     }
 
     @Override
     protected LinkedList<Checkpoint> loadCheckpoints(RunnableConfig config) throws Exception {
-        String threadId = config.threadId().orElseThrow(() -> new IllegalArgumentException("threadId is required"));
+        String executionId = config.threadId().orElseThrow(() -> new IllegalArgumentException("threadId is required"));
         String sql = "SELECT checkpoint_id, state_json FROM ai_graph_checkpoint " +
-                "WHERE thread_id = ? AND status != 'error' ORDER BY create_time DESC";
+                "WHERE execution_id = ? AND status NOT IN ('error','cancelled','rejected') " +
+                "ORDER BY sequence_no DESC";
         
         List<Checkpoint> list = jdbcTemplate.query(sql, (rs, rowNum) -> {
             String checkpointId = rs.getString("checkpoint_id");
@@ -84,14 +63,14 @@ public class SpringJdbcCheckpointSaver extends AbstractCheckpointSaver {
                 log.error(">>> [LangGraph4j] 反序列化 Checkpoint 失败！checkpointId: {}, stateJson: {}", checkpointId, stateJson, e);
                 throw new RuntimeException("Deserialize checkpoint failed, id: " + checkpointId, e);
             }
-        }, threadId);
+        }, executionId);
         
         return new LinkedList<>(list);
     }
 
     @Override
     protected void insertedCheckpoint(RunnableConfig config, LinkedList<Checkpoint> checkpoints, Checkpoint checkpoint) throws Exception {
-        String threadId = config.threadId().orElseThrow();
+        String executionId = config.threadId().orElseThrow();
         String checkpointId = checkpoint.getId();
         
         Map<String, Object> stateMap = new HashMap<>(checkpoint.getState());
@@ -105,16 +84,23 @@ public class SpringJdbcCheckpointSaver extends AbstractCheckpointSaver {
                 .map(Object::toString)
                 .orElse("default_workflow");
         
-        String sql = "INSERT INTO ai_graph_checkpoint (thread_id, checkpoint_id, parent_checkpoint_id, state_json, status, workflow_code) " +
-                "VALUES (?, ?, null, ?, 'running', ?)";
-        jdbcTemplate.update(sql, threadId, checkpointId, stateJson, workflowCode);
+        Long userId = metadataLong(config, "user_id");
+        Long conversationId = metadataLong(config, "conversation_id");
+        long sequence = executionStore.nextCheckpointSequence(executionId);
+
+        String sql = "INSERT INTO ai_graph_checkpoint " +
+                "(execution_id, sequence_no, checkpoint_id, parent_checkpoint_id, state_json, " +
+                "status, workflow_code, user_id, conversation_id) " +
+                "VALUES (?, ?, ?, null, ?, 'running', ?, ?, ?)";
+        jdbcTemplate.update(sql, executionId, sequence, checkpointId, stateJson,
+                workflowCode, userId, conversationId);
         
-        checkpoints.add(checkpoint);
+        checkpoints.push(checkpoint);
     }
 
     @Override
     protected void updatedCheckpoint(RunnableConfig config, LinkedList<Checkpoint> checkpoints, Checkpoint checkpoint) throws Exception {
-        String threadId = config.threadId().orElseThrow();
+        String executionId = config.threadId().orElseThrow();
         String checkpointId = checkpoint.getId();
         
         Map<String, Object> stateMap = new HashMap<>(checkpoint.getState());
@@ -125,22 +111,30 @@ public class SpringJdbcCheckpointSaver extends AbstractCheckpointSaver {
         String stateJson = objectMapper.writeValueAsString(stateMap);
         
         String sql = "UPDATE ai_graph_checkpoint SET state_json = ?, update_time = NOW() " +
-                "WHERE thread_id = ? AND checkpoint_id = ?";
-        jdbcTemplate.update(sql, stateJson, threadId, checkpointId);
+                "WHERE execution_id = ? AND checkpoint_id = ?";
+        jdbcTemplate.update(sql, stateJson, executionId, checkpointId);
         
         // 替换链表中旧的 checkpoint
         checkpoints.removeIf(cp -> cp.getId().equals(checkpointId));
-        checkpoints.add(checkpoint);
+        checkpoints.push(checkpoint);
     }
 
     @Override
     protected BaseCheckpointSaver.Tag releaseCheckpoints(RunnableConfig config, LinkedList<Checkpoint> checkpoints) throws Exception {
-        String threadId = config.threadId().orElseThrow();
-        String sql = "DELETE FROM ai_graph_checkpoint WHERE thread_id = ?";
-        jdbcTemplate.update(sql, threadId);
+        String executionId = config.threadId().orElseThrow();
+        String sql = "DELETE FROM ai_graph_checkpoint WHERE execution_id = ?";
+        jdbcTemplate.update(sql, executionId);
         
-        BaseCheckpointSaver.Tag tag = new BaseCheckpointSaver.Tag(threadId, new ArrayList<>(checkpoints));
+        BaseCheckpointSaver.Tag tag = new BaseCheckpointSaver.Tag(executionId, new ArrayList<>(checkpoints));
         checkpoints.clear();
         return tag;
+    }
+
+    private Long metadataLong(RunnableConfig config, String key) {
+        return config.metadata(key)
+                .map(value -> value instanceof Number number
+                        ? number.longValue()
+                        : Long.valueOf(value.toString()))
+                .orElse(null);
     }
 }

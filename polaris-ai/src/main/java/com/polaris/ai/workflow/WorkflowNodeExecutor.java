@@ -21,4 +21,9 @@ public interface WorkflowNodeExecutor {
      * @return 节点编码
      */
     String getNodeCode();
+
+    /** 编辑器中展示的节点名称。 */
+    default String getNodeName() {
+        return getNodeCode();
+    }
 }

@@ -7,7 +7,9 @@ import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.service.IImageGenerationService;
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.tools.base.AiToolPermission;
 import com.polaris.ai.utils.ChatContextHolder;
+import com.polaris.ai.utils.ToolSseHolder;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.extern.slf4j.Slf4j;
@@ -15,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.CancellationException;
 
 /**
  * AI 异步绘图工具，负责上下文垫图抓取与任务编排，具体厂商调用委托给绘图适配器
@@ -43,6 +46,7 @@ public class ImageGenerateTools implements AiTool {
          "你只能用『图N的颜色』这类引用方式表达。正确：『将图1汽车的车身颜色替换为图2汽车的车身颜色』；错误：『将图1的车改成橙色』。" +
          "【颜色互换/多图修改场景】当用户要求『互换两张图的颜色』或分别对多张图片进行修改时，修改每张图属于独立的绘图任务。你必须针对每一张图片分别调用一次本工具（例如第一次调用将图1改成图2的颜色，第二次调用将图2改成图1的颜色），严禁合并为同一次工具调用。" +
          "【重要约束】工具执行后会返回一个 JSON 字符串，你可以附带简短的友善说明，但必须在回复中包含工具返回的 JSON 内容。")
+    @AiToolPermission("ai:draw:list")
     public String drawImage(
             @P("必须传入，绘图/改图的具体提示词。若为改图或参考图场景，请用『图1』『图2』明确指代对话中按上传顺序排列的图片，写清楚要改什么、参考哪张图的什么特征。"
              + "【严禁臆测颜色】参考另一张图的颜色时，绝不允许写出具体颜色名（红/蓝/橙等），只能写『图N的颜色』，让绘图模型自己从原图读取真实颜色。"
@@ -50,6 +54,7 @@ public class ImageGenerateTools implements AiTool {
              + "错误示例：『将图1的车改成橙色』。纯文生图时用详细英文描述，严禁使用过于空泛简单的词") String prompt,
             @P("操作模式：'edit'=在已上传图片上编辑修改(改色/改细节/换背景)；'reference'=参考已上传图片生成新图；'generate'或不传=纯文生图(不使用任何已上传图片)") String editMode
     ) {
+        ToolSseHolder.ensureActive();
         log.info(">>> [ImageGenerateTools] 触发绘图工具, prompt: {}, editMode: {}", prompt, editMode);
 
         // 是否需要使用对话中已上传的图片作为底图/参照图
@@ -90,6 +95,7 @@ public class ImageGenerateTools implements AiTool {
         }
 
         try {
+            ToolSseHolder.ensureActive();
             AiImageTask task = imageGenerationService.submit(cmd);
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("type", "image-task");
@@ -100,6 +106,8 @@ public class ImageGenerateTools implements AiTool {
             String jsonResult = JSON.toJSONString(result);
             ChatContextHolder.addTaskJson(cmd.getConversationId(), jsonResult);
             return jsonResult;
+        } catch (CancellationException e) {
+            throw e;
         } catch (Exception e) {
             log.error(">>> [ImageGenerateTools] 发起绘图任务失败", e);
             Map<String, String> fail = new LinkedHashMap<>();

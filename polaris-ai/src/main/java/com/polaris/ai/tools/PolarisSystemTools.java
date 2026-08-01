@@ -2,6 +2,7 @@ package com.polaris.ai.tools;
 
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.tools.base.AiToolPermission;
 import com.polaris.system.domain.SysOperLog;
 import com.polaris.system.service.ISysOperLogService;
 import dev.langchain4j.agent.tool.Tool;
@@ -27,6 +28,7 @@ public class PolarisSystemTools implements AiTool {
      * 描述信息（注解内的文本）非常重要，大模型靠它来判断何时调用此工具。
      */
     @Tool("获取最近的系统操作日志，用于分析系统最近发生的非正常操作、错误或特定用户的动作")
+    @AiToolPermission("monitor:operlog:list")
     public List<String> getRecentSystemLogs() {
         SysOperLog query = new SysOperLog();
         // 查询最近的操作日志，并提取关键信息返回给大模型

@@ -23,6 +23,7 @@
     <resultMap id="MessageResult" type="com.polaris.ai.domain.AiMessage">
         <id     property="id"             column="id"/>
         <result property="conversationId" column="conversation_id"/>
+        <result property="workflowExecutionId" column="workflow_execution_id"/>
         <result property="role"           column="role"/>
         <result property="content"        column="content"/>
         <result property="reasoningContent" column="reasoning_content"/>
@@ -76,8 +77,8 @@
 
     <insert id="insertMessage" parameterType="com.polaris.ai.domain.AiMessage"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_message(conversation_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, create_time)
-        VALUES (#{conversationId}, #{role}, #{content}, #{reasoningContent}, #{tokens}, #{fileUrl}, #{fileName}, #{fileContent}, NOW())
+        INSERT INTO ai_message(conversation_id, workflow_execution_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, create_time)
+        VALUES (#{conversationId}, #{workflowExecutionId}, #{role}, #{content}, #{reasoningContent}, #{tokens}, #{fileUrl}, #{fileName}, #{fileContent}, NOW())
     </insert>
 
     <select id="selectMessagesByConversationId" resultMap="MessageResult">

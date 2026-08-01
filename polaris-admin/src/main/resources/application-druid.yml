@@ -105,7 +105,7 @@ ai:
         # 可选值: dashscope | openai | deepseek | ollama
         provider: deepseek
         # ── API Key（dashscope / openai / deepseek 需要）────────────
-        api-key: sk-388e29a91e1c4fdb8f5653c6b9cf9d1d
+        api-key: ${AI_MODEL_API_KEY:}
         # ── 模型名称 ────────────────────────────────────────────────
         # dashscope : qwen-turbo（快/便宜）| qwen-plus（均衡）| qwen-max（最强）
         # openai    : gpt-4o-mini | gpt-4o
@@ -120,3 +120,19 @@ ai:
         max-history-messages: 20
         # ── 系统提示词（支持自定义 AI 角色与行为）───────────────────
         system-prompt: 你是一个专业、友好的 AI 助手，请用中文回答问题。
+    workflow:
+        max-concurrent-per-user: 3
+        max-pending-approvals-per-user: 20
+        lease-seconds: 90
+        heartbeat-ms: 30000
+        retention-days: 30
+        approval-expire-days: 7
+        maintenance-ms: 3600000
+        executor:
+            core-pool-size: 4
+            max-pool-size: 16
+            queue-capacity: 100
+        node-executor:
+            core-pool-size: 8
+            max-pool-size: 32
+            queue-capacity: 100
