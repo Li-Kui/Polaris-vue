@@ -6,15 +6,21 @@ import com.alibaba.fastjson2.JSONObject;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.image.ImageGenRequest;
 import com.polaris.ai.image.ImageProviderAdapter;
+import com.polaris.common.config.PolarisConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 
 /**
  * DashScope（阿里通义万相）原生文生图适配器：异步创建任务 + 轮询结果
@@ -43,11 +49,13 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
         AiModelConfig config = request.getConfig();
         String prompt = request.getPrompt();
         String taskId = request.getTaskId();
-        String refImageUrl = request.getRefImageUrl();
+        String refImageUrl = toPublicOrBase64Url(request.getRefImageUrl());
 
         String apiKey = config.getApiKey();
-        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
-                ? config.getModelName() : "wanx-v1";
+        String modelName = config.getModelName();
+        if (modelName == null || modelName.isEmpty()) {
+            throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
+        }
 
         // 解析 DashScope 基础域名（兼容用户可能填入 OpenAI 兼容路径的情况）
         String baseUrl = "https://dashscope.aliyuncs.com";
@@ -67,18 +75,18 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
 
         String mode = request.getGenerationMode() != null ? request.getGenerationMode() : "text_to_image";
 
-        // 能力分流：wan2.7 系列走同步多模态接口（原生支持多图输入，如"把图1的车改成图2的颜色"）
+        // 能力分流：wan2.7 / qwen-image / qwen 系列多模态模型走同步多模态接口（原生支持多图/图文输入）
         // 仅对编辑/图生图/文生图类启用；局部重绘、扩图、超分等特有能力仍走 wanx2.1 异步路径
-        boolean isWan27 = modelName != null && modelName.startsWith("wan2.7");
+        String lowerModel = modelName.toLowerCase();
+        boolean isMultimodalModel = lowerModel.startsWith("wan2.") || lowerModel.startsWith("wan3")
+                || lowerModel.contains("qwen-image") || lowerModel.contains("qwen-vl") || lowerModel.startsWith("qwen");
         boolean multimodalCapable = "image_edit".equals(mode) || "image_to_image".equals(mode)
                 || "multi_image".equals(mode) || "background_replacement".equals(mode)
                 || "text_to_image".equals(mode);
-        if (isWan27 && multimodalCapable) {
+        if (isMultimodalModel && multimodalCapable) {
             return generateByMultimodal(request, baseUrl, apiKey, modelName, size);
         }
 
-        // 编辑类模型名：用户未显式配置 imageedit 模型时默认 wanx2.1-imageedit
-        String editModel = (modelName != null && modelName.contains("imageedit")) ? modelName : "wanx2.1-imageedit";
 
         // ======== 步骤 1: 按能力组装并创建异步任务 ========
         String createUrl;
@@ -94,7 +102,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "image_edit": {
                 // 指令改图：全图指令编辑，无需遮罩
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "description_edit");
                 input.put("base_image_url", refImageUrl);
 
@@ -114,7 +122,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "inpainting": {
                 // 局部重绘：带遮罩的指令编辑，仅重绘遮罩白色区域
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "description_edit_with_mask");
                 input.put("prompt", prompt);
                 input.put("base_image_url", refImageUrl);
@@ -124,7 +132,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "object_removal": {
                 // 去物体/去水印：使用 remove_watermark function
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "remove_watermark");
                 input.put("prompt", prompt != null && !prompt.isEmpty() ? prompt : "去除图中不需要的物体");
                 input.put("base_image_url", refImageUrl);
@@ -133,7 +141,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "outpainting": {
                 // 智能扩图：向任意方向扩展画布
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "expand");
                 input.put("prompt", prompt);
                 input.put("base_image_url", refImageUrl);
@@ -143,7 +151,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "background_replacement": {
                 // 背景替换：指令编辑（全图改背景，无需遮罩）
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "description_edit");
                 input.put("prompt", prompt);
                 input.put("base_image_url", refImageUrl);
@@ -152,7 +160,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "upscale": {
                 // 图像超分：放大并增强细节
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "super_resolution");
                 input.put("prompt", prompt != null && !prompt.isEmpty() ? prompt : "提升图像分辨率");
                 input.put("base_image_url", refImageUrl);
@@ -162,7 +170,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "restoration": {
                 // 图像修复/增强：使用全局风格化（低强度尽量保持原图）
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "stylization_all");
                 input.put("prompt", prompt != null && !prompt.isEmpty() ? prompt : "保持原貌，提升画质");
                 input.put("base_image_url", refImageUrl);
@@ -190,7 +198,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "doodle":
                 // colorization（上色）、doodle（线稿生图）暂用描述编辑兜底
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "description_edit");
                 input.put("prompt", prompt);
                 input.put("base_image_url", refImageUrl);
@@ -198,7 +206,7 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             case "image_to_image": {
                 // 以图生图：在原图基础上按 prompt 进行编辑，保留原图主体
                 createUrl = baseUrl + "/api/v1/services/aigc/image2image/image-synthesis";
-                body.put("model", editModel);
+                body.put("model", modelName);
                 input.put("function", "description_edit");
                 input.put("prompt", prompt);
                 input.put("base_image_url", refImageUrl);
@@ -307,11 +315,17 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             for (String url : sources) {
                 if (url != null && !url.trim().isEmpty()) {
                     JSONObject img = new JSONObject();
-                    img.put("image", url.trim());
+                    img.put("image", toPublicOrBase64Url(url.trim()));
                     content.add(img);
                     imageCount++;
                 }
             }
+        }
+        if (imageCount == 0 && request.getRefImageUrl() != null && !request.getRefImageUrl().trim().isEmpty()) {
+            JSONObject img = new JSONObject();
+            img.put("image", toPublicOrBase64Url(request.getRefImageUrl().trim()));
+            content.add(img);
+            imageCount++;
         }
         JSONObject text = new JSONObject();
         text.put("text", request.getPrompt());
@@ -408,8 +422,14 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
                 if (content != null && !content.isEmpty()) {
                     for (int i = 0; i < content.size(); i++) {
                         JSONObject c = content.getJSONObject(i);
-                        if ("image".equals(c.getString("type")) && c.containsKey("image")) {
-                            return c.getString("image");
+                        // 兼容两种格式：
+                        // 格式1（wan2.7）: {"type":"image","image":"https://..."}
+                        // 格式2（qwen-image 等）: {"image":"https://..."}（无 type 字段）
+                        if (c.containsKey("image")) {
+                            String imgVal = c.getString("image");
+                            if (imgVal != null && !imgVal.isEmpty()) {
+                                return imgVal;
+                            }
                         }
                     }
                 }
@@ -478,8 +498,10 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
         AiModelConfig config = request.getConfig();
         String taskId = request.getTaskId();
         String apiKey = config.getApiKey();
-        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
-                ? config.getModelName() : "wanx-v1";
+        String modelName = config.getModelName();
+        if (modelName == null || modelName.isEmpty()) {
+            throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
+        }
 
         // 中转站 baseUrl 直接使用，不做 DashScope 特有路径裁剪
         String baseUrl = config.getBaseUrl() != null ? config.getBaseUrl().trim() : "";
@@ -580,9 +602,68 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
     private void injectRelayImage(JSONObject body, ImageGenRequest request) {
         java.util.List<String> sources = request.getSourceImageUrls();
         if (sources != null && !sources.isEmpty()) {
-            body.put("image", sources.size() == 1 ? sources.get(0) : new com.alibaba.fastjson2.JSONArray(sources));
+            List<String> converted = new ArrayList<>();
+            for (String s : sources) {
+                converted.add(toPublicOrBase64Url(s));
+            }
+            body.put("image", converted.size() == 1 ? converted.get(0) : new com.alibaba.fastjson2.JSONArray(converted));
         } else if (request.getRefImageUrl() != null && !request.getRefImageUrl().isEmpty()) {
-            body.put("image", request.getRefImageUrl());
+            body.put("image", toPublicOrBase64Url(request.getRefImageUrl()));
         }
+    }
+
+    /**
+     * 转换图片 URL 为 DashScope API 可访问的有效格式：
+     * 1. 如果是相对路径 (/profile/...) 或 本地地址 (localhost/127.0.0.1/192.168./10.)：
+     *    尝试从本地磁盘读取对应文件并转换为 Base64 Data URI (data:image/png;base64,...)
+     * 2. 如果已经是公网 http:// 或 https:// URL 或 Base64 Data URI，原样返回。
+     */
+    private String toPublicOrBase64Url(String fileUrl) {
+        if (fileUrl == null || fileUrl.trim().isEmpty()) {
+            return fileUrl;
+        }
+        String trimmed = fileUrl.trim();
+        if (trimmed.startsWith("data:image/")) {
+            return trimmed;
+        }
+
+        boolean isLocalProfile = trimmed.contains("/profile/");
+        boolean isRelative = trimmed.startsWith("/") && !trimmed.startsWith("//");
+        boolean isLocalHost = trimmed.contains("localhost") || trimmed.contains("127.0.0.1") || trimmed.contains("192.168.") || trimmed.contains("10.");
+
+        if (isLocalProfile || isRelative || isLocalHost) {
+            String relativePath = trimmed;
+            if (trimmed.contains("/profile/")) {
+                relativePath = trimmed.substring(trimmed.indexOf("/profile/"));
+            }
+            if (relativePath.startsWith("/profile")) {
+                relativePath = relativePath.substring("/profile".length());
+            }
+
+            try {
+                String profileDir = PolarisConfig.getProfile();
+                File file = new File(profileDir + relativePath);
+                if (file.exists() && file.isFile()) {
+                    byte[] fileBytes = Files.readAllBytes(file.toPath());
+                    String mimeType = "image/png";
+                    String fileNameLower = file.getName().toLowerCase();
+                    if (fileNameLower.endsWith(".jpg") || fileNameLower.endsWith(".jpeg")) {
+                        mimeType = "image/jpeg";
+                    } else if (fileNameLower.endsWith(".webp")) {
+                        mimeType = "image/webp";
+                    } else if (fileNameLower.endsWith(".gif")) {
+                        mimeType = "image/gif";
+                    }
+                    String base64 = Base64.getEncoder().encodeToString(fileBytes);
+                    return "data:" + mimeType + ";base64," + base64;
+                } else {
+                    log.warn(">>> [DashScopeImageAdapter] 未找到本地图片文件: {}", file.getAbsolutePath());
+                }
+            } catch (Exception e) {
+                log.error(">>> [DashScopeImageAdapter] 读取本地图片转 Base64 失败, url={}: {}", trimmed, e.getMessage());
+            }
+        }
+
+        return trimmed;
     }
 }

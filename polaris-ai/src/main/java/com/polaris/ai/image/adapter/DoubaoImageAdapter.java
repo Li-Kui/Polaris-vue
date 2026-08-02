@@ -40,8 +40,10 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
         String taskId = request.getTaskId();
 
         String apiKey = config.getApiKey();
-        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
-                ? config.getModelName() : "doubao-seedream-5-0-260128";
+        String modelName = config.getModelName();
+        if (modelName == null || modelName.isEmpty()) {
+            throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
+        }
 
         // 解析 baseUrl（兼容用户可能填入完整路径的情况）
         String baseUrl = ARK_BASE_URL;

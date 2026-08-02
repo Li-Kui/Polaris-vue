@@ -35,8 +35,10 @@ public class OpenAiImageAdapter implements ImageProviderAdapter {
         String url = baseUrl + "/images/generations";
 
         String apiKey = config.getApiKey();
-        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
-                ? config.getModelName() : "dall-e-3";
+        String modelName = config.getModelName();
+        if (modelName == null || modelName.isEmpty()) {
+            throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
+        }
 
         com.alibaba.fastjson2.JSONObject body = new com.alibaba.fastjson2.JSONObject();
         body.put("model", modelName);
