@@ -114,6 +114,15 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "模型备注")
     private String modelDescription;
 
+    /** 连接方式：direct=直连厂商 relay=中转站 */
+    @Schema(description = "连接方式：direct=直连厂商 relay=中转站")
+    private String accessMode;
+
+    /** 是否通过中转站连接 */
+    public boolean isRelay() {
+        return "relay".equalsIgnoreCase(this.accessMode);
+    }
+
     /** 状态 (1正常 0禁用) */
     @Schema(description = "状态 (1正常 0禁用)")
     private String status;

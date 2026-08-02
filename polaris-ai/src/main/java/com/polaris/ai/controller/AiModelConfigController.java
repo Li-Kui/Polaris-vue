@@ -279,6 +279,11 @@ public class AiModelConfigController extends BaseController {
         if ("openai".equals(provider) && (req.getBaseUrl() == null || req.getBaseUrl().trim().isEmpty())) {
             return ResultData.fail("当前提供商无默认地址，请填写 API Base URL");
         }
+        // 中转站模式下必须填写 baseUrl
+        if ("relay".equalsIgnoreCase(req.getAccessMode())
+                && (req.getBaseUrl() == null || req.getBaseUrl().trim().isEmpty())) {
+            return ResultData.fail("中转站模式下必须填写 API Base URL");
+        }
 
         // 委托 Service 层执行
         try {

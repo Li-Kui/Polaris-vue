@@ -1,13 +1,9 @@
 package com.polaris.ai.image.adapter;
 
+import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.image.ImageGenRequest;
 import com.polaris.ai.image.ImageProviderAdapter;
-import com.polaris.ai.pivot.AiModelFactory;
-import dev.langchain4j.data.image.Image;
-import dev.langchain4j.model.image.ImageModel;
-import dev.langchain4j.model.output.Response;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,9 +14,6 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 public class OpenAiImageAdapter implements ImageProviderAdapter {
-
-    @Autowired
-    private AiModelFactory modelFactory;
 
     @Override
     public boolean supports(String provider) {
@@ -34,23 +27,106 @@ public class OpenAiImageAdapter implements ImageProviderAdapter {
 
     @Override
     public String generate(ImageGenRequest request) throws Exception {
+        AiModelConfig config = request.getConfig();
         String mode = request.getGenerationMode() != null ? request.getGenerationMode() : "text_to_image";
-        // OpenAI 兼容接口（langchain4j ImageModel）目前仅支持文生图；
-        // 其余编辑类能力若走到兜底适配器，明确报错而非静默降级出错图（与 DashScope 适配器保持一致）
-        if (!"text_to_image".equals(mode)) {
-            throw new UnsupportedOperationException(
-                    "当前厂商[" + (request.getConfig() != null ? request.getConfig().getProvider() : "unknown")
-                            + "]的适配器暂不支持能力[" + mode + "]，请改用支持该能力的模型（如通义万相）");
+
+        String baseUrl = config.getBaseUrl() != null ? config.getBaseUrl().trim() : "";
+        while (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        String url = baseUrl + "/images/generations";
+
+        String apiKey = config.getApiKey();
+        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
+                ? config.getModelName() : "dall-e-3";
+
+        com.alibaba.fastjson2.JSONObject body = new com.alibaba.fastjson2.JSONObject();
+        body.put("model", modelName);
+        body.put("prompt", request.getPrompt());
+        body.put("size", request.getSize() != null ? request.getSize() : "1024x1024");
+        body.put("n", request.getN() > 0 ? request.getN() : 1);
+        body.put("response_format", "url");
+
+        switch (mode) {
+            case "text_to_image":
+                // 纯文生图，无需额外字段
+                break;
+            case "image_edit":
+            case "image_to_image":
+                injectImage(body, request);
+                break;
+            case "inpainting":
+                injectImage(body, request);
+                if (request.getMaskImageUrl() != null && !request.getMaskImageUrl().isEmpty()) {
+                    body.put("mask", request.getMaskImageUrl());
+                }
+                break;
+            case "multi_image":
+                java.util.List<String> sources = request.getSourceImageUrls();
+                if (sources != null && !sources.isEmpty()) {
+                    body.put("image", sources.size() == 1 ? sources.get(0) : new com.alibaba.fastjson2.JSONArray(sources));
+                }
+                break;
+            default:
+                // 其他高级能力尝试发送，让中转站/厂商决定
+                injectImage(body, request);
+                break;
         }
-        log.info(">>> [OpenAiImageAdapter] 使用 OpenAI 兼容接口生成图像, taskId: {}", request.getTaskId());
-        ImageModel imageModel = modelFactory.getImageModel(request.getConfig());
-        if (imageModel == null) {
-            throw new RuntimeException("图像模型构建失败，请检查配置。");
+
+        log.info(">>> [OpenAiImageAdapter] taskId={}, mode={}, model={}, url={}",
+                request.getTaskId(), mode, modelName, url);
+
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(120000);
+
+        try (java.io.OutputStream os = conn.getOutputStream()) {
+            os.write(body.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
-        Response<Image> response = imageModel.generate(request.getPrompt());
-        if (response == null || response.content() == null || response.content().url() == null) {
-            throw new RuntimeException("API 接口响应异常，未能成功生成图像");
+
+        int httpCode = conn.getResponseCode();
+        String respBody = readStream(
+                httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream());
+
+        if (httpCode != 200) {
+            throw new RuntimeException("OpenAI 兼容绘图请求失败, HTTP " + httpCode + ": " + respBody);
         }
-        return response.content().url().toString();
+
+        com.alibaba.fastjson2.JSONObject resp = com.alibaba.fastjson2.JSON.parseObject(respBody);
+        com.alibaba.fastjson2.JSONArray data = resp.getJSONArray("data");
+        if (data == null || data.isEmpty()) {
+            throw new RuntimeException("未返回有效图片数据: " + respBody);
+        }
+        String imageUrl = data.getJSONObject(0).getString("url");
+        if (imageUrl == null || imageUrl.isEmpty()) {
+            throw new RuntimeException("响应中未找到图片 URL: " + respBody);
+        }
+
+        log.info(">>> [OpenAiImageAdapter] 图像生成成功, taskId={}, url={}", request.getTaskId(), imageUrl);
+        return imageUrl;
+    }
+
+    private void injectImage(com.alibaba.fastjson2.JSONObject body, ImageGenRequest request) {
+        java.util.List<String> sources = request.getSourceImageUrls();
+        if (sources != null && !sources.isEmpty()) {
+            body.put("image", sources.size() == 1 ? sources.get(0) : new com.alibaba.fastjson2.JSONArray(sources));
+        } else if (request.getRefImageUrl() != null && !request.getRefImageUrl().isEmpty()) {
+            body.put("image", request.getRefImageUrl());
+        }
+    }
+
+    private String readStream(java.io.InputStream is) throws Exception {
+        if (is == null) return "";
+        try (java.io.BufferedReader br = new java.io.BufferedReader(
+                new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8))) {
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = br.readLine()) != null) {
+                sb.append(line);
+            }
+            return sb.toString();
+        }
     }
 }

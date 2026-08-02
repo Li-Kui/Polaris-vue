@@ -47,26 +47,40 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
         String baseUrl = ARK_BASE_URL;
         if (config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()) {
             String cfgUrl = config.getBaseUrl().trim();
-            cfgUrl = cfgUrl.replace("/images/generations", "");
-            cfgUrl = cfgUrl.replace("/v3/", "");
-            cfgUrl = cfgUrl.replace("/v3", "");
-            // 去掉末尾所有斜杠后拼接标准路径
-            while (cfgUrl.endsWith("/")) {
-                cfgUrl = cfgUrl.substring(0, cfgUrl.length() - 1);
-            }
-            if (cfgUrl.endsWith("/api")) {
-                baseUrl = cfgUrl + "/v3";
-            } else if (cfgUrl.contains("/api/")) {
-                // 已经带完整路径，提取 /api/ 前的部分
-                int idx = cfgUrl.indexOf("/api/");
-                baseUrl = cfgUrl.substring(0, idx) + "/api/v3";
+
+            if (config.isRelay()) {
+                // ── 中转站：baseUrl 直接使用，不做 Ark 特有路径拼接 ──
+                while (cfgUrl.endsWith("/")) cfgUrl = cfgUrl.substring(0, cfgUrl.length() - 1);
+                baseUrl = cfgUrl;
             } else {
-                baseUrl = cfgUrl + "/api/v3";
+                // ── 直连 Ark：保持现有解析逻辑 ──
+                cfgUrl = cfgUrl.replace("/images/generations", "");
+                cfgUrl = cfgUrl.replace("/v3/", "");
+                cfgUrl = cfgUrl.replace("/v3", "");
+                while (cfgUrl.endsWith("/")) {
+                    cfgUrl = cfgUrl.substring(0, cfgUrl.length() - 1);
+                }
+                if (cfgUrl.endsWith("/api")) {
+                    baseUrl = cfgUrl + "/v3";
+                } else if (cfgUrl.contains("/api/")) {
+                    int idx = cfgUrl.indexOf("/api/");
+                    baseUrl = cfgUrl.substring(0, idx) + "/api/v3";
+                } else {
+                    baseUrl = cfgUrl + "/api/v3";
+                }
             }
         }
 
         // 尺寸映射：系统 1024x1024 → Doubao "2K"；2048x2048 → "4K"
-        String size = mapSize(request.getSize(), config.getDefaultImageSize());
+        String size;
+        if (config.isRelay()) {
+            // 中转站模式：使用标准像素格式，中转站内部处理转换
+            size = request.getSize() != null && !request.getSize().isEmpty()
+                    ? request.getSize() : "1024x1024";
+        } else {
+            // 直连模式：映射为 Ark 特有格式（2K/4K）
+            size = mapSize(request.getSize(), config.getDefaultImageSize());
+        }
 
         String createUrl = baseUrl + "/images/generations";
 

@@ -368,17 +368,35 @@
               <el-input v-model="form.name" placeholder="例如：DeepSeek官方对话、阿里云通用向量"/>
             </el-form-item>
             
+            <el-form-item label="连接方式" prop="accessMode">
+              <el-radio-group v-model="form.accessMode">
+                <el-radio label="direct">🔗 直连厂商</el-radio>
+                <el-radio label="relay">🔀 中转站</el-radio>
+              </el-radio-group>
+              <div v-if="form.accessMode === 'relay'" style="font-size: 12px; color: #909399; margin-top: 4px;">
+                💡 中转站模式下，提供商请选择中转站背后实际对接的厂商
+              </div>
+            </el-form-item>
+
             <el-form-item label="提供商" prop="provider">
               <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%;">
                 <el-option label="DeepSeek" value="deepseek"/>
                 <el-option label="阿里云通义" value="dashscope"/>
                 <el-option label="OpenAI" value="openai"/>
-                <el-option label="Ollama (本地部署)" value="ollama"/>
+                <el-option v-if="form.accessMode !== 'relay'" label="Ollama (本地部署)" value="ollama"/>
                 <el-option label="火山引擎 Ark" value="ark"/>
               </el-select>
             </el-form-item>
 
-            <el-form-item label="模型名称 (Model Identifier)" prop="modelName">
+            <el-form-item label="API Key" prop="apiKey">
+              <el-input v-model="form.apiKey" placeholder="输入 API Key（脱敏存储）" show-password/>
+            </el-form-item>
+
+            <el-form-item label="API Base URL">
+              <el-input v-model="form.baseUrl" :placeholder="form.provider === 'ollama' ? 'http://localhost:11434' : '不填则使用官方默认地址'"/>
+            </el-form-item>
+
+            <el-form-item label="模型名称" prop="modelName">
               <div style="display: flex; gap: 8px; width: 100%;">
                 <el-select
                   v-model="form.modelName"
@@ -386,7 +404,7 @@
                   allow-create
                   default-first-option
                   clearable
-                  :placeholder="remoteModelList.length > 0 ? '从列表选择或手动输入' : '例如：deepseek-chat、text-embedding-v3'"
+                  :placeholder="remoteModelList.length > 0 ? '从列表选择或手动输入' : '手动输入或点右侧获取'"
                   style="flex: 1;"
                 >
                   <el-option
@@ -409,21 +427,13 @@
               </div>
             </el-form-item>
 
-            <el-form-item label="API Key" prop="apiKey">
-              <el-input v-model="form.apiKey" placeholder="输入大模型 API Key（脱敏存储）" show-password/>
-            </el-form-item>
-
-            <el-form-item label="API Base URL">
-              <el-input v-model="form.baseUrl" placeholder="不填使用官方默认。Ollama 必须填写：http://localhost:11434"/>
-            </el-form-item>
-
             <el-form-item label="归属部门">
               <el-tree-select
                 v-model="form.deptId"
                 :data="deptOptions"
                 :props="{ value: 'id', label: 'label', children: 'children' }"
                 value-key="id"
-                placeholder="请选择所属部门（留空表示全局共享模型）"
+                placeholder="留空表示全局共享模型"
                 clearable
                 check-strictly
                 style="width: 100%;"
@@ -653,7 +663,8 @@ export default {
     canFetchModels() {
       if (!this.form.provider) return false;
       if (this.form.provider === 'ollama') return true;
-      if (this.form.provider === 'openai' && !this.form.baseUrl) return false;
+      // 中转站模式或 OpenAI 提供商必须填写 baseUrl
+      if ((this.form.accessMode === 'relay' || this.form.provider === 'openai') && !this.form.baseUrl) return false;
       return !!this.form.apiKey;
     },
     enabledToolsArray: {
@@ -846,6 +857,7 @@ export default {
       this.form = {
         id: undefined,
         name: undefined,
+        accessMode: 'direct',
         provider: 'deepseek',
         modelName: undefined,
         apiKey: undefined,
@@ -897,7 +909,8 @@ export default {
       fetchRemoteModels({
         provider: this.form.provider,
         apiKey: this.form.apiKey,
-        baseUrl: this.form.baseUrl
+        baseUrl: this.form.baseUrl,
+        accessMode: this.form.accessMode
       }).then(res => {
         if (res.code === 200 && res.data && res.data.length > 0) {
           this.remoteModelList = res.data
@@ -1751,7 +1764,7 @@ html body .pane-card {
 }
 
 .editor-left-pane {
-  width: 360px;
+  width: 420px;
   flex-shrink: 0;
 }
 

@@ -27,6 +27,7 @@
         <result property="modelFeatures"      column="model_features"/>
         <result property="defaultImageSize"   column="default_image_size"/>
         <result property="modelDescription"   column="model_description"/>
+        <result property="accessMode"        column="access_mode"/>
         <result property="status"             column="status"/>
         <result property="delFlag"            column="del_flag"/>
         <result property="createBy"           column="create_by"/>
@@ -116,6 +117,7 @@
             <if test="modelFeatures != null">model_features,</if>
             <if test="defaultImageSize != null">default_image_size,</if>
             <if test="modelDescription != null">model_description,</if>
+            <if test="accessMode != null and accessMode != ''">access_mode,</if>
             <if test="status != null and status != ''">status,</if>
             <if test="createBy != null and createBy != ''">create_by,</if>
             del_flag,
@@ -142,6 +144,7 @@
             <if test="modelFeatures != null">#{modelFeatures},</if>
             <if test="defaultImageSize != null">#{defaultImageSize},</if>
             <if test="modelDescription != null">#{modelDescription},</if>
+            <if test="accessMode != null and accessMode != ''">#{accessMode},</if>
             <if test="status != null and status != ''">#{status},</if>
             <if test="createBy != null and createBy != ''">#{createBy},</if>
             '0',
@@ -173,6 +176,7 @@
             <if test="modelFeatures != null">model_features = #{modelFeatures},</if>
             <if test="defaultImageSize != null">default_image_size = #{defaultImageSize},</if>
             <if test="modelDescription != null">model_description = #{modelDescription},</if>
+            <if test="accessMode != null and accessMode != ''">access_mode = #{accessMode},</if>
             <if test="status != null and status != ''">status = #{status},</if>
             <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
             update_time = NOW()

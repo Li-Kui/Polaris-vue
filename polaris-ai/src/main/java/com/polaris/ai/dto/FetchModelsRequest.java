@@ -20,4 +20,7 @@ public class FetchModelsRequest {
 
     @Schema(description = "自定义 API Base URL（可选）")
     private String baseUrl;
+
+    @Schema(description = "连接方式：direct=直连厂商 relay=中转站")
+    private String accessMode;
 }

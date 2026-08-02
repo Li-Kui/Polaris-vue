@@ -32,6 +32,14 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
 
     @Override
     public String generate(ImageGenRequest request) throws Exception {
+        // ── 中转站模式：使用标准 OpenAI 兼容端点 ──
+        if (request.getConfig().isRelay()) {
+            return generateViaRelay(request);
+        }
+        return generateViaNative(request);
+    }
+
+    private String generateViaNative(ImageGenRequest request) throws Exception {
         AiModelConfig config = request.getConfig();
         String prompt = request.getPrompt();
         String taskId = request.getTaskId();
@@ -460,5 +468,121 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
     private float getFloat(JSONObject obj, String key, float def) {
         if (obj == null || !obj.containsKey(key)) return def;
         return (float) obj.getDoubleValue(key);
+    }
+
+    /**
+     * 中转站模式：标准 /images/generations 端点 + 万相参数优化。
+     * 中转站内部负责调用 DashScope 原生异步 API 并同步返回结果。
+     */
+    private String generateViaRelay(ImageGenRequest request) throws Exception {
+        AiModelConfig config = request.getConfig();
+        String taskId = request.getTaskId();
+        String apiKey = config.getApiKey();
+        String modelName = config.getModelName() != null && !config.getModelName().isEmpty()
+                ? config.getModelName() : "wanx-v1";
+
+        // 中转站 baseUrl 直接使用，不做 DashScope 特有路径裁剪
+        String baseUrl = config.getBaseUrl() != null ? config.getBaseUrl().trim() : "";
+        while (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        String url = baseUrl + "/images/generations";
+
+        String size = request.getSize() != null && !request.getSize().isEmpty()
+                ? request.getSize() : "1024x1024";
+
+        JSONObject body = new JSONObject();
+        body.put("model", modelName);
+        body.put("response_format", "url");
+        body.put("n", request.getN() > 0 ? request.getN() : 1);
+        body.put("size", size);
+
+        String mode = request.getGenerationMode() != null ? request.getGenerationMode() : "text_to_image";
+
+        switch (mode) {
+            case "text_to_image":
+                body.put("prompt", request.getPrompt());
+                if (request.getRefImageUrl() != null && !request.getRefImageUrl().isEmpty()) {
+                    body.put("image", request.getRefImageUrl());
+                }
+                break;
+            case "image_edit":
+                boolean pixelExact = request.getExtra() != null
+                        && Boolean.TRUE.equals(request.getExtra().get("pixelExact"));
+                if (pixelExact) {
+                    body.put("prompt", "保持原图完全不变，仅提升画质与边缘平滑度");
+                } else {
+                    body.put("prompt", request.getPrompt());
+                }
+                injectRelayImage(body, request);
+                break;
+            case "image_to_image":
+                body.put("prompt", request.getPrompt());
+                injectRelayImage(body, request);
+                break;
+            case "inpainting":
+                body.put("prompt", request.getPrompt());
+                injectRelayImage(body, request);
+                if (request.getMaskImageUrl() != null && !request.getMaskImageUrl().isEmpty()) {
+                    body.put("mask", request.getMaskImageUrl());
+                }
+                break;
+            case "multi_image":
+                body.put("prompt", request.getPrompt());
+                java.util.List<String> sources = request.getSourceImageUrls();
+                if (sources != null && !sources.isEmpty()) {
+                    body.put("image", sources.size() == 1 ? sources.get(0) : new com.alibaba.fastjson2.JSONArray(sources));
+                }
+                break;
+            default:
+                body.put("prompt", request.getPrompt());
+                injectRelayImage(body, request);
+                break;
+        }
+
+        log.info(">>> [DashScopeImageAdapter] 中转站模式, taskId={}, mode={}, model={}, url={}",
+                taskId, mode, modelName, url);
+
+        // 发送请求
+        HttpURLConnection conn = (HttpURLConnection) new java.net.URL(url).openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(30000);
+        conn.setReadTimeout(120000);
+
+        try (java.io.OutputStream os = conn.getOutputStream()) {
+            os.write(body.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        int httpCode = conn.getResponseCode();
+        String respBody = readResponseStream(
+                httpCode >= 400 ? conn.getErrorStream() : conn.getInputStream());
+
+        if (httpCode != 200) {
+            throw new RuntimeException("中转站绘图请求失败, HTTP " + httpCode + ": " + respBody);
+        }
+
+        // 解析 OpenAI 标准响应格式
+        JSONObject resp = JSON.parseObject(respBody);
+        com.alibaba.fastjson2.JSONArray data = resp.getJSONArray("data");
+        if (data == null || data.isEmpty()) {
+            throw new RuntimeException("中转站未返回有效图片数据: " + respBody);
+        }
+        String imageUrl = data.getJSONObject(0).getString("url");
+        if (imageUrl == null || imageUrl.isEmpty()) {
+            throw new RuntimeException("中转站响应中未找到图片 URL: " + respBody);
+        }
+
+        log.info(">>> [DashScopeImageAdapter] 中转站模式图像生成成功, taskId={}, url={}", taskId, imageUrl);
+        return imageUrl;
+    }
+
+    private void injectRelayImage(JSONObject body, ImageGenRequest request) {
+        java.util.List<String> sources = request.getSourceImageUrls();
+        if (sources != null && !sources.isEmpty()) {
+            body.put("image", sources.size() == 1 ? sources.get(0) : new com.alibaba.fastjson2.JSONArray(sources));
+        } else if (request.getRefImageUrl() != null && !request.getRefImageUrl().isEmpty()) {
+            body.put("image", request.getRefImageUrl());
+        }
     }
 }

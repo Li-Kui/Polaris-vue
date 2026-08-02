@@ -71,6 +71,17 @@ public class AiModelFactory
     }
 
     /**
+     * 清除指定模型配置的所有缓存（模型配置更新/删除时调用）
+     */
+    public void evictCache(Long configId) {
+        if (configId == null) return;
+        chatCache.remove("chat_" + configId);
+        embeddingCache.remove("embed_" + configId);
+        imageCache.remove("image_" + configId);
+        log.info(">>> 已清除模型配置缓存, configId={}", configId);
+    }
+
+    /**
      * 编程式动态拼接角色关联的数据权限 SQL 过滤片段
      */
     private String buildDataScopeSql(SysUser user, String deptAlias, String deptField)
@@ -409,6 +420,26 @@ public class AiModelFactory
             double temperature = config.getTemperature() != null ? config.getTemperature() : 0.7;
             Map<String, String> customHeaders = getCustomHeaders(config);
 
+            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+            if (config.isRelay()) {
+                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建聊天模型");
+                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                        ? config.getBaseUrl().trim() : null;
+                if (relayUrl == null) {
+                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
+                }
+                return OpenAiStreamingChatModel.builder()
+                        .baseUrl(relayUrl)
+                        .apiKey(config.getApiKey())
+                        .modelName(config.getModelName())
+                        .maxTokens(maxTokens)
+                        .temperature(temperature)
+                        .timeout(timeoutOrDefault(requestTimeout, 120))
+                        .customHeaders(customHeaders)
+                        .returnThinking("1".equals(config.getEnableThinking()))
+                        .build();
+            }
+
             switch (provider) {
                 case "dashscope":
                     String dashscopeUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
@@ -506,6 +537,22 @@ public class AiModelFactory
             String provider = config.getProvider().toLowerCase();
             String apiKey = config.getApiKey();
 
+            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+            if (config.isRelay()) {
+                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建向量模型");
+                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                        ? config.getBaseUrl().trim() : null;
+                if (relayUrl == null) {
+                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
+                }
+                return OpenAiEmbeddingModel.builder()
+                        .baseUrl(relayUrl)
+                        .apiKey(apiKey)
+                        .modelName(config.getModelName())
+                        .timeout(Duration.ofSeconds(60))
+                        .build();
+            }
+
             switch (provider) {
                 case "dashscope":
                     String dashscopeEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
@@ -567,6 +614,17 @@ public class AiModelFactory
             log.info(">>> 动态构建图像生成模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
             String provider = config.getProvider().toLowerCase();
             String apiKey = config.getApiKey();
+
+            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+            if (config.isRelay()) {
+                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建图像模型");
+                return OpenAiImageModel.builder()
+                        .baseUrl(config.getBaseUrl())
+                        .apiKey(apiKey)
+                        .modelName(config.getModelName())
+                        .timeout(Duration.ofSeconds(60))
+                        .build();
+            }
 
             switch (provider) {
                 case "dashscope":
