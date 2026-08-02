@@ -379,7 +379,34 @@
             </el-form-item>
 
             <el-form-item label="模型名称 (Model Identifier)" prop="modelName">
-              <el-input v-model="form.modelName" placeholder="例如：deepseek-chat、text-embedding-v3"/>
+              <div style="display: flex; gap: 8px; width: 100%;">
+                <el-select
+                  v-model="form.modelName"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  :placeholder="remoteModelList.length > 0 ? '从列表选择或手动输入' : '例如：deepseek-chat、text-embedding-v3'"
+                  style="flex: 1;"
+                >
+                  <el-option
+                    v-for="m in remoteModelList"
+                    :key="m"
+                    :label="m"
+                    :value="m"
+                  />
+                </el-select>
+                <el-button
+                  :icon="Connection"
+                  :loading="fetchingModels"
+                  :disabled="!canFetchModels"
+                  @click="handleFetchModels"
+                  class="action-btn-primary"
+                  style="flex-shrink: 0;"
+                >
+                  {{ fetchingModels ? '获取中...' : '获取模型' }}
+                </el-button>
+              </div>
             </el-form-item>
 
             <el-form-item label="API Key" prop="apiKey">
@@ -577,6 +604,7 @@
 import {
   addModel,
   delModel,
+  fetchRemoteModels,
   getModel,
   listModel,
   setDefaultChat,
@@ -614,7 +642,20 @@ export default {
     Delete,
     DocumentCopy
   },
+  watch: {
+    // 提供商变更时清空已拉取的模型列表（不同提供商模型不同，需重新拉取）
+    'form.provider'() {
+      this.remoteModelList = [];
+    }
+  },
   computed: {
+    // 是否可以点击获取模型按钮：提供商必填 + (API Key 必填 || Ollama 无需 Key) + (OpenAI 中转必须填 URL)
+    canFetchModels() {
+      if (!this.form.provider) return false;
+      if (this.form.provider === 'ollama') return true;
+      if (this.form.provider === 'openai' && !this.form.baseUrl) return false;
+      return !!this.form.apiKey;
+    },
     enabledToolsArray: {
       get() {
         if (!this.form || !this.form.enabledTools) return [];
@@ -651,6 +692,10 @@ export default {
     return {
       // 视图模式 card: 三维星图, table: 经典表格, edit: 独立整屏配置工作台
       viewMode: 'card',
+      // 远程拉取的可用模型名称列表
+      remoteModelList: [],
+      // 模型列表拉取中 loading 状态
+      fetchingModels: false,
       // 部门树选项
       deptOptions: [],
       // 遮罩层
@@ -702,7 +747,7 @@ export default {
           { required: true, message: '提供商不能为空', trigger: 'change' }
         ],
         modelName: [
-          { required: true, message: '模型名称不能为空', trigger: 'blur' }
+          { required: true, message: '模型名称不能为空', trigger: 'change' }
         ]
       }
     }
@@ -823,6 +868,7 @@ export default {
         isDefault: '0',
         status: '1'
       }
+      this.remoteModelList = []
       this.resetForm('form')
     },
     /** 搜索按钮操作 */
@@ -844,6 +890,27 @@ export default {
       this.reset()
       this.viewMode = 'edit'
       this.title = '添加 AI 模型配置'
+    },
+    /** 拉取远程可用模型列表 */
+    handleFetchModels() {
+      this.fetchingModels = true
+      fetchRemoteModels({
+        provider: this.form.provider,
+        apiKey: this.form.apiKey,
+        baseUrl: this.form.baseUrl
+      }).then(res => {
+        if (res.code === 200 && res.data && res.data.length > 0) {
+          this.remoteModelList = res.data
+          this.$modal.msgSuccess(`成功获取 ${res.data.length} 个可用模型`)
+        } else {
+          this.$modal.msgWarning(res.msg || '未获取到模型列表，请检查 API Key 或网络连接')
+        }
+      }).catch(err => {
+        console.error(err)
+        this.$modal.msgError('获取模型列表失败：' + (err.message || '请检查 API Key 和 Base URL'))
+      }).finally(() => {
+        this.fetchingModels = false
+      })
     },
     /** 修改按钮操作 */
     handleUpdate(row) {

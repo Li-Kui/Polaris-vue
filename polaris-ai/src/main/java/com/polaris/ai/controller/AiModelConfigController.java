@@ -1,6 +1,9 @@
 package com.polaris.ai.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.domain.AiModelConfig;
+import com.polaris.ai.dto.FetchModelsRequest;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.common.annotation.ApiGroup;
@@ -13,10 +16,17 @@ import com.polaris.common.enums.BusinessType;
 import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -24,11 +34,21 @@ import java.util.List;
  *
  * @author polaris
  */
+@Slf4j
 @ApiGroup(ApiVersionConstants.VERSION_2_0_0)
 @Tag(name = "AI模型管理")
 @RestController
 @RequestMapping("/ai/model")
 public class AiModelConfigController extends BaseController {
+
+    /** 阿里通义 OpenAI 兼容地址 */
+    private static final String DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    /** DeepSeek 官方地址 */
+    private static final String DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+    /** 火山引擎 Ark 默认地址 */
+    private static final String ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3";
+    /** Ollama 默认地址 */
+    private static final String OLLAMA_DEFAULT_URL = "http://localhost:11434";
     @Autowired
     private IAiModelConfigService modelConfigService;
 
@@ -252,5 +272,172 @@ public class AiModelConfigController extends BaseController {
         int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache();
         return toAjaxResult(result);
+    }
+
+    /**
+     * 拉取远程模型列表
+     * 通过后端代理调用各提供商的 OpenAI 兼容 /models 端点，统一返回可用模型 ID 列表
+     */
+    @Operation(summary = "拉取远程可用模型列表")
+    @PostMapping("/list/remote")
+    public ResultData<List<String>> fetchModels(@RequestBody FetchModelsRequest req) {
+        if (req.getProvider() == null || req.getProvider().trim().isEmpty()) {
+            return ResultData.fail("提供商不能为空");
+        }
+        String provider = req.getProvider().trim().toLowerCase();
+
+        // Ollama 以外的提供商必须提供 API Key
+        if (!"ollama".equals(provider) && (req.getApiKey() == null || req.getApiKey().trim().isEmpty())) {
+            return ResultData.fail("API Key 不能为空");
+        }
+
+        // 非 Ollama 且未提供 Base URL 时，检查是否有已知默认地址
+        boolean hasCustomUrl = req.getBaseUrl() != null && !req.getBaseUrl().trim().isEmpty();
+        if (!hasCustomUrl && "openai".equals(provider)) {
+            return ResultData.fail("当前提供商无默认地址，请填写 API Base URL");
+        }
+
+        try {
+            String resolvedUrl = resolveBaseUrl(provider, req.getBaseUrl());
+            String apiKey = resolveApiKey(provider, req.getApiKey());
+
+            // 智能路径兼容：构建候选 endpoint 列表
+            // 用户可能输入 https://api.moonshot.cn（不含 /v1）或 https://api.deepseek.com/v1（已含 /v1）
+            List<String> candidateEndpoints = new ArrayList<>();
+            String normalizedUrl = resolvedUrl.endsWith("/") ? resolvedUrl.substring(0, resolvedUrl.length() - 1) : resolvedUrl;
+
+            if (normalizedUrl.matches(".*?/v\\d+$")) {
+                // URL 已包含版本路径如 /v1, /v2 → 直接追加 /models
+                candidateEndpoints.add(normalizedUrl + "/models");
+            } else {
+                // URL 不含版本路径 → 先试 /v1/models，再试 /models
+                candidateEndpoints.add(normalizedUrl + "/v1/models");
+                candidateEndpoints.add(normalizedUrl + "/models");
+            }
+
+            HttpClient client = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10))
+                    .build();
+
+            // 依次尝试候选 endpoint，遇到 200 立即返回
+            HttpResponse<String> lastResponse = null;
+            for (String endpoint : candidateEndpoints) {
+                log.info(">>> 尝试拉取远程模型列表, provider={}, endpoint={}", provider, endpoint);
+
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(endpoint))
+                        .header("Authorization", "Bearer " + apiKey)
+                        .header("Accept", "application/json")
+                        .timeout(Duration.ofSeconds(15))
+                        .GET()
+                        .build();
+
+                lastResponse = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (lastResponse.statusCode() == 401 || lastResponse.statusCode() == 403) {
+                    return ResultData.fail("API Key 无效或已过期，请检查后重试");
+                }
+
+                if (lastResponse.statusCode() == 200) {
+                    List<String> modelIds = parseModelIds(lastResponse.body());
+                    if (!modelIds.isEmpty()) {
+                        log.info(">>> 成功获取 {} 个模型, provider={}, endpoint={}", modelIds.size(), provider, endpoint);
+                        return ok(modelIds);
+                    }
+                }
+
+                // 404 或空列表 → 继续尝试下一个候选 endpoint
+                log.info(">>> endpoint={} 返回 status={}, 尝试下一个候选路径", endpoint, lastResponse.statusCode());
+            }
+
+            // 所有候选 endpoint 均失败
+            if (lastResponse != null && lastResponse.statusCode() != 200) {
+                return ResultData.fail("获取模型列表失败，HTTP 状态码：" + lastResponse.statusCode());
+            }
+            return ResultData.fail("未获取到可用模型，请检查 API Key 权限或服务地址");
+
+        } catch (java.net.http.HttpTimeoutException e) {
+            log.error("拉取模型列表超时, provider={}", provider, e);
+            return ResultData.fail("请求超时，请检查网络连接或 API Base URL 是否可达");
+        } catch (Exception e) {
+            log.error("拉取模型列表异常, provider={}", provider, e);
+            return ResultData.fail("获取模型列表失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 解析最终 Base URL
+     * 核心原则：用户自定义 URL 永远优先（支持中转站/代理），provider 仅用于无 URL 时的默认兜底
+     */
+    private String resolveBaseUrl(String provider, String customBaseUrl) {
+        boolean hasCustomUrl = customBaseUrl != null && !customBaseUrl.trim().isEmpty();
+
+        // ① 用户提供了自定义 URL → 直接使用（支持任意中转站）
+        if (hasCustomUrl) {
+            String url = customBaseUrl.trim();
+            // Ollama 特殊处理：如果 URL 不含 /v1，自动追加以兼容 OpenAI 协议
+            if ("ollama".equalsIgnoreCase(provider) && !url.contains("/v1")) {
+                return url + "/v1";
+            }
+            return url;
+        }
+
+        // ② 未提供自定义 URL → 使用提供商官方默认地址
+        switch (provider) {
+            case "deepseek":
+                return DEEPSEEK_BASE_URL;
+            case "dashscope":
+                return DASHSCOPE_BASE_URL;
+            case "ollama":
+                return OLLAMA_DEFAULT_URL + "/v1";
+            case "ark":
+                return ARK_BASE_URL;
+            default:
+                throw new IllegalArgumentException("当前提供商无默认地址，请填写 API Base URL");
+        }
+    }
+
+    /** Ollama 无需鉴权，使用固定占位 Key */
+    private String resolveApiKey(String provider, String apiKey) {
+        return "ollama".equals(provider) ? "ollama" : apiKey.trim();
+    }
+
+    /**
+     * 解析 OpenAI 兼容格式的模型列表 JSON
+     * 标准格式: { "data": [{ "id": "model-name", ... }, ...] }
+     */
+    private List<String> parseModelIds(String responseBody) {
+        List<String> result = new ArrayList<>();
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(responseBody);
+
+            // 标准 OpenAI 格式: { "data": [...] }
+            JsonNode dataNode = root.get("data");
+            if (dataNode != null && dataNode.isArray()) {
+                for (JsonNode model : dataNode) {
+                    JsonNode idNode = model.get("id");
+                    if (idNode != null && !idNode.asText().isEmpty()) {
+                        result.add(idNode.asText());
+                    }
+                }
+            }
+
+            // 兜底：Ollama 旧版 /api/tags 格式 { "models": [{ "name": "...", ... }] }
+            if (result.isEmpty()) {
+                JsonNode modelsNode = root.get("models");
+                if (modelsNode != null && modelsNode.isArray()) {
+                    for (JsonNode model : modelsNode) {
+                        JsonNode nameNode = model.get("name");
+                        if (nameNode != null && !nameNode.asText().isEmpty()) {
+                            result.add(nameNode.asText());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("解析模型列表 JSON 失败", e);
+        }
+        return result;
     }
 }

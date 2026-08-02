@@ -74,3 +74,13 @@ export function listAvailableModel() {
     method: 'get'
   })
 }
+
+// 根据提供商、API Key、Base URL 拉取远程可用模型列表
+export function fetchRemoteModels(data) {
+  return request({
+    url: '/ai/model/list/remote',
+    method: 'post',
+    data: data,
+    timeout: 15000
+  })
+}
