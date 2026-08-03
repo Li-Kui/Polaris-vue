@@ -308,7 +308,67 @@
               <el-form-item label="备注说明" prop="remark">
                 <el-input v-model="form.remark" placeholder="备注信息" />
               </el-form-item>
+              <el-form-item label="最大循环次数 (maxIterations)">
+                <template #label>
+                  <div style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                    <span>最大循环次数</span>
+                    <el-tag v-if="hasLoopEdges" size="small" type="success" effect="light">已检测到循环</el-tag>
+                  </div>
+                </template>
+                <el-input-number v-model="graph.maxIterations" :min="1" :max="1000" style="width:100%;" placeholder="默认 10" />
+                <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">
+                  防止分类路由节点构成的循环分支无限死循环（范围 1 - 1000）
+                </div>
+              </el-form-item>
             </el-form>
+          </el-card>
+
+          <!-- 节点工具箱卡片（支持拖拽到右侧画布） -->
+          <el-card class="pane-card palette-card" shadow="never" style="margin-top: 14px;">
+            <template #header>
+              <div class="pane-card-header">
+                <span><el-icon><grid /></el-icon> 节点工具箱</span>
+              </div>
+            </template>
+            <div class="palette-nodes-list">
+              <div
+                class="palette-node-item"
+                draggable="true"
+                @dragstart="onPaletteDragStart($event, 'agent')"
+              >
+                <div class="pnode-icon agent-icon"><el-icon><cpu /></el-icon></div>
+                <div class="pnode-info">
+                  <span class="pnode-name">智能体节点</span>
+                  <span class="pnode-desc">根据提示词与 LLM 交互</span>
+                </div>
+              </div>
+              <div
+                class="palette-node-item"
+                draggable="true"
+                @dragstart="onPaletteDragStart($event, 'classifier')"
+              >
+                <div class="pnode-icon classifier-icon"><el-icon><share /></el-icon></div>
+                <div class="pnode-info">
+                  <span class="pnode-name">意图分类节点</span>
+                  <span class="pnode-desc">条件评估与多分支路由</span>
+                </div>
+              </div>
+              <div
+                v-if="javaExecutors.length"
+                class="palette-node-item"
+                draggable="true"
+                @dragstart="onPaletteDragStart($event, 'java')"
+              >
+                <div class="pnode-icon java-icon"><el-icon><connection /></el-icon></div>
+                <div class="pnode-info">
+                  <span class="pnode-name">Java 业务节点</span>
+                  <span class="pnode-desc">执行后端已注册服务</span>
+                </div>
+              </div>
+            </div>
+            <div class="palette-tip">
+              💡 按住节点拖拽到右侧画布即可直接创建
+            </div>
           </el-card>
         </div>
 
@@ -337,7 +397,20 @@
           </div>
 
           <!-- Vue Flow 画布 -->
-          <div class="vf-canvas-wrapper">
+          <div class="vf-canvas-wrapper" @drop="onCanvasDrop" @dragover.prevent="onCanvasDragOver">
+            <!-- 空画布引导提示 -->
+            <div v-if="isEmptyCanvas" class="empty-canvas-guide">
+              <div class="empty-guide-card">
+                <el-icon class="empty-icon"><connection /></el-icon>
+                <div class="empty-title">工作流尚未添加中间节点</div>
+                <div class="empty-desc">按住左侧工具箱节点拖到此处，或从 Start 节点拉出连线即可添加</div>
+                <div class="empty-actions">
+                  <el-button type="primary" size="small" class="action-btn-primary" icon="Plus" @click="addNodeStep('agent')">添加智能体节点</el-button>
+                  <el-button size="small" class="empty-sub-btn" icon="Share" @click="addNodeStep('classifier')">添加分类节点</el-button>
+                </div>
+              </div>
+            </div>
+
             <VueFlow
               ref="vueFlowRef"
               v-model:nodes="vfNodes"
@@ -354,10 +427,13 @@
               :default-edge-options="defaultEdgeOptions"
               class="vue-flow-editor"
               @connect="onConnect"
+              @connect-start="onConnectStart"
+              @connect-end="onConnectEnd"
               @edge-double-click="onEdgeDoubleClick"
               @node-click="onCanvasNodeClick"
               @node-drag-stop="onNodeDragStop"
               @pane-click="onPaneClick"
+              @pane-context-menu="onPaneContextMenu"
             >
               <Background pattern-color="rgba(255,255,255,0.06)" :gap="20" />
             </VueFlow>
@@ -522,9 +598,58 @@
                   </template>
 
                   <div class="edge-editor-actions">
-                    <el-button size="small" type="primary" style="flex:1;" @click="confirmEdgeEdit">保存</el-button>
+                    <el-button size="small" type="primary" class="action-btn-primary" style="flex:1;" @click="confirmEdgeEdit">保存</el-button>
+                    <el-button size="small" type="warning" plain style="flex:1;" @click="promptInsertNodeOnEdge">插入节点</el-button>
                     <el-button size="small" type="danger" plain style="flex:1;" @click="deleteEdgeFromEditor">删除连线</el-button>
                   </div>
+                </div>
+              </div>
+            </transition>
+
+            <!-- 快速节点选择器（连线拖空 / 右键菜单触发） -->
+            <transition name="popover-fade">
+              <div
+                v-if="quickNodePicker.visible"
+                class="quick-node-picker"
+                :style="{ left: quickNodePicker.screenX + 'px', top: quickNodePicker.screenY + 'px' }"
+                @click.stop
+              >
+                <div class="quick-picker-title">选择节点类型</div>
+                <div class="quick-picker-item" @click="onQuickNodeSelect('agent')">
+                  <el-icon><cpu /></el-icon> 智能体节点
+                </div>
+                <div class="quick-picker-item" @click="onQuickNodeSelect('classifier')">
+                  <el-icon><share /></el-icon> 意图分类节点
+                </div>
+                <div class="quick-picker-item" v-if="javaExecutors.length" @click="onQuickNodeSelect('java')">
+                  <el-icon><connection /></el-icon> Java 业务节点
+                </div>
+              </div>
+            </transition>
+
+            <!-- 画布右键上下文菜单 -->
+            <transition name="popover-fade">
+              <div
+                v-if="contextMenu.visible"
+                class="canvas-context-menu"
+                :style="{ left: contextMenu.screenX + 'px', top: contextMenu.screenY + 'px' }"
+                @click.stop
+              >
+                <div class="ctx-menu-item" @click="onContextMenuAdd('agent')">
+                  <el-icon><cpu /></el-icon> 添加智能体节点
+                </div>
+                <div class="ctx-menu-item" @click="onContextMenuAdd('classifier')">
+                  <el-icon><share /></el-icon> 添加意图分类节点
+                </div>
+                <div class="ctx-menu-item" v-if="javaExecutors.length" @click="onContextMenuAdd('java')">
+                  <el-icon><connection /></el-icon> 添加 Java 业务节点
+                </div>
+                <div class="ctx-menu-divider"></div>
+                <div class="ctx-menu-item" @click="contextMenu.visible = false; autoLayout()">
+                  <el-icon><grid /></el-icon> 自动对齐
+                </div>
+                <div class="ctx-menu-item" @click="contextMenu.visible = false; fitView()">
+                  <el-icon><full-screen /></el-icon> 适应屏幕
                 </div>
               </div>
             </transition>
@@ -657,6 +782,25 @@ export default {
         x: 0,
         y: 0
       },
+      // 快速节点选择器（连线拖空触发）
+      quickNodePicker: {
+        visible: false,
+        screenX: 0,
+        screenY: 0,
+        flowX: 0,
+        flowY: 0,
+        sourceNodeId: null
+      },
+      // 右键上下文菜单
+      contextMenu: {
+        visible: false,
+        screenX: 0,
+        screenY: 0,
+        flowX: 0,
+        flowY: 0
+      },
+      _connectDragSourceId: null,
+      _connectHandled: false,
       // Vue Flow 默认边样式
       defaultEdgeOptions: {
         type: 'smoothstep',
@@ -679,6 +823,12 @@ export default {
     };
   },
   computed: {
+    hasLoopEdges() {
+      return this.vfEdges && this.vfEdges.some(e => e.label && e.label.includes('🔄'));
+    },
+    isEmptyCanvas() {
+      return !this.graph || !this.graph.nodes || this.graph.nodes.length === 0;
+    },
     nodeSteps: {
       get() {
         return this.graph.nodes;
@@ -1028,7 +1178,7 @@ export default {
       } while (this.graph.nodes.some(node => node.id === id));
       return id;
     },
-    addNodeStep(nodeType = 'agent') {
+    addNodeStep(nodeType = 'agent', options = {}) {
       // el-dropdown 的 command 会传字符串；直接点击（非分类场景）时兜底为 agent
       if (typeof nodeType !== 'string') nodeType = 'agent';
       const isClassifier = nodeType === 'classifier';
@@ -1050,13 +1200,12 @@ export default {
       };
       this.graph.nodes.push(newStep);
 
-      // 直接加入画布，保留用户放置新节点时的位置。
-      const centerX = 300 + Math.random() * 200;
-      const centerY = 200 + Math.random() * 100;
+      // 智能位置计算：优先使用传入位置（拖拽/右键），否则自动寻找空闲位置
+      const pos = options.position || this.findFreePosition();
       this.vfNodes.push({
         id: nodeId,
         type: 'default',
-        position: { x: centerX, y: centerY },
+        position: { x: pos.x, y: pos.y },
         data: { label: isClassifier ? '意图分类' : '未配置节点' },
         class: isClassifier ? 'vf-node-classifier'
           : isJava ? 'vf-node-java vf-node-unconfigured' : 'vf-node-agent vf-node-unconfigured',
@@ -1067,9 +1216,42 @@ export default {
         _stepUid: uid
       });
 
+      // 自动连线：如果从连线拖空触发，自动连接源节点到新节点
+      if (options.sourceNodeId) {
+        const srcId = options.sourceNodeId;
+        const srcNode = this.graph.nodes.find(n => n.id === srcId);
+        const isSrcClassifier = srcNode && srcNode.type === 'classifier';
+        let edgeCondition = null;
+        if (isSrcClassifier) {
+          if (!srcNode.branches) srcNode.branches = [];
+          const slug = 'br_' + Math.random().toString(36).substr(2, 6);
+          srcNode.branches.push({ slug, label: isClassifier ? '意图分类' : '未配置', targetId: nodeId });
+          edgeCondition = slug;
+        }
+        this.graph.edges.push({ from: srcId, to: nodeId, condition: edgeCondition });
+        const edgeColor = isSrcClassifier ? '#f59e0b' : '#818cf8';
+        this.vfEdges.push({
+          id: `vfe-${srcId}-${nodeId}-${Date.now()}`,
+          source: srcId,
+          target: nodeId,
+          data: { condition: edgeCondition },
+          type: 'smoothstep',
+          animated: !!isSrcClassifier,
+          style: { stroke: edgeColor, strokeWidth: 2 },
+          markerEnd: { type: 'arrowclosed', color: edgeColor, width: 16, height: 16 }
+        });
+      }
+
       // 立刻把属性面板切换到新节点，方便用户直接配置
       this.popover = { visible: true, node: newStep, x: 0, y: 0 };
       this.edgeEditor.visible = false;
+      this.quickNodePicker.visible = false;
+      this.contextMenu.visible = false;
+
+      // 自动平滑调整画布视口，确保新节点在当前屏幕中完整展示
+      this.$nextTick(() => {
+        this.fitView();
+      });
     },
     deleteNodeStep(index) {
       const nodeId = this.graph.nodes[index] && this.graph.nodes[index].id;
@@ -1246,6 +1428,13 @@ export default {
       edges.forEach((e, i) => g.setEdge(e.from, e.to, {}, `e${i}`));
       dagre.layout(g);
 
+      // 获取每个节点的布局层级（y 坐标），用于检测回环边
+      const nodeRanks = {};
+      allIds.forEach(id => {
+        const nd = g.node(id);
+        if (nd) nodeRanks[id] = nd.y;
+      });
+
       const newNodes = allIds.map(id => {
         const p = g.node(id);
         const isTerm = id === '__start__' || id === '__end__';
@@ -1282,20 +1471,46 @@ export default {
           const br = srcNode.branches.find(b => b.slug === cond);
           if (br) cond = br.label;
         }
+
+        // 检测回环边（目标节点的布局层级 <= 源节点 → 连回上游）
+        const isLoopEdge = nodeRanks[e.to] != null && nodeRanks[e.from] != null
+          && nodeRanks[e.to] <= nodeRanks[e.from] && e.from !== '__start__';
+
+        let edgeColor, edgeLabel, edgeAnimated, edgeStyle;
+        if (isLoopEdge) {
+          edgeColor = '#22c55e';
+          edgeLabel = cond ? `🔄 ${cond}` : '🔄 循环';
+          edgeAnimated = true;
+          edgeStyle = { stroke: '#22c55e', strokeWidth: 2, strokeDasharray: '8 4' };
+        } else if (cond) {
+          edgeColor = '#f59e0b';
+          edgeLabel = cond;
+          edgeAnimated = true;
+          edgeStyle = { stroke: '#f59e0b', strokeWidth: 2 };
+        } else {
+          edgeColor = '#818cf8';
+          edgeLabel = '';
+          edgeAnimated = false;
+          edgeStyle = { stroke: '#818cf8', strokeWidth: 2 };
+        }
+
         return {
           id: `vfe-${e.from}-${e.to}-${i}`,
           source: e.from,
           target: e.to,
           data: { condition: e.condition || null },
           type: 'smoothstep',
-          label: cond,
-          labelStyle: { fontSize: '11px', fontWeight: 700, fill: cond ? '#f59e0b' : '#a5b4fc' },
-          labelBgStyle: { fill: cond ? 'rgba(251,191,36,0.15)' : 'rgba(129,140,248,0.1)', stroke: cond ? 'rgba(251,191,36,0.4)' : 'rgba(129,140,248,0.3)' },
+          label: edgeLabel,
+          labelStyle: { fontSize: '11px', fontWeight: 700, fill: edgeColor },
+          labelBgStyle: {
+            fill: isLoopEdge ? 'rgba(34,197,94,0.15)' : (cond ? 'rgba(251,191,36,0.15)' : 'rgba(129,140,248,0.1)'),
+            stroke: isLoopEdge ? 'rgba(34,197,94,0.4)' : (cond ? 'rgba(251,191,36,0.4)' : 'rgba(129,140,248,0.3)')
+          },
           labelBgPadding: [4, 3],
           labelBgBorderRadius: 4,
-          animated: !!cond,
-          style: { stroke: cond ? '#f59e0b' : '#818cf8', strokeWidth: 2 },
-          markerEnd: { type: 'arrowclosed', color: cond ? '#f59e0b' : '#818cf8', width: 16, height: 16 }
+          animated: edgeAnimated,
+          style: edgeStyle,
+          markerEnd: { type: 'arrowclosed', color: edgeColor, width: 16, height: 16 }
         };
       });
 
@@ -1311,12 +1526,21 @@ export default {
 
     // 连线创建（拖拽 handle）
     onConnect(params) {
+      this._connectHandled = true;
       const { source, target } = params;
       if (!source || !target || source === target) return;
 
       // 防重复
       const exists = this.graph.edges.find(e => e.from === source && e.to === target);
       if (exists) return;
+
+      // 前端循环检测：非分类节点的无条件边禁止成环（与后端 GraphTopology 逻辑一致）
+      const srcNodeCheck = this.graph.nodes.find(n => n.id === source);
+      const isFromClassifier = srcNodeCheck && srcNodeCheck.type === 'classifier';
+      if (!isFromClassifier && this.detectCycleInNonConditionalEdges(source, target)) {
+        this.$message.warning('普通连线不允许形成循环。如需循环，请通过「意图分类节点」的条件分支实现。');
+        return;
+      }
 
       const sourceNode = this.graph.nodes.find(n => n.id === source);
       const isClassifier = sourceNode && sourceNode.type === 'classifier';
@@ -1431,6 +1655,8 @@ export default {
       if (!step) return;
       this.popover = { visible: true, node: step, x: 0, y: 0 };
       this.edgeEditor.visible = false;
+      this.quickNodePicker.visible = false;
+      this.contextMenu.visible = false;
       // 阻止冒泡到 pane-click
       this._nodeClickHandled = true;
       setTimeout(() => { this._nodeClickHandled = false; }, 100);
@@ -1441,13 +1667,231 @@ export default {
       if (this._nodeClickHandled) return;
       this.popover.visible = false;
       this.edgeEditor.visible = false;
+      this.quickNodePicker.visible = false;
+      this.contextMenu.visible = false;
     },
 
     closePopover() {
       this.popover.visible = false;
     },
 
-    // 浮层里修改了 ref
+    // ── 连线拖空创建节点（优化A）──────────────────────────────────
+    onConnectStart(...args) {
+      // 兼容 VueFlow 不同版本的参数格式
+      for (const arg of args) {
+        if (arg && typeof arg === 'object' && arg.nodeId) {
+          this._connectDragSourceId = arg.nodeId;
+          return;
+        }
+      }
+    },
+
+    onConnectEnd(event) {
+      const sourceNodeId = this._connectDragSourceId;
+      this._connectDragSourceId = null;
+      // 如果 onConnect 已处理（成功连线），跳过
+      if (this._connectHandled) {
+        this._connectHandled = false;
+        return;
+      }
+      if (!sourceNodeId) return;
+      // 连线拖到空白处松手 → 弹出快速节点选择器
+      try {
+        const flowPos = this.$refs.vueFlowRef.project({
+          x: event.clientX,
+          y: event.clientY
+        });
+        this.quickNodePicker = {
+          visible: true,
+          screenX: event.clientX,
+          screenY: event.clientY,
+          flowX: flowPos.x,
+          flowY: flowPos.y,
+          sourceNodeId
+        };
+        this.contextMenu.visible = false;
+        this.popover.visible = false;
+        this.edgeEditor.visible = false;
+      } catch (e) {
+        console.warn('连线拖空：无法获取画布坐标', e);
+      }
+    },
+
+    onQuickNodeSelect(nodeType) {
+      const picker = this.quickNodePicker;
+      const position = { x: picker.flowX - 55, y: picker.flowY - 16 };
+      this.quickNodePicker.visible = false;
+      this.addNodeStep(nodeType, { position, sourceNodeId: picker.sourceNodeId });
+    },
+
+    // ── 右键画布上下文菜单（优化B）──────────────────────────────────
+    onPaneContextMenu(event) {
+      event.preventDefault();
+      try {
+        const flowPos = this.$refs.vueFlowRef.project({
+          x: event.clientX,
+          y: event.clientY
+        });
+        this.contextMenu = {
+          visible: true,
+          screenX: event.clientX,
+          screenY: event.clientY,
+          flowX: flowPos.x,
+          flowY: flowPos.y
+        };
+        this.quickNodePicker.visible = false;
+        this.popover.visible = false;
+        this.edgeEditor.visible = false;
+      } catch (e) {
+        console.warn('右键菜单：无法获取画布坐标', e);
+      }
+    },
+
+    onContextMenuAdd(nodeType) {
+      const menu = this.contextMenu;
+      const position = { x: menu.flowX - 55, y: menu.flowY - 16 };
+      this.contextMenu.visible = false;
+      this.addNodeStep(nodeType, { position });
+    },
+
+    // ── 智能位置计算（优化E）──────────────────────────────────────
+    findFreePosition() {
+      let baseX = 300, baseY = 200;
+      // 如果画布上有节点，优先在 Start 节点与 End 节点之间或流程上方/下方放置
+      if (this.vfNodes && this.vfNodes.length > 0) {
+        const startNode = this.vfNodes.find(n => n.id === '__start__');
+        const endNode = this.vfNodes.find(n => n.id === '__end__');
+        if (startNode && endNode) {
+          // 在 Start 和 End 节点中间下方放置
+          baseX = (startNode.position.x + endNode.position.x) / 2;
+          baseY = Math.max(startNode.position.y, endNode.position.y) + 90;
+        } else {
+          let sumX = 0;
+          let maxY = -Infinity;
+          this.vfNodes.forEach(n => {
+            sumX += (n.position.x || 0);
+            if ((n.position.y || 0) > maxY) maxY = n.position.y;
+          });
+          baseX = sumX / this.vfNodes.length;
+          baseY = maxY + 90;
+        }
+      } else {
+        try {
+          const vf = this.$refs.vueFlowRef;
+          if (vf && vf.$el) {
+            const rect = vf.$el.getBoundingClientRect();
+            const centerScreen = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            const flowPos = vf.project(centerScreen);
+            baseX = flowPos.x - 55;
+            baseY = flowPos.y - 16;
+          }
+        } catch (e) {}
+      }
+
+      // 扫描已有节点，避免重叠
+      const occupied = this.vfNodes.map(n => n.position);
+      const THRESHOLD = 50;
+      let x = baseX, y = baseY;
+      let attempts = 0;
+      while (attempts < 20) {
+        const collision = occupied.some(p =>
+          Math.abs(p.x - x) < THRESHOLD && Math.abs(p.y - y) < THRESHOLD
+        );
+        if (!collision) break;
+        y += 70;
+        attempts++;
+      }
+      return { x, y };
+    },
+
+    // ── 前端循环检测（优化I）──────────────────────────────────────
+    detectCycleInNonConditionalEdges(fromId, toId) {
+      // 只检测无条件边子图是否会因新增 fromId→toId 而产生环
+      // 与后端 GraphTopology.java L141-L156 逻辑一致
+      const adj = {};
+      this.graph.edges.forEach(e => {
+        if (!e.condition || !e.condition.trim()) {
+          (adj[e.from] = adj[e.from] || []).push(e.to);
+        }
+      });
+      (adj[fromId] = adj[fromId] || []).push(toId);
+      // DFS 检测是否有从 toId 回到 fromId 的路径（成环）
+      const visited = new Set();
+      const stack = [toId];
+      while (stack.length) {
+        const cur = stack.pop();
+        if (cur === fromId) return true;
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        (adj[cur] || []).forEach(next => {
+          if (!visited.has(next)) stack.push(next);
+        });
+      }
+      return false;
+    },
+
+    // ── 节点工具箱拖拽支持（优化D）──────────────────────────────────
+    onPaletteDragStart(event, nodeType) {
+      event.dataTransfer.setData('application/vueflow-nodetype', nodeType);
+      event.dataTransfer.effectAllowed = 'move';
+    },
+
+    onCanvasDragOver(event) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+    },
+
+    onCanvasDrop(event) {
+      event.preventDefault();
+      const nodeType = event.dataTransfer.getData('application/vueflow-nodetype');
+      if (!nodeType) return;
+      try {
+        const flowPos = this.$refs.vueFlowRef.project({
+          x: event.clientX,
+          y: event.clientY
+        });
+        this.addNodeStep(nodeType, { position: { x: flowPos.x - 55, y: flowPos.y - 16 } });
+      } catch (e) {
+        console.warn('画布 Drop 出错:', e);
+      }
+    },
+
+    // ── 连线插入节点（优化C）────────────────────────────────────────
+    promptInsertNodeOnEdge() {
+      const edgeId = this.edgeEditor.edgeId;
+      if (!edgeId) return;
+      const vfEdge = this.vfEdges.find(e => e.id === edgeId);
+      if (!vfEdge) return;
+
+      const sourceId = vfEdge.source;
+      const targetId = vfEdge.target;
+      this.edgeEditor.visible = false;
+
+      // 弹出连线插入的节点选择菜单
+      try {
+        const srcNode = this.vfNodes.find(n => n.id === sourceId);
+        const tgtNode = this.vfNodes.find(n => n.id === targetId);
+        let midX = 300, midY = 200;
+        if (srcNode && tgtNode) {
+          midX = (srcNode.position.x + tgtNode.position.x) / 2;
+          midY = (srcNode.position.y + tgtNode.position.y) / 2;
+        }
+
+        // 使用快速节点选择器在连线中点弹出
+        this.quickNodePicker = {
+          visible: true,
+          screenX: this.edgeEditor.x,
+          screenY: this.edgeEditor.y,
+          flowX: midX,
+          flowY: midY,
+          sourceNodeId: sourceId,
+          insertBetweenTargetId: targetId,
+          originalEdgeId: edgeId
+        };
+      } catch (e) {
+        console.warn('连线插入节点定位失败:', e);
+      }
+    },
     onPopoverRefChange() {
       if (!this.popover.node) return;
       this.syncEdges();
@@ -3682,6 +4126,354 @@ export default {
       .dark &,
       .theme-dark & {
         color: #cbd5e1;
+      }
+    }
+  }
+}
+
+/* ================================================================
+   快速节点选择器 & 右键上下文菜单（优化 A/B）
+   ================================================================ */
+.quick-node-picker {
+  position: fixed;
+  z-index: 1002;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.15);
+  padding: 8px 0;
+  min-width: 180px;
+  transform: translate(-50%, 8px);
+  animation: quickPickerIn 0.18s ease;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.95);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@keyframes quickPickerIn {
+  from { opacity: 0; transform: translate(-50%, -4px) scale(0.95); }
+  to   { opacity: 1; transform: translate(-50%, 8px) scale(1); }
+}
+
+.quick-picker-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  padding: 4px 16px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  margin-bottom: 4px;
+
+  .dark &,
+  .theme-dark & {
+    color: #64748b;
+    border-bottom-color: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.quick-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.08);
+    color: #6366f1;
+  }
+
+  .el-icon {
+    font-size: 16px;
+    color: #6366f1;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+
+    &:hover {
+      background: rgba(56, 189, 248, 0.1);
+      color: #38bdf8;
+    }
+
+    .el-icon {
+      color: #38bdf8;
+    }
+  }
+}
+
+.canvas-context-menu {
+  position: fixed;
+  z-index: 1002;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(25px);
+  -webkit-backdrop-filter: blur(25px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.15);
+  padding: 6px 0;
+  min-width: 200px;
+  animation: quickPickerIn 0.15s ease;
+  transform: translate(0, 0);
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.95);
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.45);
+  }
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+
+  &:hover {
+    background: rgba(99, 102, 241, 0.08);
+    color: #6366f1;
+  }
+
+  .el-icon {
+    font-size: 15px;
+    color: #6366f1;
+  }
+
+  .dark &,
+  .theme-dark & {
+    color: #cbd5e1;
+
+    &:hover {
+      background: rgba(56, 189, 248, 0.1);
+      color: #38bdf8;
+    }
+
+    .el-icon {
+      color: #38bdf8;
+    }
+  }
+}
+
+.ctx-menu-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.06);
+  margin: 4px 12px;
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* ================================================================
+   节点工具箱 & 空画布引导样式（优化 D/F）
+   ================================================================ */
+.palette-card {
+  .palette-nodes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .palette-node-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: rgba(241, 245, 249, 0.6);
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    border-radius: 10px;
+    cursor: grab;
+    transition: all 0.2s ease;
+    user-select: none;
+
+    &:hover {
+      background: rgba(238, 242, 255, 0.9);
+      border-color: #6366f1;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.15);
+    }
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    .pnode-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+
+      &.agent-icon {
+        background: rgba(99, 102, 241, 0.12);
+        color: #6366f1;
+      }
+      &.classifier-icon {
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+      }
+      &.java-icon {
+        background: rgba(16, 185, 129, 0.12);
+        color: #10b981;
+      }
+    }
+
+    .pnode-info {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+
+      .pnode-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: #334155;
+      }
+      .pnode-desc {
+        font-size: 10px;
+        color: #94a3b8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+
+    .dark &,
+    .theme-dark & {
+      background: rgba(30, 41, 59, 0.5);
+      border-color: rgba(100, 116, 139, 0.4);
+
+      &:hover {
+        background: rgba(56, 189, 248, 0.1);
+        border-color: #38bdf8;
+      }
+
+      .pnode-info .pnode-name {
+        color: #e2e8f0;
+      }
+      .pnode-info .pnode-desc {
+        color: #64748b;
+      }
+    }
+  }
+
+  .palette-tip {
+    margin-top: 10px;
+    font-size: 11px;
+    color: #94a3b8;
+    text-align: center;
+    line-height: 1.4;
+  }
+}
+
+.empty-canvas-guide {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  pointer-events: auto;
+
+  .empty-guide-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 28px 36px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 2px dashed rgba(99, 102, 241, 0.4);
+    border-radius: 20px;
+    box-shadow: 0 16px 40px -10px rgba(99, 102, 241, 0.12);
+    text-align: center;
+
+    .empty-icon {
+      font-size: 40px;
+      color: #6366f1;
+      margin-bottom: 12px;
+    }
+
+    .empty-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }
+
+    .empty-desc {
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 20px;
+      max-width: 280px;
+      line-height: 1.5;
+    }
+
+    .empty-actions {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .empty-sub-btn {
+      background: #ffffff !important;
+      border: 1px solid #cbd5e1 !important;
+      color: #334155 !important;
+      font-weight: 600 !important;
+      border-radius: 10px !important;
+      transition: all 0.2s ease !important;
+
+      &:hover {
+        background: rgba(99, 102, 241, 0.08) !important;
+        border-color: #6366f1 !important;
+        color: #6366f1 !important;
+      }
+    }
+
+    .dark &,
+    .theme-dark & {
+      background: rgba(15, 23, 42, 0.92);
+      border-color: rgba(56, 189, 248, 0.4);
+      box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.5);
+
+      .empty-icon {
+        color: #38bdf8;
+      }
+      .empty-title {
+        color: #f8fafc;
+      }
+      .empty-desc {
+        color: #94a3b8;
+      }
+
+      .empty-sub-btn {
+        background: rgba(30, 41, 59, 0.8) !important;
+        border-color: rgba(100, 116, 139, 0.6) !important;
+        color: #cbd5e1 !important;
+
+        &:hover {
+          background: rgba(56, 189, 248, 0.15) !important;
+          border-color: #38bdf8 !important;
+          color: #38bdf8 !important;
+        }
       }
     }
   }
