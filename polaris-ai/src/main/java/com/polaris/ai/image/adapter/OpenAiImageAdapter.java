@@ -101,13 +101,27 @@ public class OpenAiImageAdapter implements ImageProviderAdapter {
         if (data == null || data.isEmpty()) {
             throw new RuntimeException("未返回有效图片数据: " + respBody);
         }
-        String imageUrl = data.getJSONObject(0).getString("url");
-        if (imageUrl == null || imageUrl.isEmpty()) {
-            throw new RuntimeException("响应中未找到图片 URL: " + respBody);
+        java.util.List<String> imageUrls = new java.util.ArrayList<>();
+        for (int i = 0; i < data.size(); i++) {
+            com.alibaba.fastjson2.JSONObject item = data.getJSONObject(i);
+            if (item != null && item.containsKey("url")) {
+                String u = item.getString("url");
+                if (u != null && !u.trim().isEmpty()) {
+                    imageUrls.add(u.trim());
+                }
+            } else if (item != null && item.containsKey("b64_json")) {
+                String b64 = item.getString("b64_json");
+                if (b64 != null && !b64.trim().isEmpty()) {
+                    imageUrls.add("data:image/png;base64," + b64.trim());
+                }
+            }
+        }
+        if (imageUrls.isEmpty()) {
+            throw new RuntimeException("响应中未找到有效图片 URL: " + respBody);
         }
 
-        log.info(">>> [OpenAiImageAdapter] 图像生成成功, taskId={}, url={}", request.getTaskId(), imageUrl);
-        return imageUrl;
+        log.info(">>> [OpenAiImageAdapter] 图像生成成功, taskId={}, count={}", request.getTaskId(), imageUrls.size());
+        return imageUrls.size() == 1 ? imageUrls.get(0) : com.alibaba.fastjson2.JSON.toJSONString(imageUrls);
     }
 
     private void injectImage(com.alibaba.fastjson2.JSONObject body, ImageGenRequest request) {

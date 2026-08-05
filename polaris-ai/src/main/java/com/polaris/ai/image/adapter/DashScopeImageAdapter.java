@@ -280,10 +280,10 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
             String taskStatus = qOutput != null ? qOutput.getString("task_status") : "UNKNOWN";
 
             if ("SUCCEEDED".equals(taskStatus)) {
-                String imageUrl = extractImageUrl(qOutput);
-                if (imageUrl != null) {
-                    log.info(">>> [DashScopeImageAdapter] 图像生成成功, taskId={}, dashTaskId={}", taskId, dashTaskId);
-                    return imageUrl;
+                List<String> imageUrls = extractImageUrls(qOutput);
+                if (!imageUrls.isEmpty()) {
+                    log.info(">>> [DashScopeImageAdapter] 图像生成成功, taskId={}, dashTaskId={}, count={}", taskId, dashTaskId, imageUrls.size());
+                    return imageUrls.size() == 1 ? imageUrls.get(0) : JSON.toJSONString(imageUrls);
                 }
                 throw new RuntimeException("DashScope 任务成功但未返回图片 URL");
             } else if ("FAILED".equals(taskStatus)) {
@@ -378,12 +378,12 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
         if (output == null) {
             throw new RuntimeException("DashScope 多模态未返回 output: " + respBody);
         }
-        String imageUrl = extractImageUrl(output);
-        if (imageUrl == null) {
+        List<String> imageUrls = extractImageUrls(output);
+        if (imageUrls.isEmpty()) {
             throw new RuntimeException("DashScope 多模态未返回图片 URL: " + respBody);
         }
-        log.info(">>> [DashScopeImageAdapter] wan2.7 生成成功, taskId={}", taskId);
-        return imageUrl;
+        log.info(">>> [DashScopeImageAdapter] wan2.7 生成成功, taskId={}, count={}", taskId, imageUrls.size());
+        return imageUrls.size() == 1 ? imageUrls.get(0) : JSON.toJSONString(imageUrls);
     }
 
     /** 读取 HTTP 响应流并返回字符串 */
@@ -400,43 +400,55 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
     }
 
     /**
-     * 兼容新旧两种响应格式提取图片 URL。
-     * 旧 endpoint（image2image/text2image）：output.results[0].url
-     * 新 2.7 endpoint（multimodal-generation）：output.choices[0].message.content[0].image
+     * 兼容新旧两种响应格式全量提取所有图片 URL。
+     * 旧 endpoint（image2image/text2image）：output.results[*].url
+     * 新 2.7 endpoint（multimodal-generation）：output.choices[*].message.content[*].image
      */
-    private String extractImageUrl(JSONObject output) {
-        // 旧格式：results[0].url
+    private List<String> extractImageUrls(JSONObject output) {
+        List<String> urls = new ArrayList<>();
+        if (output == null) return urls;
+
+        // 旧格式：results[*].url
         JSONArray results = output.getJSONArray("results");
         if (results != null && !results.isEmpty()) {
-            JSONObject first = results.getJSONObject(0);
-            if (first != null && first.containsKey("url")) {
-                return first.getString("url");
+            for (int i = 0; i < results.size(); i++) {
+                JSONObject obj = results.getJSONObject(i);
+                if (obj != null && obj.containsKey("url")) {
+                    String u = obj.getString("url");
+                    if (u != null && !u.trim().isEmpty()) {
+                        urls.add(u.trim());
+                    }
+                }
             }
         }
-        // 新 2.7 格式：choices[0].message.content[0].image
+        if (!urls.isEmpty()) {
+            return urls;
+        }
+
+        // 新 2.7 格式：choices[*].message.content[*].image
         JSONArray choices = output.getJSONArray("choices");
         if (choices != null && !choices.isEmpty()) {
-            JSONObject msg = choices.getJSONObject(0).getJSONObject("message");
-            if (msg != null) {
-                JSONArray content = msg.getJSONArray("content");
-                if (content != null && !content.isEmpty()) {
-                    for (int i = 0; i < content.size(); i++) {
-                        JSONObject c = content.getJSONObject(i);
-                        // 兼容两种格式：
-                        // 格式1（wan2.7）: {"type":"image","image":"https://..."}
-                        // 格式2（qwen-image 等）: {"image":"https://..."}（无 type 字段）
-                        if (c.containsKey("image")) {
-                            String imgVal = c.getString("image");
-                            if (imgVal != null && !imgVal.isEmpty()) {
-                                return imgVal;
+            for (int k = 0; k < choices.size(); k++) {
+                JSONObject msg = choices.getJSONObject(k).getJSONObject("message");
+                if (msg != null) {
+                    JSONArray content = msg.getJSONArray("content");
+                    if (content != null && !content.isEmpty()) {
+                        for (int i = 0; i < content.size(); i++) {
+                            JSONObject c = content.getJSONObject(i);
+                            if (c != null && c.containsKey("image")) {
+                                String imgVal = c.getString("image");
+                                if (imgVal != null && !imgVal.trim().isEmpty()) {
+                                    urls.add(imgVal.trim());
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        return null;
+        return urls;
     }
+
 
     /**
      * 为"颜色改图"指令追加结构化约束，避免 description_edit 自由发挥。

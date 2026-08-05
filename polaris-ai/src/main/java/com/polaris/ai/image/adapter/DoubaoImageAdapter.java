@@ -15,6 +15,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 火山引擎 Ark（豆包 Doubao/Seedream）绘图适配器
@@ -188,13 +190,22 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
             throw new RuntimeException("Ark 未返回有效图片数据: " + respBody);
         }
 
-        String imageUrl = data.getJSONObject(0).getString("url");
-        if (imageUrl == null || imageUrl.isEmpty()) {
-            throw new RuntimeException("Ark 响应中未找到图片 URL: " + respBody);
+        List<String> imageUrls = new ArrayList<>();
+        for (int i = 0; i < data.size(); i++) {
+            JSONObject item = data.getJSONObject(i);
+            if (item != null && item.containsKey("url")) {
+                String u = item.getString("url");
+                if (u != null && !u.trim().isEmpty()) {
+                    imageUrls.add(u.trim());
+                }
+            }
+        }
+        if (imageUrls.isEmpty()) {
+            throw new RuntimeException("Ark 响应中未找到有效的图片 URL: " + respBody);
         }
 
-        log.info(">>> [DoubaoImageAdapter] 图像生成成功, taskId={}, url={}", taskId, imageUrl);
-        return imageUrl;
+        log.info(">>> [DoubaoImageAdapter] 图像生成成功, taskId={}, count={}", taskId, imageUrls.size());
+        return imageUrls.size() == 1 ? imageUrls.get(0) : JSON.toJSONString(imageUrls);
     }
 
     private String mapSize(String systemSize, String defaultSize) {

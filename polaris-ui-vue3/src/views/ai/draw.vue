@@ -133,8 +133,15 @@
           </el-select>
         </div>
         <div class="form-block">
-          <label class="form-label">数量</label>
-          <el-input-number v-model="n" :min="1" :max="4" />
+          <label class="form-label">生成数量</label>
+          <div style="display: flex; align-items: center;">
+            <el-input-number v-model="n" :min="1" :max="10" size="default" style="width: 110px;" />
+            <el-radio-group v-model="n" size="small" style="margin-left: 8px;">
+              <el-radio-button :label="1">1张</el-radio-button>
+              <el-radio-button :label="2">2张</el-radio-button>
+              <el-radio-button :label="4">4张</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
       </div>
 
@@ -160,19 +167,31 @@
           <div v-if="task.status === '0'" class="result-loading">
             <el-icon class="is-loading"><loading></loading></el-icon> 生成中...
           </div>
-          <img
-            v-else-if="task.status === '1' && task.imageUrl"
-            :src="resolveUrl(task.imageUrl)"
-            class="result-img"
-            @click="preview(task.imageUrl)"
-          />
+          <div v-else-if="task.status === '1' && task.imageUrl" class="result-img-grid" :class="'grid-count-' + Math.min(getTaskImages(task.imageUrl).length, 4)">
+            <div
+              v-for="(imgUrl, imgIdx) in getTaskImages(task.imageUrl)"
+              :key="imgIdx"
+              class="result-img-item"
+            >
+              <img
+                :src="resolveUrl(imgUrl)"
+                class="result-img"
+                @click="previewImages(getTaskImages(task.imageUrl), imgIdx)"
+              />
+            </div>
+          </div>
           <div v-else-if="task.status === '2'" class="result-error">{{ task.errorMsg || '生成失败' }}</div>
         </div>
         <div class="result-prompt">{{ task.prompt }}</div>
       </div>
     </aside>
 
-    <el-image-viewer v-if="viewerUrl" :url-list="[viewerUrl]" @close="viewerUrl = ''"></el-image-viewer>
+    <el-image-viewer
+      v-if="viewerVisible"
+      :url-list="viewerList"
+      :initial-index="viewerIndex"
+      @close="viewerVisible = false"
+    />
   </div>
 </template>
 
@@ -181,6 +200,7 @@ import {getToken} from '@/utils/auth'
 import {generateImage, getImageTaskStatus, listImageCapabilities} from '@/api/ai/image'
 import {InfoFilled, Loading} from '@element-plus/icons-vue'
 import {ElImageViewer} from 'element-plus'
+import {parseImageUrlList} from '@/utils/aiImage'
 
 const CAPABILITIES = [
   { group: '生成类', items: [
@@ -220,7 +240,9 @@ export default {
       submitting: false,
       results: [],
       polls: {},
-      viewerUrl: '',
+      viewerVisible: false,
+      viewerList: [],
+      viewerIndex: 0,
       uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + '/common/upload',
       uploadHeaders: { Authorization: 'Bearer ' + getToken() },
       // 颜色图谱相关状态（指令改图模式专用）
@@ -495,7 +517,19 @@ export default {
       return s === '1' ? '成功' : s === '2' ? '失败' : '生成中'
     },
     preview(url) {
-      this.viewerUrl = this.resolveUrl(url)
+      if (!url) return
+      const list = this.getTaskImages(url)
+      this.previewImages(list, 0)
+    },
+    getTaskImages(raw) {
+      return parseImageUrlList(raw)
+    },
+    previewImages(urls, idx) {
+      if (!urls || !urls.length) return
+      const resolvedList = urls.map(u => this.resolveUrl(u))
+      this.viewerList = resolvedList
+      this.viewerIndex = idx || 0
+      this.viewerVisible = true
     },
 
     // ============================================================
@@ -1516,5 +1550,30 @@ export default {
     flex-shrink: 0;
     margin-top: 1px;
   }
+}
+
+.result-img-grid {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+.grid-count-1 { grid-template-columns: 1fr; }
+.grid-count-2 { grid-template-columns: 1fr 1fr; }
+.grid-count-3, .grid-count-4 { grid-template-columns: 1fr 1fr; }
+.result-img-item {
+  position: relative;
+  overflow: hidden;
+  border-radius: 6px;
+  aspect-ratio: 1;
+}
+.result-img-item .result-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+.result-img-item .result-img:hover {
+  transform: scale(1.03);
 }
 </style>

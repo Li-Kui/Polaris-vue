@@ -516,6 +516,11 @@
                 </el-form-item>
               </el-col>
               <el-col :span="12" style="margin-top: 10px;">
+                <el-form-item label="在途并发上限" prop="maxConcurrency">
+                  <el-input-number v-model="form.maxConcurrency" :min="1" :max="50" placeholder="留空则按厂商默认" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12" style="margin-top: 10px;">
                 <el-form-item label="设为默认模型" prop="isDefault">
                   <el-radio-group v-model="form.isDefault">
                     <el-radio label="1">是</el-radio>
@@ -878,6 +883,7 @@ export default {
         modelFeatures: undefined,
         modelDescription: undefined,
         isDefault: '0',
+        maxConcurrency: undefined,
         status: '1'
       }
       this.remoteModelList = []

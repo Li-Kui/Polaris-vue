@@ -28,6 +28,7 @@ CREATE TABLE `ai_model_config` (
   `default_image_size` varchar(20) DEFAULT '1024x1024' COMMENT '默认出图尺寸',
   `model_description` varchar(255) DEFAULT NULL COMMENT '模型备注',
   `access_mode` varchar(20) DEFAULT 'direct' COMMENT '连接方式(direct直连 relay中转站)',
+  `max_concurrency` int(11) DEFAULT NULL COMMENT '在途最大渲染并发数上限',
   `enabled_tools` varchar(500) DEFAULT NULL COMMENT '当前模型启用的工具集白名单',
   `dept_id` bigint(20) DEFAULT NULL COMMENT '部门ID',
   `status` char(1) DEFAULT '1' COMMENT '状态(1正常 0禁用)',

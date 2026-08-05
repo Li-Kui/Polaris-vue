@@ -87,4 +87,67 @@ public class ImageStorageHelper {
             }
         }
     }
+
+    /**
+     * 支持单图/多图（JSON数组/逗号分隔）的并行转存，单图转存失败自动降级保留原始 URL
+     *
+     * @param rawImageUrl 原始图片字段值（单图 URL 或 JSON 数组字符串）
+     * @param executor 线程池（可为空）
+     * @return 转存后的图片 URL（单图为字符串，多图为 JSON 数组字符串）
+     */
+    public String transferAllToLocal(String rawImageUrl, java.util.concurrent.Executor executor) {
+        if (rawImageUrl == null || rawImageUrl.trim().isEmpty()) {
+            return rawImageUrl;
+        }
+        String str = rawImageUrl.trim();
+        java.util.List<String> urlList = parseUrlList(str);
+        if (urlList.isEmpty()) {
+            return rawImageUrl;
+        }
+
+        if (urlList.size() == 1) {
+            String single = urlList.get(0);
+            String stored = transferToLocal(single);
+            return (stored != null && !stored.isEmpty()) ? stored : single;
+        }
+
+        // 多图并行转存 + 单图容错降级
+        java.util.List<java.util.concurrent.CompletableFuture<String>> futures = urlList.stream()
+                .map(u -> java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                    try {
+                        String local = transferToLocal(u);
+                        return (local != null && !local.isEmpty()) ? local : u;
+                    } catch (Exception e) {
+                        log.warn(">>> [ImageStorageHelper] 单图转存异常, 回退原 URL: {}", u, e);
+                        return u;
+                    }
+                }, executor != null ? executor : java.util.concurrent.ForkJoinPool.commonPool()))
+                .collect(java.util.stream.Collectors.toList());
+
+        java.util.List<String> finalUrls = futures.stream()
+                .map(java.util.concurrent.CompletableFuture::join)
+                .collect(java.util.stream.Collectors.toList());
+
+        return com.alibaba.fastjson2.JSON.toJSONString(finalUrls);
+    }
+
+    private java.util.List<String> parseUrlList(String str) {
+        if (str == null || str.isEmpty()) return java.util.Collections.emptyList();
+        if (str.startsWith("[")) {
+            try {
+                java.util.List<String> list = com.alibaba.fastjson2.JSON.parseArray(str, String.class);
+                if (list != null && !list.isEmpty()) {
+                    return list;
+                }
+            } catch (Exception ignored) {}
+        }
+        if (str.contains(",")) {
+            return java.util.Arrays.stream(str.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(java.util.stream.Collectors.toList());
+        }
+        return java.util.Collections.singletonList(str);
+    }
 }
+

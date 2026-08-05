@@ -43,4 +43,31 @@ public class ImageProviderDispatcher {
         log.info(">>> [ImageDispatcher] provider={} 选用适配器 {}", provider, chosen.getClass().getSimpleName());
         return chosen.generate(request);
     }
+
+    public List<String> generateList(ImageGenRequest request) throws Exception {
+        if (adapters == null || adapters.isEmpty()) {
+            throw new IllegalStateException("未注册任何绘图厂商适配器");
+        }
+        String provider = request.getConfig() != null && request.getConfig().getProvider() != null
+                ? request.getConfig().getProvider().toLowerCase() : "";
+
+        ImageProviderAdapter matched = null;
+        ImageProviderAdapter fallback = null;
+        for (ImageProviderAdapter adapter : adapters) {
+            if (adapter.isFallback()) {
+                fallback = adapter;
+            }
+            if (adapter.supports(provider)) {
+                matched = adapter;
+                break;
+            }
+        }
+        ImageProviderAdapter chosen = matched != null ? matched : fallback;
+        if (chosen == null) {
+            throw new IllegalStateException("未找到匹配的绘图适配器, provider=" + provider);
+        }
+        log.info(">>> [ImageDispatcher] provider={} 选用适配器 {}", provider, chosen.getClass().getSimpleName());
+        return chosen.generateList(request);
+    }
 }
+

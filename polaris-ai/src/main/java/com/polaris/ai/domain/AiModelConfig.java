@@ -118,6 +118,10 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "连接方式：direct=直连厂商 relay=中转站")
     private String accessMode;
 
+    /** 在途最大渲染并发数上限（为空或 0 时按提供商默认处理） */
+    @Schema(description = "在途最大渲染并发数上限")
+    private Integer maxConcurrency;
+
     /** 是否通过中转站连接 */
     public boolean isRelay() {
         return "relay".equalsIgnoreCase(this.accessMode);

@@ -28,6 +28,7 @@
         <result property="defaultImageSize"   column="default_image_size"/>
         <result property="modelDescription"   column="model_description"/>
         <result property="accessMode"        column="access_mode"/>
+        <result property="maxConcurrency"    column="max_concurrency"/>
         <result property="status"             column="status"/>
         <result property="delFlag"            column="del_flag"/>
         <result property="createBy"           column="create_by"/>
@@ -118,6 +119,7 @@
             <if test="defaultImageSize != null">default_image_size,</if>
             <if test="modelDescription != null">model_description,</if>
             <if test="accessMode != null and accessMode != ''">access_mode,</if>
+            <if test="maxConcurrency != null">max_concurrency,</if>
             <if test="status != null and status != ''">status,</if>
             <if test="createBy != null and createBy != ''">create_by,</if>
             del_flag,
@@ -145,6 +147,7 @@
             <if test="defaultImageSize != null">#{defaultImageSize},</if>
             <if test="modelDescription != null">#{modelDescription},</if>
             <if test="accessMode != null and accessMode != ''">#{accessMode},</if>
+            <if test="maxConcurrency != null">#{maxConcurrency},</if>
             <if test="status != null and status != ''">#{status},</if>
             <if test="createBy != null and createBy != ''">#{createBy},</if>
             '0',
@@ -177,6 +180,7 @@
             <if test="defaultImageSize != null">default_image_size = #{defaultImageSize},</if>
             <if test="modelDescription != null">model_description = #{modelDescription},</if>
             <if test="accessMode != null and accessMode != ''">access_mode = #{accessMode},</if>
+            <if test="maxConcurrency != null">max_concurrency = #{maxConcurrency},</if>
             <if test="status != null and status != ''">status = #{status},</if>
             <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
             update_time = NOW()

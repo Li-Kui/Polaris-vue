@@ -48,14 +48,20 @@ public class ImageGenerateTools implements AiTool {
          "【重要约束】工具执行后会返回一个 JSON 字符串，你可以附带简短的友善说明，但必须在回复中包含工具返回的 JSON 内容。")
     @AiToolPermission("ai:draw:list")
     public String drawImage(
-            @P("必须传入，绘图/改图的具体提示词。若为改图或参考图场景，请用『图1』『图2』明确指代对话中按上传顺序排列的图片，写清楚要改什么、参考哪张图的什么特征。"
-             + "【严禁臆测颜色】参考另一张图的颜色时，绝不允许写出具体颜色名（红/蓝/橙等），只能写『图N的颜色』，让绘图模型自己从原图读取真实颜色。"
-             + "正确示例：『将图1中汽车的车身颜色替换为图2中汽车的车身颜色，保持图1的车型、角度、背景等其它部分完全不变』；"
-             + "错误示例：『将图1的车改成橙色』。纯文生图时用详细英文描述，严禁使用过于空泛简单的词") String prompt,
-            @P("操作模式：'edit'=在已上传图片上编辑修改(改色/改细节/换背景)；'reference'=参考已上传图片生成新图；'generate'或不传=纯文生图(不使用任何已上传图片)") String editMode
+            @P("必须传入，绘图/改图的具体提示词。必须是纯粹独立的单图画面视觉描述（如'一只活泼的橘色小猫...'）。"
+             + "【多图纯净铁律】绝对严禁包含'生成N张'、'第1张/第2张'、'1. 2. 3.'等数量词或列表编号！数量请用 count 或 prompts 传。在 prompt 里写数量会导致绘图模型画成多宫格拼图！"
+             + "【严禁臆测颜色】参考另一张图的颜色时，绝不允许写出具体颜色名（红/蓝/橙等），只能写『图N的颜色』，让绘图模型自己从原图读取真实颜色。") String prompt,
+            @P("操作模式：'edit'=在已上传图片上编辑修改(改色/改细节/换背景)；'reference'=参考已上传图片生成新图；'generate'或不传=纯文生图(不使用任何已上传图片)") String editMode,
+            @P("生成图片的张数，正整数，默认 1。当用户要求生成多张图时传入对应的数值") Integer count,
+            @P("【推荐多图使用】针对多图生成的独立详细描述列表（例如 ['一只橘色小猫...', '一只灰色小猫...']）。每一条描述必须是纯粹独立的单图视觉描述，绝对严禁包含'第1张'、'1. 2.'等编号！若提供此列表，系统将为每条描述单独并发渲染，效果最佳。") List<String> prompts
     ) {
         ToolSseHolder.ensureActive();
-        log.info(">>> [ImageGenerateTools] 触发绘图工具, prompt: {}, editMode: {}", prompt, editMode);
+        int realCount = (count != null && count > 0) ? count : 1;
+        if (prompts != null && !prompts.isEmpty()) {
+            realCount = prompts.size();
+        }
+        log.info(">>> [ImageGenerateTools] 触发绘图工具, prompt: {}, editMode: {}, count: {}, promptsSize: {}", 
+                prompt, editMode, realCount, prompts != null ? prompts.size() : 0);
 
         // 是否需要使用对话中已上传的图片作为底图/参照图
         boolean useUploaded = "edit".equalsIgnoreCase(editMode) || "reference".equalsIgnoreCase(editMode);
@@ -71,7 +77,21 @@ public class ImageGenerateTools implements AiTool {
 
         // 装配命令
         ImageGenCommand cmd = new ImageGenCommand();
-        cmd.setPrompt(prompt);
+        cmd.setPrompt(cleanPrompt(prompt));
+        if (prompts != null && !prompts.isEmpty()) {
+            List<String> cleanedList = new ArrayList<>();
+            for (String p : prompts) {
+                String c = cleanPrompt(p);
+                if (c != null && !c.isEmpty()) {
+                    cleanedList.add(c);
+                }
+            }
+            if (!cleanedList.isEmpty()) {
+                cmd.setPrompts(cleanedList);
+                realCount = cleanedList.size();
+            }
+        }
+        cmd.setN(realCount);
         cmd.setConversationId(ChatContextHolder.getConversationId());
 
         if (!imageUrls.isEmpty()) {
@@ -88,8 +108,8 @@ public class ImageGenerateTools implements AiTool {
             extra.put("baseImageIdx", 0);
             extra.put("refImageIdx", imageUrls.size() > 1 ? 1 : -1);
             cmd.setExtra(extra);
-            log.info(">>> [ImageGenerateTools] 参考图共 {} 张, editMode={}, mode={}",
-                    imageUrls.size(), editMode, cmd.getGenerationMode());
+            log.info(">>> [ImageGenerateTools] 参考图共 {} 张, editMode={}, mode={}, targetCount={}",
+                    imageUrls.size(), editMode, cmd.getGenerationMode(), realCount);
         } else {
             cmd.setGenerationMode("text_to_image");
         }
@@ -102,7 +122,8 @@ public class ImageGenerateTools implements AiTool {
             result.put("taskId", task.getTaskId());
             result.put("prompt", prompt);
             result.put("status", "processing");
-            result.put("imageCount", imageUrls.size());
+            result.put("targetCount", realCount);
+            result.put("sourceCount", imageUrls.size());
             String jsonResult = JSON.toJSONString(result);
             ChatContextHolder.addTaskJson(cmd.getConversationId(), jsonResult);
             return jsonResult;
@@ -211,15 +232,25 @@ public class ImageGenerateTools implements AiTool {
             String trimmedUrl = url.trim();
             if (trimmedUrl.isEmpty()) continue;
             String lower = trimmedUrl.toLowerCase();
-            if (lower.endsWith(".pdf") || lower.endsWith(".doc") || lower.endsWith(".docx")
-                    || lower.endsWith(".xls") || lower.endsWith(".xlsx") || lower.endsWith(".ppt")
-                    || lower.endsWith(".pptx") || lower.endsWith(".txt") || lower.endsWith(".md")
-                    || lower.endsWith(".zip") || lower.endsWith(".rar") || lower.endsWith(".tar")
-                    || lower.endsWith(".gz")) {
-                continue;
+            if (trimmedUrl.startsWith("data:image/") || lower.endsWith(".png") || lower.endsWith(".jpg")
+                    || lower.endsWith(".jpeg") || lower.endsWith(".webp") || lower.endsWith(".gif")
+                    || lower.contains("/profile/")) {
+                imageUrls.add(trimmedUrl);
             }
-            imageUrls.add(trimmedUrl);
         }
         return imageUrls;
+    }
+
+    /**
+     * 清洗提示词：剔除容易诱发绘图模型渲染成多宫格拼图的数量词与标号（如"生成3张..."、"1. xx 2. xx"）
+     */
+    private String cleanPrompt(String p) {
+        if (p == null || p.trim().isEmpty()) return p;
+        String s = p.trim();
+        // 剔除开头的"生成N张..."或"本次生成N张图片..."
+        s = s.replaceAll("^(本次|一共|共|自动|请|帮我)?(生成|绘制|画)\\d+张[^：:\\n]*[：:\\n\\s]*", "");
+        // 剔除前缀如 "1. " 或 "图1: "
+        s = s.replaceAll("^(第\\d+张|图\\d+|\\d+[\\.\\、\\:\\s])\\s*", "");
+        return s.trim();
     }
 }

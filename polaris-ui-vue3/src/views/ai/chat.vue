@@ -414,28 +414,39 @@
                         </div>
                       </div>
                       
-                      <!-- 成功大图卡片 -->
+                      <!-- 成功多图/单图卡片 -->
                       <div v-else-if="task.status === '1'" class="image-success-card">
-                        <el-image 
-                          :src="resolveImageUrl(task.imageUrl)" 
-                          :preview-src-list="[resolveImageUrl(task.imageUrl)]" 
-                          fit="contain" 
-                          class="generated-img-view"
-                          preview-teleported
-                        >
-                          <template #placeholder>
-                            <div class="image-slot-loading">
-                              <el-icon class="is-loading"><loading /></el-icon>加载图片中...
+                        <div class="chat-img-grid" :class="'chat-grid-' + Math.min(getChatTaskImages(task.imageUrl).length, 4)">
+                          <div
+                            v-for="(subUrl, imgIdx) in getChatTaskImages(task.imageUrl)"
+                            :key="imgIdx"
+                            class="chat-img-grid-item"
+                          >
+                            <el-image 
+                              :src="resolveImageUrl(subUrl)" 
+                              :preview-src-list="getResolvedChatImages(task.imageUrl)" 
+                              :initial-index="imgIdx"
+                              fit="cover" 
+                              class="generated-img-view"
+                              preview-teleported
+                            >
+                              <template #placeholder>
+                                <div class="image-slot-loading">
+                                  <el-icon class="is-loading"><loading /></el-icon>加载中...
+                                </div>
+                              </template>
+                            </el-image>
+                            <div class="img-hover-actions">
+                              <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(subUrl))" />
                             </div>
-                          </template>
-                        </el-image>
-                        <!-- 耗时 Badge -->
-                        <div class="elapsed-badge" v-if="task.elapsedTime">
-                          <el-icon><clock /></el-icon>
-                          <span>生成耗时: {{ task.elapsedTime }}s</span>
+                          </div>
                         </div>
-                        <div class="img-hover-actions">
-                          <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(task.imageUrl))" />
+                        <!-- 底部栏：耗时与重新生成按钮 -->
+                        <div class="chat-card-footer">
+                          <div class="elapsed-badge" v-if="task.elapsedTime">
+                            <el-icon><clock /></el-icon>
+                            <span>生成耗时: {{ task.elapsedTime }}s</span>
+                          </div>
                           <el-button round size="small" icon="Refresh" title="重新生成" class="btn-img-regenerate" @click="handleRegenerate(task, msg, index)">重新生成</el-button>
                         </div>
                       </div>
@@ -1101,6 +1112,7 @@ import {getRefineStatus, refineReportById, saveReport} from '@/api/ai/report'
 import PolarisReportEngine from './report/PolarisReportEngine.vue'
 import request from '@/utils/request'
 import {sanitizeUrl} from '@/utils/safeUrl'
+import {parseImageUrlList} from '@/utils/aiImage'
 
 export default {
   name: 'AiChat',
@@ -1310,6 +1322,13 @@ export default {
       }
       const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
       return baseUrl + url
+    },
+    getChatTaskImages(raw) {
+      return parseImageUrlList(raw)
+    },
+    getResolvedChatImages(raw) {
+      const list = parseImageUrlList(raw)
+      return list.map(u => this.resolveImageUrl(u))
     },
     parseTaskInfos(content) {
       if (!content) return [];
@@ -3580,10 +3599,39 @@ export default {
 .image-success-card {
   position: relative;
   width: 320px;
-  height: 320px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-img-grid {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+.chat-grid-1 { grid-template-columns: 1fr; aspect-ratio: 1; }
+.chat-grid-2 { grid-template-columns: 1fr 1fr; height: 160px; }
+.chat-grid-3, .chat-grid-4 { grid-template-columns: 1fr 1fr; height: 320px; }
+
+.chat-img-grid-item {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.chat-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+:global(.theme-dark) .chat-card-footer {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .generated-img-view {
@@ -3591,26 +3639,30 @@ export default {
   height: 100%;
   transition: transform 0.3s ease;
   cursor: zoom-in;
-  object-fit: contain;
+  object-fit: cover;
 }
 
-.image-success-card:hover .generated-img-view {
-  transform: scale(1.02);
+.chat-img-grid-item:hover .generated-img-view {
+  transform: scale(1.03);
 }
 
 .img-hover-actions {
   position: absolute;
   bottom: -40px;
   left: 0; right: 0;
-  height: 40px;
+  height: 36px;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 12px;
-  gap: 8px;
+  padding: 0 8px;
+  gap: 6px;
   transition: bottom 0.2s ease;
   z-index: 2;
+}
+
+.chat-img-grid-item:hover .img-hover-actions {
+  bottom: 0;
 }
 
 /* 蒙层内的下载/刷新按钮：固定使用深色玻璃质感配色，不随亮暗主题切换，

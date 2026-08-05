@@ -32,8 +32,13 @@ public class ImageGenCommand {
     /** 透传前端自定义参数（如 pixelExact=true 表示前端已做像素级精确替换，后端仅做低强度精修） */
     private java.util.Map<String, Object> extra;
 
+    /** 针对多图场景的独立提示词列表（若提供，则为每张图使用对应的独立描述并发渲染，避免拼图） */
+    private List<String> prompts;
+
     public String getPrompt() { return prompt; }
     public void setPrompt(String prompt) { this.prompt = prompt; }
+    public List<String> getPrompts() { return prompts; }
+    public void setPrompts(List<String> prompts) { this.prompts = prompts; }
     public String getNegativePrompt() { return negativePrompt; }
     public void setNegativePrompt(String negativePrompt) { this.negativePrompt = negativePrompt; }
     public String getGenerationMode() { return generationMode; }
