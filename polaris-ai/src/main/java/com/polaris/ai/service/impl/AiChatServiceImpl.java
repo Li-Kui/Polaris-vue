@@ -11,6 +11,7 @@ import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
+import com.polaris.ai.service.IAiDocumentRecognitionService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -93,6 +94,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Autowired
     private SsePushHelper sseHelper;
+
+    @Autowired
+    private IAiDocumentRecognitionService documentRecognitionService;
 
     /** 会话级防重互锁容器（保证单个会话同时只有一个流式推送在进行） */
     private static final java.util.concurrent.ConcurrentHashMap<Long, Boolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
@@ -319,8 +323,23 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 }
             }
 
+            // 3.5 智能识别与动态挂载关联文档
+            com.polaris.ai.dto.DocumentRecognitionResult recResult = documentRecognitionService.recognizeAndMount(userInput, userId, null, conv.getKnowledgeBaseId());
+            if (recResult != null && recResult.isHasRecognizedDocs()) {
+                try {
+                    String jsonDocs = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(recResult.getRecognizedDocs());
+                    sseHelper.sendSse(emitter, "doc_recognized", jsonDocs);
+                    log.info(">>> [AiChatService] 自动识别挂载文档推送 SSE: {}", jsonDocs);
+                } catch (Exception e) {
+                    log.error(">>> [AiChatService] 推送 doc_recognized SSE 事件异常", e);
+                }
+            }
+
             // 构建完整的消息上下文（SystemMessage + 历史消息）
             List<ChatMessage> messages = buildMessages(conversationId, userId);
+            if (recResult != null && recResult.getFormattedContextPrompt() != null && !recResult.getFormattedContextPrompt().isEmpty()) {
+                messages.add(dev.langchain4j.data.message.SystemMessage.from(recResult.getFormattedContextPrompt()));
+            }
             if (selectedAgent != null && selectedAgent.getSystemPrompt() != null && !selectedAgent.getSystemPrompt().trim().isEmpty()) {
                 messages.add(0, dev.langchain4j.data.message.SystemMessage.from(selectedAgent.getSystemPrompt()));
             }

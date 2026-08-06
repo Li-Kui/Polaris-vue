@@ -536,6 +536,30 @@
                       </a>
                     </div>
                   </div>
+
+                  <!-- 自动关联识别挂载文档标签 -->
+                  <div v-if="msg.attachedDocs && msg.attachedDocs.length" class="attached-docs-panel">
+                    <div class="attached-docs-title">
+                      <el-icon><document /></el-icon>
+                      <span>已自动挂载参考文档（{{ msg.attachedDocs.length }}）</span>
+                    </div>
+                    <div class="attached-docs-tags">
+                      <el-tag
+                        v-for="doc in msg.attachedDocs"
+                        :key="doc.docId || doc.docName"
+                        size="small"
+                        type="success"
+                        effect="light"
+                        class="attached-doc-tag"
+                      >
+                        <el-icon style="margin-right: 3px;"><paperclip /></el-icon>
+                        {{ doc.docName }}
+                        <span v-if="doc.matchType === 'MENTION'" class="doc-match-type">(提及)</span>
+                        <span v-else-if="doc.confidence" class="doc-match-type">({{ Math.round(doc.confidence * 100) }}%)</span>
+                      </el-tag>
+                    </div>
+                  </div>
+
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
                     <div class="report-card-body">
@@ -807,8 +831,11 @@
                     :class="['popper-selector-item', { 'is-active': !selectedKbId }]"
                     @click="selectedKbId = null; handleModelOrKbChange(); showKbPopover = false"
                   >
-                    <el-icon class="item-icon"><folder-delete /></el-icon>
-                    <span class="item-name">不挂载任何知识库</span>
+                    <el-icon class="item-icon" style="color: #409eff;"><magic-stick /></el-icon>
+                    <div class="item-text-group">
+                      <span class="item-name">✨ 智能自动识别挂载 (推荐)</span>
+                      <span class="item-desc">自动根据对话与输入识别相关文档</span>
+                    </div>
                     <el-icon v-if="!selectedKbId" class="check-icon"><check /></el-icon>
                   </div>
                   <div
@@ -818,7 +845,10 @@
                     @click="selectedKbId = item.id; handleModelOrKbChange(); showKbPopover = false"
                   >
                     <el-icon class="item-icon"><collection /></el-icon>
-                    <span class="item-name">{{ item.name }}</span>
+                    <div class="item-text-group">
+                      <span class="item-name">{{ item.name }}</span>
+                      <span class="item-desc">全量固定绑定此知识库</span>
+                    </div>
                     <el-icon v-if="selectedKbId === item.id" class="check-icon"><check /></el-icon>
                   </div>
                 </div>
@@ -1999,7 +2029,7 @@ export default {
       return found ? found.name : '选择 AI 模型';
     },
     getSelectedKbLabel() {
-      if (!this.selectedKbId) return '关联知识库';
+      if (!this.selectedKbId) return '✨ 智能挂载中';
       const found = this.knowledgeBases.find(k => k.id === this.selectedKbId);
       return found ? found.name : '已关联知识库';
     },
@@ -2314,6 +2344,14 @@ export default {
                   this.$nextTick(() => this.scrollToBottom())
                 } catch (err) {
                   console.warn('解析联网搜索来源失败', err)
+                }
+              } else if (event === 'doc_recognized') {
+                try {
+                  const docs = JSON.parse(data || '[]')
+                  this.messages[aiIndex].attachedDocs = docs
+                  this.$nextTick(() => this.scrollToBottom())
+                } catch (err) {
+                  console.warn('解析自动识别挂载文档失败', err)
                 }
               } else if (event === 'done') {
                 this.messages[aiIndex].streaming = false
@@ -5398,6 +5436,20 @@ export default {
   white-space: nowrap;
 }
 
+.item-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.item-desc {
+  font-size: 11px;
+  color: var(--polaris-text-sub);
+  font-weight: normal;
+}
+
 .popper-selector-item .check-icon {
   font-size: 13px;
   font-weight: bold;
@@ -6949,5 +7001,36 @@ export default {
     size: A4 portrait;
     margin: 10mm;
   }
+}
+
+/* 自动关联挂载文档面板样式 */
+.attached-docs-panel {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(103, 194, 58, 0.08);
+  border: 1px dashed rgba(103, 194, 58, 0.3);
+  border-radius: 8px;
+}
+.attached-docs-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #67c23a;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.attached-docs-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attached-doc-tag {
+  border-radius: 6px;
+}
+.doc-match-type {
+  opacity: 0.75;
+  margin-left: 3px;
+  font-size: 11px;
 }
 </style>
