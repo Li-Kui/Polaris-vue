@@ -7,10 +7,17 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
+import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
+import io.qdrant.client.QdrantClient;
+import io.qdrant.client.QdrantGrpcClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -21,6 +28,7 @@ import java.util.List;
  * @author polaris
  */
 @Configuration
+@EnableConfigurationProperties(AiVectorStoreProperties.class)
 public class AiRagConfig
 {
     private static final Logger log = LoggerFactory.getLogger(AiRagConfig.class);
@@ -50,15 +58,49 @@ public class AiRagConfig
         };
     }
 
-    /**
-     * 注册内存向量数据库 Bean
-     * 采用内存存储，服务重启时会重置，但零环境依赖，对于单机开发测试极为便利。
-     * 如需生产持久化，可替换为 MilvusEmbeddingStore、PgVectorEmbeddingStore 等实现。
-     */
     @Bean
-    public EmbeddingStore<TextSegment> embeddingStore()
+    @ConditionalOnProperty(prefix = "ai.vector-store", name = "type", havingValue = "memory", matchIfMissing = true)
+    public EmbeddingStore<TextSegment> inMemoryEmbeddingStore()
     {
         log.info(">>> 初始化内存向量数据库 InMemoryEmbeddingStore");
         return new InMemoryEmbeddingStore<>();
+    }
+
+    @Bean(destroyMethod = "close")
+    @ConditionalOnMissingBean(QdrantClient.class)
+    @ConditionalOnProperty(prefix = "ai.vector-store", name = "type", havingValue = "qdrant")
+    public QdrantClient qdrantClient(AiVectorStoreProperties properties)
+    {
+        AiVectorStoreProperties.QdrantProperties qdrant = properties.getQdrant();
+        QdrantGrpcClient.Builder builder = QdrantGrpcClient.newBuilder(
+                        qdrant.getHost(), qdrant.getPort(), qdrant.isUseTls())
+                .withTimeout(qdrant.getTimeout());
+        if (StringUtils.hasText(qdrant.getApiKey())) {
+            builder.withApiKey(qdrant.getApiKey().trim());
+        }
+
+        QdrantClient client = new QdrantClient(builder.build());
+        try {
+            QdrantCollectionInitializer.initialize(client, qdrant);
+            return client;
+        } catch (RuntimeException e) {
+            client.close();
+            throw e;
+        }
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "ai.vector-store", name = "type", havingValue = "qdrant")
+    public EmbeddingStore<TextSegment> qdrantEmbeddingStore(
+            QdrantClient client,
+            AiVectorStoreProperties properties)
+    {
+        AiVectorStoreProperties.QdrantProperties qdrant = properties.getQdrant();
+        log.info(">>> 初始化 Qdrant 向量数据库, collection={}", qdrant.getCollectionName());
+        return QdrantEmbeddingStore.builder()
+                .client(client)
+                .collectionName(qdrant.getCollectionName())
+                .payloadTextKey(qdrant.getPayloadTextKey())
+                .build();
     }
 }

@@ -7,10 +7,12 @@ import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
+import com.polaris.ai.rag.AiVectorStoreProperties;
 import com.polaris.ai.service.IAiKnowledgeService;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -23,6 +25,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
@@ -48,6 +51,9 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
 
     @Autowired
     private EmbeddingStore<TextSegment> embeddingStore;
+
+    @Autowired
+    private AiVectorStoreProperties vectorStoreProperties;
 
     // ================================================================
     //  知识库 CRUD
@@ -176,14 +182,24 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             DocumentSplitter splitter = DocumentSplitters.recursive(300, 30);
             List<TextSegment> segments = splitter.split(document);
 
-            // 5. 向量化并写入向量库
+            // 5. 完成全部向量化后再替换旧索引，避免模型调用中途失败留下半份数据
             log.info(">>> 文档 {} 解析完成，共生成 {} 个分片，开始向量化...", doc.getName(), segments.size());
+            List<Embedding> embeddings = new ArrayList<>();
+            List<TextSegment> indexedSegments = new ArrayList<>();
             for (TextSegment segment : segments) {
                 if (segment.text() == null || segment.text().trim().isEmpty()) {
                     continue; // 过滤空分片，避免阿里云百炼等向量模型接口报错 (必须处于 [1, 30720] 范围)
                 }
-                embeddingStore.add(embeddingModel.embed(segment).content(), segment);
+                embeddings.add(embeddingModel.embed(segment).content());
+                indexedSegments.add(segment);
             }
+            if (embeddings.isEmpty()) {
+                throw new IllegalStateException("文档未生成可用的向量分片");
+            }
+
+            Filter oldDocumentFilter = metadataKey("document_id").isEqualTo(doc.getId().toString());
+            embeddingStore.removeAll(oldDocumentFilter);
+            embeddingStore.addAll(embeddings, indexedSegments);
 
             // 6. 更新状态为已解析 (2)
             doc.setStatus("2");
@@ -200,20 +216,25 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
 
     /**
      * 监听 Spring 启动就绪事件
-     * 由于 InMemoryEmbeddingStore 重启后向量会丢失，此处在每次系统启动后，
-     * 自动从数据库找出所有“已解析(2)”的文档，重新读取并向量化加载到内存。
+     * 内存模式默认重建；Qdrant 等持久化模式默认跳过。
+     * 首次迁移已有文档时，可临时将 rebuild-on-startup 设为 always。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void autoRebuildInMemoryEmbeddings()
     {
-        log.info(">>> 检测到系统启动，开始重新构建内存向量数据库...");
+        if (!vectorStoreProperties.shouldRebuildOnStartup()) {
+            log.info(">>> 向量存储类型为 {}，跳过启动向量重建", vectorStoreProperties.getType());
+            return;
+        }
+
+        log.info(">>> 检测到系统启动，开始重新构建 {} 向量索引...", vectorStoreProperties.getType());
         
         AiDocument query = new AiDocument();
         query.setStatus("2"); // 已解析
         List<AiDocument> readyDocs = aiDocumentMapper.selectDocumentList(query);
         
         if (readyDocs == null || readyDocs.isEmpty()) {
-            log.info(">>> 没有已解析的文档需要加载到内存向量库");
+            log.info(">>> 没有已解析的文档需要加载到向量库");
             return;
         }
 
@@ -241,15 +262,28 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
                     DocumentSplitter splitter = DocumentSplitters.recursive(300, 30);
                     List<TextSegment> segments = splitter.split(document);
 
+                    List<Embedding> embeddings = new ArrayList<>();
+                    List<TextSegment> indexedSegments = new ArrayList<>();
                     for (TextSegment segment : segments) {
-                        embeddingStore.add(embeddingModel.embed(segment).content(), segment);
+                        if (segment.text() == null || segment.text().trim().isEmpty()) {
+                            continue;
+                        }
+                        embeddings.add(embeddingModel.embed(segment).content());
+                        indexedSegments.add(segment);
                     }
+                    if (embeddings.isEmpty()) {
+                        continue;
+                    }
+
+                    Filter oldDocumentFilter = metadataKey("document_id").isEqualTo(doc.getId().toString());
+                    embeddingStore.removeAll(oldDocumentFilter);
+                    embeddingStore.addAll(embeddings, indexedSegments);
                     successCount++;
                 } catch (Exception e) {
                     log.error(">>> 重启加载文档失败: {}", doc.getName(), e);
                 }
             }
-            log.info(">>> 内存向量数据库重建完毕，成功加载 {}/{} 个文档", successCount, readyDocs.size());
+            log.info(">>> 向量索引重建完毕，成功加载 {}/{} 个文档", successCount, readyDocs.size());
         }).start();
     }
 }

@@ -376,6 +376,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     log.error(">>> 查询模型配置失败，无法提取工具配置: {}", e.getMessage());
                 }
                 Map<ToolSpecification, ToolExecutor> tools = new HashMap<>();
+                boolean allowHistoricalTools = false;
 
                 // 1. 如果用户显式选择了智能体 (Hard Route)，沿用智能体及模型绑定的显式工具
                 if (selectedAgent != null) {
@@ -394,28 +395,17 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         }
                     }
                     tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey, emitter);
+                    allowHistoricalTools = !tools.isEmpty();
                 } else {
                     // 2. 未选择智能体 (Soft Route 软路由模式)
-                    com.polaris.ai.router.IntentRouter.RouteDecision decision = intentRouter.route(userInput, conversationId);
-                    log.info(">>> [AiChatService] 自动意图识别结果: {}, 原因: {}", decision.getType(), decision.getReason());
-
-                    if (decision.getType() == com.polaris.ai.router.IntentRouter.RouteType.TOOL_CALL || Boolean.TRUE.equals(enableSearch)) {
-                        // 使用 Tool-RAG 依据语义动态精准按需加载 Top-N 工具（受 1200 Tokens 全局预算保护）
-                        tools = toolRegistry.getRetrievedTools(userInput, securityContext, searchKey, 5, emitter);
-
-                        // 补全显式开启的联网搜索
-                        if (Boolean.TRUE.equals(enableSearch)) {
-                            Map<ToolSpecification, ToolExecutor> searchTools = toolRegistry.getContextAwareTools(securityContext, "web_search", searchKey, emitter);
-                            tools.putAll(searchTools);
-                        }
-                    } else if (enabledTools != null && !enabledTools.trim().isEmpty()) {
-                        tools = toolRegistry.getContextAwareTools(securityContext, enabledTools, searchKey, emitter);
-                    }
+                    tools = resolveSoftRouteTools(
+                            userInput, conversationId, enableSearch, securityContext, searchKey, emitter);
+                    allowHistoricalTools = !tools.isEmpty();
                 }
 
                 // 3. 第二阶：多轮对话工具 Schema 历史只读 Slim 降维防护（降维立省 80% 历史工具 Token 占用，防止 Prompt 爆表）
                 java.util.Set<String> historicalToolNames = extractHistoricalToolNames(messages);
-                if (!historicalToolNames.isEmpty()) {
+                if (allowHistoricalTools && !historicalToolNames.isEmpty()) {
                     Map<ToolSpecification, ToolExecutor> historicalSlimTools = toolRegistry.getSlimToolsForHistory(historicalToolNames, securityContext, searchKey, emitter);
                     if (historicalSlimTools != null && !historicalSlimTools.isEmpty()) {
                         // 优先保留当次匹配到的全量 Schema，若当次未匹配到的历史旧工具，补充入 Slim 降维规范
@@ -547,6 +537,35 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             } catch (Exception ignored) {
             }
         }
+    }
+
+    Map<ToolSpecification, ToolExecutor> resolveSoftRouteTools(
+            String userInput,
+            Long conversationId,
+            Boolean enableSearch,
+            SecurityContext securityContext,
+            String searchKey,
+            SseEmitter emitter) {
+        com.polaris.ai.router.IntentRouter.RouteDecision decision = intentRouter.route(userInput, conversationId);
+        log.info(">>> [AiChatService] 自动意图识别结果: {}, 原因: {}", decision.getType(), decision.getReason());
+
+        Map<ToolSpecification, ToolExecutor> tools = new HashMap<>();
+        // 仅 TOOL_CALL 对当前输入匹配工具；DIRECT_LLM 不暴露模型配置中的常驻工具。
+        if (decision.getType() == com.polaris.ai.router.IntentRouter.RouteType.TOOL_CALL) {
+            Map<ToolSpecification, ToolExecutor> retrievedTools = toolRegistry.getRetrievedTools(
+                    userInput, securityContext, searchKey, 5, emitter);
+            if (retrievedTools != null) {
+                tools.putAll(retrievedTools);
+            }
+        }
+        if (Boolean.TRUE.equals(enableSearch)) {
+            Map<ToolSpecification, ToolExecutor> searchTools = toolRegistry.getContextAwareTools(
+                    securityContext, "web_search", searchKey, emitter);
+            if (searchTools != null) {
+                tools.putAll(searchTools);
+            }
+        }
+        return tools;
     }
 
     // ----------------------------------------------------------------
@@ -699,9 +718,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         }
                     }
                 } else {
-                    // assistant 消息转为 LangChain4j 的 AiMessage 类型
-                    list.add(AiMessage.from(m.getContent()));
+                    list.add(UserMessage.from(m.getContent()));
                 }
+            } else if ("assistant".equals(m.getRole())) {
+                list.add(AiMessage.from(m.getContent()));
             }
         }
         return list;

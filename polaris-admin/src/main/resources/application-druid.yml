@@ -136,3 +136,24 @@ ai:
             core-pool-size: 8
             max-pool-size: 32
             queue-capacity: 100
+
+    # RAG 向量存储配置
+    vector-store:
+        # memory: 启动后重建内存索引；qdrant: 使用持久化 Qdrant collection
+        type: qdrant
+        # auto: memory 重建、qdrant 跳过；首次迁移到 Qdrant 可临时改为 always
+        rebuild-on-startup: auto
+        qdrant:
+            host: localhost
+            # Qdrant gRPC 端口，不是 REST 端口 6333
+            port: 6334
+            use-tls: false
+            api-key: 123456
+            collection-name: polaris_knowledge
+            # 必须与当前 Embedding 模型输出维度一致；text-embedding-v3 默认 1024
+            dimension: 1024
+            on-disk: true
+            initialize-schema: true
+            create-payload-indexes: true
+            payload-text-key: text_segment
+            timeout: 10s
