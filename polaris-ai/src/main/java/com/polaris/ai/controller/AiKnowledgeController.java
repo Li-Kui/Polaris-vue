@@ -56,7 +56,8 @@ public class AiKnowledgeController extends BaseController {
     @Operation(summary = "获取知识库详细信息")
     @GetMapping("/{id}")
     public ResultData getInfo(@PathVariable Long id) {
-        return ok(aiKnowledgeService.selectKnowledgeBaseById(id));
+        AiKnowledgeBase knowledgeBase = aiKnowledgeService.selectAccessibleKnowledgeBaseById(id);
+        return knowledgeBase == null ? fail("知识库不存在或无访问权限") : ok(knowledgeBase);
     }
 
     /**
@@ -81,6 +82,11 @@ public class AiKnowledgeController extends BaseController {
     @Log(title = "知识库管理", businessType = BusinessType.UPDATE)
     @PutMapping
     public ResultData edit(@RequestBody AiKnowledgeBase knowledgeBase) {
+        AiKnowledgeBase existing = aiKnowledgeService.selectAccessibleKnowledgeBaseById(knowledgeBase.getId());
+        if (existing == null) {
+            return fail("知识库不存在或无修改权限");
+        }
+        knowledgeBase.setDeptId(existing.getDeptId());
         knowledgeBase.setUpdateBy(SecurityUtils.getUsername());
         return toAjaxResult(aiKnowledgeService.updateKnowledgeBase(knowledgeBase));
     }
@@ -92,6 +98,9 @@ public class AiKnowledgeController extends BaseController {
     @Log(title = "知识库管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/{id}")
     public ResultData remove(@PathVariable Long id) {
+        if (aiKnowledgeService.selectAccessibleKnowledgeBaseById(id) == null) {
+            return fail("知识库不存在或无删除权限");
+        }
         return toAjaxResult(aiKnowledgeService.deleteKnowledgeBase(id));
     }
 
@@ -105,6 +114,10 @@ public class AiKnowledgeController extends BaseController {
     @Operation(summary = "查询指定知识库下的文档列表")
     @GetMapping("/document/list")
     public ResultData<Page<AiDocument>> documentList(AiDocument document) {
+        if (document.getKnowledgeBaseId() == null
+                || aiKnowledgeService.selectAccessibleKnowledgeBaseById(document.getKnowledgeBaseId()) == null) {
+            return ResultData.fail("知识库不存在或无访问权限");
+        }
         startPage();
         List<AiDocument> list = aiKnowledgeService.listDocument(document);
         return ok(getDataPage(list));
@@ -119,6 +132,9 @@ public class AiKnowledgeController extends BaseController {
     public ResultData uploadDocument(
             @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
             @RequestParam("file") MultipartFile file) {
+        if (aiKnowledgeService.selectAccessibleKnowledgeBaseById(knowledgeBaseId) == null) {
+            return fail("知识库不存在或无上传权限");
+        }
         if (file.isEmpty()) {
             return fail("上传文件不可为空");
         }
@@ -153,6 +169,11 @@ public class AiKnowledgeController extends BaseController {
     @Log(title = "知识库文档管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/document/{id}")
     public ResultData removeDocument(@PathVariable Long id) {
+        AiDocument document = aiKnowledgeService.selectDocumentById(id);
+        if (document == null
+                || aiKnowledgeService.selectAccessibleKnowledgeBaseById(document.getKnowledgeBaseId()) == null) {
+            return fail("文档不存在或无删除权限");
+        }
         return toAjaxResult(aiKnowledgeService.deleteDocument(id));
     }
 
@@ -163,7 +184,26 @@ public class AiKnowledgeController extends BaseController {
     @Log(title = "知识库文档管理", businessType = BusinessType.UPDATE)
     @PostMapping("/document/{id}/rebuild")
     public ResultData rebuildDocument(@PathVariable Long id) {
-        aiKnowledgeService.importDocumentAsync(id);
-        return ok("已加入后台任务重新向量化");
+        AiDocument document = aiKnowledgeService.selectDocumentById(id);
+        if (document == null
+                || aiKnowledgeService.selectAccessibleKnowledgeBaseById(document.getKnowledgeBaseId()) == null) {
+            return fail("文档不存在或无重建权限");
+        }
+        aiKnowledgeService.rebuildKnowledgeBaseAsync(document.getKnowledgeBaseId());
+        return ok("已加入知识库安全重建任务");
+    }
+
+    /**
+     * 在新版本 collection 中重建整个知识库。
+     */
+    @Operation(summary = "重建知识库向量索引")
+    @Log(title = "知识库管理", businessType = BusinessType.UPDATE)
+    @PostMapping("/{id}/rebuild")
+    public ResultData rebuildKnowledgeBase(@PathVariable Long id) {
+        if (aiKnowledgeService.selectAccessibleKnowledgeBaseById(id) == null) {
+            return fail("知识库不存在或无重建权限");
+        }
+        aiKnowledgeService.rebuildKnowledgeBaseAsync(id);
+        return ok("已加入知识库重建任务");
     }
 }

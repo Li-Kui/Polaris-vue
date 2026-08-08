@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AiModelFactory
 {
 
+    private static final String EMBEDDING_DIMENSION_PROBE_TEXT = "Polaris embedding dimension probe";
     // 阿里通义 OpenAI 兼容地址
     private static final String DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     // DeepSeek 官方地址
@@ -325,6 +326,85 @@ public class AiModelFactory
     }
 
     /**
+     * 按明确的模型配置 ID 获取向量模型。知识库索引必须使用该方法，
+     * 避免异步线程和查询线程因安全上下文不同而选中不同模型。
+     */
+    public EmbeddingModel getEmbeddingModel(Long modelConfigId)
+    {
+        if (modelConfigId == null) {
+            return getEmbeddingModel();
+        }
+        AiModelConfig config = getModelConfig(modelConfigId);
+        if (config == null) {
+            throw new IllegalArgumentException("向量模型配置不存在: " + modelConfigId);
+        }
+        if (!ModelType.EMBEDDING.name().equalsIgnoreCase(config.getModelType())) {
+            throw new IllegalArgumentException("模型配置不是 EMBEDDING 类型: " + modelConfigId);
+        }
+        if (!"1".equals(config.getStatus())) {
+            throw new IllegalArgumentException("向量模型配置未启用: " + modelConfigId);
+        }
+        return getEmbeddingModelInstance(config);
+    }
+
+    /**
+     * Returns the configured embedding dimension, probing and persisting it on first use when needed.
+     */
+    public int ensureEmbeddingDimension(AiModelConfig config)
+    {
+        if (config != null && config.getEmbeddingDimension() != null
+                && config.getEmbeddingDimension() > 0) {
+            return config.getEmbeddingDimension();
+        }
+        return probeEmbeddingDimension(config);
+    }
+
+    /**
+     * Verifies the embedding endpoint and persists the provider's actual output dimension.
+     */
+    public synchronized int probeEmbeddingDimension(AiModelConfig config)
+    {
+        if (config == null || config.getId() == null) {
+            throw new IllegalArgumentException("向量模型配置不能为空");
+        }
+        if (!ModelType.EMBEDDING.name().equalsIgnoreCase(config.getModelType())) {
+            throw new IllegalArgumentException("模型配置不是 EMBEDDING 类型: " + config.getId());
+        }
+        if (!"1".equals(config.getStatus())) {
+            throw new IllegalArgumentException("向量模型配置未启用: " + config.getId());
+        }
+
+        int actualDimension = getEmbeddingModel(config.getId())
+                .embed(EMBEDDING_DIMENSION_PROBE_TEXT)
+                .content()
+                .dimension();
+        if (actualDimension <= 0) {
+            throw new IllegalStateException("向量模型返回了无效维度: " + actualDimension);
+        }
+        if (config.getEmbeddingDimension() != null
+                && config.getEmbeddingDimension() != actualDimension) {
+            throw new IllegalStateException("向量模型维度不匹配：配置="
+                    + config.getEmbeddingDimension() + "，实际=" + actualDimension);
+        }
+        if (config.getEmbeddingDimension() == null) {
+            AiModelConfig dimensionUpdate = new AiModelConfig();
+            dimensionUpdate.setId(config.getId());
+            dimensionUpdate.setEmbeddingDimension(actualDimension);
+            if (modelConfigService.updateModelConfig(dimensionUpdate) <= 0) {
+                throw new IllegalStateException("向量模型维度写入数据库失败: " + config.getId());
+            }
+            config.setEmbeddingDimension(actualDimension);
+            AiModelConfig cachedConfig = configCache.get(config.getId());
+            if (cachedConfig != null) {
+                cachedConfig.setEmbeddingDimension(actualDimension);
+            }
+            log.info(">>> 向量模型维度探测完成并持久化, configId={}, dimension={}",
+                    config.getId(), actualDimension);
+        }
+        return actualDimension;
+    }
+
+    /**
      * 按指定模型配置获取图像模型实例（带缓存），供绘图适配器调用
      */
     public ImageModel getImageModel(AiModelConfig config)
@@ -545,66 +625,67 @@ public class AiModelFactory
                 if (relayUrl == null) {
                     throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
                 }
-                return OpenAiEmbeddingModel.builder()
-                        .baseUrl(relayUrl)
-                        .apiKey(apiKey)
-                        .modelName(config.getModelName())
-                        .timeout(Duration.ofSeconds(60))
-                        .build();
+                return buildOpenAiEmbeddingModel(config, relayUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
             }
 
             switch (provider) {
                 case "dashscope":
                     String dashscopeEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : "https://dashscope.aliyuncs.com/compatible-mode/v1";
-                    return OpenAiEmbeddingModel.builder()
-                            .baseUrl(dashscopeEmbedUrl)
-                            .apiKey(apiKey)
-                            .modelName(config.getModelName())
-                            .timeout(Duration.ofSeconds(60))
-                            .build();
+                    return buildOpenAiEmbeddingModel(
+                            config, dashscopeEmbedUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
 
                 case "openai":
-                    return OpenAiEmbeddingModel.builder()
-                            .baseUrl(config.getBaseUrl())
-                            .apiKey(apiKey)
-                            .modelName(config.getModelName())
-                            .timeout(Duration.ofSeconds(60))
-                            .build();
+                    return buildOpenAiEmbeddingModel(
+                            config, config.getBaseUrl(), apiKey, config.getModelName(), Duration.ofSeconds(60));
 
                 case "deepseek":
                     log.warn("DeepSeek 暂无官方 Embedding 模型，默认配置阿里通义向量接口作为兜底");
-                    return OpenAiEmbeddingModel.builder()
-                            .baseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1")
-                            .apiKey(apiKey)
-                            .modelName("text-embedding-v3")
-                            .timeout(Duration.ofSeconds(60))
-                            .build();
+                    return buildOpenAiEmbeddingModel(
+                            config,
+                            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                            apiKey,
+                            "text-embedding-v3",
+                            Duration.ofSeconds(60));
 
                 case "ollama":
                     String ollamaUrl = config.getBaseUrl() != null && !config.getBaseUrl().isEmpty() 
                             ? config.getBaseUrl() : "http://localhost:11434";
-                    return OpenAiEmbeddingModel.builder()
-                            .baseUrl(ollamaUrl + "/v1")
-                            .apiKey("ollama")
-                            .modelName(config.getModelName())
-                            .timeout(Duration.ofSeconds(120))
-                            .build();
+                    return buildOpenAiEmbeddingModel(
+                            config, ollamaUrl + "/v1", "ollama", config.getModelName(), Duration.ofSeconds(120));
 
                 case "ark":
                     String arkEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : "https://ark.cn-beijing.volces.com/api/v3";
-                    return OpenAiEmbeddingModel.builder()
-                            .baseUrl(arkEmbedUrl)
-                            .apiKey(apiKey)
-                            .modelName(config.getModelName())
-                            .timeout(Duration.ofSeconds(60))
-                            .build();
+                    return buildOpenAiEmbeddingModel(
+                            config, arkEmbedUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
 
                 default:
                     throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
             }
         });
+    }
+
+    private EmbeddingModel buildOpenAiEmbeddingModel(
+            AiModelConfig config,
+            String baseUrl,
+            String apiKey,
+            String modelName,
+            Duration timeout)
+    {
+        OpenAiEmbeddingModel.OpenAiEmbeddingModelBuilder builder = OpenAiEmbeddingModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName(modelName)
+                .timeout(timeout);
+        if ("REQUEST".equalsIgnoreCase(config.getEmbeddingDimensionMode())
+                && config.getEmbeddingDimension() != null) {
+            builder.dimensions(config.getEmbeddingDimension());
+        }
+        if (config.getEmbeddingBatchSize() != null) {
+            builder.maxSegmentsPerBatch(config.getEmbeddingBatchSize());
+        }
+        return builder.build();
     }
 
     private ImageModel getImageModelInstance(AiModelConfig config)

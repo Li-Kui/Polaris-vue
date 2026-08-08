@@ -75,6 +75,14 @@ export function listAvailableModel() {
   })
 }
 
+// 查询当前用户可用于知识库的向量模型列表
+export function listAvailableEmbeddingModel() {
+  return request({
+    url: '/ai/model/list/availableEmbedding',
+    method: 'get'
+  })
+}
+
 // 根据提供商、API Key、Base URL 拉取远程可用模型列表
 export function fetchRemoteModels(data) {
   return request({

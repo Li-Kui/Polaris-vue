@@ -17,6 +17,10 @@
         <result property="systemPrompt"        column="system_prompt"/>
         <result property="isDefault"          column="is_default"/>
         <result property="modelType"          column="model_type"/>
+        <result property="embeddingDimension" column="embedding_dimension"/>
+        <result property="embeddingDimensionMode" column="embedding_dimension_mode"/>
+        <result property="embeddingMaxInputTokens" column="embedding_max_input_tokens"/>
+        <result property="embeddingBatchSize" column="embedding_batch_size"/>
         <result property="enabledTools"       column="enabled_tools"/>
         <result property="enableThinking"     column="enable_thinking"/>
         <result property="reasoningEffort"    column="reasoning_effort"/>
@@ -108,6 +112,10 @@
             <if test="systemPrompt != null">system_prompt,</if>
             <if test="isDefault != null and isDefault != ''">is_default,</if>
             <if test="modelType != null and modelType != ''">model_type,</if>
+            <if test="embeddingDimension != null">embedding_dimension,</if>
+            <if test="embeddingDimensionMode != null and embeddingDimensionMode != ''">embedding_dimension_mode,</if>
+            <if test="embeddingMaxInputTokens != null">embedding_max_input_tokens,</if>
+            <if test="embeddingBatchSize != null">embedding_batch_size,</if>
             <if test="enabledTools != null">enabled_tools,</if>
             <if test="enableThinking != null and enableThinking != ''">enable_thinking,</if>
             <if test="reasoningEffort != null and reasoningEffort != ''">reasoning_effort,</if>
@@ -136,6 +144,10 @@
             <if test="systemPrompt != null">#{systemPrompt},</if>
             <if test="isDefault != null and isDefault != ''">#{isDefault},</if>
             <if test="modelType != null and modelType != ''">#{modelType},</if>
+            <if test="embeddingDimension != null">#{embeddingDimension},</if>
+            <if test="embeddingDimensionMode != null and embeddingDimensionMode != ''">#{embeddingDimensionMode},</if>
+            <if test="embeddingMaxInputTokens != null">#{embeddingMaxInputTokens},</if>
+            <if test="embeddingBatchSize != null">#{embeddingBatchSize},</if>
             <if test="enabledTools != null">#{enabledTools},</if>
             <if test="enableThinking != null and enableThinking != ''">#{enableThinking},</if>
             <if test="reasoningEffort != null and reasoningEffort != ''">#{reasoningEffort},</if>
@@ -169,6 +181,10 @@
             <if test="systemPrompt != null">system_prompt = #{systemPrompt},</if>
             <if test="isDefault != null and isDefault != ''">is_default = #{isDefault},</if>
             <if test="modelType != null and modelType != ''">model_type = #{modelType},</if>
+            <if test="embeddingDimension != null">embedding_dimension = #{embeddingDimension},</if>
+            <if test="embeddingDimensionMode != null and embeddingDimensionMode != ''">embedding_dimension_mode = #{embeddingDimensionMode},</if>
+            <if test="embeddingMaxInputTokens != null">embedding_max_input_tokens = #{embeddingMaxInputTokens},</if>
+            <if test="embeddingBatchSize != null">embedding_batch_size = #{embeddingBatchSize},</if>
             enabled_tools = #{enabledTools},
             <if test="enableThinking != null and enableThinking != ''">enable_thinking = #{enableThinking},</if>
             <if test="reasoningEffort != null and reasoningEffort != ''">reasoning_effort = #{reasoningEffort},</if>
@@ -217,6 +233,22 @@
             </choose>
         </if>
         ORDER BY create_time DESC
+    </select>
+
+    <select id="selectAvailableModelConfigsByType" resultMap="AiModelConfigResult">
+        <include refid="selectAiModelConfigVo"/>
+        WHERE status = '1' AND del_flag = '0' AND model_type = #{modelType}
+        <if test="!isAdmin">
+            <choose>
+                <when test="deptId != null">
+                    AND (dept_id IS NULL OR dept_id = #{deptId})
+                </when>
+                <otherwise>
+                    AND dept_id IS NULL
+                </otherwise>
+            </choose>
+        </if>
+        ORDER BY is_default DESC, create_time DESC
     </select>
 
 </mapper>

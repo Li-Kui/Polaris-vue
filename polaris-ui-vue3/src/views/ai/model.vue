@@ -520,7 +520,7 @@
                   <el-input-number v-model="form.maxConcurrency" :min="1" :max="50" placeholder="留空则按厂商默认" style="width: 100%;" />
                 </el-form-item>
               </el-col>
-              <el-col :span="12" style="margin-top: 10px;">
+              <el-col v-if="form.modelType !== 'EMBEDDING'" :span="12" style="margin-top: 10px;">
                 <el-form-item label="设为默认模型" prop="isDefault">
                   <el-radio-group v-model="form.isDefault">
                     <el-radio label="1">是</el-radio>
@@ -543,6 +543,59 @@
               <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
                 <el-form-item label="联网搜索 Key" prop="searchKey">
                   <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+
+          <!-- 属性面板：向量模型参数（仅 EMBEDDING 类型显示） -->
+          <div v-if="form.modelType === 'EMBEDDING'" class="pane-card card-space-margin">
+            <div class="pane-card-header">
+              <span class="header-dot teal-dot"></span>
+              <h5>向量模型参数</h5>
+            </div>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="输出维度" prop="embeddingDimension">
+                  <el-input-number
+                    v-model="form.embeddingDimension"
+                    :min="1"
+                    :max="65536"
+                    controls-position="right"
+                    placeholder="例如 1024"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="维度模式" prop="embeddingDimensionMode">
+                  <el-select v-model="form.embeddingDimensionMode" style="width: 100%;">
+                    <el-option label="使用模型默认维度" value="MODEL_DEFAULT" />
+                    <el-option label="向提供商请求指定维度" value="REQUEST" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="最大输入 Token" prop="embeddingMaxInputTokens">
+                  <el-input-number
+                    v-model="form.embeddingMaxInputTokens"
+                    :min="1"
+                    :max="1000000"
+                    controls-position="right"
+                    placeholder="留空则不校验"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="批量分片数" prop="embeddingBatchSize">
+                  <el-input-number
+                    v-model="form.embeddingBatchSize"
+                    :min="1"
+                    :max="2048"
+                    controls-position="right"
+                    style="width: 100%;"
+                  />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -877,6 +930,10 @@ export default {
         searchKey: undefined,
         deptId: undefined,
         modelType: 'CHAT',
+        embeddingDimension: undefined,
+        embeddingDimensionMode: 'MODEL_DEFAULT',
+        embeddingMaxInputTokens: undefined,
+        embeddingBatchSize: 16,
         enabledTools: undefined,
         defaultImageSize: '1024x1024',
         imageCapabilities: undefined,

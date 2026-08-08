@@ -2,17 +2,17 @@ package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.polaris.ai.domain.AiDocument;
+import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.dto.DocumentRecognitionResult;
 import com.polaris.ai.dto.RecognizedDoc;
 import com.polaris.ai.mapper.AiDocumentMapper;
+import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.service.IAiDocumentRecognitionService;
-import dev.langchain4j.data.document.Metadata;
+import com.polaris.ai.service.IAiKnowledgeService;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.EmbeddingSearchResult;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,11 +39,11 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
     @Autowired
     private AiDocumentMapper aiDocumentMapper;
 
-    @Autowired(required = false)
-    private EmbeddingStore<TextSegment> embeddingStore;
+    @Autowired
+    private IAiKnowledgeService knowledgeService;
 
-    @Autowired(required = false)
-    private EmbeddingModel embeddingModel;
+    @Autowired
+    private AiVectorStoreResolver vectorStoreResolver;
 
     @Override
     public List<String> extractMentions(String userInput) {
@@ -71,6 +71,20 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
         if (userInput == null || userInput.trim().isEmpty()) {
             return new DocumentRecognitionResult(recognizedDocs, "");
         }
+        if (boundKnowledgeBaseId == null) {
+            return new DocumentRecognitionResult(recognizedDocs, "");
+        }
+        AiKnowledgeBase knowledgeBase = knowledgeService.selectAccessibleKnowledgeBaseById(boundKnowledgeBaseId);
+        if (knowledgeBase == null || !"READY".equalsIgnoreCase(knowledgeBase.getIndexStatus())) {
+            return new DocumentRecognitionResult(recognizedDocs, "");
+        }
+        AiVectorStoreResolver.VectorContext vectorContext;
+        try {
+            vectorContext = vectorStoreResolver.resolve(knowledgeBase);
+        } catch (Exception e) {
+            log.warn(">>> [文档识别] 无法解析知识库 {} 的向量上下文: {}", boundKnowledgeBaseId, e.getMessage());
+            return new DocumentRecognitionResult(recognizedDocs, "");
+        }
 
         // 1. 显式文本提及与 @ 语法匹配
         List<String> mentions = extractMentions(userInput);
@@ -78,6 +92,7 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
             try {
                 LambdaQueryWrapper<AiDocument> query = new LambdaQueryWrapper<>();
                 query.like(AiDocument::getName, mention)
+                        .eq(AiDocument::getKnowledgeBaseId, boundKnowledgeBaseId)
                         .eq(AiDocument::getStatus, "2"); // 2 —— 已解析的有效文档
 
                 List<AiDocument> docs = aiDocumentMapper.selectList(query);
@@ -103,16 +118,23 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
         }
 
         // 2. 隐式向量检索自动召回 (Auto-RAG)
-        if (recognizedDocs.isEmpty() && embeddingStore != null && embeddingModel != null) {
+        if (recognizedDocs.isEmpty()) {
             try {
-                dev.langchain4j.data.embedding.Embedding queryEmbedding = embeddingModel.embed(userInput).content();
+                dev.langchain4j.data.embedding.Embedding queryEmbedding =
+                        vectorContext.embeddingModel().embed(userInput).content();
                 EmbeddingSearchRequest searchRequest = EmbeddingSearchRequest.builder()
                         .queryEmbedding(queryEmbedding)
-                        .maxResults(3)
-                        .minScore(0.72)
+                        .maxResults(knowledgeBase.getRetrievalTopK() == null
+                                ? 5 : knowledgeBase.getRetrievalTopK())
+                        .minScore(knowledgeBase.getRetrievalMinScore() == null
+                                ? 0.5 : knowledgeBase.getRetrievalMinScore())
+                        .filter(dev.langchain4j.store.embedding.filter.MetadataFilterBuilder
+                                .metadataKey("knowledge_base_id")
+                                .isEqualTo(boundKnowledgeBaseId.toString()))
                         .build();
 
-                EmbeddingSearchResult<TextSegment> result = embeddingStore.search(searchRequest);
+                EmbeddingSearchResult<dev.langchain4j.data.segment.TextSegment> result =
+                        vectorContext.embeddingStore().search(searchRequest);
                 if (result != null && result.matches() != null) {
                     for (EmbeddingMatch<TextSegment> match : result.matches()) {
                         String text = match.embedded().text();
@@ -122,7 +144,7 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
                         String docName = "知识库参考片段";
                         Long docId = System.currentTimeMillis();
 
-                        Metadata metadata = match.embedded().metadata();
+                        dev.langchain4j.data.document.Metadata metadata = match.embedded().metadata();
                         if (metadata != null) {
                             String metaName = metadata.getString("doc_name");
                             if (metaName != null && !metaName.isEmpty()) {

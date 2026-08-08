@@ -37,4 +37,10 @@ public interface AiKnowledgeMapper extends BaseMapper<AiKnowledgeBase>
      * 根据 ID 获取知识库详情
      */
     AiKnowledgeBase selectKnowledgeBaseById(Long id);
+
+    /**
+     * 根据当前登录用户的数据范围查询知识库。
+     */
+    @DataScope(deptAlias = "kb")
+    AiKnowledgeBase selectAccessibleKnowledgeBaseById(AiKnowledgeBase knowledgeBase);
 }

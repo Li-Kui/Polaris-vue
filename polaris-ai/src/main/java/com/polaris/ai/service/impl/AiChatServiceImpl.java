@@ -5,26 +5,26 @@ import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.attachment.MultimodalMediaHelper;
 import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.domain.AiConversation;
+import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
+import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.service.IAiDocumentRecognitionService;
+import com.polaris.ai.service.IAiKnowledgeService;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.*;
-import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
-import dev.langchain4j.store.embedding.EmbeddingStore;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContext;
@@ -50,12 +50,6 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 @Slf4j
 @Service
 public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation> implements IAiChatService {
-
-    @Autowired
-    private EmbeddingModel embeddingModel;
-
-    @Autowired
-    private EmbeddingStore<TextSegment> embeddingStore;
 
     /**
      * 流式聊天语言模型
@@ -98,6 +92,12 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     @Autowired
     private IAiDocumentRecognitionService documentRecognitionService;
 
+    @Autowired
+    private IAiKnowledgeService knowledgeService;
+
+    @Autowired
+    private AiVectorStoreResolver vectorStoreResolver;
+
     /** 会话级防重互锁容器（保证单个会话同时只有一个流式推送在进行） */
     private static final java.util.concurrent.ConcurrentHashMap<Long, Boolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -110,6 +110,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      */
     @Override
     public AiConversation createConversation(Long userId, Long modelConfigId, Long knowledgeBaseId) {
+        requireKnowledgeBaseAccess(knowledgeBaseId);
         AiConversation conv = new AiConversation();
         conv.setUserId(userId);
         conv.setTitle("新对话");
@@ -167,6 +168,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Override
     public int updateConversationConfig(Long id, Long modelConfigId, Long knowledgeBaseId, String agentCode, String workflowCode, Long userId) {
+        requireKnowledgeBaseAccess(knowledgeBaseId);
         String modelName = null;
         if (modelConfigId != null) {
             com.polaris.ai.domain.AiModelConfig cfg = modelFactory.getModelConfig(modelConfigId);
@@ -323,8 +325,19 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 }
             }
 
+            AiKnowledgeBase accessibleKnowledgeBase = conv.getKnowledgeBaseId() == null
+                    ? null : knowledgeService.selectAccessibleKnowledgeBaseById(conv.getKnowledgeBaseId());
+            if (conv.getKnowledgeBaseId() != null && accessibleKnowledgeBase == null) {
+                log.warn(">>> 会话 {} 绑定了当前用户无权访问的知识库 {}，本次禁用 RAG",
+                        conversationId, conv.getKnowledgeBaseId());
+            }
+
             // 3.5 智能识别与动态挂载关联文档
-            com.polaris.ai.dto.DocumentRecognitionResult recResult = documentRecognitionService.recognizeAndMount(userInput, userId, null, conv.getKnowledgeBaseId());
+            Long accessibleKnowledgeBaseId = accessibleKnowledgeBase == null
+                    ? null : accessibleKnowledgeBase.getId();
+            com.polaris.ai.dto.DocumentRecognitionResult recResult = documentRecognitionService.recognizeAndMount(
+                    userInput, userId, accessibleKnowledgeBase == null ? null : accessibleKnowledgeBase.getDeptId(),
+                    accessibleKnowledgeBaseId);
             if (recResult != null && recResult.isHasRecognizedDocs()) {
                 try {
                     String jsonDocs = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(recResult.getRecognizedDocs());
@@ -346,15 +359,23 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
             // 4.1 判断是否需要启用向量检索器
             ContentRetriever contentRetriever = null;
-            if (conv.getKnowledgeBaseId() != null) {
-                log.info(">>> 会话关联知识库ID: {}, 启用 RAG 向量检索...", conv.getKnowledgeBaseId());
+            if (accessibleKnowledgeBase != null
+                    && "READY".equalsIgnoreCase(accessibleKnowledgeBase.getIndexStatus())) {
+                log.info(">>> 会话关联知识库ID: {}, 启用 RAG 向量检索...", accessibleKnowledgeBase.getId());
+                AiVectorStoreResolver.VectorContext vectorContext = vectorStoreResolver.resolve(accessibleKnowledgeBase);
                 contentRetriever = EmbeddingStoreContentRetriever.builder()
-                        .embeddingStore(embeddingStore)
-                        .embeddingModel(embeddingModel)
-                        .maxResults(5)
-                        .minScore(0.5)
-                        .filter(metadataKey("knowledge_base_id").isEqualTo(conv.getKnowledgeBaseId().toString()))
+                        .embeddingStore(vectorContext.embeddingStore())
+                        .embeddingModel(vectorContext.embeddingModel())
+                        .maxResults(accessibleKnowledgeBase.getRetrievalTopK() == null
+                                ? 5 : accessibleKnowledgeBase.getRetrievalTopK())
+                        .minScore(accessibleKnowledgeBase.getRetrievalMinScore() == null
+                                ? 0.5 : accessibleKnowledgeBase.getRetrievalMinScore())
+                        .filter(metadataKey("knowledge_base_id")
+                                .isEqualTo(accessibleKnowledgeBase.getId().toString()))
                         .build();
+            } else if (accessibleKnowledgeBase != null) {
+                log.warn(">>> 知识库 {} 索引状态为 {}，本次禁用 RAG",
+                        accessibleKnowledgeBase.getId(), accessibleKnowledgeBase.getIndexStatus());
             }
 
             // 5. 使用 AiServices 动态构建代理并注册工具类
@@ -753,5 +774,12 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             }
         }
         return names;
+    }
+
+    private void requireKnowledgeBaseAccess(Long knowledgeBaseId) {
+        if (knowledgeBaseId != null
+                && knowledgeService.selectAccessibleKnowledgeBaseById(knowledgeBaseId) == null) {
+            throw new IllegalArgumentException("知识库不存在或无访问权限");
+        }
     }
 }

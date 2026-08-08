@@ -79,14 +79,9 @@ public class AiRagConfig
             builder.withApiKey(qdrant.getApiKey().trim());
         }
 
-        QdrantClient client = new QdrantClient(builder.build());
-        try {
-            QdrantCollectionInitializer.initialize(client, qdrant);
-            return client;
-        } catch (RuntimeException e) {
-            client.close();
-            throw e;
-        }
+        // Collection schema depends on the embedding model bound to each knowledge base.
+        // It is initialized lazily by AiVectorStoreResolver once that model is known.
+        return new QdrantClient(builder.build());
     }
 
     @Bean

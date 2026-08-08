@@ -73,6 +73,22 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "模型用途类型 (CHAT / EMBEDDING / IMAGE)")
     private String modelType;
 
+    /** 向量模型输出维度（仅 EMBEDDING 类型有效） */
+    @Schema(description = "向量模型输出维度")
+    private Integer embeddingDimension;
+
+    /** 向量维度模式：MODEL_DEFAULT 使用模型默认值，REQUEST 将维度传给提供商 */
+    @Schema(description = "向量维度模式：MODEL_DEFAULT / REQUEST")
+    private String embeddingDimensionMode;
+
+    /** 向量模型最大输入 Token 数，仅用于配置校验和界面提示 */
+    @Schema(description = "向量模型最大输入 Token 数")
+    private Integer embeddingMaxInputTokens;
+
+    /** 向量化批量大小 */
+    @Schema(description = "向量化批量大小")
+    private Integer embeddingBatchSize;
+
     /** 当前模型启用的工具集白名单 */
     @Schema(description = "当前模型启用的工具集白名单")
     private String enabledTools;
@@ -136,4 +152,3 @@ public class AiModelConfig extends BaseEntity
     @TableLogic(value = "0", delval = "2")
     private String delFlag;
 }
-

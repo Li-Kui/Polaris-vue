@@ -14,6 +14,10 @@ CREATE TABLE `ai_model_config` (
   `api_key` varchar(255) DEFAULT NULL COMMENT 'API Key',
   `base_url` varchar(255) DEFAULT NULL COMMENT 'API Base URL',
   `model_type` varchar(32) NOT NULL DEFAULT 'CHAT' COMMENT '模型用途类型(CHAT/EMBEDDING/IMAGE)',
+  `embedding_dimension` int(11) DEFAULT NULL COMMENT '向量模型输出维度',
+  `embedding_dimension_mode` varchar(20) DEFAULT 'MODEL_DEFAULT' COMMENT '维度模式(MODEL_DEFAULT/REQUEST)',
+  `embedding_max_input_tokens` int(11) DEFAULT NULL COMMENT '向量模型最大输入Token数',
+  `embedding_batch_size` int(11) DEFAULT '16' COMMENT '向量化批量大小',
   `max_tokens` int(11) DEFAULT '2048' COMMENT '最大Token数',
   `temperature` double DEFAULT '0.7' COMMENT '随机温度',
   `max_history_messages` int(11) DEFAULT '20' COMMENT '最大历史消息数',
@@ -47,8 +51,8 @@ CREATE TABLE `ai_model_config` (
 INSERT INTO `ai_model_config` (name, provider, model_name, api_key, base_url, model_type, max_tokens, temperature, max_history_messages, system_prompt, is_default, status, create_by, create_time)
 VALUES ('DeepSeek官方聊天', 'deepseek', 'deepseek-chat', 'sk-您的Key', NULL, 'CHAT', 4096, 0.7, 20, '你是一个由 DeepSeek 提供技术支持的 AI 助手。', '1', '1', 'admin', NOW());
 
-INSERT INTO `ai_model_config` (name, provider, model_name, api_key, base_url, model_type, is_default, status, create_by, create_time)
-VALUES ('阿里通义向量', 'dashscope', 'text-embedding-v3', 'sk-您的Key', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'EMBEDDING', '1', '1', 'admin', NOW());
+INSERT INTO `ai_model_config` (name, provider, model_name, api_key, base_url, model_type, embedding_dimension, embedding_dimension_mode, embedding_batch_size, is_default, status, create_by, create_time)
+VALUES ('阿里通义向量', 'dashscope', 'text-embedding-v3', 'sk-您的Key', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'EMBEDDING', 1024, 'MODEL_DEFAULT', 16, '1', '1', 'admin', NOW());
 
 -- ----------------------------
 -- 2. Table structure for ai_knowledge_base (AI知识库表)
@@ -58,6 +62,17 @@ CREATE TABLE `ai_knowledge_base` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `name` varchar(100) NOT NULL COMMENT '知识库名称',
   `description` varchar(500) DEFAULT NULL COMMENT '知识库描述',
+  `embedding_model_id` bigint(20) DEFAULT NULL COMMENT '绑定的向量模型配置ID',
+  `vector_collection` varchar(200) DEFAULT NULL COMMENT '当前生效的向量collection',
+  `chunk_size` int(11) NOT NULL DEFAULT '300' COMMENT '切片最大字符数',
+  `chunk_overlap` int(11) NOT NULL DEFAULT '30' COMMENT '切片重叠字符数',
+  `splitter_type` varchar(32) NOT NULL DEFAULT 'RECURSIVE' COMMENT '切片算法',
+  `retrieval_top_k` int(11) NOT NULL DEFAULT '5' COMMENT '最大召回数量',
+  `retrieval_min_score` double NOT NULL DEFAULT '0.5' COMMENT '最低相似度',
+  `index_version` bigint(20) NOT NULL DEFAULT '0' COMMENT '当前索引版本',
+  `index_signature` varchar(64) DEFAULT NULL COMMENT '索引配置签名',
+  `index_status` varchar(20) NOT NULL DEFAULT 'EMPTY' COMMENT '索引状态',
+  `index_error` varchar(1000) DEFAULT NULL COMMENT '最近索引失败原因',
   `dept_id` bigint(20) DEFAULT NULL COMMENT '部门ID',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',

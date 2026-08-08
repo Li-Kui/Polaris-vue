@@ -76,9 +76,34 @@
         <header class="kb-content-header">
           <div class="kb-detail-title">
             <h2>{{ currentKb.name }}</h2>
-            <el-tag class="kb-tag" type="info">向量知识库</el-tag>
+            <div class="kb-detail-actions">
+              <el-tag class="kb-tag" type="info">向量知识库</el-tag>
+              <el-tag
+                class="kb-index-status"
+                :type="getIndexStatusTag(currentKb.indexStatus)"
+                effect="plain"
+              >
+                {{ getIndexStatusText(currentKb.indexStatus) }}
+              </el-tag>
+              <el-button
+                :loading="currentKb.indexStatus === 'BUILDING'"
+                class="kb-rebuild-button"
+                icon="Refresh"
+                size="small"
+                type="primary"
+                @click="handleRebuildKb"
+              >重建索引</el-button>
+            </div>
           </div>
           <p class="kb-detail-desc">{{ currentKb.description || '这个知识库还没有填写描述。' }}</p>
+          <el-alert
+            v-if="currentKb.indexError"
+            :closable="false"
+            :title="currentKb.indexError"
+            class="kb-index-error"
+            show-icon
+            type="warning"
+          />
         </header>
 
         <!-- 拖拽上传区 -->
@@ -87,6 +112,7 @@
             :action="uploadUrl"
             :before-upload="beforeUpload"
             :data="uploadData"
+            :disabled="currentKb.indexStatus === 'BUILDING'"
             :headers="uploadHeaders"
             :on-error="handleUploadError"
             :on-success="handleUploadSuccess"
@@ -179,9 +205,9 @@
       v-model="openDialog"
       append-to-body
       class="polaris-glass-dialog"
-      width="500px"
+      width="720px"
     >
-      <el-form ref="form" :model="form" :rules="rules" label-width="90px">
+      <el-form ref="form" :model="form" :rules="rules" label-width="120px">
         <el-form-item prop="name">
           <template #label>
             <span class="form-label-item">
@@ -207,6 +233,39 @@
             type="textarea"
           />
         </el-form-item>
+        <el-form-item label="向量模型" prop="embeddingModelId">
+          <el-select v-model="form.embeddingModelId" clearable placeholder="不选择则绑定当前默认向量模型" style="width: 100%;">
+            <el-option
+              v-for="model in embeddingModels"
+              :key="model.id"
+              :disabled="!model.embeddingDimension"
+              :label="`${model.name} / ${model.modelName} / ${model.embeddingDimension ? model.embeddingDimension + '维' : '维度未确认'}`"
+              :value="model.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-row :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="切片大小" prop="chunkSize">
+              <el-input-number v-model="form.chunkSize" :min="50" :max="20000" controls-position="right" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="重叠字符" prop="chunkOverlap">
+              <el-input-number v-model="form.chunkOverlap" :min="0" :max="Math.max(0, form.chunkSize - 1)" controls-position="right" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="最大召回数" prop="retrievalTopK">
+              <el-input-number v-model="form.retrievalTopK" :min="1" :max="50" controls-position="right" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="最低相似度" prop="retrievalMinScore">
+              <el-input-number v-model="form.retrievalMinScore" :min="0" :max="1" :precision="2" :step="0.05" controls-position="right" style="width: 100%;" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -226,8 +285,10 @@ import {
   listDocuments,
   listKnowledge,
   rebuildDocument,
+  rebuildKnowledge,
   updateKnowledge
 } from "@/api/ai/knowledge";
+import {listAvailableEmbeddingModel} from "@/api/ai/model";
 import {getToken} from "@/utils/auth";
 
 export default {
@@ -246,6 +307,8 @@ export default {
       currentKb: {},
       // 当前知识库的文档列表
       docList: [],
+      // 当前用户可用的向量模型
+      embeddingModels: [],
       // 列表查询参数
       queryParams: {
         name: undefined
@@ -256,14 +319,22 @@ export default {
       form: {
         id: undefined,
         name: "",
-        description: ""
+        description: "",
+        embeddingModelId: undefined,
+        chunkSize: 300,
+        chunkOverlap: 30,
+        splitterType: "RECURSIVE",
+        retrievalTopK: 5,
+        retrievalMinScore: 0.5
       },
       // 表单规则
       rules: {
         name: [
           { required: true, message: "知识库名称不能为空", trigger: "blur" },
           { min: 2, max: 40, message: "长度在 2 到 40 个字符之间", trigger: "blur" }
-        ]
+        ],
+        chunkSize: [{ required: true, message: "请输入切片大小", trigger: "change" }],
+        chunkOverlap: [{ required: true, message: "请输入重叠字符数", trigger: "change" }]
       },
       // 上传配置
       uploadUrl: import.meta.env.VITE_APP_BASE_API + "/ai/knowledge/document/upload",
@@ -283,6 +354,7 @@ export default {
   },
   created() {
     this.getKbList();
+    this.getEmbeddingModels();
   },
   beforeUnmount() {
     this.stopStatusPolling();
@@ -294,12 +366,21 @@ export default {
       listKnowledge(this.queryParams).then(response => {
         this.kbList = response.data.rows || [];
         this.loadingKb = false;
+        if (this.currentKbId) {
+          const current = this.kbList.find(item => item.id === this.currentKbId);
+          if (current) this.currentKb = current;
+        }
         // 默认选中第一个知识库
         if (this.kbList.length > 0 && !this.currentKbId) {
           this.handleSelectKb(this.kbList[0]);
         }
       }).catch(() => {
         this.loadingKb = false;
+      });
+    },
+    getEmbeddingModels() {
+      listAvailableEmbeddingModel().then(response => {
+        this.embeddingModels = response.data || [];
       });
     },
     // 过滤知识库
@@ -321,7 +402,7 @@ export default {
         this.loadingDoc = false;
         // 如果列表中包含处于"解析中(1)"状态的文档，则启动定时轮询刷新状态
         const hasParsing = this.docList.some(doc => doc.status === "1" || doc.status === "0");
-        if (hasParsing) {
+        if (hasParsing || this.currentKb.indexStatus === "BUILDING") {
           this.startStatusPolling();
         } else {
           this.stopStatusPolling();
@@ -335,9 +416,16 @@ export default {
       if (this.timer) return;
       this.timer = setInterval(() => {
         if (!this.currentKbId) return;
-        listDocuments({ knowledgeBaseId: this.currentKbId }).then(response => {
-          this.docList = response.data.rows || [];
-          const stillParsing = this.docList.some(doc => doc.status === "1" || doc.status === "0");
+        Promise.all([
+          listDocuments({ knowledgeBaseId: this.currentKbId }),
+          listKnowledge(this.queryParams)
+        ]).then(([documentResponse, knowledgeResponse]) => {
+          this.docList = documentResponse.data.rows || [];
+          this.kbList = knowledgeResponse.data.rows || [];
+          const current = this.kbList.find(item => item.id === this.currentKbId);
+          if (current) this.currentKb = current;
+          const stillParsing = this.docList.some(doc => doc.status === "1" || doc.status === "0")
+            || this.currentKb.indexStatus === "BUILDING";
           if (!stillParsing) {
             this.stopStatusPolling();
           }
@@ -362,7 +450,13 @@ export default {
       this.form = {
         id: kb.id,
         name: kb.name,
-        description: kb.description
+        description: kb.description,
+        embeddingModelId: kb.embeddingModelId,
+        chunkSize: kb.chunkSize || 300,
+        chunkOverlap: kb.chunkOverlap == null ? 30 : kb.chunkOverlap,
+        splitterType: kb.splitterType || "RECURSIVE",
+        retrievalTopK: kb.retrievalTopK || 5,
+        retrievalMinScore: kb.retrievalMinScore == null ? 0.5 : kb.retrievalMinScore
       };
       this.dialogTitle = "修改知识库";
       this.openDialog = true;
@@ -442,12 +536,28 @@ export default {
         this.getDocList();
       });
     },
+    handleRebuildKb() {
+      if (!this.currentKbId) return;
+      this.$modal.confirm(`确认重建知识库 "${this.currentKb.name}" 的全部向量索引吗？`).then(() => {
+        return rebuildKnowledge(this.currentKbId);
+      }).then(() => {
+        this.currentKb.indexStatus = "BUILDING";
+        this.$modal.msgSuccess("已提交安全重建任务");
+        this.startStatusPolling();
+      }).catch(() => {});
+    },
     // 重置表单
     resetForm() {
       this.form = {
         id: undefined,
         name: "",
-        description: ""
+        description: "",
+        embeddingModelId: undefined,
+        chunkSize: 300,
+        chunkOverlap: 30,
+        splitterType: "RECURSIVE",
+        retrievalTopK: 5,
+        retrievalMinScore: 0.5
       };
       if (this.$refs["form"]) {
         this.$refs["form"].resetFields();
@@ -488,6 +598,25 @@ export default {
         case "2": return "就绪 (已向量化)";
         case "3": return "解析失败";
         default: return "未知";
+      }
+    },
+    getIndexStatusTag(status) {
+      switch (status) {
+        case "READY": return "success";
+        case "BUILDING": return "warning";
+        case "STALE": return "warning";
+        case "FAILED": return "danger";
+        default: return "info";
+      }
+    },
+    getIndexStatusText(status) {
+      switch (status) {
+        case "READY": return "索引就绪";
+        case "BUILDING": return "索引构建中";
+        case "STALE": return "索引需重建";
+        case "FAILED": return "索引失败";
+        case "EMPTY": return "暂无索引";
+        default: return "索引状态未知";
       }
     }
   }
@@ -794,20 +923,33 @@ export default {
 
 .kb-content-header {
   margin-bottom: 4px;
+  min-width: 0;
 }
 
 .kb-detail-title {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   margin-bottom: 8px;
+  min-width: 0;
 }
 
 .kb-detail-title h2 {
   margin: 0;
+  max-width: 100%;
   font-size: 22px;
   font-weight: 800;
   color: var(--el-text-color-primary);
+  overflow-wrap: anywhere;
+}
+
+.kb-detail-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
 }
 
 .kb-tag {
@@ -825,11 +967,80 @@ export default {
   }
 }
 
+.kb-index-status {
+  flex: 0 0 auto;
+  border-radius: 6px;
+  font-weight: 700;
+}
+
+:deep(.kb-rebuild-button.el-button--primary) {
+  --el-button-bg-color: #4f46e5;
+  --el-button-border-color: #4f46e5;
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: #4338ca;
+  --el-button-hover-border-color: #4338ca;
+  --el-button-hover-text-color: #ffffff;
+  --el-button-active-bg-color: #3730a3;
+  --el-button-active-border-color: #3730a3;
+  min-width: 92px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background-color: #4f46e5 !important;
+  border-color: #4f46e5 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  flex: 0 0 auto;
+
+  &:hover,
+  &:focus {
+    background-color: #4338ca !important;
+    border-color: #4338ca !important;
+    color: #ffffff !important;
+  }
+
+  &.is-disabled,
+  &.is-loading {
+    background-color: #818cf8 !important;
+    border-color: #818cf8 !important;
+    color: #ffffff !important;
+  }
+}
+
 .kb-detail-desc {
   margin: 0;
   font-size: 13.5px;
   color: var(--el-text-color-secondary);
   line-height: 1.6;
+}
+
+.kb-index-error {
+  width: 100%;
+  margin-top: 10px;
+}
+
+:deep(.kb-index-error .el-alert__content) {
+  min-width: 0;
+}
+
+:deep(.kb-index-error .el-alert__title) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .kb-content {
+    padding: 20px;
+  }
+
+  .kb-detail-title {
+    align-items: flex-start;
+  }
+
+  .kb-detail-actions {
+    width: 100%;
+  }
 }
 
 /* 上传板块设计 */

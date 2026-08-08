@@ -22,6 +22,9 @@ public interface IAiModelConfigService extends IService<AiModelConfig>
      */
     List<AiModelConfig> selectAvailableModelConfigs(Long deptId, Boolean isAdmin);
 
+    /** 查询当前用户可用的指定类型模型。 */
+    List<AiModelConfig> selectAvailableModelConfigsByType(String modelType, Long deptId, Boolean isAdmin);
+
     /**
      * 根据 ID 获取模型配置详情
      */

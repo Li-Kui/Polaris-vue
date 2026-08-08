@@ -25,6 +25,14 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
             @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
 
     /**
+     * 查询当前用户可用的指定类型模型。
+     */
+    List<AiModelConfig> selectAvailableModelConfigsByType(
+            @org.apache.ibatis.annotations.Param("modelType") String modelType,
+            @org.apache.ibatis.annotations.Param("deptId") Long deptId,
+            @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
+
+    /**
      * 根据 ID 获取模型配置详情
      */
     AiModelConfig selectModelConfigById(Long id);

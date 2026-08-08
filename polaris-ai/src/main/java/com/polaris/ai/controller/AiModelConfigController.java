@@ -1,8 +1,11 @@
 package com.polaris.ai.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.dto.FetchModelsRequest;
 import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.service.IAiKnowledgeService;
 import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.service.IAiRemoteModelService;
 import com.polaris.common.annotation.ApiGroup;
@@ -21,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 
 /**
  * AI 模型配置控制器
@@ -42,6 +47,9 @@ public class AiModelConfigController extends BaseController {
 
     @Autowired
     private IAiRemoteModelService remoteModelService;
+
+    @Autowired
+    private IAiKnowledgeService knowledgeService;
 
     /**
      * 查询模型配置列表
@@ -73,6 +81,22 @@ public class AiModelConfigController extends BaseController {
     }
 
     /**
+     * 查询当前用户可用于知识库的向量模型。
+     */
+    @Operation(summary = "查询当前用户可用的向量模型列表")
+    @GetMapping("/list/availableEmbedding")
+    public ResultData<List<AiModelConfig>> listAvailableEmbedding() {
+        Long userId = SecurityUtils.getUserId();
+        boolean isAdmin = SecurityUtils.isAdmin(userId);
+        Long deptId = null;
+        if (!isAdmin && SecurityUtils.getLoginUser() != null
+                && SecurityUtils.getLoginUser().getUser() != null) {
+            deptId = SecurityUtils.getLoginUser().getUser().getDeptId();
+        }
+        return ok(modelConfigService.selectAvailableModelConfigsByType("EMBEDDING", deptId, isAdmin));
+    }
+
+    /**
      * 获取模型配置详情
      */
     @Operation(summary = "获取模型配置详情")
@@ -88,6 +112,14 @@ public class AiModelConfigController extends BaseController {
     @Log(title = "模型管理", businessType = BusinessType.INSERT)
     @PostMapping
     public ResultData add(@RequestBody AiModelConfig config) {
+        String validationError = validateEmbeddingConfig(config);
+        if (validationError != null) {
+            return ResultData.fail(validationError);
+        }
+        if ("EMBEDDING".equalsIgnoreCase(config.getModelType())
+                && "1".equals(config.getIsDefault())) {
+            return ResultData.fail("请先保存向量模型，再通过“设为默认向量”执行连接与维度探测");
+        }
         config.setCreateBy(SecurityUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
@@ -116,6 +148,20 @@ public class AiModelConfigController extends BaseController {
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
         }
+        mergeEmbeddingFieldsForValidation(config, existing);
+        String validationError = validateEmbeddingConfig(config);
+        if (validationError != null) {
+            return ResultData.fail(validationError);
+        }
+        boolean embeddingSpaceChanged = changesEmbeddingSpace(existing, config);
+        if ("EMBEDDING".equalsIgnoreCase(config.getModelType())
+                && "1".equals(config.getIsDefault())
+                && !"1".equals(existing.getIsDefault())) {
+            return ResultData.fail("请通过“设为默认向量”执行连接与维度探测");
+        }
+        if (embeddingSpaceChanged && "1".equals(existing.getIsDefault())) {
+            config.setIsDefault("0");
+        }
 
         // 公共模型权限校验：仅超管或创建者可编辑
         if (existing.getDeptId() == null) {
@@ -140,6 +186,10 @@ public class AiModelConfigController extends BaseController {
 
         int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache(); // 清除工厂缓存以应用最新配置
+        if (result > 0 && embeddingSpaceChanged) {
+            knowledgeService.markIndexesStaleByEmbeddingModelId(
+                    existing.getId(), "绑定的向量模型配置已变更，请重建知识库索引");
+        }
         return toAjaxResult(result);
     }
 
@@ -153,6 +203,14 @@ public class AiModelConfigController extends BaseController {
         AiModelConfig existing = modelConfigService.selectModelConfigById(id);
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
+        }
+        if ("EMBEDDING".equalsIgnoreCase(existing.getModelType())) {
+            long referencedKnowledgeBases = knowledgeService.count(
+                    new LambdaQueryWrapper<AiKnowledgeBase>()
+                            .eq(AiKnowledgeBase::getEmbeddingModelId, id));
+            if (referencedKnowledgeBases > 0) {
+                return ResultData.fail("该向量模型仍被 " + referencedKnowledgeBases + " 个知识库绑定，不能删除");
+            }
         }
 
         // 公共模型权限校验：仅超管或创建者可删除
@@ -180,6 +238,12 @@ public class AiModelConfigController extends BaseController {
         AiModelConfig existing = modelConfigService.selectModelConfigById(id);
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
+        }
+        if (!"CHAT".equalsIgnoreCase(existing.getModelType())) {
+            return ResultData.fail("只有 CHAT 类型模型可以设为默认聊天模型");
+        }
+        if (!"1".equals(existing.getStatus())) {
+            return ResultData.fail("聊天模型未启用，不能设为默认模型");
         }
 
         // 公共模型权限校验：仅超管或创建者可操作
@@ -212,6 +276,12 @@ public class AiModelConfigController extends BaseController {
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
         }
+        if (!"EMBEDDING".equalsIgnoreCase(existing.getModelType())) {
+            return ResultData.fail("只有 EMBEDDING 类型模型可以设为默认向量模型");
+        }
+        if (!"1".equals(existing.getStatus())) {
+            return ResultData.fail("向量模型未启用，不能设为默认模型");
+        }
 
         // 公共模型权限校验：仅超管或创建者可操作
         if (existing.getDeptId() == null) {
@@ -222,6 +292,13 @@ public class AiModelConfigController extends BaseController {
             }
         }
 
+        try {
+            modelFactory.probeEmbeddingDimension(existing);
+        } catch (Exception e) {
+            log.warn("向量模型启用探测失败, id={}", id, e);
+            return ResultData.fail("向量模型连接或维度探测失败：" + e.getMessage());
+        }
+
         modelConfigService.cleanDefaultStatus("EMBEDDING", existing.getDeptId());
         AiModelConfig config = new AiModelConfig();
         config.setId(id);
@@ -229,6 +306,74 @@ public class AiModelConfigController extends BaseController {
         int result = modelConfigService.updateModelConfig(config);
         modelFactory.clearCache();
         return toAjaxResult(result);
+    }
+
+    private String validateEmbeddingConfig(AiModelConfig config) {
+        if (config == null || !"EMBEDDING".equalsIgnoreCase(config.getModelType())) {
+            return null;
+        }
+        if (config.getEmbeddingDimension() != null && config.getEmbeddingDimension() <= 0) {
+            return "向量维度必须大于 0";
+        }
+        String dimensionMode = config.getEmbeddingDimensionMode();
+        if (dimensionMode == null || dimensionMode.trim().isEmpty()) {
+            config.setEmbeddingDimensionMode("MODEL_DEFAULT");
+        } else {
+            dimensionMode = dimensionMode.trim().toUpperCase(Locale.ROOT);
+            if (!"MODEL_DEFAULT".equals(dimensionMode) && !"REQUEST".equals(dimensionMode)) {
+                return "向量维度模式只支持 MODEL_DEFAULT 或 REQUEST";
+            }
+            config.setEmbeddingDimensionMode(dimensionMode);
+        }
+        if ("REQUEST".equals(config.getEmbeddingDimensionMode())
+                && config.getEmbeddingDimension() == null) {
+            return "REQUEST 维度模式必须填写向量维度";
+        }
+        if (config.getEmbeddingBatchSize() == null) {
+            config.setEmbeddingBatchSize(16);
+        } else if (config.getEmbeddingBatchSize() < 1 || config.getEmbeddingBatchSize() > 2048) {
+            return "向量化批量大小必须处于 1-2048";
+        }
+        if (config.getEmbeddingMaxInputTokens() != null && config.getEmbeddingMaxInputTokens() <= 0) {
+            return "向量模型最大输入 Token 数必须大于 0";
+        }
+        return null;
+    }
+
+    private void mergeEmbeddingFieldsForValidation(AiModelConfig update, AiModelConfig existing) {
+        if (update.getModelType() == null) update.setModelType(existing.getModelType());
+        if (update.getEmbeddingDimension() == null) {
+            update.setEmbeddingDimension(existing.getEmbeddingDimension());
+        }
+        if (update.getEmbeddingDimensionMode() == null) {
+            update.setEmbeddingDimensionMode(existing.getEmbeddingDimensionMode());
+        }
+        if (update.getEmbeddingMaxInputTokens() == null) {
+            update.setEmbeddingMaxInputTokens(existing.getEmbeddingMaxInputTokens());
+        }
+        if (update.getEmbeddingBatchSize() == null) {
+            update.setEmbeddingBatchSize(existing.getEmbeddingBatchSize());
+        }
+        if (update.getStatus() == null) update.setStatus(existing.getStatus());
+    }
+
+    private boolean changesEmbeddingSpace(AiModelConfig existing, AiModelConfig update) {
+        if (!"EMBEDDING".equalsIgnoreCase(existing.getModelType())
+                && !"EMBEDDING".equalsIgnoreCase(update.getModelType())) {
+            return false;
+        }
+        return changed(existing.getProvider(), update.getProvider())
+                || changed(existing.getModelName(), update.getModelName())
+                || changed(existing.getBaseUrl(), update.getBaseUrl())
+                || changed(existing.getAccessMode(), update.getAccessMode())
+                || changed(existing.getModelType(), update.getModelType())
+                || changed(existing.getEmbeddingDimension(), update.getEmbeddingDimension())
+                || changed(existing.getEmbeddingDimensionMode(), update.getEmbeddingDimensionMode())
+                || changed(existing.getStatus(), update.getStatus());
+    }
+
+    private boolean changed(Object current, Object update) {
+        return update != null && !Objects.equals(current, update);
     }
 
     /**
@@ -242,6 +387,12 @@ public class AiModelConfigController extends BaseController {
         AiModelConfig existing = modelConfigService.selectModelConfigById(id);
         if (existing == null) {
             return ResultData.fail("模型配置不存在");
+        }
+        if (!"IMAGE".equalsIgnoreCase(existing.getModelType())) {
+            return ResultData.fail("只有 IMAGE 类型模型可以设为默认绘图模型");
+        }
+        if (!"1".equals(existing.getStatus())) {
+            return ResultData.fail("绘图模型未启用，不能设为默认模型");
         }
 
         // 公共模型权限校验
