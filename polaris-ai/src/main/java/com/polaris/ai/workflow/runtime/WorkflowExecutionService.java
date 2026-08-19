@@ -38,6 +38,13 @@ public class WorkflowExecutionService {
     private final int maxConcurrentPerUser;
     private final int maxPendingApprovalsPerUser;
 
+    @Autowired(required = false)
+    private com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService;
+
+    public void setModeratedInputPreparationService(com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService) {
+        this.moderatedInputPreparationService = moderatedInputPreparationService;
+    }
+
     public WorkflowExecutionService(
             IAiWorkflowService workflowService,
             AiChatMapper aiChatMapper,
@@ -69,9 +76,38 @@ public class WorkflowExecutionService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    public WorkflowExecutionStore.Execution prepare(com.polaris.ai.workflow.api.WorkflowRunRequest request, Long userId) {
+        if (request == null) {
+            throw new ServiceException("请求参数不能为空");
+        }
+        return prepare(request.getWorkflowCode(), request.getMessage(), request.getFileUrl(),
+                request.getAttachmentTokens(), request.getConversationId(), userId, request.isTestRun());
+    }
+
+    @Transactional(rollbackFor = Exception.class)
     public WorkflowExecutionStore.Execution prepare(
             String workflowCode, String input, String fileUrl,
             Long conversationId, Long userId, boolean testRun) {
+        return prepare(workflowCode, input, fileUrl, java.util.List.of(), conversationId, userId, testRun);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public WorkflowExecutionStore.Execution prepare(
+            String workflowCode, String input, String fileUrl,
+            List<String> attachmentTokens,
+            Long conversationId, Long userId, boolean testRun) {
+
+        if (moderatedInputPreparationService != null) {
+            moderatedInputPreparationService.prepare(
+                    com.polaris.ai.safety.model.ModerationScene.WORKFLOW_INPUT,
+                    input,
+                    attachmentTokens,
+                    userId,
+                    "WORKFLOW",
+                    workflowCode
+            );
+        }
+
         if (!executionStore.lockUserForExecution(userId)) {
             throw new ServiceException("当前用户不存在或已停用");
         }

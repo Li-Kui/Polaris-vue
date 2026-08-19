@@ -1,0 +1,220 @@
+{
+  "sourceVersion": "polaris-sensitive-seed-v3",
+  "checksum": "e4836b6fe9aa6fb1ba6e3f322b9172cb657ff7323538322cb435fbb5faf4d2c8",
+  "generatedAt": "2026-08-13",
+  "source": {
+    "repository": "https://github.com/houbb/sensitive-word",
+    "sourceVersion": "0.29.5",
+    "license": "Apache-2.0"
+  },
+  "rules": [
+    {
+      "id": "seed-risk-word-gambling",
+      "ruleType": "RISK_WORD",
+      "content": "赌博",
+      "normalizedContent": "赌博",
+      "category": "GAMBLING",
+      "weight": 25
+    },
+    {
+      "id": "seed-risk-word-pornography",
+      "ruleType": "RISK_WORD",
+      "content": "色情",
+      "normalizedContent": "色情",
+      "category": "PORNOGRAPHY",
+      "weight": 25
+    },
+    {
+      "id": "seed-risk-word-drugs",
+      "ruleType": "RISK_WORD",
+      "content": "毒品",
+      "normalizedContent": "毒品",
+      "category": "DRUGS",
+      "weight": 25
+    },
+    {
+      "id": "seed-risk-context-resource-noun",
+      "ruleType": "RISK_CONTEXT",
+      "content": "资源",
+      "normalizedContent": "资源",
+      "category": "GENERAL",
+      "weight": 10
+    },
+    {
+      "id": "seed-risk-context-group",
+      "ruleType": "RISK_CONTEXT",
+      "content": "加群",
+      "normalizedContent": "加群",
+      "category": "GENERAL",
+      "weight": 20
+    },
+    {
+      "id": "seed-risk-context-payment",
+      "ruleType": "RISK_CONTEXT",
+      "content": "付款",
+      "normalizedContent": "付款",
+      "category": "GENERAL",
+      "weight": 20
+    },
+    {
+      "id": "seed-risk-context-address",
+      "ruleType": "RISK_CONTEXT",
+      "content": "地址",
+      "normalizedContent": "地址",
+      "category": "GENERAL",
+      "weight": 25
+    },
+    {
+      "id": "seed-risk-context-purchase",
+      "ruleType": "RISK_CONTEXT",
+      "content": "购买",
+      "normalizedContent": "购买",
+      "category": "GENERAL",
+      "weight": 20
+    },
+    {
+      "id": "seed-risk-context-tutorial",
+      "ruleType": "RISK_CONTEXT",
+      "content": "教程",
+      "normalizedContent": "教程",
+      "category": "GENERAL",
+      "weight": 20
+    },
+    {
+      "id": "seed-risk-context-download-link",
+      "ruleType": "RISK_CONTEXT",
+      "content": "下载链接",
+      "normalizedContent": "下载链接",
+      "category": "GENERAL",
+      "weight": 15
+    },
+    {
+      "id": "seed-risk-context-transaction",
+      "ruleType": "RISK_CONTEXT",
+      "content": "交易",
+      "normalizedContent": "交易",
+      "category": "GENERAL",
+      "weight": 15
+    },
+    {
+      "id": "seed-risk-context-contact",
+      "ruleType": "RISK_CONTEXT",
+      "content": "联系方式",
+      "normalizedContent": "联系方式",
+      "category": "GENERAL",
+      "weight": 45
+    },
+    {
+      "id": "seed-risk-context-wechat",
+      "ruleType": "RISK_CONTEXT",
+      "content": "微信",
+      "normalizedContent": "微信",
+      "category": "GENERAL",
+      "weight": 45
+    },
+    {
+      "id": "seed-safe-context-prohibition",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "严禁",
+      "normalizedContent": "严禁",
+      "category": "GENERAL",
+      "weight": -40
+    },
+    {
+      "id": "seed-safe-context-public-security",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "警方",
+      "normalizedContent": "警方",
+      "category": "GENERAL",
+      "weight": -25
+    },
+    {
+      "id": "seed-safe-context-enforcement",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "打击",
+      "normalizedContent": "打击",
+      "category": "GENERAL",
+      "weight": -35
+    },
+    {
+      "id": "seed-safe-context-drug-prevention",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "禁毒",
+      "normalizedContent": "禁毒",
+      "category": "DRUGS",
+      "weight": -35
+    },
+    {
+      "id": "seed-safe-context-research",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "研究",
+      "normalizedContent": "研究",
+      "category": "GENERAL",
+      "weight": -25
+    },
+    {
+      "id": "seed-safe-context-governance",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "治理",
+      "normalizedContent": "治理",
+      "category": "GENERAL",
+      "weight": -25
+    },
+    {
+      "id": "seed-safe-context-antivirus",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "杀毒软件",
+      "normalizedContent": "杀毒软件",
+      "category": "DRUGS",
+      "weight": -40
+    },
+    {
+      "id": "seed-safe-context-law",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "法律",
+      "normalizedContent": "法律",
+      "category": "GENERAL",
+      "weight": -25
+    },
+    {
+      "id": "seed-safe-context-gambling-law",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "赌博罪",
+      "normalizedContent": "赌博罪",
+      "category": "GAMBLING",
+      "weight": -35
+    },
+    {
+      "id": "seed-safe-context-publicity-framing",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "宣传如何",
+      "normalizedContent": "宣传如何",
+      "category": "GENERAL",
+      "weight": -30
+    },
+    {
+      "id": "seed-safe-context-identification-framing",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "如何识别",
+      "normalizedContent": "如何识别",
+      "category": "GENERAL",
+      "weight": -30
+    },
+    {
+      "id": "seed-safe-context-prevention-publicity",
+      "ruleType": "SAFE_CONTEXT",
+      "content": "防范宣传",
+      "normalizedContent": "防范宣传",
+      "category": "GENERAL",
+      "weight": -35
+    },
+    {
+      "id": "seed-allow-term-criminal-code",
+      "ruleType": "ALLOW_TERM",
+      "content": "中华人民共和国刑法",
+      "normalizedContent": "中华人民共和国刑法",
+      "category": "GENERAL",
+      "weight": 0
+    }
+  ]
+}

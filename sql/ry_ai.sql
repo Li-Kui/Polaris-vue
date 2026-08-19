@@ -94,6 +94,11 @@ CREATE TABLE `ai_document` (
   `file_url` varchar(500) NOT NULL COMMENT '文件OSS/本地路径',
   `status` char(1) DEFAULT '0' COMMENT '状态（0待解析 1解析中 2已解析 3失败）',
   `word_count` int(11) DEFAULT '0' COMMENT '总字数',
+  `moderation_status` varchar(20) NOT NULL DEFAULT 'WAIT_SCAN' COMMENT 'WAIT_SCAN/SCANNING/SAFE/QUARANTINED/SCAN_FAILED/AUTO_DELETED',
+  `moderation_event_id` bigint(20) DEFAULT NULL COMMENT '最近检测事件ID',
+  `moderation_version` bigint(20) DEFAULT NULL COMMENT '检测使用的词库版本ID',
+  `quarantine_path` varchar(1000) DEFAULT NULL COMMENT '隔离文件私有路径',
+  `quarantine_expire_time` datetime DEFAULT NULL COMMENT '隔离文件到期时间',
   `del_flag` char(1) DEFAULT '0' COMMENT '删除标志（0代表存在 2代表删除）',
   `create_by` varchar(64) DEFAULT '' COMMENT '创建者',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
@@ -140,6 +145,10 @@ CREATE TABLE `ai_message` (
   `file_url` varchar(2000) DEFAULT NULL COMMENT '附件文件路径/链接',
   `file_name` varchar(255) DEFAULT NULL COMMENT '附件原始名称',
   `file_content` longtext DEFAULT NULL COMMENT '附件解析内容',
+  `attachment_tokens` varchar(2000) DEFAULT NULL COMMENT 'AI私有附件令牌列表',
+  `moderation_status` varchar(32) DEFAULT NULL COMMENT '安全检测状态：SAFE, INTERRUPTED_BLOCKED',
+  `moderation_event_id` bigint(20) DEFAULT NULL COMMENT '安全检测事件ID',
+  `moderation_version` bigint(20) DEFAULT NULL COMMENT '生效的词库版本号',
   `create_time` datetime DEFAULT NULL COMMENT '创建时间',
   PRIMARY KEY (`id`),
   KEY `idx_conversation_id` (`conversation_id`),
@@ -229,6 +238,7 @@ CREATE TABLE `ai_workflow_execution` (
   `test_run` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否为编排编辑器试运行（1是 0否）',
   `input_text` longtext NOT NULL COMMENT '原始用户输入',
   `file_url` varchar(2000) DEFAULT NULL COMMENT '附件引用',
+  `attachment_tokens` varchar(2000) DEFAULT NULL COMMENT 'AI私有附件令牌列表',
   `status` varchar(32) NOT NULL COMMENT 'QUEUED/RUNNING/WAITING_APPROVAL/SUCCEEDED/FAILED/CANCELLED/REJECTED',
   `current_node_id` varchar(128) DEFAULT NULL COMMENT '当前等待或执行节点实例ID',
   `result_text` longtext DEFAULT NULL COMMENT '最终输出',
@@ -337,44 +347,7 @@ CREATE TABLE `ai_image_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI图像生成任务表';
 
 -- ----------------------------
--- 12. Ruoyi 系统字典数据 (AI相关)
--- ----------------------------
--- AI模型用途大分类字典
-INSERT INTO `sys_dict_type` (dict_name, dict_type, status, create_by, create_time) 
-VALUES ('AI模型分类', 'sys_ai_model_type', '0', 'admin', NOW());
-
-INSERT INTO `sys_dict_data` (dict_sort, dict_label, dict_value, dict_type, status, create_by, create_time) VALUES 
-(1, '文本对话模型', 'CHAT', 'sys_ai_model_type', '0', 'admin', NOW()),
-(2, '向量提取模型', 'EMBEDDING', 'sys_ai_model_type', '0', 'admin', NOW()),
-(3, '图像生成模型', 'IMAGE', 'sys_ai_model_type', '0', 'admin', NOW());
-
--- AI工具箱列表字典
-INSERT INTO `sys_dict_type` (dict_name, dict_type, status, create_by, create_time) 
-VALUES ('AI工具列表', 'sys_ai_tools', '0', 'admin', NOW());
-
-INSERT INTO `sys_dict_data` (dict_sort, dict_label, dict_value, dict_type, status, create_by, create_time) VALUES 
-(1, '网络实时搜索', 'web_search', 'sys_ai_tools', '0', 'admin', NOW()),
-(2, 'AI图像生成', 'image_generate', 'sys_ai_tools', '0', 'admin', NOW());
-
--- ----------------------------
--- 13. Ruoyi 系统菜单数据 (AI绘图工坊菜单)
--- ----------------------------
-INSERT INTO `sys_menu`
-  (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
-   `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
-VALUES
-  (2050, '绘图工坊', 2000, 6, 'draw', 'ai/draw/index', NULL, 'AiDraw',
-   1, 0, 'C', '0', '0', 'ai:draw:list', 'image', 'admin', NOW(), 'AI高级绘图工坊页面');
-
--- ----------------------------
--- 增量升级 SQL 脚本（已有数据库环境直接执行以下部分）
--- ----------------------------
--- 以下两列已包含在上面的完整建表语句中。老库升级时确认列不存在后单独执行：
--- ALTER TABLE `ai_conversation` ADD COLUMN `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code';
--- ALTER TABLE `ai_conversation` ADD COLUMN `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code';
-
--- ----------------------------
--- 14. Table structure for ai_report (AI分析报告表)
+-- 12. Table structure for ai_report (AI分析报告表)
 -- ----------------------------
 DROP TABLE IF EXISTS `ai_report`;
 CREATE TABLE `ai_report` (
@@ -404,29 +377,196 @@ CREATE TABLE `ai_report` (
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI分析报告归档表';
 
--- 已安装系统升级脚本：请在确认目标列不存在后执行，重复执行会因列已存在而失败。
--- ALTER TABLE `ai_report` ADD COLUMN `refined_schema` longtext COMMENT '重塑美化JSON' AFTER `report_stats`;
--- ALTER TABLE `ai_report` ADD COLUMN `refine_status` varchar(16) NOT NULL DEFAULT 'NONE' COMMENT '美化处理状态' AFTER `refined_schema`;
--- ALTER TABLE `ai_report` ADD COLUMN `refined_source_hash` varchar(64) DEFAULT NULL COMMENT '美化结果对应的原文SHA-256' AFTER `refine_status`;
--- ALTER TABLE `ai_report` ADD COLUMN `refine_schema_version` varchar(32) DEFAULT NULL COMMENT '美化结果Schema版本' AFTER `refined_source_hash`;
--- ALTER TABLE `ai_report` ADD COLUMN `refine_prompt_version` varchar(32) DEFAULT NULL COMMENT '美化Prompt版本' AFTER `refine_schema_version`;
--- ALTER TABLE `ai_report` ADD COLUMN `refined_at` datetime DEFAULT NULL COMMENT '美化完成时间' AFTER `refine_prompt_version`;
--- ALTER TABLE `ai_report` ADD COLUMN `refine_error` varchar(500) DEFAULT NULL COMMENT '美化失败原因' AFTER `refined_at`;
--- UPDATE `ai_report` SET `refine_status` = 'NONE' WHERE `refine_status` IS NULL OR `refine_status` = '';
+-- ----------------------------
+-- 13. Table structure for ai_moderation_dictionary_version (敏感内容词库版本表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_moderation_dictionary_version`;
+CREATE TABLE `ai_moderation_dictionary_version` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `version_no` varchar(100) NOT NULL COMMENT '词库版本号',
+  `checksum` char(64) NOT NULL COMMENT '规则规范化SHA-256校验和',
+  `status` varchar(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/PUBLISHED/ARCHIVED',
+  `source_version` varchar(100) NOT NULL COMMENT '种子来源版本',
+  `source_location` varchar(500) DEFAULT NULL COMMENT '种子资源位置',
+  `published_by` varchar(100) DEFAULT NULL COMMENT '发布或回滚操作人',
+  `published_time` datetime DEFAULT NULL COMMENT '发布时间',
+  `published_slot` tinyint GENERATED ALWAYS AS
+    (CASE WHEN `status` = 'PUBLISHED' THEN 1 ELSE NULL END) STORED COMMENT '唯一已发布槽位',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_moderation_version_no` (`version_no`),
+  UNIQUE KEY `uk_moderation_version_checksum` (`checksum`),
+  UNIQUE KEY `uk_moderation_one_published` (`published_slot`),
+  KEY `idx_moderation_version_status` (`status`, `published_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容词库版本';
 
 -- ----------------------------
--- 15. Ruoyi 系统菜单数据 (AI分析报告中心菜单)
+-- 14. Table structure for ai_moderation_rule (敏感内容规则表)
 -- ----------------------------
+DROP TABLE IF EXISTS `ai_moderation_rule`;
+CREATE TABLE `ai_moderation_rule` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `dictionary_version_id` bigint(20) NOT NULL COMMENT '词库版本ID',
+  `rule_type` varchar(32) NOT NULL COMMENT 'RISK_WORD/RISK_CONTEXT/SAFE_CONTEXT/ALLOW_TERM',
+  `content` varchar(1000) NOT NULL COMMENT '规则原文',
+  `normalized_content` varchar(1000) NOT NULL COMMENT '归一化规则内容',
+  `normalized_hash` char(64) NOT NULL COMMENT '归一化规则内容SHA-256',
+  `category` varchar(64) NOT NULL COMMENT '风险分类',
+  `weight` int(11) NOT NULL DEFAULT '0' COMMENT '风险分权重',
+  `source` varchar(200) DEFAULT NULL COMMENT '规则来源',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_moderation_rule_normalized`
+    (`dictionary_version_id`, `rule_type`, `normalized_hash`, `category`),
+  KEY `idx_moderation_rule_version_type` (`dictionary_version_id`, `rule_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容规则';
+
+-- ----------------------------
+-- 15. Table structure for ai_moderation_policy (敏感内容场景策略表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_moderation_policy`;
+CREATE TABLE `ai_moderation_policy` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `scene` varchar(32) NOT NULL COMMENT 'KNOWLEDGE/CHAT_INPUT/AI_OUTPUT/WORKFLOW_INPUT/WORKFLOW_OUTPUT',
+  `preset` varchar(20) NOT NULL COMMENT 'LENIENT/BALANCED/STRICT',
+  `mode` varchar(20) NOT NULL DEFAULT 'OBSERVE' COMMENT 'OBSERVE/ENFORCE',
+  `enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+  `suspect_threshold` int(11) DEFAULT 40 COMMENT '疑似阈值',
+  `block_threshold` int(11) DEFAULT 70 COMMENT '阻断阈值',
+  `provider_enabled` tinyint(1) DEFAULT 0 COMMENT '是否启用第三方检测',
+  `provider_timeout_ms` int(11) DEFAULT 1500 COMMENT '第三方检测超时毫秒数',
+  `provider_daily_limit` int(11) DEFAULT 1000 COMMENT '第三方每日调用上限',
+  `provider_monthly_budget` decimal(12,2) DEFAULT 100.00 COMMENT '第三方月度预算',
+  `segment_chars` int(11) DEFAULT 200 COMMENT '分段字符数',
+  `segment_overlap_chars` int(11) DEFAULT 64 COMMENT '分段重叠字符数',
+  `output_buffer_chars` int(11) DEFAULT 300 COMMENT '输出检测缓冲字符数',
+  `quarantine_days` int(11) DEFAULT 7 COMMENT '知识隔离天数',
+  `policy_version` bigint(20) DEFAULT 1 COMMENT '策略版本',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_moderation_policy_scene` (`scene`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容场景策略';
+
+-- ----------------------------
+-- 16. Table structure for ai_moderation_event (敏感内容检测审计事件表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_moderation_event`;
+CREATE TABLE `ai_moderation_event` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `request_id` varchar(64) NOT NULL COMMENT '随机检测请求标识',
+  `scene` varchar(32) NOT NULL COMMENT '检测场景',
+  `resource_type` varchar(64) DEFAULT NULL COMMENT '内部资源类型',
+  `resource_id` varchar(128) DEFAULT NULL COMMENT '内部资源标识',
+  `dictionary_version` bigint(20) DEFAULT NULL COMMENT '词库版本ID',
+  `policy_version` bigint(20) DEFAULT NULL COMMENT '策略版本',
+  `local_decision` varchar(20) NOT NULL COMMENT 'PASS/SUSPECT/HIGH_RISK',
+  `final_action` varchar(20) NOT NULL COMMENT 'ALLOW/BLOCK/QUARANTINE/REPLACE',
+  `risk_score` int(11) NOT NULL DEFAULT '0' COMMENT '风险分',
+  `categories` varchar(1000) DEFAULT NULL COMMENT '命中分类列表',
+  `matched_rule_ids` varchar(1000) DEFAULT NULL COMMENT '命中规则ID列表',
+  `provider` varchar(64) DEFAULT NULL COMMENT '第三方提供商',
+  `provider_request_id` varchar(128) DEFAULT NULL COMMENT '第三方请求标识',
+  `provider_decision` varchar(64) DEFAULT NULL COMMENT '第三方结论',
+  `provider_latency_ms` bigint(20) DEFAULT NULL COMMENT '第三方耗时毫秒数',
+  `fallback_reason` varchar(64) DEFAULT NULL COMMENT '降级原因',
+  `content_hash` char(64) NOT NULL COMMENT '待审内容SHA-256，不保存原文',
+  `masked_excerpt` varchar(120) DEFAULT NULL COMMENT '最多120字符的脱敏摘要',
+  `expire_time` datetime NOT NULL COMMENT '审计到期时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_moderation_event_request` (`request_id`),
+  KEY `idx_moderation_event_expire` (`expire_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容检测审计事件';
+
+-- ----------------------------
+-- 17. Table structure for ai_moderation_candidate (敏感内容候选规则表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_moderation_candidate`;
+CREATE TABLE `ai_moderation_candidate` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `candidate_term` varchar(256) NOT NULL COMMENT '受控候选词或短表达，不得保存原始待审内容',
+  `expression_hash` char(64) NOT NULL COMMENT '候选表达SHA-256',
+  `masked_excerpt` varchar(120) DEFAULT NULL COMMENT '最多120字符的脱敏证据摘要',
+  `category` varchar(64) NOT NULL COMMENT '建议分类',
+  `source_event_id` bigint(20) DEFAULT NULL COMMENT '来源检测事件ID',
+  `source_signal` varchar(64) NOT NULL COMMENT 'PROVIDER_HIGH_RISK/LOCAL_OBFUSCATION_REPEAT',
+  `observation_count` int(11) NOT NULL DEFAULT 1 COMMENT '已观察次数',
+  `status` varchar(20) NOT NULL DEFAULT 'OBSERVING' COMMENT 'OBSERVING/PENDING/ACCEPTED/REJECTED',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_moderation_candidate_expression` (`expression_hash`, `category`),
+  KEY `idx_moderation_candidate_status` (`status`, `update_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容候选规则';
+
+-- ----------------------------
+-- 18. Table structure for ai_private_attachment (AI私有附件暂存表)
+-- ----------------------------
+DROP TABLE IF EXISTS `ai_private_attachment`;
+CREATE TABLE `ai_private_attachment` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `attachment_token` varchar(128) NOT NULL COMMENT '私有附件令牌',
+  `user_id` bigint(20) NOT NULL COMMENT '上传用户ID',
+  `original_name` varchar(500) NOT NULL COMMENT '原始文件名',
+  `storage_path` varchar(1000) NOT NULL COMMENT '私有暂存路径',
+  `status` varchar(20) NOT NULL DEFAULT 'WAIT_SCAN' COMMENT 'WAIT_SCAN/SCANNING/SAFE/REJECTED/EXPIRED',
+  `expire_time` datetime NOT NULL COMMENT '到期清理时间',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_private_attachment_token` (`attachment_token`),
+  KEY `idx_private_attachment_cleanup` (`status`, `expire_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI私有附件暂存';
+
+-- ----------------------------
+-- 19. Ruoyi 系统字典数据 (AI相关)
+-- ----------------------------
+-- AI模型用途大分类字典
+INSERT INTO `sys_dict_type` (dict_name, dict_type, status, create_by, create_time) 
+VALUES ('AI模型分类', 'sys_ai_model_type', '0', 'admin', NOW())
+ON DUPLICATE KEY UPDATE `status` = VALUES(`status`);
+
+INSERT INTO `sys_dict_data` (dict_sort, dict_label, dict_value, dict_type, status, create_by, create_time) VALUES 
+(1, '文本对话模型', 'CHAT', 'sys_ai_model_type', '0', 'admin', NOW()),
+(2, '向量提取模型', 'EMBEDDING', 'sys_ai_model_type', '0', 'admin', NOW()),
+(3, '图像生成模型', 'IMAGE', 'sys_ai_model_type', '0', 'admin', NOW())
+ON DUPLICATE KEY UPDATE `dict_label` = VALUES(`dict_label`);
+
+-- AI工具箱列表字典
+INSERT INTO `sys_dict_type` (dict_name, dict_type, status, create_by, create_time) 
+VALUES ('AI工具列表', 'sys_ai_tools', '0', 'admin', NOW())
+ON DUPLICATE KEY UPDATE `status` = VALUES(`status`);
+
+INSERT INTO `sys_dict_data` (dict_sort, dict_label, dict_value, dict_type, status, create_by, create_time) VALUES 
+(1, '网络实时搜索', 'web_search', 'sys_ai_tools', '0', 'admin', NOW()),
+(2, 'AI图像生成', 'image_generate', 'sys_ai_tools', '0', 'admin', NOW())
+ON DUPLICATE KEY UPDATE `dict_label` = VALUES(`dict_label`);
+
+-- ----------------------------
+-- 20. Ruoyi 系统菜单与权限数据
+-- ----------------------------
+-- AI绘图工坊菜单
+INSERT INTO `sys_menu`
+  (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
+   `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+VALUES
+  (2050, '绘图工坊', 1061, 6, 'draw', 'ai/draw/index', NULL, 'AiDraw',
+   1, 0, 'C', '0', '0', 'ai:draw:list', 'image', 'admin', NOW(), 'AI高级绘图工坊页面')
+ON DUPLICATE KEY UPDATE `component` = VALUES(`component`);
+
+-- AI分析报告中心菜单
 INSERT INTO `sys_menu`
   (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
    `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
 VALUES
   (2051, '报告中心', 1061, 7, 'report', 'ai/report', NULL, 'AiReport',
-   1, 0, 'C', '0', '0', 'ai:report:list', 'document', 'admin', NOW(), 'AI分析报告归档管理页面');
+   1, 0, 'C', '0', '0', 'ai:report:list', 'document', 'admin', NOW(), 'AI分析报告归档管理页面')
+ON DUPLICATE KEY UPDATE `component` = VALUES(`component`);
 
--- ----------------------------
--- 16. 工作流 V2.1 按钮权限
--- ----------------------------
+-- 工作流 V2.1 按钮权限
 INSERT INTO `sys_menu`
   (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `query`, `route_name`,
    `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
@@ -438,4 +578,264 @@ VALUES
   (2064, '工作流删除', 9, 5, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:remove', '#', 'admin', NOW(), ''),
   (2065, '工作流执行', 9, 6, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:execute', '#', 'admin', NOW(), ''),
   (2066, '工作流试运行', 9, 7, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:test', '#', 'admin', NOW(), ''),
-  (2067, '工作流审批', 9, 8, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:approve', '#', 'admin', NOW(), '');
+  (2067, '工作流审批', 9, 8, '#', '', NULL, '', 1, 0, 'F', '0', '0', 'ai:workflow:approve', '#', 'admin', NOW(), '')
+ON DUPLICATE KEY UPDATE `perms` = VALUES(`perms`);
+
+-- 安全检测管理菜单配置 (动态挂载至AI模块下)
+INSERT INTO `sys_menu` (`menu_name`, `parent_id`, `order_num`, `path`, `component`, `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+SELECT '安全策略', m.menu_id, 20, 'moderationPolicy', 'ai/moderation/policy', 1, 0, 'C', '0', '0', 'ai:moderation:policy:list', 'shield', 'admin', NOW(), 'AI安全策略管理'
+FROM `sys_menu` m
+WHERE m.path = 'ai' OR m.component = 'Layout' AND m.menu_name LIKE '%AI%'
+LIMIT 1
+ON DUPLICATE KEY UPDATE `component` = VALUES(`component`);
+
+INSERT INTO `sys_menu` (`menu_name`, `parent_id`, `order_num`, `path`, `component`, `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+SELECT '安全词库', m.menu_id, 21, 'moderationDictionary', 'ai/moderation/dictionary', 1, 0, 'C', '0', '0', 'ai:moderation:dictionary:list', 'dict', 'admin', NOW(), 'AI敏感词库管理'
+FROM `sys_menu` m
+WHERE m.path = 'ai' OR m.component = 'Layout' AND m.menu_name LIKE '%AI%'
+LIMIT 1
+ON DUPLICATE KEY UPDATE `component` = VALUES(`component`);
+
+INSERT INTO `sys_menu` (`menu_name`, `parent_id`, `order_num`, `path`, `component`, `is_frame`, `is_cache`, `menu_type`, `visible`, `status`, `perms`, `icon`, `create_by`, `create_time`, `remark`)
+SELECT '安全统计', m.menu_id, 22, 'moderationStatistics', 'ai/moderation/statistics', 1, 0, 'C', '0', '0', 'ai:moderation:statistics:list', 'chart', 'admin', NOW(), 'AI安全统计与运维'
+FROM `sys_menu` m
+WHERE m.path = 'ai' OR m.component = 'Layout' AND m.menu_name LIKE '%AI%'
+LIMIT 1
+ON DUPLICATE KEY UPDATE `component` = VALUES(`component`);
+
+-- ----------------------------
+-- 21. AI机器安全检测自动清理定时任务 (每15分钟执行一次)
+-- ----------------------------
+INSERT INTO `sys_job`
+  (`job_name`, `job_group`, `invoke_target`, `cron_expression`,
+   `misfire_policy`, `concurrent`, `status`, `create_by`, `create_time`, `remark`)
+SELECT
+  'AI机器安全检测自动清理', 'AI_MODERATION', 'moderationCleanupTask.run',
+  '0 0/15 * * * ?', '3', '1', '0', 'admin', NOW(),
+  '清理到期隔离文件、私有附件、审计事件和候选'
+FROM DUAL
+WHERE NOT EXISTS (
+  SELECT 1 FROM `sys_job`
+  WHERE `job_group` = 'AI_MODERATION'
+    AND `invoke_target` = 'moderationCleanupTask.run'
+);
+
+
+-- ============================================================================
+-- 增量升级 SQL 脚本汇总（已有老版本数据库环境按需执行以下部分）
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- 【增量 1】智能体与工作流字段升级
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE `ai_conversation` ADD COLUMN `agent_code` varchar(64) DEFAULT NULL COMMENT '关联的智能体Code';
+-- ALTER TABLE `ai_conversation` ADD COLUMN `workflow_code` varchar(64) DEFAULT NULL COMMENT '关联的工作流Code';
+
+-- ----------------------------------------------------------------------------
+-- 【增量 2】分析报告与美化 Schema 字段升级
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_schema` longtext COMMENT '重塑美化JSON' AFTER `report_stats`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_status` varchar(16) NOT NULL DEFAULT 'NONE' COMMENT '美化处理状态' AFTER `refined_schema`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_source_hash` varchar(64) DEFAULT NULL COMMENT '美化结果对应的原文SHA-256' AFTER `refine_status`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_schema_version` varchar(32) DEFAULT NULL COMMENT '美化结果Schema版本' AFTER `refined_source_hash`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_prompt_version` varchar(32) DEFAULT NULL COMMENT '美化Prompt版本' AFTER `refine_schema_version`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refined_at` datetime DEFAULT NULL COMMENT '美化完成时间' AFTER `refine_prompt_version`;
+-- ALTER TABLE `ai_report` ADD COLUMN `refine_error` varchar(500) DEFAULT NULL COMMENT '美化失败原因' AFTER `refined_at`;
+-- UPDATE `ai_report` SET `refine_status` = 'NONE' WHERE `refine_status` IS NULL OR `refine_status` = '';
+
+-- ----------------------------------------------------------------------------
+-- 【增量 3】AI 向量模型与知识库索引参数升级
+-- ----------------------------------------------------------------------------
+-- ALTER TABLE `ai_model_config`
+--   ADD COLUMN `embedding_dimension` int(11) DEFAULT NULL COMMENT '向量模型输出维度' AFTER `model_type`,
+--   ADD COLUMN `embedding_dimension_mode` varchar(20) DEFAULT 'MODEL_DEFAULT' COMMENT '维度模式(MODEL_DEFAULT/REQUEST)' AFTER `embedding_dimension`,
+--   ADD COLUMN `embedding_max_input_tokens` int(11) DEFAULT NULL COMMENT '向量模型最大输入Token数' AFTER `embedding_dimension_mode`,
+--   ADD COLUMN `embedding_batch_size` int(11) DEFAULT '16' COMMENT '向量化批量大小' AFTER `embedding_max_input_tokens`;
+
+-- UPDATE `ai_model_config`
+-- SET `embedding_dimension` = 1024
+-- WHERE `model_type` = 'EMBEDDING'
+--   AND `embedding_dimension` IS NULL
+--   AND `model_name` = 'text-embedding-v3';
+
+-- ALTER TABLE `ai_knowledge_base`
+--   ADD COLUMN `embedding_model_id` bigint(20) DEFAULT NULL COMMENT '绑定的向量模型配置ID' AFTER `description`,
+--   ADD COLUMN `vector_collection` varchar(200) DEFAULT NULL COMMENT '当前生效的向量collection' AFTER `embedding_model_id`,
+--   ADD COLUMN `chunk_size` int(11) NOT NULL DEFAULT '300' COMMENT '切片最大字符数' AFTER `vector_collection`,
+--   ADD COLUMN `chunk_overlap` int(11) NOT NULL DEFAULT '30' COMMENT '切片重叠字符数' AFTER `chunk_size`,
+--   ADD COLUMN `splitter_type` varchar(32) NOT NULL DEFAULT 'RECURSIVE' COMMENT '切片算法' AFTER `chunk_overlap`,
+--   ADD COLUMN `retrieval_top_k` int(11) NOT NULL DEFAULT '5' COMMENT '最大召回数量' AFTER `splitter_type`,
+--   ADD COLUMN `retrieval_min_score` double NOT NULL DEFAULT '0.5' COMMENT '最低相似度' AFTER `retrieval_top_k`,
+--   ADD COLUMN `index_version` bigint(20) NOT NULL DEFAULT '0' COMMENT '当前索引版本' AFTER `retrieval_min_score`,
+--   ADD COLUMN `index_signature` varchar(64) DEFAULT NULL COMMENT '索引配置签名' AFTER `index_version`,
+--   ADD COLUMN `index_status` varchar(20) NOT NULL DEFAULT 'EMPTY' COMMENT '索引状态' AFTER `index_signature`,
+--   ADD COLUMN `index_error` varchar(1000) DEFAULT NULL COMMENT '最近索引失败原因' AFTER `index_status`;
+
+-- UPDATE `ai_knowledge_base` kb
+-- SET kb.`embedding_model_id` = (
+--       SELECT mc.id
+--       FROM `ai_model_config` mc
+--       WHERE mc.`model_type` = 'EMBEDDING'
+--         AND mc.`is_default` = '1'
+--         AND mc.`status` = '1'
+--         AND mc.`del_flag` = '0'
+--         AND (mc.`dept_id` IS NULL OR mc.`dept_id` = kb.`dept_id`)
+--       ORDER BY CASE
+--         WHEN kb.`dept_id` IS NOT NULL AND mc.`dept_id` = kb.`dept_id` THEN 2
+--         WHEN mc.`dept_id` IS NULL THEN 1
+--         ELSE 0
+--       END DESC, mc.id DESC
+--       LIMIT 1
+--     ),
+--     kb.`vector_collection` = 'polaris_knowledge',
+--     kb.`index_status` = CASE WHEN EXISTS (
+--       SELECT 1 FROM `ai_document` d
+--       WHERE d.`knowledge_base_id` = kb.id
+--         AND d.`status` = '2'
+--         AND d.`del_flag` = '0'
+--     ) THEN 'STALE' ELSE 'EMPTY' END,
+--     kb.`index_error` = CASE WHEN EXISTS (
+--       SELECT 1 FROM `ai_document` d
+--       WHERE d.`knowledge_base_id` = kb.id
+--         AND d.`status` = '2'
+--         AND d.`del_flag` = '0'
+--     ) THEN '向量存储配置已升级，请重建知识库索引' ELSE NULL END;
+
+-- ----------------------------------------------------------------------------
+-- 【增量 4】AI 敏感内容机器安全检测底座升级
+-- ----------------------------------------------------------------------------
+-- CREATE TABLE IF NOT EXISTS `ai_moderation_dictionary_version` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `version_no` varchar(100) NOT NULL COMMENT '词库版本号',
+--   `checksum` char(64) NOT NULL COMMENT '规则规范化SHA-256校验和',
+--   `status` varchar(20) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT/PUBLISHED/ARCHIVED',
+--   `source_version` varchar(100) NOT NULL COMMENT '种子来源版本',
+--   `source_location` varchar(500) DEFAULT NULL COMMENT '种子资源位置',
+--   `published_by` varchar(100) DEFAULT NULL COMMENT '发布或回滚操作人',
+--   `published_time` datetime DEFAULT NULL COMMENT '发布时间',
+--   `published_slot` tinyint GENERATED ALWAYS AS
+--     (CASE WHEN `status` = 'PUBLISHED' THEN 1 ELSE NULL END) STORED COMMENT '唯一已发布槽位',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_moderation_version_no` (`version_no`),
+--   UNIQUE KEY `uk_moderation_version_checksum` (`checksum`),
+--   UNIQUE KEY `uk_moderation_one_published` (`published_slot`),
+--   KEY `idx_moderation_version_status` (`status`, `published_time`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容词库版本';
+
+-- CREATE TABLE IF NOT EXISTS `ai_moderation_rule` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `dictionary_version_id` bigint(20) NOT NULL COMMENT '词库版本ID',
+--   `rule_type` varchar(32) NOT NULL COMMENT 'RISK_WORD/RISK_CONTEXT/SAFE_CONTEXT/ALLOW_TERM',
+--   `content` varchar(1000) NOT NULL COMMENT '规则原文',
+--   `normalized_content` varchar(1000) NOT NULL COMMENT '归一化规则内容',
+--   `normalized_hash` char(64) NOT NULL COMMENT '归一化规则内容SHA-256',
+--   `category` varchar(64) NOT NULL COMMENT '风险分类',
+--   `weight` int(11) NOT NULL DEFAULT '0' COMMENT '风险分权重',
+--   `source` varchar(200) DEFAULT NULL COMMENT '规则来源',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_moderation_rule_normalized`
+--     (`dictionary_version_id`, `rule_type`, `normalized_hash`, `category`),
+--   KEY `idx_moderation_rule_version_type` (`dictionary_version_id`, `rule_type`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容规则';
+
+-- CREATE TABLE IF NOT EXISTS `ai_moderation_policy` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `scene` varchar(32) NOT NULL COMMENT 'KNOWLEDGE/CHAT_INPUT/AI_OUTPUT/WORKFLOW_INPUT/WORKFLOW_OUTPUT',
+--   `preset` varchar(20) NOT NULL COMMENT 'LENIENT/BALANCED/STRICT',
+--   `mode` varchar(20) NOT NULL DEFAULT 'OBSERVE' COMMENT 'OBSERVE/ENFORCE',
+--   `enabled` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
+--   `suspect_threshold` int(11) DEFAULT 40 COMMENT '疑似阈值',
+--   `block_threshold` int(11) DEFAULT 70 COMMENT '阻断阈值',
+--   `provider_enabled` tinyint(1) DEFAULT 0 COMMENT '是否启用第三方检测',
+--   `provider_timeout_ms` int(11) DEFAULT 1500 COMMENT '第三方检测超时毫秒数',
+--   `provider_daily_limit` int(11) DEFAULT 1000 COMMENT '第三方每日调用上限',
+--   `provider_monthly_budget` decimal(12,2) DEFAULT 100.00 COMMENT '第三方月度预算',
+--   `segment_chars` int(11) DEFAULT 200 COMMENT '分段字符数',
+--   `segment_overlap_chars` int(11) DEFAULT 64 COMMENT '分段重叠字符数',
+--   `output_buffer_chars` int(11) DEFAULT 300 COMMENT '输出检测缓冲字符数',
+--   `quarantine_days` int(11) DEFAULT 7 COMMENT '知识隔离天数',
+--   `policy_version` bigint(20) DEFAULT 1 COMMENT '策略版本',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_moderation_policy_scene` (`scene`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容场景策略';
+
+-- CREATE TABLE IF NOT EXISTS `ai_moderation_event` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `request_id` varchar(64) NOT NULL COMMENT '随机检测请求标识',
+--   `scene` varchar(32) NOT NULL COMMENT '检测场景',
+--   `resource_type` varchar(64) DEFAULT NULL COMMENT '内部资源类型',
+--   `resource_id` varchar(128) DEFAULT NULL COMMENT '内部资源标识',
+--   `dictionary_version` bigint(20) DEFAULT NULL COMMENT '词库版本ID',
+--   `policy_version` bigint(20) DEFAULT NULL COMMENT '策略版本',
+--   `local_decision` varchar(20) NOT NULL COMMENT 'PASS/SUSPECT/HIGH_RISK',
+--   `final_action` varchar(20) NOT NULL COMMENT 'ALLOW/BLOCK/QUARANTINE/REPLACE',
+--   `risk_score` int(11) NOT NULL DEFAULT '0' COMMENT '风险分',
+--   `categories` varchar(1000) DEFAULT NULL COMMENT '命中分类列表',
+--   `matched_rule_ids` varchar(1000) DEFAULT NULL COMMENT '命中规则ID列表',
+--   `provider` varchar(64) DEFAULT NULL COMMENT '第三方提供商',
+--   `provider_request_id` varchar(128) DEFAULT NULL COMMENT '第三方请求标识',
+--   `provider_decision` varchar(64) DEFAULT NULL COMMENT '第三方结论',
+--   `provider_latency_ms` bigint(20) DEFAULT NULL COMMENT '第三方耗时毫秒数',
+--   `fallback_reason` varchar(64) DEFAULT NULL COMMENT '降级原因',
+--   `content_hash` char(64) NOT NULL COMMENT '待审内容SHA-256，不保存原文',
+--   `masked_excerpt` varchar(120) DEFAULT NULL COMMENT '最多120字符的脱敏摘要',
+--   `expire_time` datetime NOT NULL COMMENT '审计到期时间',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   PRIMARY KEY (`id`),
+--   KEY `idx_moderation_event_request` (`request_id`),
+--   KEY `idx_moderation_event_expire` (`expire_time`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容检测审计事件';
+
+-- CREATE TABLE IF NOT EXISTS `ai_moderation_candidate` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `candidate_term` varchar(256) NOT NULL COMMENT '受控候选词或短表达，不得保存原始待审内容',
+--   `expression_hash` char(64) NOT NULL COMMENT '候选表达SHA-256',
+--   `masked_excerpt` varchar(120) DEFAULT NULL COMMENT '最多120字符的脱敏证据摘要',
+--   `category` varchar(64) NOT NULL COMMENT '建议分类',
+--   `source_event_id` bigint(20) DEFAULT NULL COMMENT '来源检测事件ID',
+--   `source_signal` varchar(64) NOT NULL COMMENT 'PROVIDER_HIGH_RISK/LOCAL_OBFUSCATION_REPEAT',
+--   `observation_count` int(11) NOT NULL DEFAULT 1 COMMENT '已观察次数',
+--   `status` varchar(20) NOT NULL DEFAULT 'OBSERVING' COMMENT 'OBSERVING/PENDING/ACCEPTED/REJECTED',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_moderation_candidate_expression` (`expression_hash`, `category`),
+--   KEY `idx_moderation_candidate_status` (`status`, `update_time`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='敏感内容候选规则';
+
+-- CREATE TABLE IF NOT EXISTS `ai_private_attachment` (
+--   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+--   `attachment_token` varchar(128) NOT NULL COMMENT '私有附件令牌',
+--   `user_id` bigint(20) NOT NULL COMMENT '上传用户ID',
+--   `original_name` varchar(500) NOT NULL COMMENT '原始文件名',
+--   `storage_path` varchar(1000) NOT NULL COMMENT '私有暂存路径',
+--   `status` varchar(20) NOT NULL DEFAULT 'WAIT_SCAN' COMMENT 'WAIT_SCAN/SCANNING/SAFE/REJECTED/EXPIRED',
+--   `expire_time` datetime NOT NULL COMMENT '到期清理时间',
+--   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+--   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+--   PRIMARY KEY (`id`),
+--   UNIQUE KEY `uk_private_attachment_token` (`attachment_token`),
+--   KEY `idx_private_attachment_cleanup` (`status`, `expire_time`)
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI私有附件暂存';
+
+-- ALTER TABLE `ai_document`
+--   ADD COLUMN `moderation_status` varchar(20) NOT NULL DEFAULT 'WAIT_SCAN' COMMENT 'WAIT_SCAN/SCANNING/SAFE/QUARANTINED/SCAN_FAILED/AUTO_DELETED',
+--   ADD COLUMN `moderation_event_id` bigint(20) DEFAULT NULL COMMENT '最近检测事件ID',
+--   ADD COLUMN `moderation_version` bigint(20) DEFAULT NULL COMMENT '检测使用的词库版本ID',
+--   ADD COLUMN `quarantine_path` varchar(1000) DEFAULT NULL COMMENT '隔离文件私有路径',
+--   ADD COLUMN `quarantine_expire_time` datetime DEFAULT NULL COMMENT '隔离文件到期时间';
+
+-- ALTER TABLE `ai_message`
+--   ADD COLUMN `attachment_tokens` varchar(2000) DEFAULT NULL COMMENT 'AI私有附件令牌列表',
+--   ADD COLUMN `moderation_status` varchar(32) DEFAULT NULL COMMENT '安全检测状态：SAFE, INTERRUPTED_BLOCKED',
+--   ADD COLUMN `moderation_event_id` bigint(20) DEFAULT NULL COMMENT '安全检测事件ID',
+--   ADD COLUMN `moderation_version` bigint(20) DEFAULT NULL COMMENT '生效的词库版本号';
+
+-- ALTER TABLE `ai_workflow_execution`
+--   ADD COLUMN `attachment_tokens` varchar(2000) DEFAULT NULL COMMENT 'AI私有附件令牌列表';

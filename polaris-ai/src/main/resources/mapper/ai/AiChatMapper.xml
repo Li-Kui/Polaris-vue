@@ -31,6 +31,10 @@
         <result property="fileUrl"        column="file_url"/>
         <result property="fileName"       column="file_name"/>
         <result property="fileContent"    column="file_content"/>
+        <result property="attachmentTokens" column="attachment_tokens"/>
+        <result property="moderationStatus" column="moderation_status"/>
+        <result property="moderationEventId" column="moderation_event_id"/>
+        <result property="moderationVersion" column="moderation_version"/>
         <result property="createTime"     column="create_time"/>
     </resultMap>
 
@@ -77,8 +81,8 @@
 
     <insert id="insertMessage" parameterType="com.polaris.ai.domain.AiMessage"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO ai_message(conversation_id, workflow_execution_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, create_time)
-        VALUES (#{conversationId}, #{workflowExecutionId}, #{role}, #{content}, #{reasoningContent}, #{tokens}, #{fileUrl}, #{fileName}, #{fileContent}, NOW())
+        INSERT INTO ai_message(conversation_id, workflow_execution_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, attachment_tokens, moderation_status, moderation_event_id, moderation_version, create_time)
+        VALUES (#{conversationId}, #{workflowExecutionId}, #{role}, #{content}, #{reasoningContent}, #{tokens}, #{fileUrl}, #{fileName}, #{fileContent}, #{attachmentTokens}, #{moderationStatus}, #{moderationEventId}, #{moderationVersion}, NOW())
     </insert>
 
     <select id="selectMessagesByConversationId" resultMap="MessageResult">

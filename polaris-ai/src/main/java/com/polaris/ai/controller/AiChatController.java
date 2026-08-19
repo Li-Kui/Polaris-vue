@@ -247,4 +247,50 @@ public class AiChatController extends BaseController {
         }).start();
         return emitter;
     }
+
+    /**
+     * POST 流式发送消息（支持私有附件 tokens 与标准 JSON 请求体）
+     */
+    @Operation(summary = "流式发送消息并获取回复 (POST)")
+    @PostMapping(value = "/stream", produces = "text/event-stream;charset=UTF-8")
+    @ResponseBody
+    public SseEmitter streamPost(@RequestBody com.polaris.ai.dto.ChatStreamRequest request) {
+        SseEmitter emitter = new SseEmitter(180_000L);
+        java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        emitter.onCompletion(() -> isCancelled.set(true));
+        emitter.onTimeout(() -> {
+            isCancelled.set(true);
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        });
+        emitter.onError(e -> isCancelled.set(true));
+
+        Long userId = SecurityUtils.getUserId();
+
+        String baseUrl = "";
+        try {
+            jakarta.servlet.http.HttpServletRequest req = com.polaris.common.utils.ServletUtils.getRequest();
+            StringBuffer url = req.getRequestURL();
+            String contextPath = req.getServletContext().getContextPath();
+            baseUrl = url.delete(url.length() - req.getRequestURI().length(), url.length()).append(contextPath).toString();
+        } catch (Exception e) {
+            baseUrl = "";
+        }
+        final String finalBaseUrl = baseUrl;
+        final SecurityContext context = SecurityContextHolder.getContext();
+
+        new Thread(() -> {
+            try {
+                SecurityContextHolder.setContext(context);
+                com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
+                aiChatService.chat(request, userId, emitter, isCancelled);
+            } finally {
+                com.polaris.ai.utils.BaseUrlHolder.clear();
+                SecurityContextHolder.clearContext();
+            }
+        }).start();
+        return emitter;
+    }
 }

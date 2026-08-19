@@ -515,13 +515,22 @@ export default {
           return
         }
 
-        let url = ''
-        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
         const token = getToken()
 
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: { Authorization: 'Bearer ' + token }
+        const payload = {
+          conversationId: this.currentConvId,
+          message: text,
+          enableSearch: enableSearchParam,
+          attachmentTokens: []
+        }
+
+        const response = await fetch(`${baseUrl}/ai/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify(payload)
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -564,6 +573,25 @@ export default {
                 this.$nextTick(() => this.scrollToBottom())
               } else if (event === 'status') {
                 this.messages[aiIndex].statusMsg = data || ''
+              } else if (event === 'moderation_blocked') {
+                let blockInfo = {}
+                try {
+                  blockInfo = JSON.parse(data || '{}')
+                } catch (e) {
+                  blockInfo = { message: data }
+                }
+                const warnMsg = blockInfo.message || '内容触发安全策略，已为您终止输出'
+                this.$message.warning(warnMsg)
+                const cur = this.messages[aiIndex]
+                if (cur.content) {
+                  cur.content = cur.content + '\n\n' + `【已拦截：${warnMsg}】`
+                } else {
+                  cur.content = `【已拦截：${warnMsg}】`
+                }
+                cur.loading = false
+                this.isStreaming = false
+                this.currentReader = null
+                return
               } else if (event === 'search_sources') {
                 try {
                   const payload = JSON.parse(data || '{}')

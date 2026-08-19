@@ -100,6 +100,20 @@ spring:
 
 #兜底的AI配置
 ai:
+    moderation:
+        enabled: true
+        seed-location: classpath:moderation/polaris-sensitive-seed-v3.json
+        snapshot-poll-ms: 60000
+        audit-retention-days: 90
+        candidate-observation-threshold: 3
+        provider:
+            type: none
+            access-key-id:
+            access-key-secret:
+            endpoint: green-cip.cn-shanghai.aliyuncs.com
+            service: comment_detection_pro
+            timeout-ms: 1500
+            estimated-cost-per-call: 0.01
     model:
         # ── 当前启用的提供商 ────────────────────────────────────────
         # 可选值: dashscope | openai | deepseek | ollama

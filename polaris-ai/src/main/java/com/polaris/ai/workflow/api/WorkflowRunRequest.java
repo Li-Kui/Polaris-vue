@@ -19,6 +19,9 @@ public class WorkflowRunRequest {
     @Size(max = 2000, message = "附件引用长度不能超过2000")
     private String fileUrl;
 
+    /** 私有附件 Token 列表 */
+    private java.util.List<String> attachmentTokens;
+
     private Long conversationId;
 
     /** 编排管理页试运行，不写入真实会话。 */

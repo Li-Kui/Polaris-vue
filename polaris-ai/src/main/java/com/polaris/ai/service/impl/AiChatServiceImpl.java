@@ -11,6 +11,7 @@ import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.rag.AiVectorStoreResolver;
+import com.polaris.ai.safety.stream.StreamingModerationSession;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.service.IAiDocumentRecognitionService;
@@ -97,6 +98,24 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Autowired
     private AiVectorStoreResolver vectorStoreResolver;
+
+    @Autowired(required = false)
+    private com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService;
+
+    @Autowired(required = false)
+    private com.polaris.ai.safety.service.IModerationFacade moderationFacade;
+
+    public void setAiChatMapper(AiChatMapper aiChatMapper) {
+        this.aiChatMapper = aiChatMapper;
+    }
+
+    public void setModeratedInputPreparationService(com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService) {
+        this.moderatedInputPreparationService = moderatedInputPreparationService;
+    }
+
+    public void setModerationFacade(com.polaris.ai.safety.service.IModerationFacade moderationFacade) {
+        this.moderationFacade = moderationFacade;
+    }
 
     /** 会话级防重互锁容器（保证单个会话同时只有一个流式推送在进行） */
     private static final java.util.concurrent.ConcurrentHashMap<Long, Boolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
@@ -219,15 +238,38 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
      * 6. 流式结束后持久化完整 AI 回复及 Token 消耗
      */
     @Override
+    public void chat(com.polaris.ai.dto.ChatStreamRequest request, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+        if (request == null) {
+            return;
+        }
+        chatInternal(request.conversationId(), request.message(), null, request.attachmentTokens(),
+                request.agentCode(), request.enableSearch(), userId, emitter, isCancelled);
+    }
+
+    @Override
     public void chat(Long conversationId, String userInput, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter) {
         chat(conversationId, userInput, fileUrl, agentCode, enableSearch, userId, emitter, null);
     }
 
     @Override
     public void chat(Long conversationId, String userInput, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+        chatInternal(conversationId, userInput, fileUrl, java.util.List.of(), agentCode, enableSearch, userId, emitter, isCancelled);
+    }
+
+    private void chatInternal(
+            Long conversationId,
+            String userInput,
+            String fileUrl,
+            java.util.List<String> attachmentTokens,
+            String agentCode,
+            Boolean enableSearch,
+            Long userId,
+            SseEmitter emitter,
+            java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+
         // 0. 防重复与并发互锁：检查同一会话是否正在回复中
         if (ACTIVE_CONVERSATIONS.putIfAbsent(conversationId, true) != null) {
-            sseHelper.sendSse(emitter, "error", "当前对话正在回复中，请稍后再试");
+            if (sseHelper != null) sseHelper.sendSse(emitter, "error", "当前对话正在回复中，请稍后再试");
             try {
                 emitter.complete();
             } catch (Exception ignored) {
@@ -239,7 +281,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             // 1. 鉴权：会话必须属于当前用户
             AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
             if (conv == null) {
-                sseHelper.sendSse(emitter, "error", "会话不存在或无权限");
+                if (sseHelper != null) sseHelper.sendSse(emitter, "error", "会话不存在或无权限");
                 try {
                     emitter.complete();
                 } catch (Exception ignored) {
@@ -247,14 +289,55 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 return;
             }
 
+            // 2. 输入前置安全检测与附件准备
+            com.polaris.ai.safety.dto.PreparedAiInput preparedInput = null;
+            if (moderatedInputPreparationService != null) {
+                try {
+                    preparedInput = moderatedInputPreparationService.prepare(
+                            com.polaris.ai.safety.model.ModerationScene.CHAT_INPUT,
+                            userInput,
+                            attachmentTokens,
+                            userId,
+                            "AI_CONVERSATION",
+                            String.valueOf(conversationId)
+                    );
+                } catch (com.polaris.ai.safety.exception.ModerationBlockedException e) {
+                    log.warn(">>> 会话 {} 输入已被机器安全拦截", conversationId);
+                    if (sseHelper != null) {
+                        sseHelper.sendSse(emitter, "moderation_blocked",
+                                "{\"scope\":\"input\",\"code\":\"AI_INPUT_BLOCKED\",\"message\":\"输入内容包含敏感信息，请调整后重试。\"}");
+                    }
+                    if (isCancelled != null) isCancelled.set(true);
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                    }
+                    return;
+                } catch (Exception e) {
+                    log.error(">>> 会话 {} 附件或安全预处理异常: {}", conversationId, e.getMessage());
+                    if (sseHelper != null) {
+                        sseHelper.sendSse(emitter, "error", e.getMessage());
+                    }
+                    if (isCancelled != null) isCancelled.set(true);
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                    }
+                    return;
+                }
+            }
+
             // 1.5 重置并初始化本次请求的生图任务收集器
             com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
 
-            // 2. 解析附件并持久化用户消息（带超时与容错防护）
-            String parsedAttachmentContent = null;
-            String fileName = null;
-            if (fileUrl != null && !fileUrl.trim().isEmpty()) {
-                sseHelper.sendSse(emitter, "status", "正在解析文件附件...");
+            // 3. 解析附件并持久化用户消息（带超时与容错防护）
+            String parsedAttachmentContent = preparedInput != null ? preparedInput.attachmentText() : null;
+            String fileName = preparedInput != null ? preparedInput.attachmentNames() : null;
+            String tokensStr = (preparedInput != null && preparedInput.attachmentTokens() != null && !preparedInput.attachmentTokens().isEmpty())
+                    ? String.join(",", preparedInput.attachmentTokens()) : null;
+
+            if (preparedInput == null && fileUrl != null && !fileUrl.trim().isEmpty()) {
+                if (sseHelper != null) sseHelper.sendSse(emitter, "status", "正在解析文件附件...");
                 String[] urls = fileUrl.split(",");
                 StringBuilder sbContent = new StringBuilder();
                 StringBuilder sbNames = new StringBuilder();
@@ -277,22 +360,23 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 }
                 parsedAttachmentContent = sbContent.toString();
                 fileName = sbNames.toString();
-                sseHelper.sendSse(emitter, "status", "附件解析完成，正在初始化 AI 思考...");
+                if (sseHelper != null) sseHelper.sendSse(emitter, "status", "附件解析完成，正在初始化 AI 思考...");
                 if (parsedAttachmentContent != null && parsedAttachmentContent.length() > 28000) {
                     parsedAttachmentContent = parsedAttachmentContent.substring(0, 28000)
                             + "\n\n...[由于文件附件体积过大，已自动截断保留前 28000 字符内容]...";
                 }
             } else {
-                sseHelper.sendSse(emitter, "status", "正在呼叫 AI 助手...");
+                if (sseHelper != null) sseHelper.sendSse(emitter, "status", "正在呼叫 AI 助手...");
             }
 
             com.polaris.ai.domain.AiMessage userMsg = new com.polaris.ai.domain.AiMessage();
             userMsg.setConversationId(conversationId);
             userMsg.setRole("user");
-            userMsg.setContent(userInput); // 这里仅存储干净的用户输入内容
+            userMsg.setContent(preparedInput != null ? preparedInput.displayText() : userInput); // 这里仅存储干净的用户输入内容
             userMsg.setFileUrl(fileUrl);
             userMsg.setFileName(fileName);
             userMsg.setFileContent(parsedAttachmentContent);
+            userMsg.setAttachmentTokens(tokensStr);
             aiChatMapper.insertMessage(userMsg);
 
             // 3. 首条消息自动命名会话标题（使用原始输入，截取前15字 + 省略号）
@@ -457,76 +541,86 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
                 AiAssistant assistant = builder.build();
 
-                // 6. 调用 LangChain4j 流式接口，逐 token 通过 SSE 推送给前端
-                StringBuilder fullReply = new StringBuilder();
-                StringBuilder fullReasoning = new StringBuilder();
+                StreamingModerationSession answerSession = null;
+                StreamingModerationSession reasoningSession = null;
+                if (moderationFacade != null) {
+                    try {
+                        answerSession = moderationFacade.openStream(
+                                com.polaris.ai.safety.model.ModerationScene.AI_OUTPUT,
+                                "AI_CONVERSATION",
+                                String.valueOf(conversationId)
+                        );
+                        reasoningSession = moderationFacade.openStream(
+                                com.polaris.ai.safety.model.ModerationScene.AI_OUTPUT,
+                                "AI_CONVERSATION",
+                                String.valueOf(conversationId)
+                        );
+                    } catch (Exception e) {
+                        log.error(">>> 打开流式安全检测会话异常", e);
+                    }
+                }
+
+                // 6. 调用 LangChain4j 流式接口，逐 token 经安全缓冲后通过 SSE 推送给前端
+                com.polaris.ai.safety.stream.ModeratedResponseHandler moderatedHandler =
+                        new com.polaris.ai.safety.stream.ModeratedResponseHandler(
+                                answerSession,
+                                reasoningSession,
+                                (event, data) -> {
+                                    if (sseHelper != null) {
+                                        sseHelper.sendSse(emitter, event, data);
+                                    }
+                                },
+                                isCancelled,
+                                aiMsg -> {
+                                    try {
+                                        if (aiMsg.getContent() != null && !aiMsg.getContent().isEmpty()) {
+                                            // 兜底检查：若工具产生了生图任务 JSON，但模型回复中未显式包含 taskId，则强行追加到回复末尾
+                                            List<String> taskJsons = com.polaris.ai.utils.ChatContextHolder.getTaskJsonList(conversationId);
+                                            if (taskJsons != null && !taskJsons.isEmpty()) {
+                                                for (String taskJson : taskJsons) {
+                                                    if (taskJson != null && !taskJson.trim().isEmpty()) {
+                                                        try {
+                                                            com.alibaba.fastjson2.JSONObject jsonObj = com.alibaba.fastjson2.JSON.parseObject(taskJson);
+                                                            String taskId = jsonObj != null ? jsonObj.getString("taskId") : null;
+                                                            if (taskId != null && !aiMsg.getContent().contains(taskId)) {
+                                                                String appendix = "\n\n" + taskJson;
+                                                                aiMsg.setContent(aiMsg.getContent() + appendix);
+                                                                String escapedAppendix = appendix.replace("\n", "__SSE_NEWLINE__");
+                                                                if (sseHelper != null) {
+                                                                    sseHelper.sendSse(emitter, "message", escapedAppendix);
+                                                                }
+                                                                log.info(">>> [AiChatService] 兜底补全未被模型显式输出的生图任务 JSON, conversationId: {}, taskId: {}", conversationId, taskId);
+                                                            }
+                                                        } catch (Exception parseEx) {
+                                                            log.warn(">>> [AiChatService] 解析 taskJson 异常: {}", taskJson, parseEx);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            aiChatMapper.insertMessage(aiMsg);
+                                        }
+                                    } catch (Exception e) {
+                                        log.error("持久化 AI 消息回复异常, conversationId={}", conversationId, e);
+                                    }
+                                }
+                        );
+                moderatedHandler.setConversationId(conversationId);
 
                 TokenStream tokenStream = assistant.chat(messages);
-                tokenStream.onPartialResponse(token -> {
-                            if (isCancelled != null && isCancelled.get()) {
-                                return;
-                            }
-                            if (fullReply.length() == 0) {
-                                sseHelper.sendSse(emitter, "status", "");
-                            }
-                            fullReply.append(token);
-                            String escapedToken = token != null ? token.replace("\n", "__SSE_NEWLINE__") : "";
-                            sseHelper.sendSse(emitter, "message", escapedToken);
-                        })
+                tokenStream.onPartialResponse(moderatedHandler::onToken)
                         .onPartialThinking(thinking -> {
-                            if (isCancelled != null && isCancelled.get()) {
-                                return;
-                            }
                             if (thinking != null && thinking.text() != null) {
-                                fullReasoning.append(thinking.text());
-                                String escapedThinking = thinking.text().replace("\n", "__SSE_NEWLINE__");
-                                sseHelper.sendSse(emitter, "reasoning", escapedThinking);
+                                moderatedHandler.onThinking(thinking.text());
                             }
                         })
                         .onCompleteResponse(response -> {
                             try {
-                                // 兜底检查：若工具产生了生图任务 JSON，但模型回复中未显式包含 taskId，则强行追加到回复末尾
-                                List<String> taskJsons = com.polaris.ai.utils.ChatContextHolder.getTaskJsonList(conversationId);
-                                if (taskJsons != null && !taskJsons.isEmpty()) {
-                                    for (String taskJson : taskJsons) {
-                                        if (taskJson != null && !taskJson.trim().isEmpty()) {
-                                            try {
-                                                com.alibaba.fastjson2.JSONObject jsonObj = com.alibaba.fastjson2.JSON.parseObject(taskJson);
-                                                String taskId = jsonObj != null ? jsonObj.getString("taskId") : null;
-                                                if (taskId != null && !fullReply.toString().contains(taskId)) {
-                                                    String appendix = (fullReply.length() > 0 ? "\n\n" : "") + taskJson;
-                                                    fullReply.append(appendix);
-                                                    String escapedAppendix = appendix.replace("\n", "__SSE_NEWLINE__");
-                                                    sseHelper.sendSse(emitter, "message", escapedAppendix);
-                                                    log.info(">>> [AiChatService] 兜底补全未被模型显式输出的生图任务 JSON, conversationId: {}, taskId: {}", conversationId, taskId);
-                                                }
-                                            } catch (Exception parseEx) {
-                                                log.warn(">>> [AiChatService] 解析 taskJson 异常: {}", taskJson, parseEx);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 7. 持久化 AI 完整回复
-                                if (fullReply.length() > 0 || fullReasoning.length() > 0) {
-                                    com.polaris.ai.domain.AiMessage aiMsg = new com.polaris.ai.domain.AiMessage();
-                                    aiMsg.setConversationId(conversationId);
-                                    aiMsg.setRole("assistant");
-                                    aiMsg.setContent(fullReply.toString());
-                                    if (fullReasoning.length() > 0) {
-                                        aiMsg.setReasoningContent(fullReasoning.toString());
-                                    }
-                                    if (response != null && response.tokenUsage() != null) {
-                                        aiMsg.setTokens(response.tokenUsage().totalTokenCount());
-                                    }
-                                    aiChatMapper.insertMessage(aiMsg);
-                                }
-                            } catch (Exception e) {
-                                log.error("持久化 AI 消息回复异常, conversationId={}", conversationId, e);
+                                Integer totalTokens = (response != null && response.tokenUsage() != null)
+                                        ? response.tokenUsage().totalTokenCount() : null;
+                                moderatedHandler.onComplete(totalTokens);
                             } finally {
                                 com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                                 ACTIVE_CONVERSATIONS.remove(conversationId);
-                                sseHelper.sendSse(emitter, "done", "[DONE]");
                                 try {
                                     emitter.complete();
                                 } catch (Exception ignored) {
@@ -537,7 +631,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                             log.error("LangChain4j 声明式 AI 助手流式调用异常", error);
                             com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                             ACTIVE_CONVERSATIONS.remove(conversationId);
-                            sseHelper.sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
+                            if (sseHelper != null) {
+                                sseHelper.sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
+                            }
                             try {
                                 emitter.complete();
                             } catch (Exception ignored) {

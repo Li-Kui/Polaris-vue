@@ -52,6 +52,35 @@ public class AiDocument extends BaseEntity
     @Schema(description = "总字数")
     private Integer wordCount;
 
+    /**
+     * 安全检测状态
+     * WAIT_SCAN —— 等待机器检测
+     * SCANNING —— 机器检测中
+     * SAFE —— 检测通过
+     * QUARANTINED —— 已隔离
+     * SCAN_FAILED —— 检测失败
+     * AUTO_DELETED —— 已自动清理
+     */
+    @Schema(description = "安全检测状态：WAIT_SCAN, SCANNING, SAFE, QUARANTINED, SCAN_FAILED, AUTO_DELETED")
+    private String moderationStatus;
+
+    /** 安全检测事件ID */
+    @Schema(description = "安全检测事件ID")
+    private Long moderationEventId;
+
+    /** 检测时生效的词库版本号 */
+    @Schema(description = "检测时生效的词库版本号")
+    private Long moderationVersion;
+
+    /** 隔离区物理存储路径 */
+    @Schema(description = "隔离区物理存储路径")
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private String quarantinePath;
+
+    /** 隔离到期时间 */
+    @Schema(description = "隔离到期时间")
+    private java.util.Date quarantineExpireTime;
+
     /** 删除标志（0代表存在 2代表删除） */
     @Schema(description = "删除标志（0代表存在 2代表删除）")
     @TableLogic(value = "0", delval = "2")

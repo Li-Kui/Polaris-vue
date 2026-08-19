@@ -16,6 +16,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
@@ -77,8 +78,39 @@ public class AttachmentParserHelper {
                 return "[未找到附件对应的物理文件]";
             }
 
-            // 根据文件名后缀进行多路文本提取
-            String fileName = fileToProcess.getName().toLowerCase(Locale.ROOT);
+            return parse(fileToProcess.toPath(), fileToProcess.getName());
+        } catch (Exception e) {
+            log.error("附件解析过程发生异常, fileUrl={}", fileUrl, e);
+            return "[解析附件时发生错误: " + e.getMessage() + "]";
+        } finally {
+            if (needDeleteTempFile && fileToProcess != null && fileToProcess.exists()) {
+                try {
+                    Files.delete(fileToProcess.toPath());
+                    log.info("临时文件已成功删除: {}", fileToProcess.getAbsolutePath());
+                } catch (Exception e) {
+                    log.warn("无法删除临时文件: {}", fileToProcess.getAbsolutePath(), e);
+                }
+            }
+        }
+    }
+
+    /**
+     * 根据物理路径和原始文件名解析附件文本内容
+     *
+     * @param path         附件物理路径
+     * @param originalName 原始文件名（用于推断扩展名）
+     * @return 提取出来的文本内容
+     */
+    public static String parse(Path path, String originalName) {
+        if (path == null || !Files.exists(path)) {
+            return "[未找到附件对应的物理文件]";
+        }
+
+        File fileToProcess = path.toFile();
+        String lookupName = (originalName != null && !originalName.isBlank()) ? originalName : fileToProcess.getName();
+        String fileName = lookupName.toLowerCase(Locale.ROOT);
+
+        try {
             if (fileName.endsWith(".pdf")) {
                 return parsePdf(fileToProcess);
             } else if (fileName.endsWith(".docx")) {
@@ -96,7 +128,6 @@ public class AttachmentParserHelper {
                     || fileName.endsWith(".webp") || fileName.endsWith(".bmp")) {
                 return "";
             } else {
-                // 对于未知类型的二进制文件，默认作为文本试读取，读不出再友好提示
                 try {
                     String plainText = parsePlainText(fileToProcess);
                     if (plainText != null && plainText.length() > 0) {
@@ -105,19 +136,9 @@ public class AttachmentParserHelper {
                 } catch (Exception ignored) {}
                 return "[暂不支持该附件类型的文本解析]";
             }
-
         } catch (Exception e) {
-            log.error("附件解析过程发生异常, fileUrl={}", fileUrl, e);
+            log.error("附件解析过程发生异常, path={}, originalName={}", path, originalName, e);
             return "[解析附件时发生错误: " + e.getMessage() + "]";
-        } finally {
-            if (needDeleteTempFile && fileToProcess != null && fileToProcess.exists()) {
-                try {
-                    Files.delete(fileToProcess.toPath());
-                    log.info("临时文件已成功删除: {}", fileToProcess.getAbsolutePath());
-                } catch (Exception e) {
-                    log.warn("无法删除临时文件: {}", fileToProcess.getAbsolutePath(), e);
-                }
-            }
         }
     }
 

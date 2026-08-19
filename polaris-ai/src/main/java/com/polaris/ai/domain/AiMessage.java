@@ -63,6 +63,26 @@ public class AiMessage
     @Schema(description = "附件解析出的内容")
     private String fileContent;
 
+    /** 私有附件 Token 列表（逗号分隔） */
+    @Schema(description = "私有附件 Token 列表")
+    private String attachmentTokens;
+
+    /**
+     * 安全检测状态
+     * SAFE —— 合规
+     * INTERRUPTED_BLOCKED —— 流式输出中途被阻断
+     */
+    @Schema(description = "安全检测状态：SAFE, INTERRUPTED_BLOCKED")
+    private String moderationStatus;
+
+    /** 安全检测事件ID */
+    @Schema(description = "安全检测事件ID")
+    private Long moderationEventId;
+
+    /** 生效的词库版本号 */
+    @Schema(description = "生效的词库版本号")
+    private Long moderationVersion;
+
     /** 消息创建时间 */
     @Schema(description = "消息创建时间")
     private Date createTime;

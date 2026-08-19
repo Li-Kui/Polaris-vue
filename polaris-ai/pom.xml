@@ -36,6 +36,31 @@
 
     <dependencies>
 
+        <!-- 本地敏感内容候选匹配；项目使用自带的受控种子，不引入公共运行时词库。 -->
+        <dependency>
+            <groupId>com.github.houbb</groupId>
+            <artifactId>sensitive-word</artifactId>
+            <version>${sensitive-word.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.github.houbb</groupId>
+                    <artifactId>sensitive-word-data</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.houbb</groupId>
+            <artifactId>pinyin</artifactId>
+            <version>${houbb-pinyin.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>green20220302</artifactId>
+            <version>${aliyun-green.version}</version>
+        </dependency>
+
 		<!-- LangChain4j 核心 -->
 		<dependency>
 		    <groupId>dev.langchain4j</groupId>

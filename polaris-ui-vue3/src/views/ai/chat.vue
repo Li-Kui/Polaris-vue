@@ -1194,7 +1194,7 @@ export default {
       attachments: [],
       uploadingAttachment: false,
       uploadingCount: 0,
-      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
+      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/ai/attachment/upload-private",
       uploadHeaders: { Authorization: "Bearer " + getToken() },
       activePolls: {},
       taskStateMap: {},
@@ -2253,19 +2253,6 @@ export default {
       const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
       
       const isWorkflowMode = !!this.selectedWorkflowCode
-      let url = ''
-      if (isWorkflowMode) {
-        url = ''
-      } else {
-        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
-        if (this.selectedAgentCode) {
-          url += `&agentCode=${encodeURIComponent(this.selectedAgentCode)}`
-        }
-        if (attachedFiles.length > 0) {
-          const fileUrls = attachedFiles.map(f => f.url).join(',')
-          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
-        }
-      }
       const token = getToken()
 
       try {
@@ -2279,6 +2266,7 @@ export default {
             message: text,
             conversationId: this.currentConvId,
             fileUrl: attachedFiles.map(file => file.url).join(',') || null,
+            attachmentTokens: attachedFiles.map(file => file.token || file.url).filter(Boolean),
             testRun: false
           }, (event, envelope) => {
             this.handleWorkflowEvent(this.messages[aiIndex], event, envelope)
@@ -2286,9 +2274,21 @@ export default {
           return
         }
 
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: { Authorization: 'Bearer ' + token }
+        const payload = {
+          conversationId: this.currentConvId,
+          message: text,
+          enableSearch: enableSearchParam,
+          agentCode: this.selectedAgentCode || null,
+          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean)
+        }
+
+        const response = await fetch(`${baseUrl}/ai/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify(payload)
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -2335,6 +2335,27 @@ export default {
                 this.$nextTick(() => this.scrollToBottom())
               } else if (event === 'status') {
                 this.messages[aiIndex].statusMsg = data || ''
+              } else if (event === 'moderation_blocked') {
+                let blockInfo = {}
+                try {
+                  blockInfo = JSON.parse(data || '{}')
+                } catch (e) {
+                  blockInfo = { message: data }
+                }
+                const warnMsg = blockInfo.message || '内容触发安全策略，已为您终止输出'
+                this.$message.warning(warnMsg)
+                const cur = this.messages[aiIndex]
+                if (cur.content) {
+                  cur.content = cur.content + '\n\n' + `【已拦截：${warnMsg}】`
+                } else {
+                  cur.content = `【已拦截：${warnMsg}】`
+                }
+                cur.loading = false
+                cur.streaming = false
+                this.isStreaming = false
+                this.currentReader = null
+                this.loadConvList()
+                return
               } else if (event === 'search_sources') {
                 try {
                   const payload = JSON.parse(data || '{}')
@@ -3366,9 +3387,12 @@ export default {
         if (!this.attachments) {
           this.attachments = []
         }
+        const token = (res.data && res.data.token) ? res.data.token : (res.token || '')
+        const url = res.url || token || ''
         this.attachments.push({
           name: file.name,
-          url: res.url
+          url: url,
+          token: token
         })
         this.$message.success(`文件 "${file.name}" 上传成功`)
       } else {

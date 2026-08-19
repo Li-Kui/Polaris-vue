@@ -34,6 +34,9 @@
         <knife4j.version>4.5.0</knife4j.version>
         <lombok.version>1.18.30</lombok.version>
         <langgraph4j.version>1.8.20</langgraph4j.version>
+        <sensitive-word.version>0.29.5</sensitive-word.version>
+        <houbb-pinyin.version>0.4.0</houbb-pinyin.version>
+        <aliyun-green.version>3.3.3</aliyun-green.version>
     </properties>
 
     <!-- 依赖声明 -->

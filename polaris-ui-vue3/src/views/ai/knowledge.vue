@@ -170,6 +170,14 @@
               </template>
             </el-table-column>
             <el-table-column label="上传时间" prop="createTime" width="160" />
+            <el-table-column label="安全检测" prop="moderationStatus" width="140">
+              <template #default="scope">
+                <el-tag :type="getModerationStatusTag(scope.row.moderationStatus)" class="status-tag">
+                  <el-icon v-if="scope.row.moderationStatus === 'SCANNING'" class="is-loading"><loading /></el-icon>
+                  {{ getModerationStatusText(scope.row.moderationStatus) }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="解析状态" prop="status" width="140">
               <template #default="scope">
                 <el-tag :type="getStatusTag(scope.row.status)" class="status-tag">
@@ -581,6 +589,28 @@ export default {
     formatWordCount(count) {
       if (!count) return "0 字";
       return count.toLocaleString() + " 字";
+    },
+    getModerationStatusTag(status) {
+      switch (status) {
+        case "WAIT_SCAN": return "info";
+        case "SCANNING": return "warning";
+        case "SAFE": return "success";
+        case "QUARANTINED": return "danger";
+        case "SCAN_FAILED": return "danger";
+        case "AUTO_DELETED": return "info";
+        default: return "success";
+      }
+    },
+    getModerationStatusText(status) {
+      const moderationLabels = {
+        WAIT_SCAN: "等待机器检测",
+        SCANNING: "机器检测中",
+        SAFE: "检测通过",
+        QUARANTINED: "已隔离",
+        SCAN_FAILED: "检测失败",
+        AUTO_DELETED: "已自动清理"
+      };
+      return moderationLabels[status] || "检测通过";
     },
     getStatusTag(status) {
       switch (status) {

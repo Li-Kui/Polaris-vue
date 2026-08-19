@@ -3,7 +3,6 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
@@ -60,6 +59,15 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
 
     @Autowired
     private AiVectorStoreProperties vectorStoreProperties;
+
+    @Autowired
+    private com.polaris.ai.safety.service.IModerationFacade moderationFacade;
+
+    @Autowired
+    private com.polaris.ai.safety.guard.KnowledgeModerationGuard knowledgeModerationGuard;
+
+    @Autowired
+    private com.polaris.ai.attachment.AttachmentTextExtractor attachmentTextExtractor;
 
     // ================================================================
     //  知识库 CRUD
@@ -302,6 +310,15 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             }
 
             for (AiDocument document : documents) {
+                if ("QUARANTINED".equals(document.getModerationStatus())
+                        || "AUTO_DELETED".equals(document.getModerationStatus())) {
+                    log.info(">>> 重建索引跳过已隔离/清理的文档: id={}, name={}", document.getId(), document.getName());
+                    continue;
+                }
+                if (document.getFileUrl() == null || !java.nio.file.Files.exists(java.nio.file.Path.of(document.getFileUrl()))) {
+                    log.warn(">>> 重建索引跳过物理文件不存在的文档: id={}, name={}", document.getId(), document.getName());
+                    continue;
+                }
                 try {
                     indexDocument(document, knowledgeBase, nextVersion, context);
                 } catch (Exception e) {
@@ -350,13 +367,39 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             Long indexVersion,
             AiVectorStoreResolver.VectorContext context)
     {
-        log.info(">>> 开始解析并向量化文档: {}, collection={}", doc.getName(), context.collectionName());
+        log.info(">>> 开始安全检测与向量化文档: {}, collection={}", doc.getName(), context.collectionName());
         doc.setStatus("1");
+        doc.setModerationStatus("SCANNING");
         aiDocumentMapper.updateById(doc);
 
-        String content = AttachmentParserHelper.parse(doc.getFileUrl());
-        if (content == null || content.trim().isEmpty() || content.startsWith("[解析附件时发生错误")) {
-            throw new IllegalStateException("文件内容提取为空或解析错误");
+        java.nio.file.Path filePath = (doc.getFileUrl() != null && !doc.getFileUrl().isBlank())
+                ? java.nio.file.Path.of(doc.getFileUrl()) : null;
+        String content;
+        try {
+            content = attachmentTextExtractor.extract(filePath, doc.getName());
+            if (content == null || content.trim().isEmpty() || content.startsWith("[解析附件时发生错误")) {
+                doc.setModerationStatus("SCAN_FAILED");
+                doc.setStatus("3");
+                aiDocumentMapper.updateById(doc);
+                throw new IllegalStateException("文件内容提取为空或解析错误");
+            }
+        } catch (Exception e) {
+            doc.setModerationStatus("SCAN_FAILED");
+            doc.setStatus("3");
+            aiDocumentMapper.updateById(doc);
+            throw e;
+        }
+
+        com.polaris.ai.safety.dto.ModerationResult moderation = knowledgeModerationGuard.moderateContent(
+                doc,
+                content,
+                moderationFacade
+        );
+
+        knowledgeModerationGuard.apply(doc, moderation, filePath);
+        if (!moderation.isAllowed()) {
+            log.warn(">>> 知识库文档 {} 安全检测未通过: {}", doc.getName(), moderation.finalAction());
+            return;
         }
 
         Document document = Document.from(content);

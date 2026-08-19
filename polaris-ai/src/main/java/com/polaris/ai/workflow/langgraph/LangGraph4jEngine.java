@@ -105,6 +105,9 @@ public class LangGraph4jEngine {
     @Autowired(required = false)
     private List<WorkflowNodeExecutor> javaExecutors = new ArrayList<>();
 
+    @Autowired(required = false)
+    private com.polaris.ai.safety.guard.WorkflowModerationSink workflowModerationSink;
+
     @Autowired
     @Qualifier("workflowNodeTaskExecutor")
     private AsyncTaskExecutor nodeTaskExecutor;
@@ -127,6 +130,11 @@ public class LangGraph4jEngine {
                     Map.of("workflowCode", execution.workflowCode(),
                             "workflowVersion", execution.workflowVersion()));
             ensureNotCancelled(cancelled, cancellationProbe);
+
+            if (workflowModerationSink != null && execution.inputText() != null && !execution.inputText().isBlank()) {
+                workflowModerationSink.moderateInput(execution.inputText(), executionId);
+            }
+
             saveWorkflowUserMessage(execution);
 
             StateGraph<PolarisAgentState> stateGraph = buildStateGraph(
@@ -1350,6 +1358,15 @@ public class LangGraph4jEngine {
                 }
             }
 
+            if (workflowModerationSink != null && latestOutput != null && !latestOutput.isBlank()) {
+                try {
+                    workflowModerationSink.moderate(latestOutput, executionId, "WORKFLOW_SUMMARY");
+                } catch (com.polaris.ai.safety.exception.ModerationBlockedException ex) {
+                    log.warn("工作流最终输出包含敏感违规内容，已阻断存入会话历史: executionId={}", executionId);
+                    latestOutput = "【工作流输出内容包含敏感违规信息，已被安全检测系统拦截】";
+                }
+            }
+
             int updated = jdbcTemplate.update(
                     "UPDATE ai_message SET content = ? " +
                             "WHERE workflow_execution_id = ? AND role = 'assistant'",
@@ -1364,6 +1381,7 @@ public class LangGraph4jEngine {
             aiMsg.setWorkflowExecutionId(executionId);
             aiMsg.setRole("assistant");
             aiMsg.setContent(latestOutput);
+            aiMsg.setModerationStatus("SAFE");
             aiChatMapper.insertMessage(aiMsg);
             
             log.info(">>> [LangGraph4j] 成功向会话 {} 插入新 AI 消息，内容长度: {}", conversationId, latestOutput.length());
