@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.TenantMapper">
+    
+    <resultMap type="com.polaris.platform.domain.Tenant" id="TenantResult">
+        <id     property="tenantId"     column="tenant_id"     />
+        <result property="tenantName"   column="tenant_name"   />
+        <result property="tenantCode"   column="tenant_code"   />
+        <result property="contactName"  column="contact_name"  />
+        <result property="contactPhone" column="contact_phone" />
+        <result property="status"       column="status"        />
+        <result property="quotaTokens"  column="quota_tokens"  />
+        <result property="usedTokens"   column="used_tokens"   />
+        <result property="remark"       column="remark"        />
+        <result property="createBy"     column="create_by"     />
+        <result property="createTime"   column="create_time"   />
+        <result property="updateBy"     column="update_by"     />
+        <result property="updateTime"   column="update_time"   />
+    </resultMap>
+
+    <sql id="selectTenantVo">
+        select tenant_id, tenant_name, tenant_code, contact_name, contact_phone, status, quota_tokens, used_tokens, remark, create_by, create_time, update_by, update_time
+        from platform_tenant
+    </sql>
+
+    <select id="selectById" parameterType="Long" resultMap="TenantResult">
+        <include refid="selectTenantVo"/>
+        where tenant_id = #{tenantId}
+    </select>
+
+    <select id="selectByCode" parameterType="String" resultMap="TenantResult">
+        <include refid="selectTenantVo"/>
+        where tenant_code = #{tenantCode}
+    </select>
+
+    <select id="selectList" parameterType="com.polaris.platform.domain.Tenant" resultMap="TenantResult">
+        <include refid="selectTenantVo"/>
+        <where>
+            <if test="tenantName != null and tenantName != ''">
+                AND tenant_name like concat('%', #{tenantName}, '%')
+            </if>
+            <if test="tenantCode != null and tenantCode != ''">
+                AND tenant_code like concat('%', #{tenantCode}, '%')
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+        </where>
+        order by create_time desc
+    </select>
+
+    <insert id="insert" parameterType="com.polaris.platform.domain.Tenant" useGeneratedKeys="true" keyProperty="tenantId">
+        insert into platform_tenant(
+            <if test="tenantName != null and tenantName != ''">tenant_name,</if>
+            <if test="tenantCode != null and tenantCode != ''">tenant_code,</if>
+            <if test="contactName != null and contactName != ''">contact_name,</if>
+            <if test="contactPhone != null and contactPhone != ''">contact_phone,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="quotaTokens != null">quota_tokens,</if>
+            <if test="usedTokens != null">used_tokens,</if>
+            <if test="remark != null and remark != ''">remark,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            create_time
+        )values(
+            <if test="tenantName != null and tenantName != ''">#{tenantName},</if>
+            <if test="tenantCode != null and tenantCode != ''">#{tenantCode},</if>
+            <if test="contactName != null and contactName != ''">#{contactName},</if>
+            <if test="contactPhone != null and contactPhone != ''">#{contactPhone},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="quotaTokens != null">#{quotaTokens},</if>
+            <if test="usedTokens != null">#{usedTokens},</if>
+            <if test="remark != null and remark != ''">#{remark},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            sysdate()
+        )
+    </insert>
+
+    <update id="update" parameterType="com.polaris.platform.domain.Tenant">
+        update platform_tenant
+        <set>
+            <if test="tenantName != null and tenantName != ''">tenant_name = #{tenantName},</if>
+            <if test="tenantCode != null and tenantCode != ''">tenant_code = #{tenantCode},</if>
+            <if test="contactName != null">contact_name = #{contactName},</if>
+            <if test="contactPhone != null">contact_phone = #{contactPhone},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="quotaTokens != null">quota_tokens = #{quotaTokens},</if>
+            <if test="usedTokens != null">used_tokens = #{usedTokens},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where tenant_id = #{tenantId}
+    </update>
+
+    <delete id="deleteById" parameterType="Long">
+        delete from platform_tenant where tenant_id = #{tenantId}
+    </delete>
+
+    <update id="updateUsedTokens">
+        update platform_tenant
+        set used_tokens = used_tokens + #{tokens},
+            update_time = sysdate()
+        where tenant_id = #{tenantId}
+    </update>
+
+</mapper>

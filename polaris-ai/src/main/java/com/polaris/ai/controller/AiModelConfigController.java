@@ -1,6 +1,8 @@
 package com.polaris.ai.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.dto.FetchModelsRequest;
@@ -15,7 +17,6 @@ import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
 import com.polaris.common.core.page.Page;
 import com.polaris.common.enums.BusinessType;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -67,16 +68,8 @@ public class AiModelConfigController extends BaseController {
      */
     @Operation(summary = "查询当前用户可用的大模型列表")
     @GetMapping("/list/available")
-    public ResultData<List<AiModelConfig>> listAvailable() {
-        Long userId = SecurityUtils.getUserId();
-        boolean isAdmin = SecurityUtils.isAdmin(userId);
-        Long deptId = null;
-        if (!isAdmin) {
-            if (SecurityUtils.getLoginUser() != null && SecurityUtils.getLoginUser().getUser() != null) {
-                deptId = SecurityUtils.getLoginUser().getUser().getDeptId();
-            }
-        }
-        List<AiModelConfig> list = modelConfigService.selectAvailableModelConfigs(deptId, isAdmin);
+    public ResultData<List<AiModelConfig>> listAvailable(CallerContext caller) {
+        List<AiModelConfig> list = modelConfigService.selectAvailableModelConfigs(caller.getDeptId(), caller.isSuperAdmin());
         return ok(list);
     }
 
@@ -85,15 +78,8 @@ public class AiModelConfigController extends BaseController {
      */
     @Operation(summary = "查询当前用户可用的向量模型列表")
     @GetMapping("/list/availableEmbedding")
-    public ResultData<List<AiModelConfig>> listAvailableEmbedding() {
-        Long userId = SecurityUtils.getUserId();
-        boolean isAdmin = SecurityUtils.isAdmin(userId);
-        Long deptId = null;
-        if (!isAdmin && SecurityUtils.getLoginUser() != null
-                && SecurityUtils.getLoginUser().getUser() != null) {
-            deptId = SecurityUtils.getLoginUser().getUser().getDeptId();
-        }
-        return ok(modelConfigService.selectAvailableModelConfigsByType("EMBEDDING", deptId, isAdmin));
+    public ResultData<List<AiModelConfig>> listAvailableEmbedding(CallerContext caller) {
+        return ok(modelConfigService.selectAvailableModelConfigsByType("EMBEDDING", caller.getDeptId(), caller.isSuperAdmin()));
     }
 
     /**
@@ -120,7 +106,10 @@ public class AiModelConfigController extends BaseController {
                 && "1".equals(config.getIsDefault())) {
             return ResultData.fail("请先保存向量模型，再通过“设为默认向量”执行连接与维度探测");
         }
-        config.setCreateBy(SecurityUtils.getUsername());
+        if (CallerUtils.isPlatformMode()) {
+            config.setDeptId(null);
+        }
+        config.setCreateBy(CallerUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
         }
@@ -164,15 +153,18 @@ public class AiModelConfigController extends BaseController {
         }
 
         // 公共模型权限校验：仅超管或创建者可编辑
-        if (existing.getDeptId() == null) {
-            boolean isAdmin = SecurityUtils.isAdmin();
-            String username = SecurityUtils.getUsername();
+        if (!CallerUtils.isPlatformMode() && existing.getDeptId() == null) {
+            boolean isAdmin = CallerUtils.isSuperAdmin();
+            String username = CallerUtils.getUsername();
             if (!isAdmin && !username.equals(existing.getCreateBy())) {
                 return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
             }
         }
 
-        config.setUpdateBy(SecurityUtils.getUsername());
+        if (CallerUtils.isPlatformMode()) {
+            config.setDeptId(null);
+        }
+        config.setUpdateBy(CallerUtils.getUsername());
         if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
             config.setApiKey(null);
         }
@@ -215,8 +207,8 @@ public class AiModelConfigController extends BaseController {
 
         // 公共模型权限校验：仅超管或创建者可删除
         if (existing.getDeptId() == null) {
-            boolean isAdmin = SecurityUtils.isAdmin();
-            String username = SecurityUtils.getUsername();
+            boolean isAdmin = CallerUtils.isSuperAdmin();
+            String username = CallerUtils.getUsername();
             if (!isAdmin && !username.equals(existing.getCreateBy())) {
                 return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者删除");
             }
@@ -248,8 +240,8 @@ public class AiModelConfigController extends BaseController {
 
         // 公共模型权限校验：仅超管或创建者可操作
         if (existing.getDeptId() == null) {
-            boolean isAdmin = SecurityUtils.isAdmin();
-            String username = SecurityUtils.getUsername();
+            boolean isAdmin = CallerUtils.isSuperAdmin();
+            String username = CallerUtils.getUsername();
             if (!isAdmin && !username.equals(existing.getCreateBy())) {
                 return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
             }
@@ -285,8 +277,8 @@ public class AiModelConfigController extends BaseController {
 
         // 公共模型权限校验：仅超管或创建者可操作
         if (existing.getDeptId() == null) {
-            boolean isAdmin = SecurityUtils.isAdmin();
-            String username = SecurityUtils.getUsername();
+            boolean isAdmin = CallerUtils.isSuperAdmin();
+            String username = CallerUtils.getUsername();
             if (!isAdmin && !username.equals(existing.getCreateBy())) {
                 return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
             }
@@ -397,8 +389,8 @@ public class AiModelConfigController extends BaseController {
 
         // 公共模型权限校验
         if (existing.getDeptId() == null) {
-            boolean isAdmin = SecurityUtils.isAdmin();
-            String username = SecurityUtils.getUsername();
+            boolean isAdmin = CallerUtils.isSuperAdmin();
+            String username = CallerUtils.getUsername();
             if (!isAdmin && !username.equals(existing.getCreateBy())) {
                 return ResultData.fail("操作失败，公共模型仅允许超级管理员或原创建者修改");
             }

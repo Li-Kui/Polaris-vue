@@ -1,17 +1,18 @@
 package com.polaris.common.utils;
 
-import java.util.Collection;
-import java.util.List;
-import java.util.stream.Collectors;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.util.PatternMatchUtils;
 import com.polaris.common.constant.Constants;
 import com.polaris.common.constant.HttpStatus;
 import com.polaris.common.core.domain.entity.SysRole;
 import com.polaris.common.core.domain.model.LoginUser;
 import com.polaris.common.exception.ServiceException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.util.PatternMatchUtils;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 安全服务工具类
@@ -28,7 +29,28 @@ public class SecurityUtils
     {
         try
         {
-            return getLoginUser().getUserId();
+            Authentication auth = getAuthentication();
+            if (auth == null || auth.getPrincipal() == null) {
+                throw new ServiceException("当前未登录", HttpStatus.UNAUTHORIZED);
+            }
+            Object principal = auth.getPrincipal();
+            if (principal instanceof LoginUser loginUser) {
+                return loginUser.getUserId();
+            }
+            // 兼容非 LoginUser 主体（如中台控制台用户、第三方主体等）
+            try {
+                java.lang.reflect.Method method = principal.getClass().getMethod("getUserId");
+                Object val = method.invoke(principal);
+                if (val instanceof Long l) return l;
+                if (val instanceof Number n) return n.longValue();
+                if (val != null) return Long.valueOf(val.toString());
+            } catch (NoSuchMethodException ignored) {
+            }
+            return 0L;
+        }
+        catch (ServiceException se)
+        {
+            throw se;
         }
         catch (Exception e)
         {
@@ -43,7 +65,22 @@ public class SecurityUtils
     {
         try
         {
-            return getLoginUser().getDeptId();
+            Authentication auth = getAuthentication();
+            if (auth == null || auth.getPrincipal() == null) {
+                return null;
+            }
+            Object principal = auth.getPrincipal();
+            if (principal instanceof LoginUser loginUser) {
+                return loginUser.getDeptId();
+            }
+            try {
+                java.lang.reflect.Method method = principal.getClass().getMethod("getDeptId");
+                Object val = method.invoke(principal);
+                if (val instanceof Long l) return l;
+                if (val instanceof Number n) return n.longValue();
+            } catch (NoSuchMethodException ignored) {
+            }
+            return null;
         }
         catch (Exception e)
         {
@@ -58,7 +95,21 @@ public class SecurityUtils
     {
         try
         {
-            return getLoginUser().getUsername();
+            Authentication auth = getAuthentication();
+            if (auth == null || auth.getPrincipal() == null) {
+                return "";
+            }
+            Object principal = auth.getPrincipal();
+            if (principal instanceof LoginUser loginUser) {
+                return loginUser.getUsername();
+            }
+            try {
+                java.lang.reflect.Method method = principal.getClass().getMethod("getUsername");
+                Object val = method.invoke(principal);
+                if (val != null) return val.toString();
+            } catch (NoSuchMethodException ignored) {
+            }
+            return auth.getName();
         }
         catch (Exception e)
         {
@@ -73,7 +124,11 @@ public class SecurityUtils
     {
         try
         {
-            return (LoginUser) getAuthentication().getPrincipal();
+            Authentication auth = getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof LoginUser loginUser) {
+                return loginUser;
+            }
+            return null;
         }
         catch (Exception e)
         {
@@ -143,7 +198,8 @@ public class SecurityUtils
      */
     public static boolean hasPermi(String permission)
     {
-        return hasPermi(getLoginUser().getPermissions(), permission);
+        LoginUser loginUser = getLoginUser();
+        return loginUser != null && hasPermi(loginUser.getPermissions(), permission);
     }
 
     /**
@@ -155,8 +211,8 @@ public class SecurityUtils
      */
     public static boolean hasPermi(Collection<String> authorities, String permission)
     {
-        return authorities.stream().filter(StringUtils::hasText)
-                .anyMatch(x -> Constants.ALL_PERMISSION.equals(x) || PatternMatchUtils.simpleMatch(x, permission));
+        return authorities != null && !authorities.isEmpty() && (authorities.contains(Constants.ALL_PERMISSION)
+                || authorities.contains(StringUtils.trim(permission)));
     }
 
     /**
@@ -167,7 +223,11 @@ public class SecurityUtils
      */
     public static boolean hasRole(String role)
     {
-        List<SysRole> roleList = getLoginUser().getUser().getRoles();
+        LoginUser loginUser = getLoginUser();
+        List<SysRole> roleList = loginUser != null && loginUser.getUser() != null ? loginUser.getUser().getRoles() : null;
+        if (roleList == null || roleList.isEmpty()) {
+            return false;
+        }
         Collection<String> roles = roleList.stream().map(SysRole::getRoleKey).collect(Collectors.toSet());
         return hasRole(roles, role);
     }

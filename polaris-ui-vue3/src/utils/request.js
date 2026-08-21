@@ -1,6 +1,6 @@
 import axios from 'axios'
 import {ElLoading, ElMessage, ElMessageBox, ElNotification} from 'element-plus'
-import {getToken} from '@/utils/auth'
+import {getPlatformToken, getToken} from '@/utils/auth'
 import errorCode from '@/utils/errorCode'
 import {blobValidate, tansParams} from '@/utils/ruoyi'
 import cache from '@/plugins/cache'
@@ -28,8 +28,18 @@ service.interceptors.request.use(config => {
   const isRepeatSubmit = (config.headers || {}).repeatSubmit === false
   // 间隔时间(ms)，小于此时间视为重复提交
   const interval = (config.headers || {}).interval || 1000
-  if (getToken() && !isToken) {
-    config.headers['Authorization'] = 'Bearer ' + getToken() // 让每个请求携带自定义token 请根据实际情况自行修改
+  const isPlatform = window.location.pathname.startsWith('/platform')
+  const pToken = getPlatformToken()
+  const aToken = getToken()
+
+  if (isPlatform && pToken && !isToken) {
+    config.headers['Platform-Token'] = pToken
+  } else if (!isPlatform && aToken && !isToken) {
+    config.headers['Authorization'] = 'Bearer ' + aToken
+  } else if (pToken && !isToken) {
+    config.headers['Platform-Token'] = pToken
+  } else if (aToken && !isToken) {
+    config.headers['Authorization'] = 'Bearer ' + aToken
   }
   // get请求映射params参数
   if (config.method === 'get' && config.params) {
@@ -87,9 +97,17 @@ service.interceptors.response.use(res => {
         isRelogin.show = true
         ElMessageBox.confirm('登录状态已过期，您可以继续留在该页面，或者重新登录', '系统提示', { confirmButtonText: '重新登录', cancelButtonText: '取消', type: 'warning' }).then(() => {
           isRelogin.show = false
-          useUserStore().logOut().then(() => {
-            location.href = '/index'
-          })
+          if (location.pathname.startsWith('/platform')) {
+            import('@/store/modules/platformUser').then(m => {
+              m.default().logOut().then(() => {
+                location.href = '/platform/login'
+              })
+            })
+          } else {
+            useUserStore().logOut().then(() => {
+              location.href = '/index'
+            })
+          }
       }).catch(() => {
         isRelogin.show = false
       })

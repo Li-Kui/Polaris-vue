@@ -104,13 +104,13 @@ public class AiVectorStoreResolver
                 ? modelFactory.getDefaultModelConfig(ModelType.EMBEDDING)
                 : modelFactory.getModelConfig(modelConfigId);
         if (config == null) {
-            throw new IllegalStateException("未配置可用的默认向量模型");
+            throw new com.polaris.common.exception.ServiceException("未配置可用的向量模型，请先在大模型配置中添加或指定向量模型");
         }
         if (!ModelType.EMBEDDING.name().equalsIgnoreCase(config.getModelType())) {
-            throw new IllegalStateException("知识库绑定的模型不是 EMBEDDING 类型: " + config.getId());
+            throw new com.polaris.common.exception.ServiceException("知识库绑定的模型不是 EMBEDDING 向量模型: " + config.getName());
         }
         if (!"1".equals(config.getStatus())) {
-            throw new IllegalStateException("知识库绑定的向量模型未启用: " + config.getId());
+            throw new com.polaris.common.exception.ServiceException("知识库绑定的向量模型未启用: " + config.getName());
         }
         if (config.getEmbeddingDimension() == null || config.getEmbeddingDimension() <= 0) {
             modelFactory.ensureEmbeddingDimension(config);

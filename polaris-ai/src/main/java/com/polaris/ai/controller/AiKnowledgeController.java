@@ -11,7 +11,6 @@ import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
 import com.polaris.common.core.page.Page;
 import com.polaris.common.enums.BusinessType;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -70,11 +69,9 @@ public class AiKnowledgeController extends BaseController {
     @Log(title = "知识库管理", businessType = BusinessType.INSERT)
     @PostMapping
     public ResultData add(@RequestBody AiKnowledgeBase knowledgeBase) {
-        knowledgeBase.setCreateBy(SecurityUtils.getUsername());
+        knowledgeBase.setCreateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         // 自动绑定当前创建用户所在的部门ID，实现物理归属划分
-        if (SecurityUtils.getLoginUser() != null && SecurityUtils.getLoginUser().getUser() != null) {
-            knowledgeBase.setDeptId(SecurityUtils.getLoginUser().getUser().getDeptId());
-        }
+        knowledgeBase.setDeptId(com.polaris.ai.core.context.CallerUtils.getDeptId());
         return toAjaxResult(aiKnowledgeService.insertKnowledgeBase(knowledgeBase));
     }
 
@@ -90,7 +87,7 @@ public class AiKnowledgeController extends BaseController {
             return fail("知识库不存在或无修改权限");
         }
         knowledgeBase.setDeptId(existing.getDeptId());
-        knowledgeBase.setUpdateBy(SecurityUtils.getUsername());
+        knowledgeBase.setUpdateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         return toAjaxResult(aiKnowledgeService.updateKnowledgeBase(knowledgeBase));
     }
 
@@ -152,7 +149,7 @@ public class AiKnowledgeController extends BaseController {
             document.setName(file.getOriginalFilename());
             document.setFileUrl(stagedPath.toAbsolutePath().toString());
             document.setModerationStatus("WAIT_SCAN");
-            document.setCreateBy(SecurityUtils.getUsername());
+            document.setCreateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
             document.setCreateTime(new Date());
             aiKnowledgeService.insertDocument(document);
 

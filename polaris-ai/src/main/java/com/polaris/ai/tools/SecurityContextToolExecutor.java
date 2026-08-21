@@ -1,5 +1,6 @@
 package com.polaris.ai.tools;
 
+import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.ai.tools.base.AiToolPermission;
 import com.polaris.ai.utils.SearchKeyHolder;
@@ -148,6 +149,11 @@ public class SecurityContextToolExecutor {
             String className = targetClass.getSimpleName();
 
             if (toolNames.contains(className)) {
+                AiAgentTool ann = targetClass.getAnnotation(AiAgentTool.class);
+                if (com.polaris.ai.core.context.CallerUtils.isPlatformMode()
+                        && ann != null && ann.scope() == com.polaris.ai.tools.base.ToolScope.ADMIN_ONLY) {
+                    continue;
+                }
                 if (className.contains("WebSearchTools")
                         && (searchKey == null || searchKey.trim().isEmpty())) {
                     continue;

@@ -2,10 +2,11 @@ import router from './router'
 import {ElMessage} from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
-import {getToken} from '@/utils/auth'
+import {getPlatformToken, getToken} from '@/utils/auth'
 import {isHttp, isPathMatch} from '@/utils/validate'
 import {isRelogin} from '@/utils/request'
 import useUserStore from '@/store/modules/user'
+import usePlatformUserStore from '@/store/modules/platformUser'
 import useLockStore from '@/store/modules/lock'
 import useSettingsStore from '@/store/modules/settings'
 import usePermissionStore from '@/store/modules/permission'
@@ -20,6 +21,42 @@ const isWhiteList = (path) => {
 
 router.beforeEach(async (to, from) => {
   NProgress.start()
+
+  // ==========================================
+  // 分支 1：中台控制台路由处理 (/platform/login 或 /platform/console/**)
+  // ==========================================
+  const isPlatformRoute = to.path === '/platform/login' || to.path.startsWith('/platform/console')
+  if (isPlatformRoute) {
+    const platformToken = getPlatformToken()
+    if (to.path === '/platform/login') {
+      if (platformToken) {
+        NProgress.done()
+        return { path: '/platform/console/dashboard' }
+      }
+      return true
+    }
+
+    if (platformToken) {
+      const platformUserStore = usePlatformUserStore()
+      if (!platformUserStore.user.id) {
+        try {
+          await platformUserStore.getInfo()
+        } catch (err) {
+          await platformUserStore.logOut()
+          NProgress.done()
+          return `/platform/login?redirect=${to.fullPath}`
+        }
+      }
+      return true
+    } else {
+      NProgress.done()
+      return `/platform/login?redirect=${to.fullPath}`
+    }
+  }
+
+  // ==========================================
+  // 分支 2：管理后台路由处理 (原有逻辑)
+  // ==========================================
   if (getToken()) {
     to.meta.title && useSettingsStore().setTitle(to.meta.title)
     const isLock = useLockStore().isLock

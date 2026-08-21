@@ -1,6 +1,8 @@
 package com.polaris.framework.config;
 
-import java.util.concurrent.TimeUnit;
+import com.polaris.common.config.PolarisConfig;
+import com.polaris.common.constant.Constants;
+import com.polaris.framework.interceptor.RepeatSubmitInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,9 +13,8 @@ import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-import com.polaris.common.config.PolarisConfig;
-import com.polaris.common.constant.Constants;
-import com.polaris.framework.interceptor.RepeatSubmitInterceptor;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * 通用配置
@@ -46,6 +47,15 @@ public class ResourcesConfig implements WebMvcConfigurer
     public void addInterceptors(InterceptorRegistry registry)
     {
         registry.addInterceptor(repeatSubmitInterceptor).addPathPatterns("/**");
+    }
+
+    /**
+     * 自定义 Controller 参数解析器（自动注入 CallerContext）
+     */
+    @Override
+    public void addArgumentResolvers(java.util.List<org.springframework.web.method.support.HandlerMethodArgumentResolver> resolvers)
+    {
+        resolvers.add(new com.polaris.ai.core.web.CallerContextArgumentResolver());
     }
 
     /**

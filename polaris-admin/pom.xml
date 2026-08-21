@@ -54,6 +54,12 @@
             <artifactId>polaris-ai</artifactId>
         </dependency>
 
+        <!--中台核心模块-->
+        <dependency>
+            <groupId>com.polaris</groupId>
+            <artifactId>polaris-platform-core</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>

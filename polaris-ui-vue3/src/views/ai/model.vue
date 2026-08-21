@@ -174,12 +174,14 @@
                     <el-tag v-if="item.enableSearch === '1'" effect="plain" size="small" type="success" class="tech-pill">
                       联网搜索
                     </el-tag>
-                    <el-tag v-if="item.deptId" effect="plain" size="small" type="primary" class="tech-pill">
-                      {{ getDeptName(item.deptId) }}
-                    </el-tag>
-                    <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
-                      全局共享
-                    </el-tag>
+                    <template v-if="!isPlatform">
+                      <el-tag v-if="item.deptId" effect="plain" size="small" type="primary" class="tech-pill">
+                        {{ getDeptName(item.deptId) }}
+                      </el-tag>
+                      <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
+                        全局共享
+                      </el-tag>
+                    </template>
                     <template v-if="item.modelType === 'IMAGE'">
                       <el-tag
                         v-for="cap in jsonToArray(item.imageCapabilities)"
@@ -427,7 +429,7 @@
               </div>
             </el-form-item>
 
-            <el-form-item label="归属部门">
+            <el-form-item v-if="!isPlatform" label="归属部门">
               <el-tree-select
                 v-model="form.deptId"
                 :data="deptOptions"
@@ -540,7 +542,7 @@
               </el-col>
 
               <!-- 联网搜索 Key 配置（联级显示） -->
-              <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
+              <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
                 <el-form-item label="联网搜索 Key" prop="searchKey">
                   <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
                 </el-form-item>
@@ -717,6 +719,9 @@ export default {
     }
   },
   computed: {
+    isPlatform() {
+      return this.isPlatformMode();
+    },
     // 是否可以点击获取模型按钮：提供商必填 + (API Key 必填 || Ollama 无需 Key) + (OpenAI 中转必须填 URL)
     canFetchModels() {
       if (!this.form.provider) return false;
@@ -823,9 +828,15 @@ export default {
   },
   created() {
     this.getList()
-    this.getDeptTree()
+    // 仅在管理后台模式下查询部门树，中台模式下无需查询后台部门
+    if (!this.isPlatformMode()) {
+      this.getDeptTree()
+    }
   },
   methods: {
+    isPlatformMode() {
+      return this.$route && this.$route.path && this.$route.path.startsWith('/platform')
+    },
     isEmbeddingModel(modelName) {
       if (!modelName) return false
       return modelName.toLowerCase().includes('embed')
@@ -887,7 +898,9 @@ export default {
     /** 查询部门下拉树结构 */
     getDeptTree() {
       deptTreeSelect().then(response => {
-        this.deptOptions = response.data
+        this.deptOptions = response.data || []
+      }).catch(() => {
+        this.deptOptions = []
       })
     },
     // 递归获取部门名称
@@ -1011,6 +1024,9 @@ export default {
             this.form.imageCapabilities = null;
             this.form.modelFeatures = null;
             this.form.modelDescription = null;
+          }
+          if (this.isPlatform) {
+            this.form.deptId = undefined;
           }
           if (this.form.id != null) {
             updateModel(this.form).then(() => {

@@ -11,7 +11,6 @@ import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
 import com.polaris.common.core.page.Page;
 import com.polaris.common.enums.BusinessType;
-import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.Tool;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -44,28 +43,69 @@ public class AiAgentController extends BaseController {
     @Autowired(required = false)
     private List<AiTool> allTools;
 
+    @Autowired
+    private com.polaris.ai.service.IAiModelConfigService modelConfigService;
+
     /**
-     * 获取系统所有可用的智能体工具列表（动态扫描）
+     * 获取系统所有可用的智能体工具列表（基于作用域与运行环境动态过滤）
      * GET /ai/agent/tools
      */
     @Operation(summary = "获取所有可用的工具 Bean 列表")
     @GetMapping("/tools")
-    public ResultData<List<Map<String, String>>> getAvailableTools() {
-        List<Map<String, String>> toolsList = new ArrayList<>();
+    public ResultData<List<Map<String, Object>>> getAvailableTools() {
+        List<Map<String, Object>> toolsList = new ArrayList<>();
+        boolean isPlatform = com.polaris.ai.core.context.CallerUtils.isPlatformMode();
+        boolean hasImageModel = checkHasActiveImageModel();
+
         if (allTools != null) {
             for (AiTool tool : allTools) {
                 Class<?> targetClass = AopUtils.getTargetClass(tool);
-                Map<String, String> map = new HashMap<>();
+                AiAgentTool ann = targetClass.getAnnotation(AiAgentTool.class);
+                com.polaris.ai.tools.base.ToolScope scope = (ann != null) ? ann.scope() : com.polaris.ai.tools.base.ToolScope.UNIVERSAL;
+                com.polaris.ai.tools.base.ToolRequirement req = (ann != null) ? ann.requirement() : com.polaris.ai.tools.base.ToolRequirement.NONE;
+
+                // 1. 若为中台模式，彻底过滤掉仅管理端专属的特权工具（底层参数、用户审计等）
+                if (isPlatform && scope == com.polaris.ai.tools.base.ToolScope.ADMIN_ONLY) {
+                    continue;
+                }
+
+                Map<String, Object> map = new HashMap<>();
                 String simpleName = targetClass.getSimpleName();
                 map.put("name", simpleName);
-                
-                AiAgentTool ann = targetClass.getAnnotation(AiAgentTool.class);
                 String label = (ann != null) ? ann.value() + " (" + simpleName + ")" : simpleName + " (自定义工具)";
                 map.put("label", label);
+                map.put("scope", scope.name());
+                map.put("requirement", req.name());
+
+                // 2. 动态计算可用性状态与不可用提示
+                if (req == com.polaris.ai.tools.base.ToolRequirement.IMAGE_MODEL) {
+                    map.put("available", hasImageModel);
+                    map.put("disabledReason", hasImageModel ? "" : "当前租户/系统未配置或未启用 AI 绘图模型");
+                } else if (req == com.polaris.ai.tools.base.ToolRequirement.SEARCH_KEY) {
+                    // 联网搜索工具由前端与所选大模型 searchKey 联动控制
+                    map.put("available", true);
+                    map.put("disabledReason", "所选底座大模型未配置联网搜索 API Key (Tavily Key)");
+                } else {
+                    map.put("available", true);
+                    map.put("disabledReason", "");
+                }
+
                 toolsList.add(map);
             }
         }
         return ok(toolsList);
+    }
+
+    private boolean checkHasActiveImageModel() {
+        try {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.polaris.ai.domain.AiModelConfig> qw =
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            qw.eq(com.polaris.ai.domain.AiModelConfig::getModelType, "IMAGE")
+              .eq(com.polaris.ai.domain.AiModelConfig::getStatus, "1");
+            return modelConfigService.count(qw) > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
     
     /**
@@ -174,7 +214,8 @@ public class AiAgentController extends BaseController {
     @Log(title = "智能体管理", businessType = BusinessType.INSERT)
     @PostMapping
     public ResultData add(@RequestBody AiAgent agent) {
-        agent.setCreateBy(SecurityUtils.getUsername());
+        validateAgentTools(agent.getTools());
+        agent.setCreateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         return toAjaxResult(agentService.save(agent));
     }
 
@@ -186,8 +227,36 @@ public class AiAgentController extends BaseController {
     @Log(title = "智能体管理", businessType = BusinessType.UPDATE)
     @PutMapping
     public ResultData edit(@RequestBody AiAgent agent) {
-        agent.setUpdateBy(SecurityUtils.getUsername());
+        validateAgentTools(agent.getTools());
+        agent.setUpdateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         return toAjaxResult(agentService.updateById(agent));
+    }
+
+    /**
+     * 校验智能体工具绑定权限，严防跨租户越权绑定管理端专属工具
+     */
+    private void validateAgentTools(String tools) {
+        if (tools == null || tools.trim().isEmpty() || allTools == null) {
+            return;
+        }
+        boolean isPlatform = com.polaris.ai.core.context.CallerUtils.isPlatformMode();
+        if (!isPlatform) {
+            return; // 管理后台模式拥有全量权限
+        }
+        String[] toolNames = tools.split(",");
+        for (String name : toolNames) {
+            String trimmed = name.trim();
+            for (AiTool tool : allTools) {
+                Class<?> targetClass = AopUtils.getTargetClass(tool);
+                if (targetClass.getSimpleName().equalsIgnoreCase(trimmed)) {
+                    AiAgentTool ann = targetClass.getAnnotation(AiAgentTool.class);
+                    com.polaris.ai.tools.base.ToolScope scope = (ann != null) ? ann.scope() : com.polaris.ai.tools.base.ToolScope.UNIVERSAL;
+                    if (scope == com.polaris.ai.tools.base.ToolScope.ADMIN_ONLY) {
+                        throw new com.polaris.common.exception.ServiceException("中台租户无权绑定系统底层管理专属工具: " + trimmed);
+                    }
+                }
+            }
+        }
     }
 
     /**

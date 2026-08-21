@@ -3,6 +3,7 @@ package com.polaris.ai.tools;
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.ai.tools.base.AiToolPermission;
+import com.polaris.ai.tools.base.ToolScope;
 import com.polaris.system.domain.SysOperLog;
 import com.polaris.system.service.ISysOperLogService;
 import dev.langchain4j.agent.tool.Tool;
@@ -17,7 +18,7 @@ import java.util.stream.Collectors;
  * @date 2026/6/26
  */
 @Component
-@AiAgentTool("系统底层参数")
+@AiAgentTool(value = "系统底层参数", scope = ToolScope.ADMIN_ONLY)
 public class PolarisSystemTools implements AiTool {
 
     @Autowired

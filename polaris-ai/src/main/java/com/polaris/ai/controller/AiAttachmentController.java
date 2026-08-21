@@ -1,5 +1,6 @@
 package com.polaris.ai.controller;
 
+import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.safety.dto.PrivateAttachmentUploadResult;
 import com.polaris.ai.safety.dto.ResolvedAttachment;
 import com.polaris.ai.safety.service.IPrivateAttachmentService;
@@ -7,7 +8,6 @@ import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -40,7 +40,7 @@ public class AiAttachmentController extends BaseController {
     @Operation(summary = "上传并暂存AI附件")
     @PostMapping
     public ResultData upload(@RequestParam("file") MultipartFile file) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         PrivateAttachmentUploadResult result = privateAttachmentService.stage(file, userId);
         return ok(result);
     }
@@ -48,7 +48,7 @@ public class AiAttachmentController extends BaseController {
     @Operation(summary = "下载/查看当前用户拥有的AI附件")
     @GetMapping("/{token}/content")
     public void download(@PathVariable String token, HttpServletResponse response) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         ResolvedAttachment resolved = privateAttachmentService.resolveForDownload(token, userId);
         try {
             response.setContentType(resolved.mediaType() != null ? resolved.mediaType() : "application/octet-stream");
@@ -65,7 +65,7 @@ public class AiAttachmentController extends BaseController {
     @Operation(summary = "删除暂存AI附件")
     @DeleteMapping("/{token}")
     public ResultData delete(@PathVariable String token) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         privateAttachmentService.deleteStaged(token, userId);
         return ok();
     }

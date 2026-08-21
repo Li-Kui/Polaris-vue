@@ -56,6 +56,12 @@
             <artifactId>polaris-system</artifactId>
         </dependency>
 
+        <!-- 中台核心模块 -->
+        <dependency>
+            <groupId>com.polaris</groupId>
+            <artifactId>polaris-platform-core</artifactId>
+        </dependency>
+
     </dependencies>
 
 </project>

@@ -1,11 +1,10 @@
 package com.polaris.ai.pivot;
 
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.service.IAiModelConfigService;
-import com.polaris.common.core.domain.entity.SysRole;
-import com.polaris.common.core.domain.entity.SysUser;
-import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.image.ImageModel;
@@ -14,12 +13,9 @@ import dev.langchain4j.model.openai.OpenAiImageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -85,60 +81,20 @@ public class AiModelFactory
     /**
      * 编程式动态拼接角色关联的数据权限 SQL 过滤片段
      */
-    private String buildDataScopeSql(SysUser user, String deptAlias, String deptField)
+    private String buildDataScopeSql(CallerContext user, String deptAlias, String deptField)
     {
         if (user == null) {
-            return " AND " + deptAlias + "." + deptField + " IS NULL"; // 未登录或无上下文只看全局共享
+            return " AND " + deptAlias + "." + deptField + " IS NULL";
         }
-        if (user.isAdmin()) {
-            return ""; // 超级管理员直接返回空，拥有一切权限
-        }
-
-        StringBuilder sqlString = new StringBuilder();
-        List<String> conditions = new ArrayList<>();
-        List<String> scopeCustomIds = new ArrayList<>();
-        
-        user.getRoles().forEach(role -> {
-            if ("2".equals(role.getDataScope()) && "0".equals(role.getStatus())) {
-                scopeCustomIds.add(String.valueOf(role.getRoleId()));
-            }
-        });
-
-        for (SysRole role : user.getRoles()) {
-            String dataScope = role.getDataScope();
-            if (conditions.contains(dataScope) || "1".equals(role.getStatus())) {
-                continue;
-            }
-            if ("1".equals(dataScope)) { // 全部数据权限
-                sqlString = new StringBuilder();
-                conditions.add(dataScope);
-                break;
-            } else if ("2".equals(dataScope)) { // 自定义数据权限
-                if (scopeCustomIds.size() > 1) {
-                    sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_role_dept WHERE role_id in (%s) ) ", deptAlias, deptField, String.join(",", scopeCustomIds)));
-                } else {
-                    sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_role_dept WHERE role_id = %d ) ", deptAlias, deptField, role.getRoleId()));
-                }
-            } else if ("3".equals(dataScope)) { // 本部门数据权限
-                sqlString.append(String.format(" OR %s.%s = %d ", deptAlias, deptField, user.getDeptId()));
-            } else if ("4".equals(dataScope)) { // 本部门及以下数据权限
-                sqlString.append(String.format(" OR %s.%s IN ( SELECT dept_id FROM sys_dept WHERE dept_id = %d or find_in_set( %d , ancestors ) )", deptAlias, deptField, user.getDeptId(), user.getDeptId()));
-            } else if ("5".equals(dataScope)) { // 仅本人数据权限
-                sqlString.append(String.format(" OR %s.%s = 0 ", deptAlias, deptField));
-            }
-            conditions.add(dataScope);
+        if (user.isSuperAdmin()) {
+            return ""; 
         }
 
-        if (conditions.isEmpty()) {
-            return " AND " + deptAlias + "." + deptField + " = 0";
-        }
-
-        if (sqlString.length() > 0) {
-            // 将全局共享模型(dept_id IS NULL)融入数据权限白名单中
-            return " AND (" + sqlString.substring(4) + " OR " + deptAlias + "." + deptField + " IS NULL)";
+        if (user.getDeptId() != null) {
+            return " AND (" + deptAlias + "." + deptField + " = " + user.getDeptId() + " OR " + deptAlias + "." + deptField + " IS NULL)";
         }
         
-        return "";
+        return " AND " + deptAlias + "." + deptField + " IS NULL";
     }
 
     /**
@@ -146,18 +102,10 @@ public class AiModelFactory
      */
     public AiModelConfig getDefaultModelConfig(ModelType type)
     {
-        SysUser user = null;
-        Long userDeptId = null;
-        try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
-                user = SecurityUtils.getLoginUser().getUser();
-                userDeptId = user.getDeptId();
-            }
-        } catch (Exception e) {
-            // 无Web登录上下文
-        }
+        CallerContext ctx = CallerContextHolder.get();
+        Long userDeptId = (ctx != null) ? ctx.getDeptId() : null;
 
-        String dataScopeSql = buildDataScopeSql(user, "ai_model_config", "dept_id");
+        String dataScopeSql = buildDataScopeSql(ctx, "ai_model_config", "dept_id");
         try {
             return modelConfigService.selectDefaultModel(type.name(), userDeptId, dataScopeSql);
         } catch (Exception e) {
@@ -171,18 +119,18 @@ public class AiModelFactory
      */
     public StreamingChatModel getDefaultStreamingModel()
     {
-        SysUser user = null;
+        CallerContext user = null;
         Long userDeptId = null;
         try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
-                user = SecurityUtils.getLoginUser().getUser();
+            user = CallerContextHolder.get();
+            if (user != null) {
                 userDeptId = user.getDeptId();
             }
         } catch (Exception e) {
             // 正常捕获，说明无Web请求登录上下文
         }
 
-        String cacheKey = "default_chat_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        String cacheKey = "default_chat_" + (user != null && user.isSuperAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
         
         StreamingChatModel cachedModel = defaultChatCache.get(cacheKey);
         if (cachedModel != null) {
@@ -282,18 +230,10 @@ public class AiModelFactory
      */
     public EmbeddingModel getEmbeddingModel()
     {
-        SysUser user = null;
-        Long userDeptId = null;
-        try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
-                user = SecurityUtils.getLoginUser().getUser();
-                userDeptId = user.getDeptId();
-            }
-        } catch (Exception e) {
-            // 正常捕获，无Web登录上下文
-        }
+        CallerContext ctx = CallerContextHolder.get();
+        Long userDeptId = (ctx != null) ? ctx.getDeptId() : null;
 
-        String cacheKey = "default_embed_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        String cacheKey = "default_embed_" + (ctx != null && ctx.isSuperAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
         
         EmbeddingModel cachedModel = defaultEmbeddingCache.get(cacheKey);
         if (cachedModel != null) {
@@ -420,18 +360,18 @@ public class AiModelFactory
      */
     public ImageModel getDefaultImageModel()
     {
-        SysUser user = null;
+        CallerContext user = null;
         Long userDeptId = null;
         try {
-            if (SecurityContextHolder.getContext().getAuthentication() != null) {
-                user = SecurityUtils.getLoginUser().getUser();
+            user = CallerContextHolder.get();
+            if (user != null) {
                 userDeptId = user.getDeptId();
             }
         } catch (Exception e) {
             // 无Web登录上下文
         }
 
-        String cacheKey = "default_image_" + (user != null && user.isAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
+        String cacheKey = "default_image_" + (user != null && user.isSuperAdmin() ? "admin" : (userDeptId != null ? userDeptId : "global"));
         
         ImageModel cachedModel = defaultImageCache.get(cacheKey);
         if (cachedModel != null) {

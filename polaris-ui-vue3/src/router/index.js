@@ -24,7 +24,7 @@ import Layout from '@/layout'
   }
  */
 
-// 公共路由
+// 公共路由（无需权限，所有人直接可访问）
 export const constantRoutes = [
   {
     path: '/redirect',
@@ -45,11 +45,6 @@ export const constantRoutes = [
   {
     path: '/register',
     component: () => import('@/views/register'),
-    hidden: true
-  },
-  {
-    path: "/:pathMatch(.*)*",
-    component: () => import('@/views/error/404'),
     hidden: true
   },
   {
@@ -102,6 +97,87 @@ export const constantRoutes = [
         meta: { title: 'AI 分析报告中心', icon: 'document' }
       }
     ]
+  },
+  // ==========================================
+  // 北辰 AI 中台路由 (常量路由)
+  // ==========================================
+  {
+    path: '/platform/login',
+    component: () => import('@/views/platform/login.vue'),
+    hidden: true
+  },
+  {
+    path: '/platform/console',
+    component: () => import('@/layout/PlatformLayout.vue'),
+    redirect: '/platform/console/dashboard',
+    hidden: true,
+    children: [
+      {
+        path: 'dashboard',
+        component: () => import('@/views/platform/dashboard/index.vue'),
+        name: 'PlatformDashboard',
+        meta: { title: '概览看板', icon: 'dashboard' }
+      },
+      {
+        path: 'chat',
+        component: () => import('@/views/ai/chat.vue'),
+        name: 'PlatformChat',
+        meta: { title: 'AI 对话体验', icon: 'chat' }
+      },
+      {
+        path: 'knowledge',
+        component: () => import('@/views/ai/knowledge.vue'),
+        name: 'PlatformKnowledge',
+        meta: { title: '知识库管理', icon: 'folder' }
+      },
+      {
+        path: 'agent',
+        component: () => import('@/views/ai/agent.vue'),
+        name: 'PlatformAgent',
+        meta: { title: '智能体编排', icon: 'user' }
+      },
+      {
+        path: 'model',
+        component: () => import('@/views/ai/model.vue'),
+        name: 'PlatformModel',
+        meta: { title: '大模型配置', icon: 'cpu' }
+      },
+      {
+        path: 'apikey',
+        component: () => import('@/views/platform/apikey/index.vue'),
+        name: 'PlatformApiKey',
+        meta: { title: 'API 密钥管理', icon: 'key' }
+      },
+      {
+        path: 'datasource',
+        component: () => import('@/views/platform/datasource/index.vue'),
+        name: 'PlatformDatasource',
+        meta: { title: '外部数据源', icon: 'coin' }
+      },
+      {
+        path: 'connector',
+        component: () => import('@/views/platform/connector/index.vue'),
+        name: 'PlatformConnector',
+        meta: { title: 'API 连接器', icon: 'connection' }
+      },
+      {
+        path: 'user',
+        component: () => import('@/views/platform/user/index.vue'),
+        name: 'PlatformUser',
+        meta: { title: '成员管理', icon: 'avatar' }
+      },
+      {
+        path: 'usage',
+        component: () => import('@/views/platform/usage/index.vue'),
+        name: 'PlatformUsage',
+        meta: { title: '用量统计', icon: 'chart' }
+      }
+    ]
+  },
+  {
+    path: "/:pathMatch(.*)*",
+    component: () => import('@/views/error/404'),
+    hidden: true
   }
 ]
 
@@ -160,6 +236,20 @@ export const dynamicRoutes = [
         component: () => import('@/views/monitor/job/log'),
         name: 'JobLog',
         meta: { title: '调度日志', activeMenu: '/monitor/job' }
+      }
+    ]
+  },
+  {
+    path: '/system/platform-tenant',
+    component: Layout,
+    hidden: true,
+    permissions: ['system:tenant:list'],
+    children: [
+      {
+        path: 'index',
+        component: () => import('@/views/system/platform/tenant/index.vue'),
+        name: 'PlatformTenantManage',
+        meta: { title: '中台租户管理', activeMenu: '/system/platform-tenant' }
       }
     ]
   },

@@ -378,20 +378,33 @@
                 </template>
 
                 <div v-if="systemTools.length === 0" class="no-tools-text" style="padding: 10px 0;">
-                  系统中暂未注册任何实现 AiTool 接口的工具组件
+                  系统中暂未注册任何实现 AiTool 接口的可用工具组件
                 </div>
                 <div v-else class="tool-checkbox-large-grid">
                   <el-checkbox-group v-model="selectedTools">
                     <el-row :gutter="16">
                       <el-col v-for="tool in systemTools" :key="tool.name" :span="12" class="tool-check-col">
-                        <div :class="['tool-checkbox-card', { 'is-checked': selectedTools.includes(tool.name) }]">
-                          <el-checkbox :label="tool.name">
-                            <span class="tool-card-content">
-                              <el-icon><link-icon /></el-icon>
-                              <span class="tool-label-text">{{ tool.label }}</span>
-                            </span>
-                          </el-checkbox>
-                        </div>
+                        <el-tooltip
+                          :content="getToolDisabledTip(tool)"
+                          :disabled="!isToolDisabled(tool)"
+                          placement="top"
+                        >
+                          <div :class="['tool-checkbox-card', {
+                            'is-checked': selectedTools.includes(tool.name),
+                            'is-disabled': isToolDisabled(tool)
+                          }]">
+                            <el-checkbox :label="tool.name" :disabled="isToolDisabled(tool)">
+                              <span class="tool-card-content">
+                                <el-icon><link-icon /></el-icon>
+                                <span class="tool-label-text">
+                                  {{ tool.label }}
+                                  <span v-if="tool.requirement === 'IMAGE_MODEL' && tool.available === false" class="tool-status-tag tag-warn">（未配绘图模型）</span>
+                                  <span v-else-if="tool.requirement === 'SEARCH_KEY' && isToolDisabled(tool)" class="tool-status-tag tag-warn">（未配联网Key）</span>
+                                </span>
+                              </span>
+                            </el-checkbox>
+                          </div>
+                        </el-tooltip>
                       </el-col>
                     </el-row>
                   </el-checkbox-group>
@@ -445,6 +458,25 @@ export default {
       }
     };
   },
+  computed: {
+    selectedModelConfig() {
+      if (!this.form || !this.form.modelConfigId || !this.models || this.models.length === 0) {
+        return null;
+      }
+      return this.models.find(m => m.id === this.form.modelConfigId) || null;
+    }
+  },
+  watch: {
+    'form.modelConfigId'(newVal) {
+      this.$nextTick(() => {
+        // 当切换选中的底座大模型时，若当前模型不支持联网搜索，自动取消勾选 WebSearchTools
+        const searchTool = this.systemTools.find(t => t.requirement === 'SEARCH_KEY');
+        if (searchTool && this.isToolDisabled(searchTool)) {
+          this.selectedTools = this.selectedTools.filter(t => t !== searchTool.name);
+        }
+      });
+    }
+  },
   created() {
     this.getList();
     this.loadModels();
@@ -484,6 +516,36 @@ export default {
       } catch (err) {
         console.error(err);
       }
+    },
+    isToolDisabled(tool) {
+      if (!tool) return false;
+      if (tool.requirement === 'IMAGE_MODEL') {
+        return tool.available === false;
+      }
+      if (tool.requirement === 'SEARCH_KEY') {
+        const model = this.selectedModelConfig;
+        if (!model) return true; // 未选底座大模型时，联网搜索不可选
+        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.enableSearch === '1';
+        return !hasKey;
+      }
+      return false;
+    },
+    getToolDisabledTip(tool) {
+      if (!tool) return '';
+      if (tool.requirement === 'IMAGE_MODEL' && tool.available === false) {
+        return tool.disabledReason || '当前租户或系统未配置/启用 AI 绘画模型';
+      }
+      if (tool.requirement === 'SEARCH_KEY') {
+        const model = this.selectedModelConfig;
+        if (!model) {
+          return '请先在左侧选择绑定的底座大模型';
+        }
+        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.enableSearch === '1';
+        if (!hasKey) {
+          return '当前所选大模型未配置联网检索 API Key (Tavily Key)，请在模型配置中填写';
+        }
+      }
+      return '';
     },
     toggleStatus(row) {
       row.status = row.status === "1" ? "0" : "1";
@@ -1351,6 +1413,39 @@ export default {
   .dark &,
   .theme-dark & {
     color: #38bdf8;
+  }
+}
+
+.tool-checkbox-card.is-disabled {
+  opacity: 0.55;
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+
+  &:hover {
+    border-color: #e2e8f0;
+    box-shadow: none;
+  }
+
+  .tool-label-text {
+    color: #94a3b8;
+  }
+
+  .dark &,
+  .theme-dark & {
+    background: rgba(15, 23, 42, 0.08);
+    border-color: rgba(255, 255, 255, 0.03);
+    .tool-label-text { color: #64748b; }
+  }
+}
+
+.tool-status-tag {
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 4px;
+
+  &.tag-warn {
+    color: #f59e0b;
   }
 }
 

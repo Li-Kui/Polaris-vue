@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformUserMapper">
+    
+    <resultMap type="com.polaris.platform.domain.PlatformUser" id="PlatformUserResult">
+        <id     property="id"            column="id"              />
+        <result property="tenantId"      column="tenant_id"       />
+        <result property="username"      column="username"        />
+        <result property="password"      column="password"        />
+        <result property="nickname"      column="nickname"        />
+        <result property="email"         column="email"           />
+        <result property="phone"         column="phone"           />
+        <result property="avatar"        column="avatar"          />
+        <result property="role"          column="role"            />
+        <result property="status"        column="status"          />
+        <result property="lastLoginTime" column="last_login_time" />
+        <result property="createBy"      column="create_by"       />
+        <result property="createTime"    column="create_time"     />
+        <result property="updateBy"      column="update_by"       />
+        <result property="updateTime"    column="update_time"     />
+    </resultMap>
+
+    <sql id="selectPlatformUserVo">
+        select id, tenant_id, username, password, nickname, email, phone, avatar, role, status, last_login_time, create_by, create_time, update_by, update_time
+        from platform_tenant_user
+    </sql>
+
+    <select id="selectById" parameterType="Long" resultMap="PlatformUserResult">
+        <include refid="selectPlatformUserVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectByUsername" resultMap="PlatformUserResult">
+        <include refid="selectPlatformUserVo"/>
+        where tenant_id = #{tenantId} and username = #{username}
+    </select>
+
+    <select id="selectByTenantId" parameterType="Long" resultMap="PlatformUserResult">
+        <include refid="selectPlatformUserVo"/>
+        where tenant_id = #{tenantId}
+        order by create_time desc
+    </select>
+
+    <insert id="insert" parameterType="com.polaris.platform.domain.PlatformUser" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_tenant_user(
+            <if test="tenantId != null">tenant_id,</if>
+            <if test="username != null and username != ''">username,</if>
+            <if test="password != null and password != ''">password,</if>
+            <if test="nickname != null and nickname != ''">nickname,</if>
+            <if test="email != null and email != ''">email,</if>
+            <if test="phone != null and phone != ''">phone,</if>
+            <if test="avatar != null and avatar != ''">avatar,</if>
+            <if test="role != null and role != ''">role,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            create_time
+        )values(
+            <if test="tenantId != null">#{tenantId},</if>
+            <if test="username != null and username != ''">#{username},</if>
+            <if test="password != null and password != ''">#{password},</if>
+            <if test="nickname != null and nickname != ''">#{nickname},</if>
+            <if test="email != null and email != ''">#{email},</if>
+            <if test="phone != null and phone != ''">#{phone},</if>
+            <if test="avatar != null and avatar != ''">#{avatar},</if>
+            <if test="role != null and role != ''">#{role},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            sysdate()
+        )
+    </insert>
+
+    <update id="update" parameterType="com.polaris.platform.domain.PlatformUser">
+        update platform_tenant_user
+        <set>
+            <if test="password != null and password != ''">password = #{password},</if>
+            <if test="nickname != null">nickname = #{nickname},</if>
+            <if test="email != null">email = #{email},</if>
+            <if test="phone != null">phone = #{phone},</if>
+            <if test="avatar != null">avatar = #{avatar},</if>
+            <if test="role != null and role != ''">role = #{role},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteById" parameterType="Long">
+        delete from platform_tenant_user where id = #{id}
+    </delete>
+
+    <update id="updateLastLoginTime" parameterType="Long">
+        update platform_tenant_user
+        set last_login_time = sysdate()
+        where id = #{id}
+    </update>
+
+</mapper>

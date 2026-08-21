@@ -3,9 +3,7 @@ package com.polaris.ai.tools;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.polaris.ai.tools.base.AiAgentTool;
-import com.polaris.ai.tools.base.AiTool;
-import com.polaris.ai.tools.base.AiToolPermission;
+import com.polaris.ai.tools.base.*;
 import com.polaris.ai.utils.SearchKeyHolder;
 import com.polaris.ai.utils.ToolSseHolder;
 import dev.langchain4j.agent.tool.Tool;
@@ -29,7 +27,7 @@ import java.util.concurrent.CancellationException;
  * @author polaris
  */
 @Component
-@AiAgentTool("联网搜索接口")
+@AiAgentTool(value = "联网搜索接口", scope = ToolScope.UNIVERSAL, requirement = ToolRequirement.SEARCH_KEY)
 public class WebSearchTools implements AiTool {
     private static final Logger log = LoggerFactory.getLogger(WebSearchTools.class);
     private static final String TAVILY_API_URL = "https://api.tavily.com/search";

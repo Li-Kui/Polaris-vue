@@ -16,4 +16,14 @@ public @interface AiAgentTool {
      * 工具的易读中文描述名称
      */
     String value();
+
+    /**
+     * 工具适用范围，默认为全员通用
+     */
+    ToolScope scope() default ToolScope.UNIVERSAL;
+
+    /**
+     * 工具依赖的前置条件，默认为无依赖
+     */
+    ToolRequirement requirement() default ToolRequirement.NONE;
 }

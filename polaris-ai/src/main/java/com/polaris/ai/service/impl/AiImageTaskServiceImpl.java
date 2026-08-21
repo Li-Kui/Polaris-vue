@@ -3,10 +3,11 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiImageTask;
 import com.polaris.ai.mapper.AiImageTaskMapper;
 import com.polaris.ai.service.IAiImageTaskService;
-import com.polaris.common.utils.SecurityUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -37,12 +38,12 @@ public class AiImageTaskServiceImpl extends ServiceImpl<AiImageTaskMapper, AiIma
         }
         // 审计字段（工具在用户请求线程内创建任务，安全上下文可用；异常兜底忽略）
         try {
+            CallerContext ctx = CallerContextHolder.get();
             if (task.getCreateBy() == null) {
-                task.setCreateBy(SecurityUtils.getUsername());
+                task.setCreateBy(ctx != null ? ctx.getUsername() : "system");
             }
-            if (task.getDeptId() == null && SecurityUtils.getLoginUser() != null
-                    && SecurityUtils.getLoginUser().getUser() != null) {
-                task.setDeptId(SecurityUtils.getLoginUser().getUser().getDeptId());
+            if (task.getDeptId() == null && ctx != null && ctx.getDeptId() != null) {
+                task.setDeptId(ctx.getDeptId());
             }
         } catch (Exception ignored) {
             // 无登录上下文（如系统内部调用）时跳过

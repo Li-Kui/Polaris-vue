@@ -5,9 +5,7 @@ import com.polaris.ai.domain.AiImageTask;
 import com.polaris.ai.image.ImageGenCommand;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.service.IImageGenerationService;
-import com.polaris.ai.tools.base.AiAgentTool;
-import com.polaris.ai.tools.base.AiTool;
-import com.polaris.ai.tools.base.AiToolPermission;
+import com.polaris.ai.tools.base.*;
 import com.polaris.ai.utils.ChatContextHolder;
 import com.polaris.ai.utils.ToolSseHolder;
 import dev.langchain4j.agent.tool.P;
@@ -26,7 +24,7 @@ import java.util.concurrent.CancellationException;
  */
 @Slf4j
 @Component
-@AiAgentTool("AI绘画工具")
+@AiAgentTool(value = "AI绘画工具", scope = ToolScope.UNIVERSAL, requirement = ToolRequirement.IMAGE_MODEL)
 public class ImageGenerateTools implements AiTool {
 
     @Autowired

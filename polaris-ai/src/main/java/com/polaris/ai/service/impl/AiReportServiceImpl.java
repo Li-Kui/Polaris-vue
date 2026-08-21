@@ -3,6 +3,8 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiReport;
 import com.polaris.ai.domain.AiReportRef;
 import com.polaris.ai.mapper.AiReportMapper;
@@ -10,7 +12,6 @@ import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.service.IAiReportService;
 import com.polaris.common.constant.HttpStatus;
 import com.polaris.common.exception.ServiceException;
-import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -69,8 +70,9 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         if (report.getId() != null) {
             throw new ServiceException("归档接口不允许覆盖已有报告", HttpStatus.BAD_REQUEST);
         }
-        Long userId = SecurityUtils.getUserId();
-        String username = SecurityUtils.getUsername();
+        CallerContext ctx = CallerContextHolder.get();
+        Long userId = ctx != null ? ctx.getUserId() : null;
+        String username = ctx != null ? ctx.getUsername() : "system";
         report.setUserId(userId);
         report.setCreateBy(username);
         report.setUpdateBy(username);
@@ -98,9 +100,10 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     @Override
     public List<AiReport> selectReportList(AiReport report) {
         LambdaQueryWrapper<AiReport> wrapper = new LambdaQueryWrapper<>();
-        if (!SecurityUtils.isAdmin()) {
-            Long userId = SecurityUtils.getUserId();
-            String username = SecurityUtils.getUsername();
+        CallerContext ctx = CallerContextHolder.get();
+        if (!(ctx != null && ctx.isSuperAdmin())) {
+            Long userId = ctx != null ? ctx.getUserId() : null;
+            String username = ctx != null ? ctx.getUsername() : "system";
             wrapper.and(query -> query.eq(AiReport::getUserId, userId)
                     .or(legacy -> legacy.isNull(AiReport::getUserId)
                             .eq(AiReport::getCreateBy, username)));
@@ -146,7 +149,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         AiReport patch = new AiReport();
         patch.setId(existing.getId());
         patch.setRefinedSchema(refinedSchema);
-        patch.setUpdateBy(SecurityUtils.getUsername());
+        CallerContext ctx = CallerContextHolder.get();
+        patch.setUpdateBy(ctx != null ? ctx.getUsername() : "system");
         patch.setUpdateTime(new Date());
         return updateById(patch);
     }
@@ -173,9 +177,10 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             return buildRefineStatus(report, null);
         }
 
-        Long submitUserId = SecurityUtils.getUserId();
-        String submitUsername = SecurityUtils.getUsername();
-        boolean submitAdmin = SecurityUtils.isAdmin();
+        CallerContext ctx = CallerContextHolder.get();
+        Long submitUserId = ctx != null ? ctx.getUserId() : null;
+        String submitUsername = ctx != null ? ctx.getUsername() : "system";
+        boolean submitAdmin = ctx != null && ctx.isSuperAdmin();
         markRefineRunning(reportId, sourceHash, submitUsername);
         Runnable task = () -> {
             try {
@@ -223,7 +228,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         if (reportId == null) {
             throw new ServiceException("报告 ID 不能为空", HttpStatus.BAD_REQUEST);
         }
-        return refineReport(reportId, SecurityUtils.getUserId(), SecurityUtils.getUsername(), SecurityUtils.isAdmin());
+        CallerContext ctx = CallerContextHolder.get();
+        return refineReport(reportId, ctx != null ? ctx.getUserId() : null, ctx != null ? ctx.getUsername() : "system", ctx != null && ctx.isSuperAdmin());
     }
 
     /**
@@ -298,7 +304,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     }
 
     private void markRefineRunning(Long reportId, String sourceHash) {
-        markRefineRunning(reportId, sourceHash, SecurityUtils.getUsername());
+        CallerContext ctx = CallerContextHolder.get();
+        markRefineRunning(reportId, sourceHash, ctx != null ? ctx.getUsername() : "system");
     }
 
     private void markRefineRunning(Long reportId, String sourceHash, String username) {
@@ -316,7 +323,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     }
 
     private void markRefineFailed(Long reportId, String sourceHash, String errorMessage) {
-        markRefineFailed(reportId, sourceHash, errorMessage, SecurityUtils.getUsername());
+        CallerContext ctx = CallerContextHolder.get();
+        markRefineFailed(reportId, sourceHash, errorMessage, ctx != null ? ctx.getUsername() : "system");
     }
 
     private void markRefineFailed(Long reportId, String sourceHash, String errorMessage, String username) {
@@ -371,7 +379,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     }
 
     private void assertAccessible(AiReport report) {
-        assertAccessible(report, SecurityUtils.getUserId(), SecurityUtils.getUsername(), SecurityUtils.isAdmin());
+        CallerContext ctx = CallerContextHolder.get();
+        assertAccessible(report, ctx != null ? ctx.getUserId() : null, ctx != null ? ctx.getUsername() : "system", ctx != null && ctx.isSuperAdmin());
     }
 
     private void assertAccessible(AiReport report, Long currentUserId, String username, boolean admin) {

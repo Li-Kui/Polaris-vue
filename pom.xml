@@ -190,6 +190,20 @@
                 <version>${polaris.version}</version>
             </dependency>
 
+            <!-- ai核心引擎模块 -->
+            <dependency>
+                <groupId>com.polaris</groupId>
+                <artifactId>polaris-ai-core</artifactId>
+                <version>${polaris.version}</version>
+            </dependency>
+
+            <!-- 中台核心模块 -->
+            <dependency>
+                <groupId>com.polaris</groupId>
+                <artifactId>polaris-platform-core</artifactId>
+                <version>${polaris.version}</version>
+            </dependency>
+
             <!-- LangGraph4j 依赖管理 (精准声明，防止 BOM 污染全局通用 Jackson 版本) -->
             <dependency>
                 <groupId>org.bsc.langgraph4j</groupId>
@@ -218,6 +232,8 @@
         <module>polaris-generator</module>
         <module>polaris-common</module>
         <module>polaris-ai</module>
+        <module>polaris-ai-core</module>
+        <module>polaris-platform-core</module>
     </modules>
     <packaging>pom</packaging>
 

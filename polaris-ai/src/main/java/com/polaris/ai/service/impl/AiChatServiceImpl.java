@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.attachment.MultimodalMediaHelper;
 import com.polaris.ai.chat.AiAssistant;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
@@ -17,7 +19,6 @@ import com.polaris.ai.service.IAiChatService;
 import com.polaris.ai.service.IAiDocumentRecognitionService;
 import com.polaris.ai.service.IAiKnowledgeService;
 import com.polaris.ai.tools.AiToolRegistry;
-import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -155,7 +156,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
 
         conv.setKnowledgeBaseId(knowledgeBaseId);
-        conv.setCreateBy(SecurityUtils.getUsername());
+        CallerContext ctx = CallerContextHolder.get();
+        conv.setCreateBy(ctx != null ? ctx.getUsername() : "system");
         aiChatMapper.insertConversation(conv);
         return conv;
     }

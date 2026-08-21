@@ -1,5 +1,8 @@
 package com.polaris.ai.controller;
 
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
+import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiMessage;
 import com.polaris.ai.service.IAiChatService;
@@ -9,7 +12,6 @@ import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
 import com.polaris.common.enums.BusinessType;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,7 +66,7 @@ public class AiChatController extends BaseController {
     @GetMapping("/conversations")
     @ResponseBody
     public ResultData listConversations() {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         List<AiConversation> list = aiChatService.listConversations(userId);
         return ok(list);
     }
@@ -82,7 +84,7 @@ public class AiChatController extends BaseController {
     public ResultData createConversation(
             @RequestParam(required = false) Long modelConfigId,
             @RequestParam(required = false) Long knowledgeBaseId) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         AiConversation conv = aiChatService.createConversation(userId, modelConfigId, knowledgeBaseId);
         return ok(conv);
     }
@@ -99,7 +101,7 @@ public class AiChatController extends BaseController {
     @PutMapping("/conversations/{id}/title")
     @ResponseBody
     public ResultData renameConversation(@PathVariable Long id, @RequestParam String title) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         aiChatService.renameConversation(id, title, userId);
         return ok();
     }
@@ -117,7 +119,7 @@ public class AiChatController extends BaseController {
             @RequestParam(required = false) Long knowledgeBaseId,
             @RequestParam(required = false) String agentCode,
             @RequestParam(required = false) String workflowCode) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         aiChatService.updateConversationConfig(id, modelConfigId, knowledgeBaseId, agentCode, workflowCode, userId);
         return ok();
     }
@@ -135,7 +137,7 @@ public class AiChatController extends BaseController {
     @DeleteMapping("/conversations/{id}")
     @ResponseBody
     public ResultData deleteConversation(@PathVariable Long id) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         aiChatService.deleteConversation(id, userId);
         return ok();
     }
@@ -152,7 +154,7 @@ public class AiChatController extends BaseController {
     @DeleteMapping("/conversations/batch")
     @ResponseBody
     public ResultData deleteConversationsBatch(@RequestBody List<Long> ids) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         aiChatService.deleteConversationsBatch(ids, userId);
         return ok();
     }
@@ -169,7 +171,7 @@ public class AiChatController extends BaseController {
     @GetMapping("/conversations/{id}/messages")
     @ResponseBody
     public ResultData listMessages(@PathVariable Long id) {
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
         List<AiMessage> messages = aiChatService.listMessages(id, userId);
         return ok(messages);
     }
@@ -213,7 +215,7 @@ public class AiChatController extends BaseController {
         });
         emitter.onError(e -> isCancelled.set(true));
 
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
 
         // 抓取当前主线程的域名与端口，利用 polaris-common 的 ServletUtils 规避跨模块依赖
         String baseUrl = "";
@@ -227,20 +229,25 @@ public class AiChatController extends BaseController {
         }
         final String finalBaseUrl = baseUrl;
 
-        // 获取当前主线程的安全上下文（包含已登录用户信息）
+        // 获取当前主线程的安全上下文与调用者上下文（包含已登录用户信息）
         final SecurityContext context = SecurityContextHolder.getContext();
+        final CallerContext callerCtx = CallerContextHolder.get();
 
         // 新线程异步执行，当前 Tomcat 线程立即返回 emitter，不阻塞线程池
         new Thread(() -> {
             try {
-                // 将安全上下文绑定到子线程
+                // 将安全上下文与调用者上下文绑定到子线程
                 SecurityContextHolder.setContext(context);
+                if (callerCtx != null) {
+                    CallerContextHolder.set(callerCtx);
+                }
                 // 将域名设置到 ThreadLocal 中
                 com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
                 aiChatService.chat(conversationId, message, fileUrl, agentCode, enableSearch, userId, emitter, isCancelled);
             } finally {
                 // 清理 ThreadLocal
                 com.polaris.ai.utils.BaseUrlHolder.clear();
+                CallerContextHolder.clear();
                 // 执行完成后清除上下文，避免对线程造成污染
                 SecurityContextHolder.clearContext();
             }
@@ -267,7 +274,7 @@ public class AiChatController extends BaseController {
         });
         emitter.onError(e -> isCancelled.set(true));
 
-        Long userId = SecurityUtils.getUserId();
+        Long userId = CallerUtils.getUserId();
 
         String baseUrl = "";
         try {
@@ -280,14 +287,19 @@ public class AiChatController extends BaseController {
         }
         final String finalBaseUrl = baseUrl;
         final SecurityContext context = SecurityContextHolder.getContext();
+        final CallerContext callerCtx = CallerContextHolder.get();
 
         new Thread(() -> {
             try {
                 SecurityContextHolder.setContext(context);
+                if (callerCtx != null) {
+                    CallerContextHolder.set(callerCtx);
+                }
                 com.polaris.ai.utils.BaseUrlHolder.set(finalBaseUrl);
                 aiChatService.chat(request, userId, emitter, isCancelled);
             } finally {
                 com.polaris.ai.utils.BaseUrlHolder.clear();
+                CallerContextHolder.clear();
                 SecurityContextHolder.clearContext();
             }
         }).start();

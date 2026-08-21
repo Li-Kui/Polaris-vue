@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <parent>
+        <artifactId>polaris</artifactId>
+        <groupId>com.polaris</groupId>
+        <version>3.9.2</version>
+    </parent>
+    <modelVersion>4.0.0</modelVersion>
+
+    <artifactId>polaris-platform-core</artifactId>
+
+    <description>
+        中台核心基础设施模块
+    </description>
+
+    <dependencies>
+        <!-- AI核心引擎层 -->
+        <dependency>
+            <groupId>com.polaris</groupId>
+            <artifactId>polaris-ai-core</artifactId>
+        </dependency>
+
+        <!-- 通用工具 -->
+        <dependency>
+            <groupId>com.polaris</groupId>
+            <artifactId>polaris-common</artifactId>
+        </dependency>
+
+        <!-- SpringWeb模块 -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+    </dependencies>
+
+</project>

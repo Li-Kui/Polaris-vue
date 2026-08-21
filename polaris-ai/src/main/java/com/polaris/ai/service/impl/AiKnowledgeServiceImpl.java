@@ -3,6 +3,8 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
@@ -11,7 +13,6 @@ import com.polaris.ai.mapper.AiKnowledgeMapper;
 import com.polaris.ai.rag.AiVectorStoreProperties;
 import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.service.IAiKnowledgeService;
-import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
@@ -510,7 +511,8 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     {
         boolean admin = false;
         try {
-            admin = SecurityUtils.isAdmin();
+            CallerContext ctx = CallerContextHolder.get();
+            admin = ctx != null && ctx.isSuperAdmin();
         } catch (Exception ignored) {
             // Background rebuilds use the already validated persisted binding.
         }

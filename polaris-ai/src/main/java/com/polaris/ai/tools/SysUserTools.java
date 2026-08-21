@@ -3,6 +3,7 @@ package com.polaris.ai.tools;
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.ai.tools.base.AiToolPermission;
+import com.polaris.ai.tools.base.ToolScope;
 import com.polaris.ai.utils.ToolSseHolder;
 import com.polaris.common.core.domain.entity.SysUser;
 import com.polaris.system.service.ISysUserService;
@@ -19,7 +20,7 @@ import java.util.List;
  * @author polaris
  */
 @Component
-@AiAgentTool("系统用户审计")
+@AiAgentTool(value = "系统用户审计", scope = ToolScope.ADMIN_ONLY)
 public class SysUserTools implements AiTool {
     @Autowired
     private ISysUserService userService;

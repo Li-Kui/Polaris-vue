@@ -241,8 +241,14 @@
             type="textarea"
           />
         </el-form-item>
-        <el-form-item label="向量模型" prop="embeddingModelId">
-          <el-select v-model="form.embeddingModelId" clearable placeholder="不选择则绑定当前默认向量模型" style="width: 100%;">
+        <el-form-item prop="embeddingModelId">
+          <template #label>
+            <span class="form-label-item">
+              <el-icon><cpu /></el-icon>
+              <span>向量模型</span>
+            </span>
+          </template>
+          <el-select v-model="form.embeddingModelId" clearable placeholder="请选择绑定的向量模型 (必填)" style="width: 100%;">
             <el-option
               v-for="model in embeddingModels"
               :key="model.id"
@@ -341,6 +347,9 @@ export default {
           { required: true, message: "知识库名称不能为空", trigger: "blur" },
           { min: 2, max: 40, message: "长度在 2 到 40 个字符之间", trigger: "blur" }
         ],
+        embeddingModelId: [
+          { required: true, message: "请选择绑定的向量模型", trigger: "change" }
+        ],
         chunkSize: [{ required: true, message: "请输入切片大小", trigger: "change" }],
         chunkOverlap: [{ required: true, message: "请输入重叠字符数", trigger: "change" }]
       },
@@ -389,6 +398,12 @@ export default {
     getEmbeddingModels() {
       listAvailableEmbeddingModel().then(response => {
         this.embeddingModels = response.data || [];
+        if (!this.form.embeddingModelId && this.embeddingModels.length > 0) {
+          const defaultModel = this.embeddingModels.find(m => m.isDefaultEmbedding === '1') || this.embeddingModels[0];
+          if (defaultModel) {
+            this.form.embeddingModelId = defaultModel.id;
+          }
+        }
       });
     },
     // 过滤知识库
@@ -449,6 +464,12 @@ export default {
     // 新建知识库
     handleCreateKb() {
       this.resetForm();
+      if (this.embeddingModels && this.embeddingModels.length > 0) {
+        const defaultModel = this.embeddingModels.find(m => m.isDefaultEmbedding === '1') || this.embeddingModels[0];
+        if (defaultModel) {
+          this.form.embeddingModelId = defaultModel.id;
+        }
+      }
       this.dialogTitle = "新建知识库";
       this.openDialog = true;
     },
