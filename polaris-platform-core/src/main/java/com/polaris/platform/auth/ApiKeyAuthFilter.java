@@ -11,11 +11,16 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Date;
+import java.util.List;
 
 /**
  * API Key 认证过滤器。
@@ -57,14 +62,22 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         // 更新最后使用时间（异步更佳，此处简化）
         apiKeyMapper.updateLastUsedTime(apiKey.getId());
 
-        CallerContextHolder.set(
-            new ApiKeyCallerContext(apiKey.getTenantId(), apiKey.getKeyName(), apiKey.getPermissions())
-        );
+        ApiKeyCallerContext context =
+                new ApiKeyCallerContext(apiKey.getTenantId(), apiKey.getKeyName(), apiKey.getPermissions());
+        CallerContextHolder.set(context);
+
+        // 注入 Spring Security 上下文，由安全链统一校验开放API访问权限
+        List<SimpleGrantedAuthority> authorities =
+                Collections.singletonList(new SimpleGrantedAuthority("ROLE_PLATFORM_API"));
+        UsernamePasswordAuthenticationToken authentication =
+                new UsernamePasswordAuthenticationToken(context, null, authorities);
+        SecurityContextHolder.getContext().setAuthentication(authentication);
 
         try {
             filterChain.doFilter(request, response);
         } finally {
             CallerContextHolder.clear();
+            SecurityContextHolder.clearContext();
         }
     }
 

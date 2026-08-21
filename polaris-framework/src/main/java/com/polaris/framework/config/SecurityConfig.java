@@ -60,6 +60,12 @@ public class SecurityConfig
     private com.polaris.platform.auth.PlatformJwtFilter platformJwtFilter;
 
     /**
+     * 中台API Key认证过滤器
+     */
+    @Autowired(required = false)
+    private com.polaris.platform.auth.ApiKeyAuthFilter apiKeyAuthFilter;
+
+    /**
      * 允许匿名访问的地址
      */
     @Autowired
@@ -98,8 +104,10 @@ public class SecurityConfig
                     // 静态资源，可匿名访问
                     .requestMatchers(HttpMethod.GET, "/", "/*.html", "/**.html", "/**.css", "/**.js", "/profile/**").permitAll()
                     .requestMatchers("/swagger-ui.html", "/v3/api-docs", "/v3/api-docs/**", "/swagger-ui/**", "/druid/**", "/doc.html", "/webjars/**").permitAll()
-                    // 中台接口与文档开放访问（中台自带独立 JWT / API Key 过滤器鉴权）
-                    .requestMatchers("/platform/**").permitAll()
+                    // 中台登录接口允许匿名访问，其他接口按认证类型分别鉴权
+                    .requestMatchers("/platform/login").permitAll()
+                    .requestMatchers("/platform/api/**").hasRole("PLATFORM_API")
+                    .requestMatchers("/platform/**").hasRole("PLATFORM_USER")
                     // 除上面外的所有请求全部需要鉴权认证
                     .anyRequest().authenticated();
             })
@@ -109,6 +117,14 @@ public class SecurityConfig
         // 添加中台 JWT filter (如果存在)
         if (platformJwtFilter != null) {
             httpSecurity.addFilterBefore(platformJwtFilter, UsernamePasswordAuthenticationFilter.class);
+        }
+        // 添加中台 API Key filter (如果存在)
+        if (apiKeyAuthFilter != null) {
+            if (platformJwtFilter != null) {
+                httpSecurity.addFilterBefore(apiKeyAuthFilter, com.polaris.platform.auth.PlatformJwtFilter.class);
+            } else {
+                httpSecurity.addFilterBefore(apiKeyAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            }
         }
         // 添加管理端 JWT filter
         httpSecurity.addFilterBefore(authenticationTokenFilter, UsernamePasswordAuthenticationFilter.class);

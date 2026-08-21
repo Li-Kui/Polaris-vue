@@ -66,6 +66,7 @@ public class PlatformJwtFilter extends OncePerRequestFilter {
         } finally {
             if (authSet) {
                 CallerContextHolder.clear();
+                SecurityContextHolder.clearContext();
             }
         }
     }
@@ -80,12 +81,17 @@ public class PlatformJwtFilter extends OncePerRequestFilter {
             return true;
         }
 
-        // 2. 所有 /platform/** 接口（如 /platform/getInfo, /platform/console/** 等）均需进入本 Filter
+        // 2. 中台开放API由API Key过滤器独立处理
+        if (path.startsWith("/platform/api/")) {
+            return true;
+        }
+
+        // 3. 其他 /platform/** 接口（如 /platform/getInfo, /platform/console/** 等）进入本 Filter
         if (path.startsWith("/platform/")) {
             return false;
         }
 
-        // 3. 携带 Platform-Token 的 AI 模块接口也进入本 Filter
+        // 4. 携带 Platform-Token 的 AI 模块接口也进入本 Filter
         if (path.startsWith("/ai/") && token != null && !token.isEmpty()) {
             return false;
         }
