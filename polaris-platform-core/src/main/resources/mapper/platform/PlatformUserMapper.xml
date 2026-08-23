@@ -32,6 +32,18 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where id = #{id}
     </select>
 
+    <select id="selectAuthUser" resultMap="PlatformUserResult">
+        select u.id, u.tenant_id, u.username, u.password, u.nickname, u.email, u.phone, u.avatar,
+               u.role, u.status, u.last_login_time, u.create_by, u.create_time, u.update_by, u.update_time
+        from platform_tenant_user u
+        inner join platform_tenant t on t.tenant_id = u.tenant_id
+        where u.id = #{userId}
+          and u.tenant_id = #{tenantId}
+          and u.username = #{username}
+          and u.status = '0'
+          and t.status = '0'
+    </select>
+
     <select id="selectByUsername" resultMap="PlatformUserResult">
         <include refid="selectPlatformUserVo"/>
         where tenant_id = #{tenantId} and username = #{username}

@@ -44,20 +44,23 @@ public class PlatformJwtFilter extends OncePerRequestFilter {
                 Long tenantId = jwtUtils.getTenantId(token);
                 String username = jwtUtils.getUsername(token);
 
-                PlatformUser user = userMapper.selectById(userId);
-                boolean isAdmin = user != null && "admin".equals(user.getRole());
+                PlatformUser user = userMapper.selectAuthUser(userId, tenantId, username);
+                if (user != null) {
+                    boolean isAdmin = "admin".equals(user.getRole());
+                    PlatformUserCallerContext context = new PlatformUserCallerContext(
+                            user.getId(), user.getTenantId(), user.getUsername(), isAdmin);
+                    CallerContextHolder.set(context);
 
-                PlatformUserCallerContext context = new PlatformUserCallerContext(userId, tenantId, username, isAdmin);
-                CallerContextHolder.set(context);
-
-                // 注入 Spring Security 上下文，支持无缝通过认证
-                List<SimpleGrantedAuthority> authorities = Collections.singletonList(new SimpleGrantedAuthority("ROLE_PLATFORM_USER"));
-                UsernamePasswordAuthenticationToken authentication =
-                        new UsernamePasswordAuthenticationToken(context, null, authorities);
-                SecurityContextHolder.getContext().setAuthentication(authentication);
-                authSet = true;
+                    // 注入 Spring Security 上下文，支持无缝通过认证
+                    List<SimpleGrantedAuthority> authorities =
+                            Collections.singletonList(new SimpleGrantedAuthority("ROLE_PLATFORM_USER"));
+                    UsernamePasswordAuthenticationToken authentication =
+                            new UsernamePasswordAuthenticationToken(context, null, authorities);
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    authSet = true;
+                }
             } catch (Exception e) {
-                // Token 解析失败
+                // Token解析或身份校验失败
             }
         }
 
