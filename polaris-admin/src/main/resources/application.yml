@@ -63,6 +63,14 @@ token:
   # 令牌有效期（默认30分钟）
   expireTime: 300
 
+# 中台JWT配置
+platform:
+  jwt:
+    # HS512密钥，不少于64字节；生产环境通过环境变量注入
+    secret: k9NmP2vL8xQwZ5rTbE4yUjC7aGhF3sDeA6tKnM1qWzX8vByR0uJ4iOeP9vK3mT7wB1
+    # 令牌有效期（默认24小时，单位毫秒）
+    expiration: 86400000
+
 # MyBatis Plus配置
 mybatis-plus:
   # 搜索指定包别名
