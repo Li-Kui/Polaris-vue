@@ -2,6 +2,7 @@ package com.polaris.platform.service;
 
 import com.polaris.platform.domain.PlatformApiKey;
 import com.polaris.platform.mapper.PlatformApiKeyMapper;
+import com.polaris.platform.tenant.PlatformTenantGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -18,27 +19,40 @@ public class PlatformApiKeyService {
     private PlatformApiKeyMapper apiKeyMapper;
 
     public List<PlatformApiKey> listByTenantId(Long tenantId) {
+        if (!PlatformTenantGuard.belongsToCurrentTenant(tenantId)) {
+            return List.of();
+        }
         return apiKeyMapper.selectByTenantId(tenantId);
     }
 
     public PlatformApiKey getById(Long id) {
-        return apiKeyMapper.selectById(id);
+        PlatformApiKey apiKey = apiKeyMapper.selectById(id);
+        return apiKey != null && PlatformTenantGuard.belongsToCurrentTenant(apiKey.getTenantId()) ? apiKey : null;
     }
 
     /**
      * 创建 API Key，自动生成 sk-xxx 格式的密钥
      */
     public PlatformApiKey create(PlatformApiKey apiKey) {
+        apiKey.setTenantId(PlatformTenantGuard.requireTenantId());
         apiKey.setApiKey("sk-" + UUID.randomUUID().toString().replace("-", ""));
         apiKeyMapper.insert(apiKey);
         return apiKey;
     }
 
     public int update(PlatformApiKey apiKey) {
+        PlatformApiKey current = getById(apiKey.getId());
+        if (current == null) {
+            return 0;
+        }
+        apiKey.setTenantId(current.getTenantId());
         return apiKeyMapper.update(apiKey);
     }
 
     public int delete(Long id) {
+        if (getById(id) == null) {
+            return 0;
+        }
         return apiKeyMapper.deleteById(id);
     }
 }

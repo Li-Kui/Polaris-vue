@@ -23,7 +23,7 @@ public class PlatformUserCallerContext implements CallerContext {
     public Long getUserId() { return userId; }
 
     @Override
-    public String getTenantId() { return String.valueOf(tenantId); }
+    public String getTenantId() { return tenantId != null ? String.valueOf(tenantId) : null; }
 
     @Override
     public String getUsername() { return username; }
@@ -33,4 +33,7 @@ public class PlatformUserCallerContext implements CallerContext {
 
     @Override
     public boolean isSuperAdmin() { return false; } // 中台用户不是超管
+
+    @Override
+    public boolean isPlatformMode() { return true; }
 }

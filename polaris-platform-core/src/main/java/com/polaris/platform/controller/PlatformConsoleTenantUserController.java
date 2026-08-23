@@ -8,6 +8,7 @@ import com.polaris.common.core.page.TableDataInfo;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.service.PlatformAuthService;
+import com.polaris.platform.tenant.PlatformTenantGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,7 +41,8 @@ public class PlatformConsoleTenantUserController extends BaseController {
 
     @GetMapping("/{id}")
     public AjaxResult getInfo(@PathVariable Long id) {
-        return success(userMapper.selectById(id));
+        PlatformUser user = userMapper.selectById(id);
+        return success(user != null && PlatformTenantGuard.belongsToCurrentTenant(user.getTenantId()) ? user : null);
     }
 
     @PostMapping
@@ -61,11 +63,20 @@ public class PlatformConsoleTenantUserController extends BaseController {
         if (ctx != null) {
             user.setUpdateBy(ctx.getUsername());
         }
+        PlatformUser current = userMapper.selectById(user.getId());
+        if (current == null || !PlatformTenantGuard.belongsToCurrentTenant(current.getTenantId())) {
+            return toAjax(0);
+        }
+        user.setTenantId(current.getTenantId());
         return toAjax(userMapper.update(user));
     }
 
     @DeleteMapping("/{id}")
     public AjaxResult remove(@PathVariable Long id) {
+        PlatformUser user = userMapper.selectById(id);
+        if (user == null || !PlatformTenantGuard.belongsToCurrentTenant(user.getTenantId())) {
+            return toAjax(0);
+        }
         return toAjax(userMapper.deleteById(id));
     }
 }

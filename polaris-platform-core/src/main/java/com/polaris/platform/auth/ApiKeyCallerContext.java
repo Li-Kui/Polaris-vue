@@ -21,7 +21,7 @@ public class ApiKeyCallerContext implements CallerContext {
     public Long getUserId() { return null; }
 
     @Override
-    public String getTenantId() { return String.valueOf(tenantId); }
+    public String getTenantId() { return tenantId != null ? String.valueOf(tenantId) : null; }
 
     @Override
     public String getUsername() { return "apikey:" + keyName; }
@@ -31,6 +31,9 @@ public class ApiKeyCallerContext implements CallerContext {
 
     @Override
     public boolean isSuperAdmin() { return false; }
+
+    @Override
+    public boolean isPlatformMode() { return true; }
 
     public String getPermissions() { return permissions; }
 
