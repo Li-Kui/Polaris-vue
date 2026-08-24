@@ -85,7 +85,7 @@ public class AiWorkflowController extends BaseController {
     }
 
     @Operation(summary = "获取所有启用的工作流列表")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:execute')")
+    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute')")
     @GetMapping("/list/active")
     public ResultData<List<AiWorkflow>> listActive() {
         return ok(workflowService.listActiveWorkflows());
@@ -133,7 +133,7 @@ public class AiWorkflowController extends BaseController {
     }
 
     @Operation(summary = "流式执行智能体工作流")
-    @PreAuthorize("(!#request.testRun and @ss.hasPermi('ai:workflow:execute')) " +
+    @PreAuthorize("(!#request.testRun and (hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute'))) " +
             "or (#request.testRun and @ss.hasPermi('ai:workflow:test'))")
     @RateLimiter(time = 60, count = 20, limitType = LimitType.IP)
     @PostMapping(value = "/executions/stream", produces = "text/event-stream;charset=UTF-8")
@@ -192,7 +192,7 @@ public class AiWorkflowController extends BaseController {
     }
 
     @Operation(summary = "查询当前用户的待审批工作流")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:approve')")
+    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:approve')")
     @GetMapping("/approvals/pending")
     public ResultData<List<Map<String, Object>>> listPendingApprovals() {
         return ok(executionStore.listPendingApprovals(SecurityUtils.getUserId()));
@@ -200,7 +200,7 @@ public class AiWorkflowController extends BaseController {
 
     /** 拒绝分支只写终态，绝不调用受保护节点。 */
     @Operation(summary = "审批工作流并恢复执行")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:approve')")
+    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:approve')")
     @PostMapping(value = "/executions/{executionId}/approvals/{approvalId}/decision",
             produces = "text/event-stream;charset=UTF-8")
     public SseEmitter decideApproval(
@@ -284,7 +284,8 @@ public class AiWorkflowController extends BaseController {
     }
 
     @Operation(summary = "取消工作流执行")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:execute') or @ss.hasPermi('ai:workflow:test')")
+    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute') " +
+            "or @ss.hasPermi('ai:workflow:test')")
     @PostMapping("/executions/{executionId}/cancel")
     public ResultData<Void> cancelExecution(@PathVariable String executionId) {
         WorkflowExecutionStore.Execution execution =

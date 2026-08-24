@@ -1,6 +1,6 @@
 import axios from 'axios'
 import {ElLoading, ElMessage, ElMessageBox, ElNotification} from 'element-plus'
-import {getPlatformToken, getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 import errorCode from '@/utils/errorCode'
 import {blobValidate, tansParams} from '@/utils/ruoyi'
 import cache from '@/plugins/cache'
@@ -28,18 +28,8 @@ service.interceptors.request.use(config => {
   const isRepeatSubmit = (config.headers || {}).repeatSubmit === false
   // 间隔时间(ms)，小于此时间视为重复提交
   const interval = (config.headers || {}).interval || 1000
-  const isPlatform = window.location.pathname.startsWith('/platform')
-  const pToken = getPlatformToken()
-  const aToken = getToken()
-
-  if (isPlatform && pToken && !isToken) {
-    config.headers['Platform-Token'] = pToken
-  } else if (!isPlatform && aToken && !isToken) {
-    config.headers['Authorization'] = 'Bearer ' + aToken
-  } else if (pToken && !isToken) {
-    config.headers['Platform-Token'] = pToken
-  } else if (aToken && !isToken) {
-    config.headers['Authorization'] = 'Bearer ' + aToken
+  if (!isToken) {
+    Object.assign(config.headers, getAuthHeaders())
   }
   // get请求映射params参数
   if (config.method === 'get' && config.params) {

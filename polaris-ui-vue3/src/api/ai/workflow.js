@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import {getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 
 const lastWorkflowSequences = new Map()
 
@@ -132,7 +132,7 @@ async function postWorkflowStream(path, data, onEvent, signal) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + getToken()
+      ...getAuthHeaders()
     },
     body: JSON.stringify(data),
     signal

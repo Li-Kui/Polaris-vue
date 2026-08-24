@@ -1118,7 +1118,7 @@
 
 <script>
 import * as echarts from 'echarts'
-import {getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 import {
   createConversation,
   deleteConversation,
@@ -1195,7 +1195,7 @@ export default {
       uploadingAttachment: false,
       uploadingCount: 0,
       uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/ai/attachment/upload-private",
-      uploadHeaders: { Authorization: "Bearer " + getToken() },
+      uploadHeaders: getAuthHeaders(),
       activePolls: {},
       taskStateMap: {},
       // 报告预览相关
@@ -1961,19 +1961,12 @@ export default {
 
     async loadToolDictionary() {
       try {
-        const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
-        const token = getToken()
-        const response = await fetch(`${baseUrl}/ai/agent/tools/dictionary`, {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + token
-          }
+        const res = await request({
+          url: '/ai/agent/tools/dictionary',
+          method: 'get'
         })
-        if (response.ok) {
-          const res = await response.json()
-          if (res.code === 200 && res.data) {
-            this.toolDictionary = res.data
-          }
+        if (res.code === 200 && res.data) {
+          this.toolDictionary = res.data
         }
       } catch (err) {
         console.error('加载工具翻译字典失败:', err)
@@ -2253,8 +2246,6 @@ export default {
       const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
       
       const isWorkflowMode = !!this.selectedWorkflowCode
-      const token = getToken()
-
       try {
         if (isWorkflowMode) {
           const workflowController = new AbortController()
@@ -2286,7 +2277,7 @@ export default {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json;charset=UTF-8',
-            'Authorization': 'Bearer ' + token
+            ...getAuthHeaders()
           },
           body: JSON.stringify(payload)
         })

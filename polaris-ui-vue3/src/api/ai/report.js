@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import {getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 
 /**
  * 归档保存分析报告
@@ -100,7 +100,7 @@ export async function refineReportStream(content, { onChunk, onComplete, onError
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        'Authorization': 'Bearer ' + getToken()
+        ...getAuthHeaders()
       },
       body: JSON.stringify({ content })
     })
@@ -135,4 +135,3 @@ export async function refineReportStream(content, { onChunk, onComplete, onError
     else throw err
   }
 }
-
