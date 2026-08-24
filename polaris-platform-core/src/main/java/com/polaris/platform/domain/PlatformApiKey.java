@@ -1,5 +1,6 @@
 package com.polaris.platform.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.polaris.common.core.domain.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -16,7 +17,11 @@ public class PlatformApiKey extends BaseEntity {
 
     private Long id;
     private Long tenantId;
-    private String apiKey;
+    /** SHA-256 摘要，不向接口响应暴露 */
+    @JsonIgnore
+    private String apiKeyHash;
+    /** 用于列表脱敏展示 */
+    private String keyPrefix;
     private String keyName;
     /** JSON: ["chat","knowledge","agent"] */
     private String permissions;

@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS `platform_tenant_user` (
 CREATE TABLE IF NOT EXISTS `platform_api_key` (
     `id`             BIGINT       NOT NULL AUTO_INCREMENT COMMENT 'ID',
     `tenant_id`      BIGINT       NOT NULL COMMENT '租户ID',
-    `api_key`        VARCHAR(128) NOT NULL COMMENT 'API Key',
+    `api_key`        VARCHAR(64)  NOT NULL COMMENT 'API Key SHA-256摘要',
+    `key_prefix`     VARCHAR(16)  NOT NULL COMMENT 'API Key脱敏展示前缀',
     `key_name`       VARCHAR(128) NOT NULL COMMENT '密钥名称',
     `permissions`    JSON         DEFAULT NULL COMMENT '权限列表',
     `rate_limit`     INT          DEFAULT 60 COMMENT '每分钟限流',

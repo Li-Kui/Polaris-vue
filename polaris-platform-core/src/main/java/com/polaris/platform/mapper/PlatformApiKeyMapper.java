@@ -9,7 +9,7 @@ import java.util.List;
 @Mapper
 public interface PlatformApiKeyMapper {
     PlatformApiKey selectById(@Param("id") Long id);
-    PlatformApiKey selectByApiKey(@Param("apiKey") String apiKey);
+    PlatformApiKey selectByApiKeyHash(@Param("apiKeyHash") String apiKeyHash);
     List<PlatformApiKey> selectByTenantId(@Param("tenantId") Long tenantId);
     int insert(PlatformApiKey apiKey);
     int update(PlatformApiKey apiKey);

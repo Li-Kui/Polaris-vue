@@ -14,13 +14,10 @@
               <span class="key-name-text">{{ scope.row.keyName }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="apiKey" label="API Key" min-width="280">
+          <el-table-column prop="keyPrefix" label="API Key" min-width="280">
             <template #default="scope">
               <div class="api-key-box">
-                <span class="api-key-badge">{{ scope.row.apiKey }}</span>
-                <el-tooltip content="复制密钥" placement="top">
-                  <el-button link icon="DocumentCopy" @click="copyText(scope.row.apiKey)" class="copy-btn" />
-                </el-tooltip>
+                <span class="api-key-badge">{{ formatApiKey(scope.row.keyPrefix) }}</span>
               </div>
             </template>
           </el-table-column>
@@ -70,6 +67,24 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- API Key 仅在创建成功时展示一次 -->
+    <el-dialog title="API Key 创建成功" v-model="createdKeyOpen" width="560px" append-to-body
+               :close-on-click-modal="false" @closed="createdApiKey = ''" class="polaris-glass-dialog">
+      <el-alert title="请立即复制并妥善保存，此密钥关闭后将无法再次查看。" type="warning" :closable="false" show-icon />
+      <div class="created-key-box">
+        <el-input :model-value="createdApiKey" readonly>
+          <template #append>
+            <el-button icon="DocumentCopy" class="copy-btn" @click="copyText(createdApiKey)">复制</el-button>
+          </template>
+        </el-input>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button type="primary" @click="createdKeyOpen = false">我已保存</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -83,6 +98,8 @@ const keyList = ref([])
 const open = ref(false)
 const submitLoading = ref(false)
 const formRef = ref(null)
+const createdKeyOpen = ref(false)
+const createdApiKey = ref('')
 
 const form = reactive({
   keyName: '',
@@ -111,10 +128,12 @@ function submitForm() {
   formRef.value.validate(valid => {
     if (valid) {
       submitLoading.value = true
-      addApiKey(form).then(() => {
+      addApiKey(form).then(res => {
+        createdApiKey.value = res.data?.apiKey || ''
         ElMessage.success('创建 API Key 成功')
         open.value = false
         submitLoading.value = false
+        createdKeyOpen.value = true
         getList()
       }).catch(() => {
         submitLoading.value = false
@@ -138,6 +157,10 @@ function copyText(text) {
   navigator.clipboard.writeText(text).then(() => {
     ElMessage.success('已复制 API Key 到剪贴板')
   })
+}
+
+function formatApiKey(keyPrefix) {
+  return keyPrefix ? `${keyPrefix}••••••••` : '已隐藏'
 }
 
 onMounted(getList)
@@ -188,6 +211,10 @@ onMounted(getList)
     background: rgba(99, 102, 241, 0.15) !important;
     border-color: rgba(99, 102, 241, 0.35) !important;
   }
+}
+
+.created-key-box {
+  margin-top: 20px;
 }
 
 .copy-btn {

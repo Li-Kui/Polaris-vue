@@ -1,6 +1,8 @@
 package com.polaris.platform.service;
 
+import com.polaris.platform.auth.ApiKeyDigestUtils;
 import com.polaris.platform.domain.PlatformApiKey;
+import com.polaris.platform.dto.PlatformApiKeyCreatedResponse;
 import com.polaris.platform.mapper.PlatformApiKeyMapper;
 import com.polaris.platform.tenant.PlatformTenantGuard;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,11 +35,14 @@ public class PlatformApiKeyService {
     /**
      * 创建 API Key，自动生成 sk-xxx 格式的密钥
      */
-    public PlatformApiKey create(PlatformApiKey apiKey) {
+    public PlatformApiKeyCreatedResponse create(PlatformApiKey apiKey) {
+        String rawApiKey = "sk-" + UUID.randomUUID().toString().replace("-", "");
         apiKey.setTenantId(PlatformTenantGuard.requireTenantId());
-        apiKey.setApiKey("sk-" + UUID.randomUUID().toString().replace("-", ""));
+        apiKey.setApiKeyHash(ApiKeyDigestUtils.digest(rawApiKey));
+        apiKey.setKeyPrefix(ApiKeyDigestUtils.prefix(rawApiKey));
         apiKeyMapper.insert(apiKey);
-        return apiKey;
+        return new PlatformApiKeyCreatedResponse(
+                apiKey.getId(), apiKey.getKeyName(), apiKey.getKeyPrefix(), rawApiKey);
     }
 
     public int update(PlatformApiKey apiKey) {
