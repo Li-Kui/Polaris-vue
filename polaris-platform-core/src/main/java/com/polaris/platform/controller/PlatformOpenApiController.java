@@ -3,11 +3,14 @@ package com.polaris.platform.controller;
 import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
-import com.polaris.ai.core.usage.TokenUsageTracker;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.common.core.domain.AjaxResult;
+import com.polaris.platform.service.TokenQuotaService;
+import com.polaris.platform.service.TokenQuotaService.TokenQuotaExceededException;
+import com.polaris.platform.service.TokenQuotaService.TokenQuotaUnavailableException;
+import com.polaris.platform.service.TokenQuotaService.TokenReservation;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -18,6 +21,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -26,6 +30,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 中台标准开放 API 接口（兼容 OpenAI 标准协议规范）
@@ -39,7 +44,9 @@ public class PlatformOpenApiController {
     private AiModelFactory modelFactory;
 
     @Autowired
-    private TokenUsageTracker usageTracker;
+    private TokenQuotaService tokenQuotaService;
+
+    private static final int DEFAULT_OUTPUT_TOKEN_RESERVATION = 4096;
 
     @Data
     public static class OpenAiMessage {
@@ -86,24 +93,42 @@ public class PlatformOpenApiController {
         CallerContext ctx = CallerContextHolder.get();
         String tenantId = ctx != null ? ctx.getTenantId() : null;
 
-        // 检查配额
-        if (usageTracker.isQuotaExceeded(tenantId)) {
-            return AjaxResult.error(429, "租户 Token 配额已耗尽，请联系管理员充值");
+        TokenReservation reservation;
+        try {
+            reservation = tokenQuotaService.reserve(tenantId, estimateReservationTokens(request));
+        } catch (TokenQuotaExceededException e) {
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            return AjaxResult.error(HttpStatus.TOO_MANY_REQUESTS.value(), e.getMessage());
+        } catch (TokenQuotaUnavailableException e) {
+            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+            return AjaxResult.error(HttpStatus.SERVICE_UNAVAILABLE.value(), e.getMessage());
         }
 
         if (Boolean.TRUE.equals(request.getStream())) {
-            return handleStreamingChat(request, tenantId);
+            return handleStreamingChat(request, reservation);
         } else {
-            return handleBlockingChat(request, tenantId);
+            try {
+                return handleBlockingChat(request, reservation);
+            } catch (RuntimeException e) {
+                tokenQuotaService.release(reservation);
+                throw e;
+            }
         }
     }
 
-    private SseEmitter handleStreamingChat(OpenAiChatRequest request, String tenantId) {
+    private SseEmitter handleStreamingChat(OpenAiChatRequest request, TokenReservation reservation) {
         SseEmitter emitter = new SseEmitter(180000L);
+        AtomicBoolean finalized = new AtomicBoolean(false);
+        Runnable releaseReservation = () -> {
+            if (finalized.compareAndSet(false, true)) {
+                tokenQuotaService.release(reservation);
+            }
+        };
         CompletableFuture.runAsync(() -> {
             try {
                 StreamingChatModel model = modelFactory.getDefaultStreamingModel();
                 if (model == null) {
+                    releaseReservation.run();
                     emitter.send(SseEmitter.event().data("{\"error\":\"未配置默认对话模型\"}"));
                     emitter.complete();
                     return;
@@ -129,29 +154,34 @@ public class PlatformOpenApiController {
                         })
                         .onCompleteResponse(resp -> {
                             try {
+                                int tokenEstimate = estimateActualTokens(request, fullResponse.length());
+                                if (finalized.compareAndSet(false, true)) {
+                                    completeReservation(reservation, tokenEstimate);
+                                }
                                 emitter.send(SseEmitter.event().data("[DONE]"));
                                 emitter.complete();
-                                int tokenEstimate = (int) Math.ceil((fullResponse.length() + request.getMessages().toString().length()) / 2.0);
-                                usageTracker.onStreamComplete(tenantId, tokenEstimate);
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
                         })
                         .onError(error -> {
+                            releaseReservation.run();
                             emitter.completeWithError(error);
                         })
                         .start();
 
             } catch (Exception e) {
+                releaseReservation.run();
                 emitter.completeWithError(e);
             }
         });
         return emitter;
     }
 
-    private Map<String, Object> handleBlockingChat(OpenAiChatRequest request, String tenantId) {
+    private Map<String, Object> handleBlockingChat(OpenAiChatRequest request, TokenReservation reservation) {
         StreamingChatModel model = modelFactory.getDefaultStreamingModel();
         if (model == null) {
+            tokenQuotaService.release(reservation);
             Map<String, Object> err = new HashMap<>();
             err.put("error", "未配置默认对话模型");
             return err;
@@ -180,8 +210,8 @@ public class PlatformOpenApiController {
             answerText = fullResponse.toString();
         }
 
-        int tokenEstimate = (int) Math.ceil((answerText.length() + request.getMessages().toString().length()) / 2.0);
-        usageTracker.onStreamComplete(tenantId, tokenEstimate);
+        int tokenEstimate = estimateActualTokens(request, answerText.length());
+        completeReservation(reservation, tokenEstimate);
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("id", "chatcmpl-" + UUID.randomUUID().toString());
@@ -204,6 +234,40 @@ public class PlatformOpenApiController {
         res.put("usage", usage);
 
         return res;
+    }
+
+    private void completeReservation(TokenReservation reservation, int actualTokens) {
+        try {
+            tokenQuotaService.complete(reservation, actualTokens);
+        } catch (RuntimeException e) {
+            log.error("租户[{}] Token 配额结算失败", reservation.tenantId(), e);
+        }
+    }
+
+    private int estimateReservationTokens(OpenAiChatRequest request) {
+        int outputTokens = request.getMax_tokens() != null && request.getMax_tokens() > 0
+                ? request.getMax_tokens() : DEFAULT_OUTPUT_TOKEN_RESERVATION;
+        long total = (long) estimateMessageTokens(request.getMessages()) + outputTokens;
+        return (int) Math.min(Integer.MAX_VALUE, total);
+    }
+
+    private int estimateActualTokens(OpenAiChatRequest request, int responseLength) {
+        long outputTokens = (long) Math.ceil(responseLength / 2.0);
+        long total = estimateMessageTokens(request.getMessages()) + outputTokens;
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, total));
+    }
+
+    private int estimateMessageTokens(List<OpenAiMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return 0;
+        }
+        long characters = 0L;
+        for (OpenAiMessage message : messages) {
+            if (message != null && message.getContent() != null) {
+                characters += message.getContent().length();
+            }
+        }
+        return (int) Math.min(Integer.MAX_VALUE, (long) Math.ceil(characters / 2.0));
     }
 
     private List<ChatMessage> convertMessages(List<OpenAiMessage> openAiMessages) {

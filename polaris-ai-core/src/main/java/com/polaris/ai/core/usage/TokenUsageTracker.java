@@ -1,7 +1,5 @@
 package com.polaris.ai.core.usage;
 
-import com.polaris.ai.core.cache.TenantAwareRedisKey;
-import com.polaris.common.core.redis.RedisCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,12 +14,6 @@ import org.springframework.stereotype.Component;
 public class TokenUsageTracker {
 
     private static final Logger log = LoggerFactory.getLogger(TokenUsageTracker.class);
-
-    private static final String USED_TOKENS_KEY = "platform:tenant:used_tokens";
-    private static final String QUOTA_KEY = "platform:tenant:quota_tokens";
-
-    @Autowired(required = false)
-    private RedisCache redisCache;
 
     @Autowired
     private ApplicationEventPublisher eventPublisher;
@@ -39,19 +31,4 @@ public class TokenUsageTracker {
         }
     }
 
-    /**
-     * 检查租户配额是否已用尽
-     */
-    public boolean isQuotaExceeded(String tenantId) {
-        if (tenantId == null || redisCache == null) return false;
-        try {
-            Long used = redisCache.getCacheObject(TenantAwareRedisKey.build(USED_TOKENS_KEY, tenantId));
-            Long quota = redisCache.getCacheObject(TenantAwareRedisKey.build(QUOTA_KEY, tenantId));
-            if (quota == null || quota == -1) return false;
-            return used != null && used >= quota;
-        } catch (Exception e) {
-            log.warn("检查租户配额异常: {}", e.getMessage());
-            return false;
-        }
-    }
 }

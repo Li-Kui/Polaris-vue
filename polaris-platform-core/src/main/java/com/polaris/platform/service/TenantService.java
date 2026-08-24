@@ -21,6 +21,9 @@ public class TenantService {
     @Autowired
     private PlatformAuthService authService;
 
+    @Autowired
+    private TokenQuotaService tokenQuotaService;
+
     public List<Tenant> list(Tenant query) {
         return tenantMapper.selectList(query);
     }
@@ -50,14 +53,24 @@ public class TenantService {
         admin.setStatus("0");
         authService.createUser(admin);
 
+        tokenQuotaService.refresh(tenant);
+
         return tenant;
     }
 
     public int update(Tenant tenant) {
-        return tenantMapper.update(tenant);
+        int rows = tenantMapper.update(tenant);
+        if (rows > 0) {
+            tokenQuotaService.refresh(tenantMapper.selectById(tenant.getTenantId()));
+        }
+        return rows;
     }
 
     public int delete(Long tenantId) {
-        return tenantMapper.deleteById(tenantId);
+        int rows = tenantMapper.deleteById(tenantId);
+        if (rows > 0) {
+            tokenQuotaService.evict(tenantId);
+        }
+        return rows;
     }
 }
