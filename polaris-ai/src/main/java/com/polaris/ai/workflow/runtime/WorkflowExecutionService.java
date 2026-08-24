@@ -140,6 +140,7 @@ public class WorkflowExecutionService {
                 workflow.getWorkflowCode(),
                 workflow.getVersion() == null ? 1 : workflow.getVersion(),
                 immutableSnapshot,
+                currentTenantId(),
                 userId,
                 ownedConversationId,
                 testRun,
@@ -148,6 +149,21 @@ public class WorkflowExecutionService {
                 WorkflowExecutionStore.QUEUED);
         executionStore.create(execution);
         return execution;
+    }
+
+    private Long currentTenantId() {
+        if (!com.polaris.ai.core.context.CallerUtils.isPlatformMode()) {
+            return null;
+        }
+        String tenantId = com.polaris.ai.core.context.CallerUtils.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new ServiceException("中台模式缺少租户ID");
+        }
+        try {
+            return Long.valueOf(tenantId);
+        } catch (NumberFormatException e) {
+            throw new ServiceException("中台租户ID格式错误");
+        }
     }
 
     public WorkflowExecutionStore.Execution getOwned(String executionId, Long userId) {

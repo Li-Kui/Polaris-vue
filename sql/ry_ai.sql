@@ -194,6 +194,7 @@ VALUES
 DROP TABLE IF EXISTS `ai_workflow`;
 CREATE TABLE `ai_workflow` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
   `workflow_code` varchar(50) NOT NULL COMMENT '工作流唯一编码',
   `workflow_name` varchar(100) NOT NULL COMMENT '工作流名称',
   `description` varchar(500) DEFAULT NULL COMMENT '描述',
@@ -208,7 +209,8 @@ CREATE TABLE `ai_workflow` (
   `update_time` datetime DEFAULT NULL COMMENT '更新时间',
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_workflow_code` (`workflow_code`)
+  UNIQUE KEY `uk_workflow_code` (`workflow_code`),
+  KEY `idx_ai_workflow_tenant` (`tenant_id`, `status`, `del_flag`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI智能体工作流表';
 
 -- ----------------------------
@@ -229,6 +231,7 @@ DROP TABLE IF EXISTS `ai_workflow_approval`;
 DROP TABLE IF EXISTS `ai_workflow_execution`;
 CREATE TABLE `ai_workflow_execution` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
   `execution_id` varchar(64) NOT NULL COMMENT '服务端生成的执行ID',
   `workflow_code` varchar(50) NOT NULL COMMENT '工作流编码',
   `workflow_version` int(11) NOT NULL COMMENT '执行绑定的工作流版本',
@@ -255,6 +258,7 @@ CREATE TABLE `ai_workflow_execution` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_workflow_execution_id` (`execution_id`),
   KEY `idx_workflow_execution_user_status` (`user_id`, `status`, `create_time`),
+  KEY `idx_workflow_execution_tenant_user_status` (`tenant_id`, `user_id`, `status`, `create_time`),
   KEY `idx_workflow_execution_code` (`workflow_code`, `workflow_version`),
   KEY `idx_workflow_execution_conversation` (`conversation_id`),
   KEY `idx_workflow_execution_lease` (`status`, `lease_until`),

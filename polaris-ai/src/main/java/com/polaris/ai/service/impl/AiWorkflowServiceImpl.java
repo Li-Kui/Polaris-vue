@@ -3,8 +3,12 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.core.context.CallerUtils;
+import com.polaris.ai.domain.AiAgent;
 import com.polaris.ai.domain.AiWorkflow;
 import com.polaris.ai.mapper.AiWorkflowMapper;
+import com.polaris.ai.service.IAiAgentService;
+import com.polaris.ai.service.IAiModelConfigService;
 import com.polaris.ai.service.IAiWorkflowService;
 import com.polaris.ai.workflow.langgraph.GraphTopology;
 import com.polaris.common.exception.ServiceException;
@@ -24,6 +28,12 @@ public class AiWorkflowServiceImpl extends ServiceImpl<AiWorkflowMapper, AiWorkf
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private IAiAgentService agentService;
+
+    @Autowired
+    private IAiModelConfigService modelConfigService;
 
     @Override
     public boolean save(AiWorkflow entity) {
@@ -64,10 +74,40 @@ public class AiWorkflowServiceImpl extends ServiceImpl<AiWorkflowMapper, AiWorkf
         try {
             GraphTopology topology = objectMapper.readValue(graphJson, GraphTopology.class);
             topology.validate();
+            validateTenantReferences(topology);
+        } catch (ServiceException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             throw new ServiceException(e.getMessage());
         } catch (Exception e) {
             throw new ServiceException("工作流图配置无法解析");
+        }
+    }
+
+    /**
+     * 中台保存工作流时必须保证图中引用的智能体和显式模型都属于当前租户。
+     * 管理端仍沿用原有全局管理逻辑。
+     */
+    void validateTenantReferences(GraphTopology topology) {
+        if (!CallerUtils.isPlatformMode() || topology == null || topology.getNodes() == null) {
+            return;
+        }
+        for (GraphTopology.NodeDef node : topology.getNodes()) {
+            if ("agent".equals(node.getType())) {
+                AiAgent agent = agentService.selectAgentByCode(node.getRef());
+                if (agent == null) {
+                    throw new ServiceException("工作流引用的智能体不属于当前租户或未启用: " + node.getRef());
+                }
+                validateTenantModel(agent.getModelConfigId(), "智能体 " + node.getRef());
+            } else if ("classifier".equals(node.getType())) {
+                validateTenantModel(node.getModelConfigId(), "分类节点 " + node.getId());
+            }
+        }
+    }
+
+    private void validateTenantModel(Long modelConfigId, String owner) {
+        if (modelConfigId != null && modelConfigService.getById(modelConfigId) == null) {
+            throw new ServiceException(owner + " 引用的模型不属于当前租户或不存在: " + modelConfigId);
         }
     }
 

@@ -108,6 +108,8 @@ ALTER TABLE `ai_model_config`   ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFA
 ALTER TABLE `ai_knowledge_base` ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFAULT NULL COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `ai_conversation`   ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFAULT NULL COMMENT '租户ID' AFTER `id`;
 ALTER TABLE `ai_agent`          ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFAULT NULL COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `ai_workflow`       ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFAULT NULL COMMENT '租户ID' AFTER `id`;
+ALTER TABLE `ai_workflow_execution` ADD COLUMN IF NOT EXISTS `tenant_id` BIGINT DEFAULT NULL COMMENT '租户ID' AFTER `id`;
 
 -- 7. 初始化管理后台「中台管理」菜单及按钮数据 (sys_menu)
 -- 一级目录：中台管理

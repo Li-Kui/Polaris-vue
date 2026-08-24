@@ -1,5 +1,6 @@
 package com.polaris.ai.workflow.runtime;
 
+import com.polaris.ai.core.context.CallerUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -39,6 +40,7 @@ public class WorkflowExecutionStore {
             String workflowCode,
             int workflowVersion,
             String workflowSnapshot,
+            Long tenantId,
             Long userId,
             Long conversationId,
             boolean testRun,
@@ -53,19 +55,27 @@ public class WorkflowExecutionStore {
     public void create(Execution execution) {
         jdbcTemplate.update(
                 "INSERT INTO ai_workflow_execution " +
-                        "(execution_id, workflow_code, workflow_version, workflow_snapshot, user_id, conversation_id, " +
+                        "(execution_id, workflow_code, workflow_version, workflow_snapshot, tenant_id, user_id, conversation_id, " +
                         "test_run, input_text, file_url, status, runner_id, lease_until, heartbeat_time, " +
                         "event_sequence, lock_version, create_time, update_time) " +
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), " +
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), " +
                         "NOW(), 0, 0, NOW(), NOW())",
                 execution.executionId(), execution.workflowCode(), execution.workflowVersion(),
-                execution.workflowSnapshot(), execution.userId(), execution.conversationId(),
+                execution.workflowSnapshot(), execution.tenantId(), execution.userId(), execution.conversationId(),
                 execution.testRun(), execution.inputText(), execution.fileUrl(), execution.status(),
                 instanceIdentity.id(), leaseSeconds);
     }
 
     /** 以用户行为粒度串行化“检查配额 + 创建执行”，避免并发请求绕过配额。 */
     public boolean lockUserForExecution(Long userId) {
+        Long tenantId = currentTenantId();
+        if (tenantId != null) {
+            List<Long> users = jdbcTemplate.query(
+                    "SELECT id FROM platform_tenant_user " +
+                            "WHERE id = ? AND tenant_id = ? AND status = '0' FOR UPDATE",
+                    (rs, rowNum) -> rs.getLong(1), userId, tenantId);
+            return !users.isEmpty();
+        }
         List<Long> users = jdbcTemplate.query(
                 "SELECT user_id FROM sys_user WHERE user_id = ? AND status = '0' FOR UPDATE",
                 (rs, rowNum) -> rs.getLong(1), userId);
@@ -73,27 +83,45 @@ public class WorkflowExecutionStore {
     }
 
     public int countActiveByUser(Long userId) {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM ai_workflow_execution " +
-                        "WHERE user_id = ? AND status IN ('QUEUED','RUNNING')",
-                Integer.class, userId);
+        Long tenantId = currentTenantId();
+        Integer count = tenantId == null
+                ? jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM ai_workflow_execution WHERE tenant_id IS NULL " +
+                                "AND user_id = ? AND status IN ('QUEUED','RUNNING')",
+                        Integer.class, userId)
+                : jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM ai_workflow_execution WHERE tenant_id = ? " +
+                                "AND user_id = ? AND status IN ('QUEUED','RUNNING')",
+                        Integer.class, tenantId, userId);
         return count == null ? 0 : count;
     }
 
     public int countPendingApprovalsByUser(Long userId) {
-        Integer count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM ai_workflow_execution " +
-                        "WHERE user_id = ? AND status = 'WAITING_APPROVAL'",
-                Integer.class, userId);
+        Long tenantId = currentTenantId();
+        Integer count = tenantId == null
+                ? jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM ai_workflow_execution WHERE tenant_id IS NULL " +
+                                "AND user_id = ? AND status = 'WAITING_APPROVAL'",
+                        Integer.class, userId)
+                : jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM ai_workflow_execution WHERE tenant_id = ? " +
+                                "AND user_id = ? AND status = 'WAITING_APPROVAL'",
+                        Integer.class, tenantId, userId);
         return count == null ? 0 : count;
     }
 
     public Optional<Execution> findOwned(String executionId, Long userId) {
-        List<Execution> rows = jdbcTemplate.query(
-                "SELECT execution_id, workflow_code, workflow_version, workflow_snapshot, user_id, conversation_id, " +
-                        "test_run, input_text, file_url, status FROM ai_workflow_execution " +
-                        "WHERE execution_id = ? AND user_id = ?",
-                (rs, rowNum) -> mapExecution(rs), executionId, userId);
+        Long tenantId = currentTenantId();
+        String select = "SELECT execution_id, workflow_code, workflow_version, workflow_snapshot, " +
+                "tenant_id, user_id, conversation_id, test_run, input_text, file_url, status " +
+                "FROM ai_workflow_execution ";
+        List<Execution> rows = tenantId == null
+                ? jdbcTemplate.query(select +
+                                "WHERE execution_id = ? AND tenant_id IS NULL AND user_id = ?",
+                        (rs, rowNum) -> mapExecution(rs), executionId, userId)
+                : jdbcTemplate.query(select +
+                                "WHERE execution_id = ? AND tenant_id = ? AND user_id = ?",
+                        (rs, rowNum) -> mapExecution(rs), executionId, tenantId, userId);
         return rows.stream().findFirst();
     }
 
@@ -229,13 +257,19 @@ public class WorkflowExecutionStore {
     }
 
     public List<Map<String, Object>> listPendingApprovals(Long userId) {
-        return jdbcTemplate.queryForList(
-                "SELECT a.approval_id, a.execution_id, a.node_instance_id, a.create_time, " +
-                        "e.workflow_code, e.conversation_id FROM ai_workflow_approval a " +
-                        "JOIN ai_workflow_execution e ON e.execution_id = a.execution_id " +
-                        "WHERE e.user_id = ? AND e.status = 'WAITING_APPROVAL' " +
-                        "AND e.test_run = 0 AND a.status = 'PENDING' ORDER BY a.id DESC",
-                userId);
+        Long tenantId = currentTenantId();
+        String select = "SELECT a.approval_id, a.execution_id, a.node_instance_id, a.create_time, " +
+                "e.workflow_code, e.conversation_id FROM ai_workflow_approval a " +
+                "JOIN ai_workflow_execution e ON e.execution_id = a.execution_id ";
+        String suffix = "AND e.status = 'WAITING_APPROVAL' AND e.test_run = 0 " +
+                "AND a.status = 'PENDING' ORDER BY a.id DESC";
+        return tenantId == null
+                ? jdbcTemplate.queryForList(select +
+                                "WHERE e.tenant_id IS NULL AND e.user_id = ? " + suffix,
+                        userId)
+                : jdbcTemplate.queryForList(select +
+                                "WHERE e.tenant_id = ? AND e.user_id = ? " + suffix,
+                        tenantId, userId);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -384,12 +418,24 @@ public class WorkflowExecutionStore {
                 rs.getString("workflow_code"),
                 rs.getInt("workflow_version"),
                 rs.getString("workflow_snapshot"),
+                rs.getObject("tenant_id", Long.class),
                 rs.getLong("user_id"),
                 rs.getObject("conversation_id", Long.class),
                 rs.getBoolean("test_run"),
                 rs.getString("input_text"),
                 rs.getString("file_url"),
                 rs.getString("status"));
+    }
+
+    private Long currentTenantId() {
+        if (!CallerUtils.isPlatformMode()) {
+            return null;
+        }
+        String tenantId = CallerUtils.getTenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalStateException("中台模式缺少租户ID");
+        }
+        return Long.valueOf(tenantId);
     }
 
     private String abbreviate(String value, int maxLength) {

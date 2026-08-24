@@ -6955,6 +6955,193 @@ export default {
 }
 </style>
 
+<!-- 对话首页主题兼容：使用 html.dark 作为真实主题来源，避免侧栏及主按钮在浅色背景中失去对比度 -->
+<style>
+/* 两种主题共用的按钮轮廓、交互与键盘焦点 */
+.ai-chat-wrapper .btn-new-chat,
+.ai-chat-wrapper .btn-batch-toggle,
+.ai-chat-wrapper .btn-start-chat {
+  opacity: 1 !important;
+}
+
+.ai-chat-wrapper .btn-new-chat:focus-visible,
+.ai-chat-wrapper .btn-batch-toggle:focus-visible,
+.ai-chat-wrapper .btn-start-chat:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.24) !important;
+  outline-offset: 2px;
+}
+
+/* 极光浅色模式 */
+html:not(.dark) .ai-chat-wrapper .sidebar {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-right-color: rgba(15, 23, 42, 0.09) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .sidebar-header {
+  border-bottom-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-new-chat {
+  --el-button-bg-color: #ffffff;
+  --el-button-border-color: rgba(79, 70, 229, 0.34);
+  --el-button-text-color: #3730a3;
+  --el-button-hover-bg-color: #eef2ff;
+  --el-button-hover-border-color: #4f46e5;
+  --el-button-hover-text-color: #4338ca;
+  background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%) !important;
+  border-color: rgba(79, 70, 229, 0.34) !important;
+  color: #3730a3 !important;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.10) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-new-chat:hover:not(:disabled) {
+  background: #eef2ff !important;
+  border-color: #4f46e5 !important;
+  color: #4338ca !important;
+  box-shadow: 0 5px 14px rgba(79, 70, 229, 0.18) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle {
+  --el-button-bg-color: #ffffff;
+  --el-button-border-color: rgba(15, 23, 42, 0.16);
+  --el-button-text-color: #475569;
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #475569 !important;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.07) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle:hover:not(:disabled) {
+  background: #eef2ff !important;
+  border-color: #4f46e5 !important;
+  color: #4338ca !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .welcome-setup-card {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(79, 70, 229, 0.12) !important;
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.14) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .welcome-setup-card .el-select__wrapper {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-start-chat {
+  --el-button-bg-color: #4f46e5;
+  --el-button-border-color: #4f46e5;
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: #4338ca;
+  --el-button-hover-border-color: #4338ca;
+  --el-button-hover-text-color: #ffffff;
+  background-color: #4f46e5 !important;
+  background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+  border-color: #4f46e5 !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.28) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-start-chat:hover:not(:disabled) {
+  background-color: #4338ca !important;
+  background-image: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
+  border-color: #4338ca !important;
+  box-shadow: 0 10px 26px rgba(79, 70, 229, 0.36) !important;
+}
+
+/* 深空暗色模式 */
+html.dark .ai-chat-wrapper .sidebar {
+  background: rgba(8, 15, 30, 0.78) !important;
+  border-right-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat {
+  --el-button-bg-color: rgba(56, 189, 248, 0.12);
+  --el-button-border-color: rgba(56, 189, 248, 0.44);
+  --el-button-text-color: #e0f2fe;
+  background: rgba(56, 189, 248, 0.12) !important;
+  border-color: rgba(56, 189, 248, 0.44) !important;
+  color: #e0f2fe !important;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.16) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.20) !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.24) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-batch-toggle {
+  --el-button-bg-color: rgba(15, 23, 42, 0.80);
+  --el-button-border-color: rgba(148, 163, 184, 0.28);
+  --el-button-text-color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.80) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #cbd5e1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-batch-toggle:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.16) !important;
+  border-color: #38bdf8 !important;
+  color: #e0f2fe !important;
+}
+
+html.dark .ai-chat-wrapper .welcome-setup-card .el-select__wrapper {
+  background-color: rgba(15, 23, 42, 0.78) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-start-chat {
+  --el-button-bg-color: #38bdf8;
+  --el-button-border-color: #38bdf8;
+  --el-button-text-color: #08111f;
+  --el-button-hover-bg-color: #7dd3fc;
+  --el-button-hover-border-color: #7dd3fc;
+  --el-button-hover-text-color: #08111f;
+  background-color: #38bdf8 !important;
+  background-image: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%) !important;
+  border-color: #38bdf8 !important;
+  color: #08111f !important;
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.30) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-start-chat:hover:not(:disabled) {
+  background-color: #7dd3fc !important;
+  background-image: linear-gradient(135deg, #7dd3fc 0%, #a5b4fc 100%) !important;
+  border-color: #7dd3fc !important;
+  box-shadow: 0 10px 28px rgba(56, 189, 248, 0.42) !important;
+}
+
+/* 禁用状态仍保留按钮边界，避免功能不可用时整块消失 */
+html:not(.dark) .ai-chat-wrapper .btn-new-chat.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-new-chat:disabled,
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle:disabled,
+html:not(.dark) .ai-chat-wrapper .btn-start-chat.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-start-chat:disabled {
+  background: #eef2f7 !important;
+  border-color: rgba(100, 116, 139, 0.24) !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  opacity: 0.72 !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat.is-disabled,
+html.dark .ai-chat-wrapper .btn-new-chat:disabled,
+html.dark .ai-chat-wrapper .btn-batch-toggle.is-disabled,
+html.dark .ai-chat-wrapper .btn-batch-toggle:disabled,
+html.dark .ai-chat-wrapper .btn-start-chat.is-disabled,
+html.dark .ai-chat-wrapper .btn-start-chat:disabled {
+  background: rgba(30, 41, 59, 0.88) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  opacity: 0.76 !important;
+}
+</style>
+
 <!-- 打印专用全局样式，确保导出/打印 PDF 时仅渲染报告主体并隐藏系统侧边栏、顶部导航与工具栏 -->
 <style>
 @media print {
