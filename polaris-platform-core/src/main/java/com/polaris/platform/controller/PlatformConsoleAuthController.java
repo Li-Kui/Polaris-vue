@@ -4,13 +4,21 @@ import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.AjaxResult;
+import com.polaris.common.utils.ip.IpUtils;
+import com.polaris.platform.auth.PlatformLoginRateLimiter;
+import com.polaris.platform.auth.PlatformLoginRateLimiter.LoginAttemptResult;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.mapper.TenantMapper;
 import com.polaris.platform.service.PlatformAuthService;
+import com.polaris.platform.service.PlatformAuthService.PlatformAuthenticationException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -21,6 +29,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/platform")
+@Slf4j
 public class PlatformConsoleAuthController extends BaseController {
 
     @Autowired
@@ -31,6 +40,9 @@ public class PlatformConsoleAuthController extends BaseController {
 
     @Autowired
     private PlatformUserMapper userMapper;
+
+    @Autowired
+    private PlatformLoginRateLimiter loginRateLimiter;
 
     @Data
     public static class PlatformLoginBody {
@@ -43,22 +55,45 @@ public class PlatformConsoleAuthController extends BaseController {
      * 中台用户登录
      */
     @PostMapping("/login")
-    public AjaxResult login(@RequestBody PlatformLoginBody body) {
-        if (body.getTenantCode() == null || body.getUsername() == null || body.getPassword() == null) {
+    public AjaxResult login(@RequestBody PlatformLoginBody body, HttpServletRequest request,
+                            HttpServletResponse response) {
+        if (body.getTenantCode() == null || body.getTenantCode().isBlank()
+                || body.getUsername() == null || body.getUsername().isBlank()
+                || body.getPassword() == null || body.getPassword().isBlank()) {
             return error("租户编码、用户名或密码不能为空");
         }
-        Tenant tenant = tenantMapper.selectByCode(body.getTenantCode());
-        if (tenant == null) {
-            return error("租户不存在");
-        }
-        if ("1".equals(tenant.getStatus())) {
-            return error("租户已被停用");
-        }
+
+        String tenantCode = body.getTenantCode().trim();
+        String username = body.getUsername().trim();
+        String sourceIp = IpUtils.getIpAddr(request);
+        String account = loginRateLimiter.accountFingerprint(tenantCode, username);
+        LoginAttemptResult attempt;
         try {
-            Map<String, Object> authData = authService.login(tenant.getTenantId(), body.getUsername(), body.getPassword());
-            return success(authData);
+            attempt = loginRateLimiter.tryAcquire(sourceIp, tenantCode, username);
         } catch (Exception e) {
-            return error(e.getMessage());
+            log.error("中台登录限流服务异常, account={}", account, e);
+            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+            return AjaxResult.error(HttpStatus.SERVICE_UNAVAILABLE.value(), "登录服务暂不可用，请稍后重试");
+        }
+        if (!attempt.allowed()) {
+            log.warn("中台登录尝试过于频繁, dimension={}, account={}", attempt.dimension(), account);
+            response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+            response.setHeader("Retry-After", String.valueOf(attempt.retryAfterSeconds()));
+            return AjaxResult.error(HttpStatus.TOO_MANY_REQUESTS.value(), "登录尝试过于频繁，请稍后重试");
+        }
+
+        try {
+            Map<String, Object> authData = authService.login(tenantCode, username, body.getPassword());
+            loginRateLimiter.clearAccountFailures(tenantCode, username);
+            return success(authData);
+        } catch (PlatformAuthenticationException e) {
+            log.warn("中台登录认证失败, account={}, remoteAddress={}", account, request.getRemoteAddr());
+            response.setStatus(HttpStatus.UNAUTHORIZED.value());
+            return AjaxResult.error(HttpStatus.UNAUTHORIZED.value(), e.getMessage());
+        } catch (Exception e) {
+            log.error("中台登录服务异常, account={}", account, e);
+            response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
+            return AjaxResult.error(HttpStatus.SERVICE_UNAVAILABLE.value(), "登录服务暂不可用，请稍后重试");
         }
     }
 

@@ -2,7 +2,9 @@ package com.polaris.platform.service;
 
 import com.polaris.platform.auth.PlatformJwtUtils;
 import com.polaris.platform.domain.PlatformUser;
+import com.polaris.platform.domain.Tenant;
 import com.polaris.platform.mapper.PlatformUserMapper;
+import com.polaris.platform.mapper.TenantMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -20,23 +22,36 @@ public class PlatformAuthService {
     private PlatformUserMapper userMapper;
 
     @Autowired
+    private TenantMapper tenantMapper;
+
+    @Autowired
     private PlatformJwtUtils jwtUtils;
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+    private final String dummyPasswordHash = passwordEncoder.encode("polaris-platform-login-dummy-password");
 
     /**
      * 中台用户登录
      */
-    public Map<String, Object> login(Long tenantId, String username, String password) {
+    public Map<String, Object> login(String tenantCode, String username, String password) {
+        Tenant tenant = tenantMapper.selectByCode(tenantCode);
+        if (tenant == null || !"0".equals(tenant.getStatus())) {
+            passwordEncoder.matches(password, dummyPasswordHash);
+            throw new PlatformAuthenticationException();
+        }
+
+        Long tenantId = tenant.getTenantId();
         PlatformUser user = userMapper.selectByUsername(tenantId, username);
-        if (user == null) {
-            throw new RuntimeException("用户不存在");
+        String storedPassword = user != null && user.getPassword() != null
+                ? user.getPassword() : dummyPasswordHash;
+        boolean passwordMatched;
+        try {
+            passwordMatched = passwordEncoder.matches(password, storedPassword);
+        } catch (IllegalArgumentException e) {
+            passwordMatched = false;
         }
-        if ("1".equals(user.getStatus())) {
-            throw new RuntimeException("用户已被停用");
-        }
-        if (!passwordEncoder.matches(password, user.getPassword())) {
-            throw new RuntimeException("密码错误");
+        if (user == null || !"0".equals(user.getStatus()) || !passwordMatched) {
+            throw new PlatformAuthenticationException();
         }
 
         // 更新最后登录时间
@@ -49,6 +64,12 @@ public class PlatformAuthService {
         result.put("token", token);
         result.put("user", user);
         return result;
+    }
+
+    public static class PlatformAuthenticationException extends RuntimeException {
+        public PlatformAuthenticationException() {
+            super("租户编码、用户名或密码错误");
+        }
     }
 
     /**
