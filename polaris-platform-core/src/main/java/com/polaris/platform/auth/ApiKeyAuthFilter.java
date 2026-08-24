@@ -50,7 +50,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        PlatformApiKey apiKey = apiKeyMapper.selectByApiKeyHash(ApiKeyDigestUtils.digest(keyValue));
+        PlatformApiKey apiKey = apiKeyMapper.selectAuthApiKeyByHash(ApiKeyDigestUtils.digest(keyValue));
         if (apiKey == null) {
             sendError(response, 401, "无效的 API Key");
             return;

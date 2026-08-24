@@ -30,9 +30,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where id = #{id}
     </select>
 
-    <select id="selectByApiKeyHash" parameterType="String" resultMap="PlatformApiKeyResult">
-        <include refid="selectPlatformApiKeyVo"/>
-        where api_key = #{apiKeyHash}
+    <select id="selectAuthApiKeyByHash" parameterType="String" resultMap="PlatformApiKeyResult">
+        select k.id, k.tenant_id, k.key_prefix, k.key_name, k.permissions, k.rate_limit, k.status,
+               k.expire_time, k.last_used_time, k.create_by, k.create_time, k.update_by, k.update_time
+        from platform_api_key k
+        inner join platform_tenant t on t.tenant_id = k.tenant_id
+        where k.api_key = #{apiKeyHash}
+          and t.status = '0'
     </select>
 
     <select id="selectByTenantId" parameterType="Long" resultMap="PlatformApiKeyResult">
