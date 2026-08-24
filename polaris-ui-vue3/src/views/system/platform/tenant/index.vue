@@ -184,7 +184,7 @@ const rules = {
 function getList() {
   loading.value = true
   listTenant(queryParams).then(res => {
-    tenantList.value = res.rows || []
+    tenantList.value = res.data?.rows || []
     loading.value = false
   })
 }

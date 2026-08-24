@@ -114,7 +114,7 @@ const rules = {
 function getList() {
   loading.value = true
   listTenantUser().then(res => {
-    userList.value = res.rows || []
+    userList.value = res.data?.rows || []
     loading.value = false
   })
 }

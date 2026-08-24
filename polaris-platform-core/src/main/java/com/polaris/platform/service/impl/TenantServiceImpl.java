@@ -1,8 +1,11 @@
-package com.polaris.platform.service;
+package com.polaris.platform.service.impl;
 
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
 import com.polaris.platform.mapper.TenantMapper;
+import com.polaris.platform.service.IPlatformAuthService;
+import com.polaris.platform.service.ITenantService;
+import com.polaris.platform.service.TokenQuotaService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,29 +13,34 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * 租户管理服务
+ * 中台租户服务层实现类
+ *
+ * @author polaris
  */
 @Service
-public class TenantService {
+public class TenantServiceImpl implements ITenantService {
 
     @Autowired
     private TenantMapper tenantMapper;
 
     @Autowired
-    private PlatformAuthService authService;
+    private IPlatformAuthService platformAuthService;
 
     @Autowired
     private TokenQuotaService tokenQuotaService;
 
-    public List<Tenant> list(Tenant query) {
-        return tenantMapper.selectList(query);
+    @Override
+    public List<Tenant> selectTenantList(Tenant tenant) {
+        return tenantMapper.selectList(tenant);
     }
 
-    public Tenant getById(Long tenantId) {
+    @Override
+    public Tenant selectTenantById(Long tenantId) {
         return tenantMapper.selectById(tenantId);
     }
 
-    public Tenant getByCode(String tenantCode) {
+    @Override
+    public Tenant selectTenantByCode(String tenantCode) {
         return tenantMapper.selectByCode(tenantCode);
     }
 
@@ -40,7 +48,8 @@ public class TenantService {
      * 创建租户，同时创建默认管理员账号
      */
     @Transactional
-    public Tenant create(Tenant tenant, String adminUsername, String adminPassword) {
+    @Override
+    public Tenant createTenant(Tenant tenant, String adminUsername, String adminPassword) {
         tenantMapper.insert(tenant);
 
         // 创建默认管理员
@@ -51,14 +60,15 @@ public class TenantService {
         admin.setNickname("管理员");
         admin.setRole("admin");
         admin.setStatus("0");
-        authService.createUser(admin);
+        platformAuthService.createPlatformUser(admin);
 
         tokenQuotaService.refresh(tenant);
 
         return tenant;
     }
 
-    public int update(Tenant tenant) {
+    @Override
+    public int updateTenant(Tenant tenant) {
         int rows = tenantMapper.update(tenant);
         if (rows > 0) {
             tokenQuotaService.refresh(tenantMapper.selectById(tenant.getTenantId()));
@@ -66,7 +76,8 @@ public class TenantService {
         return rows;
     }
 
-    public int delete(Long tenantId) {
+    @Override
+    public int deleteTenant(Long tenantId) {
         int rows = tenantMapper.deleteById(tenantId);
         if (rows > 0) {
             tokenQuotaService.evict(tenantId);

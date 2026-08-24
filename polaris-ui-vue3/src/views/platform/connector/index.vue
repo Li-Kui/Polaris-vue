@@ -114,7 +114,7 @@ const rules = {
 function getList() {
   loading.value = true
   listConnector().then(res => {
-    connectorList.value = res.rows || []
+    connectorList.value = res.data?.rows || []
     loading.value = false
   })
 }

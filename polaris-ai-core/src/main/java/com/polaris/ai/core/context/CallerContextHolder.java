@@ -6,12 +6,16 @@ package com.polaris.ai.core.context;
  */
 public final class CallerContextHolder {
 
-    private static final ThreadLocal<CallerContext> HOLDER = new InheritableThreadLocal<>();
+    private static final ThreadLocal<CallerContext> HOLDER = new ThreadLocal<>();
 
     private CallerContextHolder() {}
 
     public static void set(CallerContext context) {
-        HOLDER.set(context);
+        if (context == null) {
+            clear();
+        } else {
+            HOLDER.set(context);
+        }
     }
 
     public static CallerContext get() {

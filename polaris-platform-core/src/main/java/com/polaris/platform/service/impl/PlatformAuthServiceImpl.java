@@ -1,26 +1,28 @@
-package com.polaris.platform.service;
+package com.polaris.platform.service.impl;
 
 import com.polaris.platform.auth.PlatformJwtUtils;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
+import com.polaris.platform.dto.PlatformLoginResponse;
 import com.polaris.platform.dto.PlatformUserResponse;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.mapper.TenantMapper;
+import com.polaris.platform.service.IPlatformAuthService;
+import com.polaris.platform.service.PlatformAuthenticationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
- * 中台用户认证服务
+ * 中台用户认证服务层实现类
+ *
+ * @author polaris
  */
 @Service
-public class PlatformAuthService {
+public class PlatformAuthServiceImpl implements IPlatformAuthService {
 
     @Autowired
-    private PlatformUserMapper userMapper;
+    private PlatformUserMapper platformUserMapper;
 
     @Autowired
     private TenantMapper tenantMapper;
@@ -34,7 +36,8 @@ public class PlatformAuthService {
     /**
      * 中台用户登录
      */
-    public Map<String, Object> login(String tenantCode, String username, String password) {
+    @Override
+    public PlatformLoginResponse login(String tenantCode, String username, String password) {
         Tenant tenant = tenantMapper.selectByCode(tenantCode);
         if (tenant == null || !"0".equals(tenant.getStatus())) {
             passwordEncoder.matches(password, dummyPasswordHash);
@@ -42,7 +45,7 @@ public class PlatformAuthService {
         }
 
         Long tenantId = tenant.getTenantId();
-        PlatformUser user = userMapper.selectByUsername(tenantId, username);
+        PlatformUser user = platformUserMapper.selectByUsername(tenantId, username);
         String storedPassword = user != null && user.getPassword() != null
                 ? user.getPassword() : dummyPasswordHash;
         boolean passwordMatched;
@@ -56,28 +59,20 @@ public class PlatformAuthService {
         }
 
         // 更新最后登录时间
-        userMapper.updateLastLoginTime(user.getId());
+        platformUserMapper.updateLastLoginTime(user.getId());
 
         // 生成 Token
         String token = jwtUtils.generateToken(user.getId(), tenantId, username);
 
-        Map<String, Object> result = new HashMap<>();
-        result.put("token", token);
-        result.put("user", PlatformUserResponse.from(user));
-        return result;
-    }
-
-    public static class PlatformAuthenticationException extends RuntimeException {
-        public PlatformAuthenticationException() {
-            super("租户编码、用户名或密码错误");
-        }
+        return new PlatformLoginResponse(token, PlatformUserResponse.from(user));
     }
 
     /**
      * 创建中台用户（密码加密）
      */
-    public void createUser(PlatformUser user) {
+    @Override
+    public int createPlatformUser(PlatformUser user) {
         user.setPassword(passwordEncoder.encode(user.getPassword()));
-        userMapper.insert(user);
+        return platformUserMapper.insert(user);
     }
 }

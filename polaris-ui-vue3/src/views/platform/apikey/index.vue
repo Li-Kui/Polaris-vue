@@ -113,7 +113,7 @@ const rules = {
 function getList() {
   loading.value = true
   listApiKey().then(res => {
-    keyList.value = res.rows || []
+    keyList.value = res.data?.rows || []
     loading.value = false
   })
 }

@@ -1,9 +1,10 @@
-package com.polaris.platform.service;
+package com.polaris.platform.service.impl;
 
 import com.polaris.platform.auth.ApiKeyDigestUtils;
 import com.polaris.platform.domain.PlatformApiKey;
 import com.polaris.platform.dto.PlatformApiKeyCreatedResponse;
 import com.polaris.platform.mapper.PlatformApiKeyMapper;
+import com.polaris.platform.service.IPlatformApiKeyService;
 import com.polaris.platform.tenant.PlatformTenantGuard;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -12,52 +13,59 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * API Key 管理服务
+ * 中台 API Key 服务层实现类
+ *
+ * @author polaris
  */
 @Service
-public class PlatformApiKeyService {
+public class PlatformApiKeyServiceImpl implements IPlatformApiKeyService {
 
     @Autowired
-    private PlatformApiKeyMapper apiKeyMapper;
+    private PlatformApiKeyMapper platformApiKeyMapper;
 
-    public List<PlatformApiKey> listByTenantId(Long tenantId) {
+    @Override
+    public List<PlatformApiKey> selectApiKeyListByTenantId(Long tenantId) {
         if (!PlatformTenantGuard.belongsToCurrentTenant(tenantId)) {
             return List.of();
         }
-        return apiKeyMapper.selectByTenantId(tenantId);
+        return platformApiKeyMapper.selectByTenantId(tenantId);
     }
 
-    public PlatformApiKey getById(Long id) {
-        PlatformApiKey apiKey = apiKeyMapper.selectById(id);
+    @Override
+    public PlatformApiKey selectApiKeyById(Long id) {
+        PlatformApiKey apiKey = platformApiKeyMapper.selectById(id);
         return apiKey != null && PlatformTenantGuard.belongsToCurrentTenant(apiKey.getTenantId()) ? apiKey : null;
     }
 
     /**
      * 创建 API Key，自动生成 sk-xxx 格式的密钥
      */
-    public PlatformApiKeyCreatedResponse create(PlatformApiKey apiKey) {
+    @Override
+    public PlatformApiKeyCreatedResponse createApiKey(PlatformApiKey apiKey) {
         String rawApiKey = "sk-" + UUID.randomUUID().toString().replace("-", "");
         apiKey.setTenantId(PlatformTenantGuard.requireTenantId());
         apiKey.setApiKeyHash(ApiKeyDigestUtils.digest(rawApiKey));
         apiKey.setKeyPrefix(ApiKeyDigestUtils.prefix(rawApiKey));
-        apiKeyMapper.insert(apiKey);
+        platformApiKeyMapper.insert(apiKey);
         return new PlatformApiKeyCreatedResponse(
                 apiKey.getId(), apiKey.getKeyName(), apiKey.getKeyPrefix(), rawApiKey);
     }
 
-    public int update(PlatformApiKey apiKey) {
-        PlatformApiKey current = getById(apiKey.getId());
+    @Override
+    public int updateApiKey(PlatformApiKey apiKey) {
+        PlatformApiKey current = selectApiKeyById(apiKey.getId());
         if (current == null) {
             return 0;
         }
         apiKey.setTenantId(current.getTenantId());
-        return apiKeyMapper.update(apiKey);
+        return platformApiKeyMapper.update(apiKey);
     }
 
-    public int delete(Long id) {
-        if (getById(id) == null) {
+    @Override
+    public int deleteApiKey(Long id) {
+        if (selectApiKeyById(id) == null) {
             return 0;
         }
-        return apiKeyMapper.deleteById(id);
+        return platformApiKeyMapper.deleteById(id);
     }
 }

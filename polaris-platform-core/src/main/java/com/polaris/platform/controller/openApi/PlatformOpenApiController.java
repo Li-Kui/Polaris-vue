@@ -1,4 +1,4 @@
-package com.polaris.platform.controller;
+package com.polaris.platform.controller.openApi;
 
 import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.core.context.CallerContext;
@@ -6,7 +6,11 @@ import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.common.annotation.ApiGroup;
+import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.domain.AjaxResult;
+import com.polaris.platform.dto.OpenAiChatRequest;
+import com.polaris.platform.dto.OpenAiMessage;
 import com.polaris.platform.service.TokenQuotaService;
 import com.polaris.platform.service.TokenQuotaService.TokenQuotaExceededException;
 import com.polaris.platform.service.TokenQuotaService.TokenQuotaUnavailableException;
@@ -17,10 +21,13 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -34,64 +41,59 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 中台标准开放 API 接口（兼容 OpenAI 标准协议规范）
+ *
+ * @author polaris
  */
+@ApiGroup(ApiVersionConstants.VERSION_2_0_0)
+@Tag(name = "中台OpenAI兼容接口")
 @Slf4j
 @RestController
 @RequestMapping("/platform/api/v1")
 public class PlatformOpenApiController {
 
+    private static final int DEFAULT_OUTPUT_TOKEN_RESERVATION = 4096;
+
     @Autowired
-    private AiModelFactory modelFactory;
+    private AiModelFactory aiModelFactory;
 
     @Autowired
     private TokenQuotaService tokenQuotaService;
 
-    private static final int DEFAULT_OUTPUT_TOKEN_RESERVATION = 4096;
-
-    @Data
-    public static class OpenAiMessage {
-        private String role;
-        private String content;
-    }
-
-    @Data
-    public static class OpenAiChatRequest {
-        private String model;
-        private List<OpenAiMessage> messages;
-        private Boolean stream;
-        private Double temperature;
-        private Integer max_tokens;
-    }
+    @Autowired
+    @Qualifier("aiTaskExecutor")
+    private TaskExecutor aiTaskExecutor;
 
     /**
      * 获取可用模型列表
      */
+    @Operation(summary = "获取 OpenAI 兼容模型列表")
     @GetMapping("/models")
     public Map<String, Object> listModels() {
-        Map<String, Object> resp = new LinkedHashMap<>();
-        resp.put("object", "list");
+        Map<String, Object> responseData = new LinkedHashMap<>();
+        responseData.put("object", "list");
 
         List<Map<String, Object>> data = new ArrayList<>();
-        AiModelConfig chatConfig = modelFactory.getDefaultModelConfig(ModelType.CHAT);
+        AiModelConfig chatConfig = aiModelFactory.getDefaultModelConfig(ModelType.CHAT);
         if (chatConfig != null) {
-            Map<String, Object> m = new HashMap<>();
-            m.put("id", chatConfig.getModelName());
-            m.put("object", "model");
-            m.put("created", System.currentTimeMillis() / 1000);
-            m.put("owned_by", "polaris-platform");
-            data.add(m);
+            Map<String, Object> model = new HashMap<>();
+            model.put("id", chatConfig.getModelName());
+            model.put("object", "model");
+            model.put("created", System.currentTimeMillis() / 1000);
+            model.put("owned_by", "polaris-platform");
+            data.add(model);
         }
-        resp.put("data", data);
-        return resp;
+        responseData.put("data", data);
+        return responseData;
     }
 
     /**
      * 对话补全接口（支持阻塞与流式 SSE）
      */
+    @Operation(summary = "OpenAI 兼容对话补全")
     @PostMapping(value = "/chat/completions", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Object chatCompletions(@RequestBody OpenAiChatRequest request, HttpServletResponse response) {
-        CallerContext ctx = CallerContextHolder.get();
-        String tenantId = ctx != null ? ctx.getTenantId() : null;
+        CallerContext callerContext = CallerContextHolder.get();
+        String tenantId = callerContext != null ? callerContext.getTenantId() : null;
 
         TokenReservation reservation;
         try {
@@ -119,6 +121,7 @@ public class PlatformOpenApiController {
     private SseEmitter handleStreamingChat(OpenAiChatRequest request, TokenReservation reservation) {
         SseEmitter emitter = new SseEmitter(180000L);
         AtomicBoolean finalized = new AtomicBoolean(false);
+        // 模型回调可能由第三方线程执行，配额操作只使用显式传入的预占记录
         Runnable releaseReservation = () -> {
             if (finalized.compareAndSet(false, true)) {
                 tokenQuotaService.release(reservation);
@@ -126,7 +129,7 @@ public class PlatformOpenApiController {
         };
         CompletableFuture.runAsync(() -> {
             try {
-                StreamingChatModel model = modelFactory.getDefaultStreamingModel();
+                StreamingChatModel model = aiModelFactory.getDefaultStreamingModel();
                 if (model == null) {
                     releaseReservation.run();
                     emitter.send(SseEmitter.event().data("{\"error\":\"未配置默认对话模型\"}"));
@@ -152,7 +155,7 @@ public class PlatformOpenApiController {
                                 emitter.completeWithError(e);
                             }
                         })
-                        .onCompleteResponse(resp -> {
+                        .onCompleteResponse(response -> {
                             try {
                                 int tokenEstimate = estimateActualTokens(request, fullResponse.length());
                                 if (finalized.compareAndSet(false, true)) {
@@ -174,12 +177,12 @@ public class PlatformOpenApiController {
                 releaseReservation.run();
                 emitter.completeWithError(e);
             }
-        });
+        }, aiTaskExecutor);
         return emitter;
     }
 
     private Map<String, Object> handleBlockingChat(OpenAiChatRequest request, TokenReservation reservation) {
-        StreamingChatModel model = modelFactory.getDefaultStreamingModel();
+        StreamingChatModel model = aiModelFactory.getDefaultStreamingModel();
         if (model == null) {
             tokenQuotaService.release(reservation);
             Map<String, Object> err = new HashMap<>();
@@ -198,7 +201,7 @@ public class PlatformOpenApiController {
         TokenStream tokenStream = assistant.chat(chatMessages);
         tokenStream
                 .onPartialResponse(fullResponse::append)
-                .onCompleteResponse(resp -> future.complete(fullResponse.toString()))
+                .onCompleteResponse(response -> future.complete(fullResponse.toString()))
                 .onError(future::completeExceptionally)
                 .start();
 
@@ -213,27 +216,27 @@ public class PlatformOpenApiController {
         int tokenEstimate = estimateActualTokens(request, answerText.length());
         completeReservation(reservation, tokenEstimate);
 
-        Map<String, Object> res = new LinkedHashMap<>();
-        res.put("id", "chatcmpl-" + UUID.randomUUID().toString());
-        res.put("object", "chat.completion");
-        res.put("created", System.currentTimeMillis() / 1000);
-        res.put("model", request.getModel() != null ? request.getModel() : "polaris-default");
+        Map<String, Object> responseData = new LinkedHashMap<>();
+        responseData.put("id", "chatcmpl-" + UUID.randomUUID().toString());
+        responseData.put("object", "chat.completion");
+        responseData.put("created", System.currentTimeMillis() / 1000);
+        responseData.put("model", request.getModel() != null ? request.getModel() : "polaris-default");
 
         Map<String, Object> choice = new HashMap<>();
         choice.put("index", 0);
-        Map<String, String> msg = new HashMap<>();
-        msg.put("role", "assistant");
-        msg.put("content", answerText);
-        choice.put("message", msg);
+        Map<String, String> message = new HashMap<>();
+        message.put("role", "assistant");
+        message.put("content", answerText);
+        choice.put("message", message);
         choice.put("finish_reason", "stop");
 
-        res.put("choices", List.of(choice));
+        responseData.put("choices", List.of(choice));
 
         Map<String, Object> usage = new HashMap<>();
         usage.put("total_tokens", tokenEstimate);
-        res.put("usage", usage);
+        responseData.put("usage", usage);
 
-        return res;
+        return responseData;
     }
 
     private void completeReservation(TokenReservation reservation, int actualTokens) {
@@ -245,8 +248,8 @@ public class PlatformOpenApiController {
     }
 
     private int estimateReservationTokens(OpenAiChatRequest request) {
-        int outputTokens = request.getMax_tokens() != null && request.getMax_tokens() > 0
-                ? request.getMax_tokens() : DEFAULT_OUTPUT_TOKEN_RESERVATION;
+        int outputTokens = request.getMaxTokens() != null && request.getMaxTokens() > 0
+                ? request.getMaxTokens() : DEFAULT_OUTPUT_TOKEN_RESERVATION;
         long total = (long) estimateMessageTokens(request.getMessages()) + outputTokens;
         return (int) Math.min(Integer.MAX_VALUE, total);
     }
@@ -273,13 +276,13 @@ public class PlatformOpenApiController {
     private List<ChatMessage> convertMessages(List<OpenAiMessage> openAiMessages) {
         List<ChatMessage> list = new ArrayList<>();
         if (openAiMessages != null) {
-            for (OpenAiMessage msg : openAiMessages) {
-                if ("user".equalsIgnoreCase(msg.getRole())) {
-                    list.add(UserMessage.from(msg.getContent()));
-                } else if ("assistant".equalsIgnoreCase(msg.getRole())) {
-                    list.add(AiMessage.from(msg.getContent()));
+            for (OpenAiMessage message : openAiMessages) {
+                if ("user".equalsIgnoreCase(message.getRole())) {
+                    list.add(UserMessage.from(message.getContent()));
+                } else if ("assistant".equalsIgnoreCase(message.getRole())) {
+                    list.add(AiMessage.from(message.getContent()));
                 } else {
-                    list.add(UserMessage.from(msg.getContent()));
+                    list.add(UserMessage.from(message.getContent()));
                 }
             }
         }

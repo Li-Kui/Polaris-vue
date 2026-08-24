@@ -264,10 +264,10 @@ function copyCode() {
 }
 
 function loadOverviewStats() {
-  listApiKey().then(res => { if (res.rows) activeKeysCount.value = res.rows.length })
-  listDatasource().then(res => { if (res.rows) datasourceCount.value = res.rows.length })
-  listConnector().then(res => { if (res.rows) connectorCount.value = res.rows.length })
-  listTenantUser().then(res => { if (res.rows) memberCount.value = res.rows.length })
+  listApiKey().then(res => { if (res.data?.rows) activeKeysCount.value = res.data.rows.length })
+  listDatasource().then(res => { if (res.data?.rows) datasourceCount.value = res.data.rows.length })
+  listConnector().then(res => { if (res.data?.rows) connectorCount.value = res.data.rows.length })
+  listTenantUser().then(res => { if (res.data?.rows) memberCount.value = res.data.rows.length })
 }
 
 onMounted(() => {

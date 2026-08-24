@@ -150,7 +150,7 @@ const rules = {
 function getList() {
   loading.value = true
   listDatasource(queryParams).then(res => {
-    dsList.value = res.rows || []
+    dsList.value = res.data?.rows || []
     loading.value = false
   })
 }

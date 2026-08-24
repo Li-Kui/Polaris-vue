@@ -13,14 +13,19 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @Configuration
 public class AiAsyncConfig {
 
+    @Bean
+    public CallerContextTaskDecorator callerContextTaskDecorator() {
+        return new CallerContextTaskDecorator();
+    }
+
     @Bean("aiTaskExecutor")
-    public TaskExecutor aiTaskExecutor() {
+    public TaskExecutor aiTaskExecutor(CallerContextTaskDecorator taskDecorator) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setCorePoolSize(10);
         executor.setMaxPoolSize(50);
         executor.setQueueCapacity(200);
         executor.setThreadNamePrefix("ai-async-");
-        executor.setTaskDecorator(new CallerContextTaskDecorator());
+        executor.setTaskDecorator(taskDecorator);
         executor.initialize();
         return executor;
     }
