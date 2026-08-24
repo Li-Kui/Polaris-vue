@@ -9,6 +9,7 @@ import com.polaris.platform.auth.PlatformLoginRateLimiter;
 import com.polaris.platform.auth.PlatformLoginRateLimiter.LoginAttemptResult;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
+import com.polaris.platform.dto.PlatformUserResponse;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.mapper.TenantMapper;
 import com.polaris.platform.service.PlatformAuthService;
@@ -113,7 +114,7 @@ public class PlatformConsoleAuthController extends BaseController {
         PlatformUser user = userMapper.selectById(userId);
 
         Map<String, Object> res = new HashMap<>();
-        res.put("user", user);
+        res.put("user", PlatformUserResponse.from(user));
         res.put("tenant", tenant);
         res.put("permissions", ctx.isSuperAdmin() ? new String[]{"*"} : new String[]{"platform:console"});
         return success(res);

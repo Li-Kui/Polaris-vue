@@ -3,6 +3,7 @@ package com.polaris.platform.service;
 import com.polaris.platform.auth.PlatformJwtUtils;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
+import com.polaris.platform.dto.PlatformUserResponse;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.mapper.TenantMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,7 +63,7 @@ public class PlatformAuthService {
 
         Map<String, Object> result = new HashMap<>();
         result.put("token", token);
-        result.put("user", user);
+        result.put("user", PlatformUserResponse.from(user));
         return result;
     }
 

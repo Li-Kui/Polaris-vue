@@ -6,6 +6,7 @@ import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.AjaxResult;
 import com.polaris.common.core.page.TableDataInfo;
 import com.polaris.platform.domain.PlatformUser;
+import com.polaris.platform.dto.PlatformUserResponse;
 import com.polaris.platform.mapper.PlatformUserMapper;
 import com.polaris.platform.service.PlatformAuthService;
 import com.polaris.platform.tenant.PlatformTenantGuard;
@@ -36,13 +37,17 @@ public class PlatformConsoleTenantUserController extends BaseController {
         Long tenantId = Long.parseLong(ctx.getTenantId());
         startPage();
         List<PlatformUser> list = userMapper.selectByTenantId(tenantId);
-        return getDataTable(list);
+        List<PlatformUserResponse> responses = list.stream().map(PlatformUserResponse::from).toList();
+        TableDataInfo tableData = getDataTable(list);
+        tableData.setRows(responses);
+        return tableData;
     }
 
     @GetMapping("/{id}")
     public AjaxResult getInfo(@PathVariable Long id) {
         PlatformUser user = userMapper.selectById(id);
-        return success(user != null && PlatformTenantGuard.belongsToCurrentTenant(user.getTenantId()) ? user : null);
+        return success(user != null && PlatformTenantGuard.belongsToCurrentTenant(user.getTenantId())
+                ? PlatformUserResponse.from(user) : null);
     }
 
     @PostMapping

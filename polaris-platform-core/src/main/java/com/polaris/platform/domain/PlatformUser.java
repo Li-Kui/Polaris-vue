@@ -1,5 +1,6 @@
 package com.polaris.platform.domain;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.polaris.common.core.domain.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -17,6 +18,8 @@ public class PlatformUser extends BaseEntity {
     private Long id;
     private Long tenantId;
     private String username;
+    /** 仅用于请求反序列化和内部认证，不向接口响应暴露 */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
     private String nickname;
     private String email;
