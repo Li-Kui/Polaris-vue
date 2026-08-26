@@ -15,9 +15,15 @@ public class PlatformTenantLineHandler implements TenantLineHandler {
 
     /** 需要强制租户隔离的数据表（严格租户隔离，各租户数据完全独立） */
     private static final Set<String> TENANT_TABLES = Set.of(
-        "ai_model_config", "ai_knowledge_base", "ai_agent", "ai_workflow", "ai_conversation",
+        "ai_model_config", "ai_knowledge_base", "ai_agent", "ai_conversation",
         "platform_api_key", "platform_datasource", "platform_api_connector",
-        "platform_tenant_user"
+        "platform_tenant_user",
+        "ai_workflow_definition", "ai_workflow_version",
+        "ai_workflow_resource_binding", "ai_workflow_execution",
+        "ai_workflow_node_run", "ai_workflow_checkpoint",
+        "ai_workflow_event", "ai_workflow_approval_task",
+        "ai_workflow_artifact", "ai_workflow_trigger",
+        "ai_workflow_outbox", "ai_workflow_concurrency_quota"
     );
 
     @Override

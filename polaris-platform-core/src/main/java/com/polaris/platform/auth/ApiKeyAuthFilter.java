@@ -85,7 +85,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         apiKeyMapper.updateLastUsedTime(apiKey.getId());
 
         ApiKeyCallerContext context =
-                new ApiKeyCallerContext(apiKey.getTenantId(), apiKey.getKeyName(), apiKey.getPermissions());
+                new ApiKeyCallerContext(apiKey.getTenantId(), apiKey.getId(),
+                        apiKey.getKeyName(), apiKey.getPermissions());
         CallerContextHolder.set(context);
 
         // 注入 Spring Security 上下文，由安全链统一校验开放API访问权限

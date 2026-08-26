@@ -138,7 +138,7 @@ public class AiAgentController extends BaseController {
         }
         
         // 2. 扫描已有的智能体 code 和名称
-        List<AiAgent> agents = agentService.list();
+        List<AiAgent> agents = agentService.selectAgentList(null);
         if (agents != null) {
             for (AiAgent agent : agents) {
                 if (agent.getAgentCode() != null && agent.getAgentName() != null) {
@@ -190,9 +190,6 @@ public class AiAgentController extends BaseController {
         AiAgent query = new AiAgent();
         query.setStatus("1");
         List<AiAgent> list = agentService.selectAgentList(query);
-        if (list == null || list.isEmpty()) {
-            list = agentService.list();
-        }
         return ok(list);
     }
 
@@ -203,7 +200,8 @@ public class AiAgentController extends BaseController {
     @Operation(summary = "获取智能体详情")
     @GetMapping("/{id}")
     public ResultData getInfo(@PathVariable Long id) {
-        return ok(agentService.getById(id));
+        AiAgent agent = agentService.getById(id);
+        return ok(belongsToCurrentScope(agent) ? agent : null);
     }
 
     /**
@@ -215,6 +213,7 @@ public class AiAgentController extends BaseController {
     @PostMapping
     public ResultData add(@RequestBody AiAgent agent) {
         validateAgentTools(agent.getTools());
+        agent.setTenantId(currentTenantId());
         agent.setCreateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         return toAjaxResult(agentService.save(agent));
     }
@@ -228,6 +227,11 @@ public class AiAgentController extends BaseController {
     @PutMapping
     public ResultData edit(@RequestBody AiAgent agent) {
         validateAgentTools(agent.getTools());
+        AiAgent existing = agent.getId() == null ? null : agentService.getById(agent.getId());
+        if (!belongsToCurrentScope(existing)) {
+            throw new com.polaris.common.exception.ServiceException("智能体不存在或无权修改");
+        }
+        agent.setTenantId(currentTenantId());
         agent.setUpdateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
         return toAjaxResult(agentService.updateById(agent));
     }
@@ -267,6 +271,26 @@ public class AiAgentController extends BaseController {
     @Log(title = "智能体管理", businessType = BusinessType.DELETE)
     @DeleteMapping("/{id}")
     public ResultData remove(@PathVariable Long id) {
+        AiAgent existing = agentService.getById(id);
+        if (!belongsToCurrentScope(existing)) {
+            throw new com.polaris.common.exception.ServiceException("智能体不存在或无权删除");
+        }
         return toAjaxResult(agentService.removeById(id));
+    }
+
+    private Long currentTenantId() {
+        if (!com.polaris.ai.core.context.CallerUtils.isPlatformMode()) return null;
+        try {
+            long tenantId = Long.parseLong(
+                    com.polaris.ai.core.context.CallerUtils.getTenantId());
+            if (tenantId <= 0) throw new NumberFormatException();
+            return tenantId;
+        } catch (Exception e) {
+            throw new com.polaris.common.exception.ServiceException("中台租户ID格式错误");
+        }
+    }
+
+    private boolean belongsToCurrentScope(AiAgent agent) {
+        return agent != null && java.util.Objects.equals(agent.getTenantId(), currentTenantId());
     }
 }

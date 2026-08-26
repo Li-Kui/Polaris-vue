@@ -1,355 +1,336 @@
 package com.polaris.ai.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.polaris.ai.domain.AiWorkflow;
-import com.polaris.ai.service.IAiWorkflowService;
-import com.polaris.ai.utils.ChatContextHolder;
-import com.polaris.ai.workflow.api.WorkflowApprovalRequest;
-import com.polaris.ai.workflow.api.WorkflowRunRequest;
-import com.polaris.ai.workflow.event.WorkflowSsePublisher;
-import com.polaris.ai.workflow.langgraph.GraphTopology;
-import com.polaris.ai.workflow.langgraph.LangGraph4jEngine;
-import com.polaris.ai.workflow.runtime.WorkflowCancellationRegistry;
-import com.polaris.ai.workflow.runtime.WorkflowExecutionService;
-import com.polaris.ai.workflow.runtime.WorkflowExecutionStore;
+import com.polaris.ai.workflow.application.*;
+import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
+import com.polaris.ai.workflow.runtime.WorkflowEventStreamService;
+import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.common.annotation.ApiGroup;
-import com.polaris.common.annotation.Log;
-import com.polaris.common.annotation.RateLimiter;
 import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
-import com.polaris.common.core.page.Page;
-import com.polaris.common.enums.BusinessType;
-import com.polaris.common.enums.LimitType;
-import com.polaris.common.exception.ServiceException;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.task.AsyncTaskExecutor;
-import org.springframework.core.task.TaskRejectedException;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-/** AI 工作流 V2.1 管理和执行接口。 */
-@Slf4j
-@Tag(name = "AI智能体工作流")
+/** 工作流草稿、校验、发布和执行的共享接口。 */
+@Tag(name = "AI工作流")
 @ApiGroup(ApiVersionConstants.VERSION_2_0_0)
 @RestController
 @RequestMapping("/ai/workflow")
 public class AiWorkflowController extends BaseController {
 
-    private final IAiWorkflowService workflowService;
-    private final LangGraph4jEngine langGraph4jEngine;
-    private final AsyncTaskExecutor taskExecutor;
-    private final WorkflowExecutionService executionService;
-    private final WorkflowExecutionStore executionStore;
-    private final WorkflowCancellationRegistry cancellationRegistry;
-    private final WorkflowSsePublisher eventPublisher;
-    private final ObjectMapper objectMapper;
+    private final WorkflowDefinitionApplicationFacade workflowFacade;
+    private final WorkflowApprovalApplicationFacade approvalFacade;
+    private final WorkflowExecutionApplicationFacade executionFacade;
+    private final WorkflowResourceBindingApplicationFacade resourceBindingFacade;
+    private final WorkflowResourceCatalogApplicationFacade resourceCatalogFacade;
+    private final WorkflowEventStreamService eventStreamService;
+    private final WorkflowTriggerApplicationFacade triggerFacade;
+    private final WorkflowArtifactApplicationFacade artifactFacade;
 
     public AiWorkflowController(
-            IAiWorkflowService workflowService,
-            LangGraph4jEngine langGraph4jEngine,
-            @Qualifier("workflowTaskExecutor") AsyncTaskExecutor taskExecutor,
-            WorkflowExecutionService executionService,
-            WorkflowExecutionStore executionStore,
-            WorkflowCancellationRegistry cancellationRegistry,
-            WorkflowSsePublisher eventPublisher,
-            ObjectMapper objectMapper) {
-        this.workflowService = workflowService;
-        this.langGraph4jEngine = langGraph4jEngine;
-        this.taskExecutor = taskExecutor;
-        this.executionService = executionService;
-        this.executionStore = executionStore;
-        this.cancellationRegistry = cancellationRegistry;
-        this.eventPublisher = eventPublisher;
-        this.objectMapper = objectMapper;
+            WorkflowDefinitionApplicationFacade workflowFacade,
+            WorkflowApprovalApplicationFacade approvalFacade,
+            WorkflowExecutionApplicationFacade executionFacade,
+            WorkflowResourceBindingApplicationFacade resourceBindingFacade,
+            WorkflowResourceCatalogApplicationFacade resourceCatalogFacade,
+            WorkflowEventStreamService eventStreamService,
+            WorkflowTriggerApplicationFacade triggerFacade,
+            WorkflowArtifactApplicationFacade artifactFacade) {
+        this.workflowFacade = workflowFacade;
+        this.approvalFacade = approvalFacade;
+        this.executionFacade = executionFacade;
+        this.resourceBindingFacade = resourceBindingFacade;
+        this.resourceCatalogFacade = resourceCatalogFacade;
+        this.eventStreamService = eventStreamService;
+        this.triggerFacade = triggerFacade;
+        this.artifactFacade = artifactFacade;
     }
 
-    @Operation(summary = "条件分页查询工作流列表")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:list')")
-    @GetMapping("/list")
-    public ResultData<Page<AiWorkflow>> list(AiWorkflow workflow) {
-        startPage();
-        return ok(getDataPage(workflowService.selectWorkflowList(workflow)));
+    @Operation(summary = "查询工作流定义")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions")
+    public ResultData<List<WorkflowDefinitionView>> listDefinitions() {
+        return ok(workflowFacade.listDefinitions());
     }
 
-    @Operation(summary = "获取所有启用的工作流列表")
-    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute')")
-    @GetMapping("/list/active")
-    public ResultData<List<AiWorkflow>> listActive() {
-        return ok(workflowService.listActiveWorkflows());
+    @Operation(summary = "创建工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions")
+    public ResultData<WorkflowDefinitionView> createDraft(
+            @RequestBody WorkflowDraftCommand command) {
+        return ok(workflowFacade.createDraft(command));
     }
 
-    @Operation(summary = "获取已注册的 Java 工作流节点")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:query') or @ss.hasPermi('ai:workflow:add') " +
-            "or @ss.hasPermi('ai:workflow:edit')")
-    @GetMapping("/executors/available")
-    public ResultData<List<Map<String, String>>> listExecutors() {
-        return ok(langGraph4jEngine.listJavaExecutors());
+    @Operation(summary = "查询工作流定义详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}")
+    public ResultData<WorkflowDefinitionView> getDefinition(@PathVariable Long definitionId) {
+        return ok(workflowFacade.getDefinition(definitionId));
     }
 
-    @Operation(summary = "获取工作流详情")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:query')")
-    @GetMapping("/{id}")
-    public ResultData<AiWorkflow> getInfo(@PathVariable Long id) {
-        return ok(workflowService.getById(id));
+    @Operation(summary = "保存工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PutMapping("/definitions/{definitionId}/draft")
+    public ResultData<WorkflowDefinitionView> updateDraft(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowDraftCommand command) {
+        return ok(workflowFacade.updateDraft(definitionId, command));
     }
 
-    @Operation(summary = "新增工作流配置")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:add')")
-    @Log(title = "工作流管理", businessType = BusinessType.INSERT)
-    @PostMapping
-    public ResultData<Void> add(@Validated @RequestBody AiWorkflow workflow) {
-        workflow.setCreateBy(SecurityUtils.getUsername());
-        return toAjaxResult(workflowService.save(workflow));
+    @Operation(summary = "校验并编译工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit() or @workflowAccess.canDebug()")
+    @PostMapping("/definitions/{definitionId}/validate")
+    public ResultData<WorkflowCompilationResult> validateDraft(@PathVariable Long definitionId) {
+        return ok(workflowFacade.validateDraft(definitionId));
     }
 
-    @Operation(summary = "修改工作流配置")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:edit')")
-    @Log(title = "工作流管理", businessType = BusinessType.UPDATE)
-    @PutMapping
-    public ResultData<Void> edit(@Validated @RequestBody AiWorkflow workflow) {
-        workflow.setUpdateBy(SecurityUtils.getUsername());
-        return toAjaxResult(workflowService.updateById(workflow));
+    @Operation(summary = "发布不可变工作流版本")
+    @PreAuthorize("@workflowAccess.canPublish()")
+    @PostMapping("/definitions/{definitionId}/publish")
+    public ResultData<WorkflowPublishResult> publish(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowPublishCommand command) {
+        return ok(workflowFacade.publish(definitionId, command));
     }
 
-    @Operation(summary = "删除工作流配置")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:remove')")
-    @Log(title = "工作流管理", businessType = BusinessType.DELETE)
-    @DeleteMapping("/{id}")
-    public ResultData<Void> remove(@PathVariable Long id) {
-        return toAjaxResult(workflowService.removeById(id));
+    @Operation(summary = "查询工作流发布版本")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/versions")
+    public ResultData<List<WorkflowPublishedVersionView>> listVersions(
+            @PathVariable Long definitionId) {
+        return ok(workflowFacade.listVersions(definitionId));
     }
 
-    @Operation(summary = "流式执行智能体工作流")
-    @PreAuthorize("(!#request.testRun and (hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute'))) " +
-            "or (#request.testRun and @ss.hasPermi('ai:workflow:test'))")
-    @RateLimiter(time = 60, count = 20, limitType = LimitType.IP)
-    @PostMapping(value = "/executions/stream", produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter runWorkflowStream(@Validated @RequestBody WorkflowRunRequest request) {
-        Long userId = SecurityUtils.getUserId();
-        WorkflowExecutionStore.Execution execution = executionService.prepare(
-                request.getWorkflowCode(), request.getMessage(), request.getFileUrl(),
-                request.getConversationId(), userId, request.isTestRun());
-        SseEmitter emitter = new SseEmitter(600_000L);
-        AtomicBoolean cancelled = cancellationRegistry.register(execution.executionId());
-        configureEmitter(emitter, execution.executionId(), cancelled);
-        SecurityContext securityContext = copySecurityContext();
-
-        Runnable task = () -> {
-            try {
-                SecurityContextHolder.setContext(securityContext);
-                ChatContextHolder.setConversationId(execution.conversationId());
-                ChatContextHolder.setFileUrl(execution.fileUrl());
-                langGraph4jEngine.run(execution, securityContext, emitter, cancelled);
-            } finally {
-                ChatContextHolder.clear();
-                SecurityContextHolder.clearContext();
-                cancellationRegistry.unregister(execution.executionId());
-            }
-        };
-        submit(execution.executionId(), emitter, task);
-        return emitter;
+    @Operation(summary = "查询工作流发布版本详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/versions/{versionId}")
+    public ResultData<WorkflowPublishedVersionDetailView> getVersion(
+            @PathVariable Long definitionId,
+            @PathVariable String versionId) {
+        return ok(workflowFacade.getVersion(definitionId, versionId));
     }
 
-    @Operation(summary = "获取工作流拓扑可视化")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:query')")
-    @GetMapping("/graph")
-    public ResultData<String> getGraph(@RequestParam String workflowCode) {
-        return ok(langGraph4jEngine.generateMermaid(workflowCode));
+    @Operation(summary = "将发布版本恢复为工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions/{definitionId}/versions/{versionId}/rollback")
+    public ResultData<WorkflowDefinitionView> rollbackDraft(
+            @PathVariable Long definitionId,
+            @PathVariable String versionId,
+            @RequestBody WorkflowRollbackCommand command) {
+        return ok(workflowFacade.rollbackDraft(definitionId, versionId, command));
     }
 
-    @Operation(summary = "预览工作流实时 Mermaid 拓扑图")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:add') or @ss.hasPermi('ai:workflow:edit')")
-    @PostMapping("/preview-mermaid")
-    public ResultData<String> previewMermaid(@RequestBody Map<String, String> body) {
-        String graphJson = body.get("graphJson");
-        if (graphJson == null || graphJson.isBlank()) {
-            return ok("graph TD\n  START((Start)) --> END((End))");
-        }
-        try {
-            GraphTopology topology = objectMapper.readValue(graphJson, GraphTopology.class);
-            topology.validate();
-            return ok(langGraph4jEngine.buildMermaid(topology));
-        } catch (IllegalArgumentException e) {
-            return ok("graph TD\n  ERROR[\"配置异常: "
-                    + e.getMessage().replace("\"", "\\\"") + "\"]");
-        } catch (Exception e) {
-            log.error("实时生成预览 Mermaid 失败", e);
-            return ok("graph TD\n  ERROR[\"拓扑格式损坏，无法渲染图表\"]");
-        }
+    @Operation(summary = "克隆工作流定义")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions/{definitionId}/clone")
+    public ResultData<WorkflowDefinitionView> cloneDefinition(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowCloneCommand command) {
+        return ok(workflowFacade.cloneDefinition(definitionId, command));
     }
 
-    @Operation(summary = "查询当前用户的待审批工作流")
-    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:approve')")
-    @GetMapping("/approvals/pending")
-    public ResultData<List<Map<String, Object>>> listPendingApprovals() {
-        return ok(executionStore.listPendingApprovals(SecurityUtils.getUserId()));
+    @Operation(summary = "查询工作流可用节点描述")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/node-descriptors")
+    public ResultData<Collection<WorkflowNodeDescriptor>> listNodeDescriptors() {
+        return ok(workflowFacade.listNodeDescriptors());
     }
 
-    /** 拒绝分支只写终态，绝不调用受保护节点。 */
-    @Operation(summary = "审批工作流并恢复执行")
-    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:approve')")
-    @PostMapping(value = "/executions/{executionId}/approvals/{approvalId}/decision",
-            produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter decideApproval(
+    @Operation(summary = "启动工作流持久化执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions")
+    public ResultData<WorkflowExecutionView> startExecution(
+            @RequestBody WorkflowExecutionStartCommand command) {
+        return ok(executionFacade.start(command));
+    }
+
+    @Operation(summary = "按工作流编码启动持久化执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions/by-code")
+    public ResultData<WorkflowExecutionView> startExecutionByCode(
+            @RequestBody WorkflowExecutionByCodeCommand command) {
+        return ok(executionFacade.startByCode(command));
+    }
+
+    @Operation(summary = "查询工作流执行列表")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions")
+    public ResultData<List<WorkflowExecutionView>> listExecutions(
+            @RequestParam(required = false) Long definitionId,
+            @RequestParam(required = false) String status) {
+        return ok(executionFacade.list(definitionId, status));
+    }
+
+    @Operation(summary = "查询工作流执行详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}")
+    public ResultData<WorkflowExecutionView> getExecution(@PathVariable String executionId) {
+        return ok(executionFacade.get(executionId));
+    }
+
+    @Operation(summary = "查询工作流节点运行记录")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/node-runs")
+    public ResultData<List<WorkflowNodeRunView>> listNodeRuns(
+            @PathVariable String executionId) {
+        return ok(executionFacade.listNodeRuns(executionId));
+    }
+
+    @Operation(summary = "查询工作流执行产物")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/artifacts")
+    public ResultData<List<WorkflowArtifactView>> listArtifacts(
+            @PathVariable String executionId) {
+        return ok(artifactFacade.list(executionId));
+    }
+
+    @Operation(summary = "下载工作流执行产物")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/artifacts/{artifactId}/content")
+    public void downloadArtifact(
             @PathVariable String executionId,
-            @PathVariable String approvalId,
-            @Validated @RequestBody WorkflowApprovalRequest request) {
-        return decideApproval(executionId, approvalId, request, false);
+            @PathVariable String artifactId,
+            HttpServletResponse response) throws java.io.IOException {
+        WorkflowArtifactContent artifact = artifactFacade.load(executionId, artifactId);
+        byte[] content = artifact.content();
+        response.setContentType(artifact.mimeType());
+        response.setContentLength(content.length);
+        String encodedName = URLEncoder.encode(
+                artifact.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        response.setHeader("Content-Disposition",
+                "attachment; filename*=UTF-8''" + encodedName);
+        response.getOutputStream().write(content);
+        response.flushBuffer();
     }
 
-    @Operation(summary = "审批试运行工作流并恢复执行")
-    @PreAuthorize("@ss.hasPermi('ai:workflow:test')")
-    @PostMapping(value = "/executions/{executionId}/test-approvals/{approvalId}/decision",
-            produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter decideTestApproval(
+    @Operation(summary = "重放工作流执行事件")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/events")
+    public ResultData<List<WorkflowExecutionEventView>> listEvents(
             @PathVariable String executionId,
-            @PathVariable String approvalId,
-            @Validated @RequestBody WorkflowApprovalRequest request) {
-        return decideApproval(executionId, approvalId, request, true);
+            @RequestParam(defaultValue = "0") long afterSequence,
+            @RequestParam(defaultValue = "200") int limit) {
+        return ok(executionFacade.listEvents(executionId, afterSequence, limit));
     }
 
-    private SseEmitter decideApproval(
-            String executionId, String approvalId, WorkflowApprovalRequest request,
-            boolean expectedTestRun) {
-        Long userId = SecurityUtils.getUserId();
-        WorkflowExecutionStore.Execution execution = executionService.getOwned(executionId, userId);
-        if (execution.testRun() != expectedTestRun) {
-            throw new ServiceException(expectedTestRun
-                    ? "该执行不是试运行，不能使用试运行审批接口"
-                    : "试运行审批必须在工作流编辑器中处理");
-        }
-        SseEmitter emitter = new SseEmitter(600_000L);
-
-        if (!Boolean.TRUE.equals(request.getApprove())) {
-            boolean rejected = executionStore.reject(
-                    executionId, approvalId, execution.userId(), userId, request.getFeedback());
-            sendDecisionResult(emitter, executionId, rejected, "workflow_rejected", approvalId,
-                    request.getFeedback());
-            return emitter;
-        }
-
-        AtomicBoolean cancelled;
-        try {
-            // 先预留运行槽，再消费一次性审批，避免清理竞态把执行卡在 RUNNING。
-            cancelled = cancellationRegistry.register(executionId);
-        } catch (IllegalStateException e) {
-            sendBusyResult(emitter, executionId);
-            return emitter;
-        }
-
-        boolean approved;
-        try {
-            approved = executionStore.approve(
-                    executionId, approvalId, execution.userId(), userId, request.getFeedback());
-        } catch (RuntimeException e) {
-            cancellationRegistry.unregister(executionId);
-            throw e;
-        }
-        if (!approved) {
-            cancellationRegistry.unregister(executionId);
-            sendDecisionResult(emitter, executionId, false, "error", approvalId, null);
-            return emitter;
-        }
-
-        configureEmitter(emitter, executionId, cancelled);
-        SecurityContext securityContext = copySecurityContext();
-        Runnable task = () -> {
-            try {
-                SecurityContextHolder.setContext(securityContext);
-                ChatContextHolder.setConversationId(execution.conversationId());
-                ChatContextHolder.setFileUrl(execution.fileUrl());
-                langGraph4jEngine.resume(
-                        execution, request.getFeedback(), securityContext, emitter, cancelled);
-            } finally {
-                ChatContextHolder.clear();
-                SecurityContextHolder.clearContext();
-                cancellationRegistry.unregister(executionId);
-            }
-        };
-        submit(executionId, emitter, task);
-        return emitter;
+    @Operation(summary = "SSE观察工作流持久化事件")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping(value = "/executions/{executionId}/events/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamEvents(
+            @PathVariable String executionId,
+            @RequestParam(defaultValue = "0") long afterSequence) {
+        return eventStreamService.subscribe(executionId, afterSequence);
     }
 
     @Operation(summary = "取消工作流执行")
-    @PreAuthorize("hasRole('PLATFORM_USER') or @ss.hasPermi('ai:workflow:execute') " +
-            "or @ss.hasPermi('ai:workflow:test')")
+    @PreAuthorize("@workflowAccess.canCancel()")
     @PostMapping("/executions/{executionId}/cancel")
-    public ResultData<Void> cancelExecution(@PathVariable String executionId) {
-        WorkflowExecutionStore.Execution execution =
-                executionService.getOwned(executionId, SecurityUtils.getUserId());
-        cancellationRegistry.cancel(execution.executionId());
-        executionStore.markCancelled(execution.executionId());
-        return ok();
+    public ResultData<WorkflowExecutionView> cancelExecution(
+            @PathVariable String executionId) {
+        return ok(executionFacade.cancel(executionId));
     }
 
-    private void sendDecisionResult(SseEmitter emitter, String executionId, boolean success,
-                                    String event, String approvalId, String feedback) {
-        if (success) {
-            eventPublisher.send(emitter, executionId, event, null,
-                    Map.of("approvalId", approvalId,
-                            "feedback", feedback == null ? "" : feedback));
-        } else {
-            eventPublisher.send(emitter, executionId, "error", null,
-                    Map.of("message", "审批任务已处理或执行状态已变化"));
-        }
-        emitter.complete();
-        eventPublisher.release(executionId);
+    @Operation(summary = "安全重试工作流执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions/{executionId}/retry")
+    public ResultData<WorkflowExecutionView> retryExecution(
+            @PathVariable String executionId,
+            @RequestBody(required = false) WorkflowExecutionRetryCommand command) {
+        return ok(executionFacade.retry(executionId, command));
     }
 
-    /** 上一运行任务仍在收尾时，不释放其事件序列，也不消费审批。 */
-    private void sendBusyResult(SseEmitter emitter, String executionId) {
-        eventPublisher.send(emitter, executionId, "error", null,
-                Map.of("message", "工作流上一阶段仍在收尾，请稍后重试审批"));
-        emitter.complete();
+    @Operation(summary = "查询工作流审批箱")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @GetMapping("/approvals")
+    public ResultData<List<WorkflowApprovalTaskView>> listApprovals(
+            @RequestParam(required = false) String status) {
+        return ok(approvalFacade.list(status));
     }
 
-    private void configureEmitter(SseEmitter emitter, String executionId, AtomicBoolean cancelled) {
-        emitter.onTimeout(() -> {
-            cancelled.set(true);
-            cancellationRegistry.cancel(executionId);
-            executionStore.markCancelled(executionId);
-            emitter.complete();
-        });
-        emitter.onError(error -> {
-            cancelled.set(true);
-            cancellationRegistry.cancel(executionId);
-            executionStore.markCancelled(executionId);
-        });
+    @Operation(summary = "处理工作流审批任务")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @PostMapping("/approvals/{approvalTaskId}/decision")
+    public ResultData<WorkflowApprovalTaskView> decideApproval(
+            @PathVariable String approvalTaskId,
+            @RequestBody WorkflowApprovalDecisionCommand command) {
+        return ok(approvalFacade.decide(approvalTaskId, command));
     }
 
-    private SecurityContext copySecurityContext() {
-        SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(SecurityContextHolder.getContext().getAuthentication());
-        return context;
+    @Operation(summary = "查询工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/resource-bindings")
+    public ResultData<List<WorkflowResourceBindingView>> listResourceBindings(
+            @RequestParam(required = false) String environment) {
+        return ok(resourceBindingFacade.list(environment));
     }
 
-    private void submit(String executionId, SseEmitter emitter, Runnable task) {
-        try {
-            cancellationRegistry.attachFuture(executionId, taskExecutor.submitCompletable(task));
-        } catch (TaskRejectedException e) {
-            cancellationRegistry.unregister(executionId);
-            executionStore.markFailed(executionId, "工作流执行队列已满");
-            try {
-                eventPublisher.send(emitter, executionId, "error", null,
-                        Map.of("message", "工作流执行队列已满，请稍后重试"));
-            } catch (Exception ignored) {
-            } finally {
-                emitter.complete();
-                eventPublisher.release(executionId);
-            }
-        }
+    @Operation(summary = "查询工作流可用的现有资源")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/resources")
+    public ResultData<List<WorkflowResourceOption>> listResources(
+            @RequestParam String kind,
+            @RequestParam(required = false) String environment) {
+        return ok(resourceCatalogFacade.list(kind, environment));
+    }
+
+    @Operation(summary = "保存工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/resource-bindings")
+    public ResultData<WorkflowResourceBindingView> saveResourceBinding(
+            @RequestBody WorkflowResourceBindingCommand command) {
+        return ok(resourceBindingFacade.save(command));
+    }
+
+    @Operation(summary = "停用工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/resource-bindings/{bindingId}/disable")
+    public ResultData<WorkflowResourceBindingView> disableResourceBinding(
+            @PathVariable Long bindingId) {
+        return ok(resourceBindingFacade.disable(bindingId));
+    }
+
+    @Operation(summary = "查询工作流触发器")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/triggers")
+    public ResultData<List<WorkflowTriggerView>> listTriggers(
+            @RequestParam(required = false) Long definitionId) {
+        return ok(triggerFacade.list(definitionId));
+    }
+
+    @Operation(summary = "创建工作流触发器")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/triggers")
+    public ResultData<WorkflowTriggerView> createTrigger(
+            @RequestBody WorkflowTriggerCommand command) {
+        return ok(triggerFacade.create(command));
+    }
+
+    @Operation(summary = "启停工作流触发器")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PutMapping("/triggers/{triggerId}/status")
+    public ResultData<WorkflowTriggerView> updateTriggerStatus(
+            @PathVariable String triggerId,
+            @RequestBody WorkflowTriggerStatusCommand command) {
+        return ok(triggerFacade.updateStatus(triggerId, command));
+    }
+
+    @Operation(summary = "调用工作流触发器")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/triggers/{triggerId}/invoke")
+    public ResultData<WorkflowExecutionView> invokeTrigger(
+            @PathVariable String triggerId,
+            @RequestBody(required = false) WorkflowTriggerInvocationCommand command) {
+        return ok(triggerFacade.invoke(triggerId, command));
     }
 }

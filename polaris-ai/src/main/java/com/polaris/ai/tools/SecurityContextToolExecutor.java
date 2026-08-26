@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 /**
  * 统一的安全上下文传播工具执行器
  * <p>
- * 为普通聊天和 LangGraph4j 工作流统一提供 SecurityContext、RequestAttributes
+ * 为普通聊天和工作流统一提供 SecurityContext、RequestAttributes
  * 与 SearchKey 的跨线程传递能力。
  *
  * @author polaris

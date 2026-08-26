@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schema/workflow-definition.schema.json",
+  "title": "Polaris WorkflowDefinition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "metadata", "inputs", "nodes", "edges", "outputs", "policies"],
+  "properties": {
+    "schemaVersion": { "const": "2.0" },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "inputs": { "$ref": "#/$defs/jsonSchema" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1000,
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/valueBinding" }
+    },
+    "policies": { "$ref": "#/$defs/policies" },
+    "ui": {
+      "type": "object",
+      "description": "Editor-only metadata excluded from the execution plan hash",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "name"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "jsonSchema": {
+      "type": "object",
+      "description": "Restricted JSON Schema object validated by the compiler",
+      "additionalProperties": true
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "typeVersion", "name", "inputMapping", "config"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$" },
+        "type": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        "typeVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "inputMapping": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/valueBinding" }
+        },
+        "config": { "type": "object", "additionalProperties": true },
+        "retryPolicy": { "$ref": "#/$defs/retryPolicy" },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+        "onError": { "enum": ["FAIL", "CONTINUE", "ROUTE"] },
+        "resourceRefs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/resourceRef" }
+        },
+        "ui": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target", "kind"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourcePort": { "type": "string", "maxLength": 64 },
+        "target": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "targetPort": { "type": "string", "maxLength": 64 },
+        "kind": { "enum": ["NORMAL", "CONDITION", "PARALLEL", "LOOP", "SEMANTIC"] },
+        "condition": { "$ref": "#/$defs/condition" },
+        "default": { "type": "boolean", "default": false }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expression", "priority", "onError"],
+      "properties": {
+        "expression": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "onError": { "enum": ["FAIL", "FALSE"] }
+      }
+    },
+    "valueBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expression"],
+          "properties": {
+            "expression": { "type": "string", "minLength": 1, "maxLength": 2000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value"],
+          "properties": { "value": true }
+        }
+      ]
+    },
+    "retryPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxAttempts", "backoff", "initialDelayMs", "maxDelayMs"],
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "backoff": { "enum": ["FIXED", "EXPONENTIAL"] },
+        "initialDelayMs": { "type": "integer", "minimum": 0, "maximum": 3600000 },
+        "maxDelayMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+        "retryableErrors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "resourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "key"],
+      "properties": {
+        "kind": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+        "key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "required": { "type": "boolean", "default": true }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["timeoutSeconds", "maxNodeRuns", "maxParallelism"],
+      "properties": {
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 604800 },
+        "maxNodeRuns": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "maxParallelism": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "tokenBudget": { "type": "integer", "minimum": 0 },
+        "costBudget": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

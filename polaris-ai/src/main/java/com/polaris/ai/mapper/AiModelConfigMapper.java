@@ -1,7 +1,10 @@
 package com.polaris.ai.mapper;
 
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiModelConfig;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -12,6 +15,41 @@ import java.util.List;
  */
 public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
 {
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config WHERE id = #{id} AND del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "LIMIT 1", "</script>"})
+    AiModelConfig selectWorkflowResource(
+            @Param("tenantId") Long tenantId, @Param("id") Long id);
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config WHERE del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "ORDER BY CASE WHEN tenant_id IS NULL THEN 1 ELSE 0 END, name, id",
+            "</script>"})
+    List<AiModelConfig> selectWorkflowResources(@Param("tenantId") Long tenantId);
+
+    /**
+     * 按模型名称查询当前工作流作用域内优先级最高的聊天模型。
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config",
+            "WHERE model_name = #{modelName} AND model_type = 'CHAT'",
+            "AND status = '1' AND del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "<choose><when test='tenantId != null'>",
+            "ORDER BY CASE WHEN tenant_id = #{tenantId} THEN 0 ELSE 1 END, is_default DESC, id DESC",
+            "</when><otherwise>ORDER BY is_default DESC, id DESC</otherwise></choose>",
+            "LIMIT 1", "</script>"})
+    AiModelConfig selectWorkflowResourceByModelName(
+            @Param("tenantId") Long tenantId, @Param("modelName") String modelName);
+
     /**
      * 查询模型配置列表
      */

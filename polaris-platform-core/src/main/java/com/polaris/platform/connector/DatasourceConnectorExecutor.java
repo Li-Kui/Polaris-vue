@@ -17,6 +17,12 @@ import java.util.Map;
 @Component
 public class DatasourceConnectorExecutor {
 
+    private final ReadOnlySqlPolicy sqlPolicy;
+
+    public DatasourceConnectorExecutor(ReadOnlySqlPolicy sqlPolicy) {
+        this.sqlPolicy = sqlPolicy;
+    }
+
     public boolean testConnection(PlatformDatasource ds) {
         try (Connection conn = getConnection(ds)) {
             return conn != null && !conn.isClosed();
@@ -27,26 +33,29 @@ public class DatasourceConnectorExecutor {
     }
 
     public List<Map<String, Object>> executeQuery(PlatformDatasource ds, String sql, int maxRows) {
+        String safeSql = sqlPolicy.validate(sql);
         List<Map<String, Object>> result = new ArrayList<>();
-        try (Connection conn = getConnection(ds);
-             Statement stmt = conn.createStatement()) {
-            if (ds.getQueryTimeout() != null && ds.getQueryTimeout() > 0) {
-                stmt.setQueryTimeout(ds.getQueryTimeout());
-            }
-            stmt.setMaxRows(maxRows > 0 ? maxRows : 100);
-            try (ResultSet rs = stmt.executeQuery(sql)) {
-                ResultSetMetaData metaData = rs.getMetaData();
-                int colCount = metaData.getColumnCount();
-                while (rs.next()) {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    for (int i = 1; i <= colCount; i++) {
-                        row.put(metaData.getColumnLabel(i), rs.getObject(i));
+        try (Connection conn = getConnection(ds)) {
+            conn.setReadOnly(true);
+            try (Statement stmt = conn.createStatement()) {
+                if (ds.getQueryTimeout() != null && ds.getQueryTimeout() > 0) {
+                    stmt.setQueryTimeout(Math.min(ds.getQueryTimeout(), 30));
+                }
+                stmt.setMaxRows(maxRows > 0 ? Math.min(maxRows, 1000) : 100);
+                try (ResultSet rs = stmt.executeQuery(safeSql)) {
+                    ResultSetMetaData metaData = rs.getMetaData();
+                    int colCount = metaData.getColumnCount();
+                    while (rs.next()) {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        for (int i = 1; i <= colCount; i++) {
+                            row.put(metaData.getColumnLabel(i), rs.getObject(i));
+                        }
+                        result.add(row);
                     }
-                    result.add(row);
                 }
             }
         } catch (Exception e) {
-            log.error("执行数据源查询失败, ds={}, sql={}", ds.getDsName(), sql, e);
+            log.error("执行数据源只读查询失败, ds={}", ds.getDsName(), e);
             throw new RuntimeException("查询执行异常: " + e.getMessage());
         }
         return result;

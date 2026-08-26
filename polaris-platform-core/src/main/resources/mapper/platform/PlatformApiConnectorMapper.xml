@@ -36,6 +36,33 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         order by create_time desc
     </select>
 
+    <select id="selectWorkflowResource" resultMap="PlatformApiConnectorResult">
+        <include refid="selectPlatformApiConnectorVo"/>
+        where id = #{id}
+        <choose>
+            <when test="tenantId != null">
+                and (tenant_id = #{tenantId} or tenant_id is null)
+            </when>
+            <otherwise>
+                and tenant_id is null
+            </otherwise>
+        </choose>
+        limit 1
+    </select>
+
+    <select id="selectWorkflowResources" resultMap="PlatformApiConnectorResult">
+        <include refid="selectPlatformApiConnectorVo"/>
+        <choose>
+            <when test="tenantId != null">
+                where tenant_id = #{tenantId} or tenant_id is null
+            </when>
+            <otherwise>
+                where tenant_id is null
+            </otherwise>
+        </choose>
+        order by case when tenant_id is null then 1 else 0 end, connector_name, id
+    </select>
+
     <select id="selectList" parameterType="com.polaris.platform.domain.PlatformApiConnector" resultMap="PlatformApiConnectorResult">
         <include refid="selectPlatformApiConnectorVo"/>
         <where>

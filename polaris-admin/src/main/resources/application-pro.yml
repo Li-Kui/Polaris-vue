@@ -142,6 +142,16 @@ ai:
         retention-days: 30
         approval-expire-days: 7
         maintenance-ms: 3600000
+        enabled: true
+        write-nodes-enabled: false
+        code-node-enabled: false
+        worker-enabled: true
+        accepting-new-executions: true
+        worker-batch-size: 10
+        tenant-concurrency: 20
+        workflow-concurrency: 10
+        principal-concurrency: 5
+        allowed-tenant-ids: []
         executor:
             core-pool-size: 4
             max-pool-size: 16

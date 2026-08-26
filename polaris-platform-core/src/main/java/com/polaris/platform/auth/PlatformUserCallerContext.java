@@ -36,4 +36,7 @@ public class PlatformUserCallerContext implements CallerContext {
 
     @Override
     public boolean isPlatformMode() { return true; }
+
+    @Override
+    public boolean isTenantAdmin() { return tenantAdmin; }
 }

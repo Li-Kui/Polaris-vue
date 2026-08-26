@@ -49,6 +49,10 @@
           <el-icon class="nav-icon"><UserFilled /></el-icon>
           <span class="nav-text">智能体编排</span>
         </router-link>
+        <router-link to="/platform/console/workflow" class="nav-item" :class="{ active: isCurrent('/platform/console/workflow') }">
+          <el-icon class="nav-icon"><Share /></el-icon>
+          <span class="nav-text">工作流编排</span>
+        </router-link>
         <router-link to="/platform/console/model" class="nav-item" :class="{ active: isCurrent('/platform/console/model') }">
           <el-icon class="nav-icon"><Cpu /></el-icon>
           <span class="nav-text">大模型配置</span>
@@ -188,6 +192,7 @@ import {
   Moon,
   Odometer,
   PieChart,
+  Share,
   Sunny,
   SwitchButton,
   TopRight,

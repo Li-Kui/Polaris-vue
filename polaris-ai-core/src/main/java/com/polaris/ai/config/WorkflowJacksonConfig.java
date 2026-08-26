@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
-/** 为仍使用 Jackson 2 API 的 LangChain4j/LangGraph4j 工作流组件提供 Mapper。 */
+/** 为工作流契约、编译与持久化提供统一的 Jackson Mapper。 */
 @Configuration
 public class WorkflowJacksonConfig {
 

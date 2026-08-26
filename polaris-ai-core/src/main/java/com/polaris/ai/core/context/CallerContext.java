@@ -25,4 +25,14 @@ public interface CallerContext {
     default boolean isPlatformMode() {
         return getTenantId() != null;
     }
+
+    /** 调用方是否为当前租户管理员。 */
+    default boolean isTenantAdmin() {
+        return false;
+    }
+
+    /** API 密钥和服务主体使用的可选细粒度权限检查。 */
+    default boolean hasPermission(String permission) {
+        return isSuperAdmin();
+    }
 }

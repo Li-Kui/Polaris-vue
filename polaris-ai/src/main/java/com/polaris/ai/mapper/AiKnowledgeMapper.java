@@ -1,8 +1,11 @@
 package com.polaris.ai.mapper;
 
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.common.annotation.DataScope;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -13,6 +16,24 @@ import java.util.List;
  */
 public interface AiKnowledgeMapper extends BaseMapper<AiKnowledgeBase>
 {
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_knowledge_base WHERE id = #{id} AND del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "LIMIT 1", "</script>"})
+    AiKnowledgeBase selectWorkflowResource(
+            @Param("tenantId") Long tenantId, @Param("id") Long id);
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_knowledge_base WHERE del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "ORDER BY name, id",
+            "</script>"})
+    List<AiKnowledgeBase> selectWorkflowResources(@Param("tenantId") Long tenantId);
+
     // ================================================================
     //  知识库主表操作
     // ================================================================

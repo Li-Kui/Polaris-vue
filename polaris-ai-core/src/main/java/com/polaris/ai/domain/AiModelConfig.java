@@ -28,6 +28,10 @@ public class AiModelConfig extends BaseEntity
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 所属中台租户，管理端共享资源为空 */
+    @Schema(description = "所属中台租户")
+    private Long tenantId;
+
     /** 配置名称 */
     @Schema(description = "配置名称")
     private String name;

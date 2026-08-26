@@ -59,6 +59,14 @@
           <el-input-number v-model="form.rateLimit" :min="1" :max="10000" style="width: 160px;" />
           <span style="margin-left: 10px; color: #94a3b8; font-size: 13px;">次/分钟</span>
         </el-form-item>
+        <el-form-item label="API 权限" prop="permissionValues">
+          <el-checkbox-group v-model="form.permissionValues" class="permission-list">
+            <el-checkbox label="chat">大模型对话</el-checkbox>
+            <el-checkbox label="workflow:execute">发起工作流</el-checkbox>
+            <el-checkbox label="workflow:read">查询工作流执行</el-checkbox>
+            <el-checkbox label="workflow:cancel">取消工作流执行</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -103,7 +111,8 @@ const createdApiKey = ref('')
 
 const form = reactive({
   keyName: '',
-  rateLimit: 60
+  rateLimit: 60,
+  permissionValues: ['chat']
 })
 
 const rules = {
@@ -121,6 +130,7 @@ function getList() {
 function handleAdd() {
   form.keyName = ''
   form.rateLimit = 60
+  form.permissionValues = ['chat']
   open.value = true
 }
 
@@ -128,7 +138,11 @@ function submitForm() {
   formRef.value.validate(valid => {
     if (valid) {
       submitLoading.value = true
-      addApiKey(form).then(res => {
+      addApiKey({
+        keyName: form.keyName,
+        rateLimit: form.rateLimit,
+        permissions: JSON.stringify(form.permissionValues)
+      }).then(res => {
         createdApiKey.value = res.data?.apiKey || ''
         ElMessage.success('创建 API Key 成功')
         open.value = false
@@ -215,6 +229,12 @@ onMounted(getList)
 
 .created-key-box {
   margin-top: 20px;
+}
+
+.permission-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .copy-btn {

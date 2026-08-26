@@ -2,6 +2,7 @@ package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.domain.AiAgent;
 import com.polaris.ai.mapper.AiAgentMapper;
 import com.polaris.ai.service.IAiAgentService;
@@ -59,6 +60,11 @@ public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> impl
     public List<AiAgent> selectAgentList(AiAgent agent) {
         LambdaQueryWrapper<AiAgent> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(AiAgent::getDelFlag, "0"); // 仅未删除的
+        if (CallerUtils.isPlatformMode()) {
+            queryWrapper.eq(AiAgent::getTenantId, currentTenantId());
+        } else {
+            queryWrapper.isNull(AiAgent::getTenantId);
+        }
         if (agent != null) {
             if (StringUtils.isNotEmpty(agent.getAgentCode())) {
                 queryWrapper.eq(AiAgent::getAgentCode, agent.getAgentCode());
@@ -72,5 +78,15 @@ public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> impl
         }
         queryWrapper.orderByDesc(AiAgent::getId);
         return list(queryWrapper);
+    }
+
+    private Long currentTenantId() {
+        try {
+            long tenantId = Long.parseLong(CallerUtils.getTenantId());
+            if (tenantId <= 0) throw new NumberFormatException();
+            return tenantId;
+        } catch (Exception e) {
+            throw new com.polaris.common.exception.ServiceException("中台租户ID格式错误");
+        }
     }
 }

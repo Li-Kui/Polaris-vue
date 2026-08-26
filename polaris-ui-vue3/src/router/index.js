@@ -95,6 +95,12 @@ export const constantRoutes = [
         component: () => import('@/views/ai/report'),
         name: 'AiReport',
         meta: { title: 'AI 分析报告中心', icon: 'document' }
+      },
+      {
+        path: 'workflow',
+        component: () => import('@/views/ai/workflow/index.vue'),
+        name: 'AiWorkflow',
+        meta: { title: '工作流编排', icon: 'connection' }
       }
     ]
   },
@@ -135,6 +141,12 @@ export const constantRoutes = [
         component: () => import('@/views/ai/agent.vue'),
         name: 'PlatformAgent',
         meta: { title: '智能体编排', icon: 'user' }
+      },
+      {
+        path: 'workflow',
+        component: () => import('@/views/platform/workflow/index.vue'),
+        name: 'PlatformWorkflow',
+        meta: { title: '工作流编排', icon: 'connection' }
       },
       {
         path: 'model',

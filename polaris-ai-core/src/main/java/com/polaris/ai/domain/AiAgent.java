@@ -25,6 +25,10 @@ public class AiAgent extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
+    /** 所属中台租户，管理端共享资源为空 */
+    @Schema(description = "所属中台租户")
+    private Long tenantId;
+
     /** 智能体唯一编码 */
     @Schema(description = "智能体唯一编码")
     private String agentCode;
