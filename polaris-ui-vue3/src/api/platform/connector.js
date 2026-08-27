@@ -38,6 +38,13 @@ export function delConnector(id) {
   })
 }
 
+export function getConnectorUsages(id) {
+  return request({
+    url: `/platform/console/connector/${id}/usages`,
+    method: 'get'
+  })
+}
+
 export function invokeConnector(id, data) {
   return request({
     url: `/platform/console/connector/${id}/invoke`,

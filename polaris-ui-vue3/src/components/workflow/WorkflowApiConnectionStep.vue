@@ -1,0 +1,398 @@
+<template>
+  <div class="api-connection-step">
+    <el-alert
+      v-if="error"
+      :title="error"
+      type="error"
+      :closable="false"
+      show-icon
+    />
+
+    <div class="step-heading">
+      <div>
+        <strong>API 连接</strong>
+        <small>{{ environment }} · 选择已有连接或在当前工作流中新建</small>
+      </div>
+      <el-tag v-if="selectedResource" type="success" size="small">已连接</el-tag>
+    </div>
+
+    <el-input v-model="keyword" prefix-icon="Search" clearable placeholder="搜索 API 连接" />
+    <div class="connection-list" v-loading="loading">
+      <button
+        v-for="resource in filteredResources"
+        :key="resource.resourceId"
+        type="button"
+        :class="['connection-row', {selected: resource.resourceId === selectedResourceId}]"
+        :disabled="!canEdit || !resource.available"
+        @click="$emit('select', resource.resourceId)"
+      >
+        <span class="connection-row-main">
+          <span class="connection-row-icon"><el-icon><Connection /></el-icon></span>
+          <span class="connection-row-copy">
+            <strong>{{ resource.name }}</strong>
+            <small>{{ description(resource) }}</small>
+          </span>
+        </span>
+        <el-icon v-if="resource.resourceId === selectedResourceId"><CircleCheck /></el-icon>
+        <el-icon v-else><ArrowRight /></el-icon>
+      </button>
+      <div v-if="!loading && !filteredResources.length" class="connection-empty">
+        <el-icon><Connection /></el-icon>
+        <strong>{{ keyword ? '没有匹配的 API 连接' : '暂无可用 API 连接' }}</strong>
+        <small>{{ keyword ? '请尝试其他关键词' : '可以直接在下方创建第一个连接' }}</small>
+      </div>
+    </div>
+
+    <section v-if="appearance === 'platform' && canEdit" :class="['inline-create-form', {expanded: creating}]">
+      <button type="button" class="create-connection-toggle" @click="toggleCreate">
+        <span class="create-connection-title">
+          <el-icon><CirclePlus /></el-icon>
+          <strong>新建 API 连接</strong>
+        </span>
+        <el-icon class="create-chevron"><ArrowUp v-if="creating" /><ArrowDown v-else /></el-icon>
+      </button>
+      <div v-if="creating" class="inline-create-body">
+        <ApiConnectorForm ref="connectorFormRef" :form="form" compact />
+        <p class="reuse-hint">连接信息将独立保存，可在其他工作流复用。</p>
+        <div class="inline-actions">
+          <el-button @click="cancelCreate">取消新建</el-button>
+          <el-button type="primary" :loading="saving" @click="saveAndUse">保存连接并继续</el-button>
+        </div>
+      </div>
+    </section>
+  </div>
+</template>
+
+<script>
+import {ArrowDown, ArrowRight, ArrowUp, CircleCheck, CirclePlus, Connection} from '@element-plus/icons-vue'
+import {addConnector} from '@/api/platform/connector'
+import ApiConnectorForm from '@/components/platform/ApiConnectorForm.vue'
+
+export default {
+  name: 'WorkflowApiConnectionStep',
+  components: {
+    ApiConnectorForm,
+    ArrowDown,
+    ArrowRight,
+    ArrowUp,
+    CircleCheck,
+    CirclePlus,
+    Connection
+  },
+  props: {
+    resources: {type: Array, default: () => []},
+    selectedResourceId: {type: String, default: ''},
+    selectedResource: {type: Object, default: null},
+    environment: {type: String, default: 'PROD'},
+    loading: {type: Boolean, default: false},
+    canEdit: {type: Boolean, default: false},
+    appearance: {type: String, default: 'admin'},
+    error: {type: String, default: ''}
+  },
+  emits: ['select', 'created'],
+  data() {
+    return {
+      keyword: '',
+      creating: false,
+      emptyStateHandled: false,
+      saving: false,
+      form: this.emptyForm()
+    }
+  },
+  computed: {
+    filteredResources() {
+      const keyword = this.keyword.trim().toLowerCase()
+      if (!keyword) return this.resources
+      return this.resources.filter(resource => {
+        const attributes = resource.attributes || {}
+        return [resource.name, resource.description, attributes.baseUrl]
+          .filter(Boolean)
+          .some(value => String(value).toLowerCase().includes(keyword))
+      })
+    }
+  },
+  watch: {
+    loading(value) {
+      if (!value) this.openCreateForEmptyState()
+    },
+    resources() {
+      this.openCreateForEmptyState()
+    }
+  },
+  mounted() {
+    this.openCreateForEmptyState()
+  },
+  methods: {
+    emptyForm() {
+      return {
+        id: undefined,
+        connectorName: '',
+        baseUrl: '',
+        authType: 'NONE',
+        originalAuthType: 'NONE',
+        credentialAction: 'CLEAR',
+        credentialConfigured: false,
+        credential: {headerName: 'X-API-Key', secret: ''},
+        headerRows: [],
+        timeoutSeconds: 30,
+        status: '0',
+        remark: ''
+      }
+    },
+    description(resource) {
+      const attributes = resource.attributes || {}
+      const authLabel = attributes.authType && attributes.authType !== 'NONE'
+        ? `${attributes.authType} · ${attributes.credentialConfigured ? '凭证已配置' : '凭证缺失'}`
+        : '无需认证'
+      return [attributes.baseUrl, authLabel].filter(Boolean).join(' · ')
+    },
+    toggleCreate() {
+      this.creating = !this.creating
+      this.emptyStateHandled = true
+      if (this.creating) {
+        this.form = this.emptyForm()
+        this.$nextTick(() => this.$refs.connectorFormRef?.$el?.querySelector('input')?.focus())
+      }
+    },
+    cancelCreate() {
+      this.creating = false
+      this.emptyStateHandled = true
+      this.form = this.emptyForm()
+    },
+    openCreateForEmptyState() {
+      if (this.appearance !== 'platform'
+          || this.loading
+          || this.emptyStateHandled
+          || this.resources.length) return
+      this.creating = true
+      this.emptyStateHandled = true
+    },
+    async saveAndUse() {
+      try {
+        await this.$refs.connectorFormRef.validate()
+      } catch (error) {
+        return
+      }
+      this.saving = true
+      try {
+        const response = await addConnector(this.$refs.connectorFormRef.buildPayload())
+        const connector = response.data
+        if (!connector?.id) throw new Error('连接器创建成功，但未返回连接器 ID')
+        this.creating = false
+        this.emptyStateHandled = true
+        this.form = this.emptyForm()
+        this.$emit('created', String(connector.id))
+      } finally {
+        this.saving = false
+      }
+    }
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.api-connection-step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+}
+
+.step-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    margin-top: 4px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.connection-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 92px;
+  gap: 8px;
+}
+
+.connection-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 10px 14px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 9px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
+  text-align: left;
+  cursor: pointer;
+
+  &:hover,
+  &.selected {
+    border-color: var(--workflow-primary, var(--el-color-primary));
+    background: var(--el-color-primary-light-9);
+    color: var(--el-color-primary);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .connection-row-copy strong,
+  .connection-row-copy small {
+    display: block;
+  }
+
+  .connection-row-copy small {
+    max-width: 360px;
+    margin-top: 4px;
+    color: var(--el-text-color-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.connection-row-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-row-copy {
+  min-width: 0;
+}
+
+.connection-row-icon {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--workflow-primary, var(--el-color-primary));
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+}
+
+.connection-empty {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px dashed var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 10px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+
+  > .el-icon {
+    margin-bottom: 3px;
+    color: var(--workflow-primary, var(--el-color-primary));
+    font-size: 24px;
+  }
+
+  strong {
+    color: var(--workflow-text, var(--el-text-color-primary));
+    font-size: 13px;
+  }
+
+  small {
+    font-size: 11px;
+  }
+}
+
+.inline-create-form {
+  border: 1px dashed var(--workflow-primary, var(--el-color-primary));
+  border-radius: 12px;
+  background: var(--workflow-surface, var(--el-bg-color));
+  overflow: visible;
+}
+
+.inline-create-form.expanded {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--workflow-primary, #625bf6) 8%, transparent);
+}
+
+.inline-create-form :deep(.el-input__wrapper.is-focus),
+.inline-create-form :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px var(--workflow-primary, var(--el-color-primary)) inset;
+}
+
+.create-connection-toggle {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  color: var(--workflow-primary, var(--el-color-primary));
+  background: transparent;
+  cursor: pointer;
+}
+
+.create-connection-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  .el-icon {
+    font-size: 20px;
+  }
+
+  strong {
+    font-size: 14px;
+  }
+}
+
+.create-chevron {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+}
+
+.inline-create-body {
+  padding: 10px 16px 0;
+}
+
+.inline-actions {
+  position: sticky;
+  bottom: -24px;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 14px -16px 0;
+  padding: 14px 16px;
+  border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  background: var(--workflow-surface, var(--el-bg-color));
+
+  :deep(.el-button) {
+    min-width: 112px;
+    height: 38px;
+    border-radius: 8px;
+  }
+
+  :deep(.el-button--primary) {
+    --el-button-bg-color: var(--workflow-primary, var(--el-color-primary));
+    --el-button-border-color: var(--workflow-primary, var(--el-color-primary));
+    --el-button-hover-bg-color: var(--workflow-primary-hover, var(--el-color-primary-dark-2));
+    --el-button-hover-border-color: var(--workflow-primary-hover, var(--el-color-primary-dark-2));
+  }
+}
+
+.reuse-hint {
+  margin: 12px 0 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+}
+</style>

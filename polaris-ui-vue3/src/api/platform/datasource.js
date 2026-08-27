@@ -46,6 +46,20 @@ export function testDatasource(data) {
   })
 }
 
+export function testSavedDatasource(id) {
+  return request({
+    url: `/platform/console/datasource/${id}/test`,
+    method: 'post'
+  })
+}
+
+export function getDatasourceUsages(id) {
+  return request({
+    url: `/platform/console/datasource/${id}/usages`,
+    method: 'get'
+  })
+}
+
 export function queryDatasource(id, data) {
   return request({
     url: `/platform/console/datasource/${id}/query`,

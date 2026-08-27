@@ -1,6 +1,8 @@
 package com.polaris.platform.service;
 
 import com.polaris.platform.domain.PlatformDatasource;
+import com.polaris.platform.dto.DatasourceSaveRequest;
+import com.polaris.platform.dto.DatasourceTestResponse;
 
 import java.util.List;
 import java.util.Map;
@@ -18,13 +20,22 @@ public interface IPlatformDatasourceService {
 
     PlatformDatasource selectDatasourceById(Long id);
 
-    int insertDatasource(PlatformDatasource datasource);
+    PlatformDatasource insertDatasource(DatasourceSaveRequest request, String operator);
 
-    int updateDatasource(PlatformDatasource datasource);
+    PlatformDatasource updateDatasource(DatasourceSaveRequest request, String operator);
 
     int deleteDatasourceById(Long id);
 
-    boolean testDatasourceConnection(PlatformDatasource datasource);
+    long countDatasourceUsages(Long id);
 
-    List<Map<String, Object>> executeDatasourceQuery(Long id, String sql, int maxRows);
+    DatasourceTestResponse testDatasourceConnection(DatasourceSaveRequest request);
+
+    DatasourceTestResponse testSavedDatasourceConnection(Long id);
+
+    List<Map<String, Object>> executeDatasourceQuery(
+            Long id,
+            String sql,
+            Map<String, Object> parameters,
+            int maxRows,
+            Integer queryTimeoutSeconds);
 }

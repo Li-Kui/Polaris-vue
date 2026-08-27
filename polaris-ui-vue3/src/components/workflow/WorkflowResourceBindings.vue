@@ -26,6 +26,13 @@
 
     <el-table v-loading="loading" :data="bindings" class="polaris-el-table">
       <el-table-column prop="environment" label="环境" width="100" />
+      <el-table-column label="作用范围" width="130">
+        <template #default="{row}">
+          <el-tag :type="row.scopeType === 'WORKFLOW' ? 'primary' : 'info'" size="small">
+            {{ scopeLabel(row.scopeType) }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="resourceKind" label="资源类型" width="180" />
       <el-table-column prop="resourceKey" label="逻辑键" min-width="180" />
       <el-table-column label="已关联资源" min-width="240">
@@ -54,6 +61,14 @@
 
     <el-dialog v-model="dialogOpen" :title="form.id ? '修改资源绑定' : '新增资源绑定'" width="560px">
       <el-form label-width="110px">
+        <el-form-item label="作用范围">
+          <el-input :model-value="scopeLabel(form.scopeType)" disabled />
+          <small class="scope-hint">
+            {{ form.scopeType === 'WORKFLOW'
+              ? `该绑定仅供工作流 #${form.definitionId} 使用`
+              : '共享绑定可被当前租户下的工作流作为默认值使用' }}
+          </small>
+        </el-form-item>
         <el-form-item label="环境">
           <el-select v-model="form.environment" style="width: 100%" @change="loadDialogResources">
             <el-option label="开发 DEV" value="DEV" />
@@ -153,6 +168,8 @@ export default {
     emptyForm() {
       return {
         id: null,
+        definitionId: null,
+        scopeType: 'OWNER',
         environment: this.environment,
         resourceKind: 'MODEL',
         resourceKey: '',
@@ -180,6 +197,8 @@ export default {
     async openEdit(row) {
       this.form = {
         id: row.id,
+        definitionId: row.definitionId,
+        scopeType: row.scopeType || 'OWNER',
         environment: row.environment,
         resourceKind: row.resourceKind,
         resourceKey: row.resourceKey,
@@ -244,6 +263,9 @@ export default {
     resourceDescription(resource) {
       const details = resource.attributes || {}
       return resource.description || details.modelName || details.type || details.baseUrl || ''
+    },
+    scopeLabel(scopeType) {
+      return scopeType === 'WORKFLOW' ? '当前工作流' : '租户共享'
     }
   }
 }
@@ -285,9 +307,17 @@ export default {
 
 .resource-cell span,
 .resource-option small,
-.resource-warning {
+.resource-warning,
+.scope-hint {
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.scope-hint {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  line-height: 1.5;
 }
 
 .resource-option {

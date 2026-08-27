@@ -35,6 +35,7 @@ public class WorkflowResourceResolver {
 
     public Resolution resolve(
             WorkflowExecutionPlan plan,
+            Long definitionId,
             Long tenantId,
             String environment,
             String principalType,
@@ -49,9 +50,15 @@ public class WorkflowResourceResolver {
                 }
                 String ownerType = tenantId == null ? "SYSTEM" : "TENANT";
                 Long ownerId = tenantId == null ? 0L : tenantId;
-                WorkflowResourceBinding binding = bindingMapper.selectActive(
-                        ownerType, ownerId, environment,
-                        reference.getKind(), reference.getKey());
+                WorkflowResourceBinding binding = definitionId == null ? null
+                        : bindingMapper.selectActive(
+                                ownerType, ownerId, "WORKFLOW", definitionId, environment,
+                                reference.getKind(), reference.getKey());
+                if (binding == null) {
+                    binding = bindingMapper.selectActive(
+                            ownerType, ownerId, "OWNER", ownerId, environment,
+                            reference.getKind(), reference.getKey());
+                }
                 if (binding == null) {
                     if (Boolean.TRUE.equals(reference.getRequired())) {
                         throw new ServiceException("工作流资源未绑定或已停用: " + compositeKey);
@@ -78,11 +85,16 @@ public class WorkflowResourceResolver {
                     throw new ServiceException("工作流资源解析结果为空: " + compositeKey);
                 }
                 resources.put(compositeKey, resolved);
-                snapshot.put(compositeKey, Map.of(
-                        "kind", binding.getResourceKind(),
-                        "key", binding.getResourceKey(),
-                        "resourceId", binding.getResourceId(),
-                        "bindingVersion", binding.getBindingVersion()));
+                Map<String, Object> snapshotItem = new LinkedHashMap<>();
+                snapshotItem.put("kind", binding.getResourceKind());
+                snapshotItem.put("key", binding.getResourceKey());
+                snapshotItem.put("resourceId", binding.getResourceId());
+                snapshotItem.put("bindingVersion", binding.getBindingVersion());
+                // 数据源等版本化资源由提供器返回实际资源版本，重试时固定解析该版本。
+                if (resolved.resourceVersion() > 0) {
+                    snapshotItem.put("resourceVersion", resolved.resourceVersion());
+                }
+                snapshot.put(compositeKey, snapshotItem);
             }
         }
         return new Resolution(writeJson(snapshot), Map.copyOf(resources));
@@ -136,7 +148,9 @@ public class WorkflowResourceResolver {
                             reference.getKey(),
                             item.path("resourceId").asText(),
                             principalType,
-                            principalId);
+                            principalId,
+                            item.has("resourceVersion")
+                                    ? item.path("resourceVersion").asInt() : null);
                     List<String> errors = provider.validate(request);
                     if (errors != null && !errors.isEmpty()) {
                         throw new ServiceException("执行资源快照校验失败: "

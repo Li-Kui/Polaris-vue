@@ -25,6 +25,7 @@
       :can-edit="canEdit"
       :can-publish="canPublish"
       :can-execute="canExecute"
+      :appearance="appearance"
       @back="backToList"
       @saved="definitionSaved"
       @published="definitionPublished"

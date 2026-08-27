@@ -63,8 +63,11 @@ public class WorkflowEventStreamService {
         return emitter;
     }
 
-    @Scheduled(fixedDelayString = "${ai.workflow.event-stream-poll-ms:1000}")
+    @Scheduled(fixedDelayString = "${ai.workflow.event-stream-poll-ms:5000}")
     public void pollConnections() {
+        if (connections.isEmpty()) {
+            return;
+        }
         for (Connection connection : connections.values()) {
             poll(connection);
         }

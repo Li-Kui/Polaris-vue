@@ -30,6 +30,18 @@
             <artifactId>mysql-connector-j</artifactId>
         </dependency>
 
+        <!-- 工作流外部数据源驱动包 -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.microsoft.sqlserver</groupId>
+            <artifactId>mssql-jdbc</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- 核心模块-->
         <dependency>
             <groupId>com.polaris</groupId>

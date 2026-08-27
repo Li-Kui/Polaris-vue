@@ -7,7 +7,9 @@ import com.polaris.ai.workflow.application.WorkflowResourceBindingApplicationFac
 import com.polaris.ai.workflow.application.WorkflowResourceBindingCommand;
 import com.polaris.ai.workflow.application.WorkflowResourceBindingView;
 import com.polaris.ai.workflow.config.WorkflowProperties;
+import com.polaris.ai.workflow.domain.WorkflowDefinition;
 import com.polaris.ai.workflow.domain.WorkflowResourceBinding;
+import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowResourceBindingMapper;
 import com.polaris.ai.workflow.registry.WorkflowResourceRegistry;
 import com.polaris.ai.workflow.spi.WorkflowResourceProvider;
@@ -26,33 +28,50 @@ public class WorkflowResourceBindingService
         implements WorkflowResourceBindingApplicationFacade {
 
     private static final Set<String> ENVIRONMENTS = Set.of("DEV", "TEST", "PROD");
+    private static final Set<String> SCOPE_TYPES = Set.of("OWNER", "WORKFLOW");
 
     private final WorkflowResourceBindingMapper bindingMapper;
+    private final WorkflowDefinitionMapper definitionMapper;
     private final WorkflowResourceRegistry resourceRegistry;
     private final WorkflowProperties properties;
 
     public WorkflowResourceBindingService(
             WorkflowResourceBindingMapper bindingMapper,
+            WorkflowDefinitionMapper definitionMapper,
             WorkflowResourceRegistry resourceRegistry,
             WorkflowProperties properties) {
         this.bindingMapper = bindingMapper;
+        this.definitionMapper = definitionMapper;
         this.resourceRegistry = resourceRegistry;
         this.properties = properties;
     }
 
     @Override
-    public List<WorkflowResourceBindingView> list(String environment) {
+    public List<WorkflowResourceBindingView> list(Long definitionId, String environment) {
         requireEnabled();
         OwnerScope scope = currentScope();
+        if (definitionId != null) {
+            requireDefinition(definitionId, scope);
+        }
         LambdaQueryWrapper<WorkflowResourceBinding> query =
                 new LambdaQueryWrapper<WorkflowResourceBinding>()
                         .eq(WorkflowResourceBinding::getOwnerType, scope.ownerType())
                         .eq(WorkflowResourceBinding::getOwnerId, scope.ownerId());
+        if (definitionId != null) {
+            query.and(wrapper -> wrapper
+                    .and(shared -> shared
+                            .eq(WorkflowResourceBinding::getScopeType, "OWNER")
+                            .eq(WorkflowResourceBinding::getScopeId, scope.ownerId()))
+                    .or(workflow -> workflow
+                            .eq(WorkflowResourceBinding::getScopeType, "WORKFLOW")
+                            .eq(WorkflowResourceBinding::getScopeId, definitionId)));
+        }
         if (environment != null && !environment.isBlank()) {
             query.eq(WorkflowResourceBinding::getEnvironment,
                     normalizeEnvironment(environment));
         }
         query.orderByAsc(WorkflowResourceBinding::getEnvironment)
+                .orderByDesc(WorkflowResourceBinding::getScopeType)
                 .orderByAsc(WorkflowResourceBinding::getResourceKind)
                 .orderByAsc(WorkflowResourceBinding::getResourceKey);
         return bindingMapper.selectList(query).stream().map(this::view).toList();
@@ -68,12 +87,16 @@ public class WorkflowResourceBindingService
         String kind = normalizeKind(command.resourceKind());
         String key = normalizeKey(command.resourceKey());
         String resourceId = normalizeResourceId(command.resourceId());
+        String scopeType = normalizeScopeType(command.scopeType(), command.definitionId());
+        Long scopeId = scopeId(scopeType, command.definitionId(), scope);
         validateResource(scope.tenantId(), environment, kind, key, resourceId);
         if (command.id() == null) {
             WorkflowResourceBinding duplicate = bindingMapper.selectOne(
                     new LambdaQueryWrapper<WorkflowResourceBinding>()
                             .eq(WorkflowResourceBinding::getOwnerType, scope.ownerType())
                             .eq(WorkflowResourceBinding::getOwnerId, scope.ownerId())
+                            .eq(WorkflowResourceBinding::getScopeType, scopeType)
+                            .eq(WorkflowResourceBinding::getScopeId, scopeId)
                             .eq(WorkflowResourceBinding::getEnvironment, environment)
                             .eq(WorkflowResourceBinding::getResourceKind, kind)
                             .eq(WorkflowResourceBinding::getResourceKey, key)
@@ -85,6 +108,8 @@ public class WorkflowResourceBindingService
             binding.setOwnerType(scope.ownerType());
             binding.setOwnerId(scope.ownerId());
             binding.setTenantId(scope.tenantId());
+            binding.setScopeType(scopeType);
+            binding.setScopeId(scopeId);
             binding.setEnvironment(environment);
             binding.setResourceKind(kind);
             binding.setResourceKey(key);
@@ -105,6 +130,8 @@ public class WorkflowResourceBindingService
             throw new ServiceException("资源绑定已被其他用户修改，请刷新后重试");
         }
         existing.setEnvironment(environment);
+        existing.setScopeType(scopeType);
+        existing.setScopeId(scopeId);
         existing.setResourceKind(kind);
         existing.setResourceKey(key);
         existing.setResourceId(resourceId);
@@ -156,6 +183,15 @@ public class WorkflowResourceBindingService
         return binding;
     }
 
+    private WorkflowDefinition requireDefinition(Long definitionId, OwnerScope scope) {
+        WorkflowDefinition definition = definitionMapper.selectById(definitionId);
+        if (definition == null || !"0".equals(definition.getDelFlag())
+                || !java.util.Objects.equals(definition.getTenantId(), scope.tenantId())) {
+            throw new ServiceException("工作流不存在或无权访问");
+        }
+        return definition;
+    }
+
     private OwnerScope currentScope() {
         if (CallerUtils.isPlatformMode()) {
             Long current = parseTenantId(CallerUtils.getTenantId());
@@ -190,6 +226,27 @@ public class WorkflowResourceBindingService
         return result;
     }
 
+    private String normalizeScopeType(String value, Long definitionId) {
+        String result = value == null || value.isBlank()
+                ? (definitionId == null ? "OWNER" : "WORKFLOW")
+                : value.trim().toUpperCase(Locale.ROOT);
+        if (!SCOPE_TYPES.contains(result)) {
+            throw new ServiceException("资源绑定作用域只能是 OWNER 或 WORKFLOW");
+        }
+        return result;
+    }
+
+    private Long scopeId(String scopeType, Long definitionId, OwnerScope ownerScope) {
+        if ("OWNER".equals(scopeType)) {
+            return ownerScope.ownerId();
+        }
+        if (definitionId == null) {
+            throw new ServiceException("工作流级资源绑定必须提供工作流 ID");
+        }
+        requireDefinition(definitionId, ownerScope);
+        return definitionId;
+    }
+
     private String normalizeKey(String value) {
         String result = value == null ? "" : value.trim();
         if (!result.matches("[A-Za-z][A-Za-z0-9_.-]{0,127}")) {
@@ -221,7 +278,9 @@ public class WorkflowResourceBindingService
     private WorkflowResourceBindingView view(WorkflowResourceBinding binding) {
         return new WorkflowResourceBindingView(
                 binding.getId(), binding.getOwnerType(), binding.getOwnerId(),
-                binding.getTenantId(), binding.getEnvironment(),
+                binding.getTenantId(), binding.getScopeType(), binding.getScopeId(),
+                "WORKFLOW".equals(binding.getScopeType()) ? binding.getScopeId() : null,
+                binding.getEnvironment(),
                 binding.getResourceKind(), binding.getResourceKey(), binding.getResourceId(),
                 binding.getBindingVersion(), binding.getStatus(), binding.getLockVersion(),
                 binding.getCreateTime(), binding.getUpdateTime());

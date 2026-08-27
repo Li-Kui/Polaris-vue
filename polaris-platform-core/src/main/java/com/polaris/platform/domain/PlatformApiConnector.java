@@ -1,5 +1,6 @@
 package com.polaris.platform.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -26,12 +27,13 @@ public class PlatformApiConnector extends BaseEntity {
     @Schema(description = "连接器基础地址")
     private String baseUrl;
 
-    /** NONE|API_KEY|BEARER|BASIC */
-    @Schema(description = "认证类型", allowableValues = {"NONE", "API_KEY", "BEARER", "BASIC"})
+    /** NONE|API_KEY|BEARER */
+    @Schema(description = "认证类型", allowableValues = {"NONE", "API_KEY", "BEARER"})
     private String authType;
 
-    /** JSON */
-    @Schema(description = "认证配置 JSON")
+    /** 加密 JSON 信封，不允许通过接口序列化。 */
+    @JsonIgnore
+    @Schema(hidden = true)
     private String authConfig;
 
     @Schema(description = "默认请求头 JSON")

@@ -10,6 +10,7 @@ import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.WorkflowApprovalApplicationFacade;
 import com.polaris.ai.workflow.application.WorkflowApprovalDecisionCommand;
 import com.polaris.ai.workflow.application.WorkflowApprovalTaskView;
+import com.polaris.ai.workflow.application.WorkflowTaskSignal;
 import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.contract.WorkflowErrorCode;
 import com.polaris.ai.workflow.domain.WorkflowApprovalTask;
@@ -21,7 +22,7 @@ import com.polaris.ai.workflow.mapper.WorkflowNodeRunMapper;
 import com.polaris.ai.workflow.runtime.WorkflowExecutionPersistence;
 import com.polaris.ai.workflow.runtime.WorkflowQuotaService;
 import com.polaris.common.exception.ServiceException;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -44,6 +45,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
     private final WorkflowQuotaService quotaService;
     private final WorkflowProperties properties;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher eventPublisher;
 
     public WorkflowApprovalService(
             WorkflowApprovalTaskMapper approvalTaskMapper,
@@ -52,7 +54,8 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
             WorkflowExecutionPersistence persistence,
             WorkflowQuotaService quotaService,
             WorkflowProperties properties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ApplicationEventPublisher eventPublisher) {
         this.approvalTaskMapper = approvalTaskMapper;
         this.executionMapper = executionMapper;
         this.nodeRunMapper = nodeRunMapper;
@@ -60,6 +63,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         this.quotaService = quotaService;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -162,11 +166,12 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
             rejectExecution(task, WorkflowErrorCode.APPROVAL_REJECTED, "工作流审批被拒绝");
         } else if (approved && executionMapper.requeueAfterApproval(task.getExecutionId()) != 1) {
             throw new ServiceException("审批完成，但工作流已不在等待状态");
+        } else if (approved) {
+            eventPublisher.publishEvent(WorkflowTaskSignal.APPROVAL_COMPLETED);
         }
         return view(task);
     }
 
-    @Scheduled(fixedDelayString = "${ai.workflow.approval-expire-poll-ms:30000}")
     @Transactional(rollbackFor = Exception.class)
     public void expirePendingTasks() {
         if (!properties.isEnabled()) {

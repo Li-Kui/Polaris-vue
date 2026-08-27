@@ -19,5 +19,9 @@ public interface PlatformDatasourceMapper {
     List<PlatformDatasource> selectList(PlatformDatasource query);
     int insert(PlatformDatasource ds);
     int update(PlatformDatasource ds);
+    int updateCurrentVersion(
+            @Param("id") Long id,
+            @Param("currentVersionId") Long currentVersionId,
+            @Param("updateBy") String updateBy);
     int deleteById(@Param("id") Long id);
 }

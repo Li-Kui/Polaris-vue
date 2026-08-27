@@ -5,7 +5,7 @@ import java.util.List;
 /** 当前所有者资源绑定管理的应用边界。 */
 public interface WorkflowResourceBindingApplicationFacade {
 
-    List<WorkflowResourceBindingView> list(String environment);
+    List<WorkflowResourceBindingView> list(Long definitionId, String environment);
 
     WorkflowResourceBindingView save(WorkflowResourceBindingCommand command);
 

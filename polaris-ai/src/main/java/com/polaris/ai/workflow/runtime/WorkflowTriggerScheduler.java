@@ -13,6 +13,7 @@ import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.domain.WorkflowTrigger;
 import com.polaris.ai.workflow.mapper.WorkflowTriggerMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ import java.util.Date;
 /** 支持多实例安全调度的发布版本持久化触发器调度器。 */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "ai.workflow", name = "enabled", havingValue = "true")
 public class WorkflowTriggerScheduler {
 
     private final WorkflowTriggerMapper triggerMapper;

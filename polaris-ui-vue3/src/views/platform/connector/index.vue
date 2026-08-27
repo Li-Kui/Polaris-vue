@@ -56,26 +56,8 @@
     </div>
 
     <!-- 弹窗 -->
-    <el-dialog :title="title" v-model="open" width="600px" append-to-body class="polaris-glass-dialog">
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="110px">
-        <el-form-item label="连接器名称" prop="connectorName">
-          <el-input v-model="form.connectorName" placeholder="例如: 财务系统发票查询接口" />
-        </el-form-item>
-        <el-form-item label="Base URL" prop="baseUrl">
-          <el-input v-model="form.baseUrl" placeholder="https://api.example.com/v1" />
-        </el-form-item>
-        <el-form-item label="认证类型" prop="authType">
-          <el-select v-model="form.authType" placeholder="请选择" style="width: 100%;">
-            <el-option label="无需认证 (NONE)" value="NONE" />
-            <el-option label="API Key (Header 传递)" value="API_KEY" />
-            <el-option label="Bearer Token" value="BEARER" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="超时时间" prop="timeoutMs">
-          <el-input-number v-model="form.timeoutMs" :min="1000" :step="1000" style="width: 180px;" />
-          <span style="margin-left: 10px; color: #94a3b8; font-size: 13px;">毫秒 (ms)</span>
-        </el-form-item>
-      </el-form>
+    <el-dialog :title="title" v-model="open" width="680px" append-to-body class="polaris-glass-dialog">
+      <ApiConnectorForm ref="connectorFormRef" :form="form" :editing="!!form.id" />
       <template #footer>
         <div class="dialog-footer">
           <el-button @click="open = false">取消</el-button>
@@ -89,27 +71,37 @@
 <script setup>
 import {onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {addConnector, delConnector, listConnector, updateConnector} from '@/api/platform/connector'
+import {
+  addConnector,
+  delConnector,
+  getConnector,
+  getConnectorUsages,
+  listConnector,
+  updateConnector
+} from '@/api/platform/connector'
+import ApiConnectorForm from '@/components/platform/ApiConnectorForm.vue'
 
 const loading = ref(false)
 const connectorList = ref([])
 const open = ref(false)
 const title = ref('')
 const submitLoading = ref(false)
-const formRef = ref(null)
+const connectorFormRef = ref(null)
 
 const form = reactive({
   id: undefined,
   connectorName: '',
   baseUrl: '',
   authType: 'NONE',
-  timeoutMs: 30000
+  originalAuthType: 'NONE',
+  credentialAction: 'CLEAR',
+  credentialConfigured: false,
+  credential: {headerName: 'X-API-Key', secret: ''},
+  headerRows: [],
+  timeoutSeconds: 30,
+  status: '0',
+  remark: ''
 })
-
-const rules = {
-  connectorName: [{ required: true, message: '请输入连接器名称', trigger: 'blur' }],
-  baseUrl: [{ required: true, message: '请输入 Base URL', trigger: 'blur' }]
-}
 
 function getList() {
   loading.value = true
@@ -125,42 +117,78 @@ function handleAdd() {
     connectorName: '',
     baseUrl: '',
     authType: 'NONE',
-    timeoutMs: 30000
+    originalAuthType: 'NONE',
+    credentialAction: 'CLEAR',
+    credentialConfigured: false,
+    credential: {headerName: 'X-API-Key', secret: ''},
+    headerRows: [],
+    timeoutSeconds: 30,
+    status: '0',
+    remark: ''
   })
   title.value = '新建 API 连接器'
   open.value = true
 }
 
-function handleUpdate(row) {
-  Object.assign(form, row)
+async function handleUpdate(row) {
+  const response = await getConnector(row.id)
+  const detail = response.data || row
+  Object.assign(form, {
+    id: detail.id,
+    connectorName: detail.connectorName || '',
+    baseUrl: detail.baseUrl || '',
+    authType: detail.authType || 'NONE',
+    originalAuthType: detail.authType || 'NONE',
+    credentialAction: detail.authType === 'NONE' ? 'CLEAR' : 'KEEP',
+    credentialConfigured: !!detail.credentialConfigured,
+    credential: {headerName: 'X-API-Key', secret: ''},
+    headerRows: parseHeaders(detail.defaultHeaders),
+    timeoutSeconds: Math.max(1, Math.round((detail.timeoutMs || 30000) / 1000)),
+    status: detail.status || '0',
+    remark: detail.remark || ''
+  })
   title.value = '修改 API 连接器'
   open.value = true
 }
 
-function submitForm() {
-  formRef.value.validate(valid => {
-    if (valid) {
-      submitLoading.value = true
-      const action = form.id ? updateConnector(form) : addConnector(form)
-      action.then(() => {
-        ElMessage.success('保存成功')
-        open.value = false
-        submitLoading.value = false
-        getList()
-      }).catch(() => {
-        submitLoading.value = false
-      })
-    }
-  })
+async function submitForm() {
+  try {
+    await connectorFormRef.value.validate()
+  } catch (error) {
+    return
+  }
+  submitLoading.value = true
+  try {
+    const payload = connectorFormRef.value.buildPayload()
+    await (form.id ? updateConnector(payload) : addConnector(payload))
+    ElMessage.success('保存成功')
+    open.value = false
+    getList()
+  } finally {
+    submitLoading.value = false
+  }
 }
 
-function handleDelete(row) {
-  ElMessageBox.confirm(`确定删除连接器 "${row.connectorName}" 吗？`, '警告', { type: 'warning' }).then(() => {
-    delConnector(row.id).then(() => {
-      ElMessage.success('删除成功')
-      getList()
-    })
-  })
+function parseHeaders(value) {
+  try {
+    const headers = typeof value === 'string' ? JSON.parse(value || '{}') : (value || {})
+    return Object.entries(headers).map(([name, headerValue]) => ({name, value: String(headerValue)}))
+  } catch (error) {
+    return []
+  }
+}
+
+async function handleDelete(row) {
+  const usageResponse = await getConnectorUsages(row.id)
+  const usageCount = usageResponse.data?.activeBindingCount || 0
+  if (usageCount > 0) {
+    ElMessage.warning(`该连接器仍被 ${usageCount} 个工作流资源绑定使用，请先解除绑定或停用连接器`)
+    return
+  }
+  await ElMessageBox.confirm(`确定删除连接器 "${row.connectorName}" 吗？`, '警告', {type: 'warning'})
+  await delConnector(row.id)
+  ElMessage.success('删除成功')
+  getList()
 }
 
 onMounted(getList)

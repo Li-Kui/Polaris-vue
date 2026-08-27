@@ -1,10 +1,12 @@
 package com.polaris.ai.workflow.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.workflow.application.WorkflowTaskSignal;
 import com.polaris.ai.workflow.domain.*;
 import com.polaris.ai.workflow.mapper.*;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
 import com.polaris.common.exception.ServiceException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +27,7 @@ public class WorkflowExecutionPersistence {
     private final WorkflowOutboxMapper outboxMapper;
     private final ObjectMapper objectMapper;
     private final WorkflowDataRedactor dataRedactor;
+    private final ApplicationEventPublisher eventPublisher;
 
     public WorkflowExecutionPersistence(
             WorkflowExecutionMapper executionMapper,
@@ -35,7 +38,8 @@ public class WorkflowExecutionPersistence {
             WorkflowQuotaService quotaService,
             WorkflowOutboxMapper outboxMapper,
             ObjectMapper objectMapper,
-            WorkflowDataRedactor dataRedactor) {
+            WorkflowDataRedactor dataRedactor,
+            ApplicationEventPublisher eventPublisher) {
         this.executionMapper = executionMapper;
         this.nodeRunMapper = nodeRunMapper;
         this.eventMapper = eventMapper;
@@ -45,6 +49,7 @@ public class WorkflowExecutionPersistence {
         this.outboxMapper = outboxMapper;
         this.objectMapper = objectMapper;
         this.dataRedactor = dataRedactor;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -72,6 +77,7 @@ public class WorkflowExecutionPersistence {
         if (outboxMapper.insert(outbox) != 1) {
             throw new ServiceException("创建工作流事务事件失败");
         }
+        eventPublisher.publishEvent(WorkflowTaskSignal.EXECUTION_QUEUED);
     }
 
     @Transactional(rollbackFor = Exception.class)

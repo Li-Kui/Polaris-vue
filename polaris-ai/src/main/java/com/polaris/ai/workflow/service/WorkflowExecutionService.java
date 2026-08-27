@@ -253,6 +253,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         WorkflowResourceResolver.Resolution resources = resourceResolver.resolve(
                 plan,
+                definition.getId(),
                 principal.tenantId(),
                 environment,
                 principal.type(),

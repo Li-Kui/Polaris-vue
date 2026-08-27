@@ -53,6 +53,7 @@
         :model-value="modelValue?.[field.name]"
         :disabled="disabled"
         :maxlength="field.schema.maxLength"
+        :placeholder="field.schema.placeholder"
         clearable
         @input="update(field.name, $event)"
       />

@@ -47,7 +47,7 @@
       </div>
     </header>
 
-    <div class="workbench-body">
+    <div :class="['workbench-body', {'workbench-body--guided': isApiNode}]">
       <aside class="node-palette">
         <div class="palette-heading"><strong>节点库</strong><small>{{ filteredDescriptors.length }} 个节点</small></div>
         <el-input v-model="descriptorKeyword" placeholder="搜索节点名称或类型" clearable size="small" prefix-icon="Search" />
@@ -115,32 +115,66 @@
         </VueFlow>
       </main>
 
-      <aside class="inspector-panel">
+      <aside :class="['inspector-panel', {'inspector-panel--guided': isApiNode}]">
         <template v-if="selectedNode">
           <div class="inspector-heading">
             <div><span class="inspector-node-icon"><el-icon><component :is="nodeIcon(selectedNode.type)" /></el-icon></span></div>
             <div><strong>{{ selectedNode.name }}</strong><small>{{ selectedNode.id }}</small></div>
             <el-button icon="Close" text circle @click="clearSelection" />
           </div>
-          <el-tabs v-model="selectedInspectorTab" class="inspector-tabs">
-            <el-tab-pane label="配置" name="config">
+          <nav v-if="isApiNode" class="integration-stepper" aria-label="API 节点配置步骤">
+            <button
+              type="button"
+              :class="{active: selectedInspectorTab === 'resource', completed: selectedInspectorTab !== 'resource'}"
+              @click="selectedInspectorTab = 'resource'"
+            >
+              <span>1</span>
+              <strong>连接服务</strong>
+            </button>
+            <i></i>
+            <button
+              type="button"
+              :class="{active: selectedInspectorTab !== 'resource'}"
+              :disabled="!apiConnectorReference || !selectedResourceId(apiConnectorReference)"
+              @click="selectedInspectorTab = 'config'"
+            >
+              <span>2</span>
+              <strong>配置请求</strong>
+            </button>
+          </nav>
+          <div v-if="isApiNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
+            <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">请求参数</button>
+            <button type="button" :class="{active: selectedInspectorTab === 'mapping'}" @click="selectedInspectorTab = 'mapping'">输入输出</button>
+            <button type="button" :class="{active: selectedInspectorTab === 'policy'}" @click="selectedInspectorTab = 'policy'">运行策略</button>
+          </div>
+          <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isApiNode}]">
+            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
-                <WorkflowSchemaConfig
-                  :schema="selectedDescriptor?.configSchema"
-                  :model-value="selectedNode.config"
+                <WorkflowDatabaseQueryStep
+                  v-if="isDatabaseNode"
+                  :config="selectedNode.config"
+                  :selected-resource-id="datasourceReference ? selectedResourceId(datasourceReference) : ''"
                   :disabled="!canEdit"
-                  @update:model-value="schemaConfigChanged"
+                  @update:config="schemaConfigChanged"
                 />
-                <el-collapse>
-                  <el-collapse-item title="高级 JSON 配置" name="json">
-                    <el-input v-model="selectedNodeConfig" type="textarea" :rows="9" :disabled="!canEdit" @input="configChanged" />
-                    <div v-if="configError" class="field-error">{{ configError }}</div>
-                  </el-collapse-item>
-                </el-collapse>
+                <template v-else>
+                  <WorkflowSchemaConfig
+                    :schema="nodeConfigSchema"
+                    :model-value="selectedNode.config"
+                    :disabled="!canEdit"
+                    @update:model-value="schemaConfigChanged"
+                  />
+                  <el-collapse>
+                    <el-collapse-item title="高级 JSON 配置" name="json">
+                      <el-input v-model="selectedNodeConfig" type="textarea" :rows="9" :disabled="!canEdit" @input="configChanged" />
+                      <div v-if="configError" class="field-error">{{ configError }}</div>
+                    </el-collapse-item>
+                  </el-collapse>
+                </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane label="资源" name="resource">
+            <el-tab-pane :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -149,8 +183,35 @@
                 show-icon
                 class="resource-alert"
               />
-              <div v-if="!selectedNode.resourceRefs.length" class="empty-resource">该节点不需要外部资源</div>
-              <div v-for="(reference, index) in selectedNode.resourceRefs" :key="`${reference.kind}:${index}`" class="resource-card">
+              <WorkflowApiConnectionStep
+                v-if="isApiNode && apiConnectorReference"
+                :resources="resourceCatalog.API_CONNECTOR || []"
+                :selected-resource-id="selectedResourceId(apiConnectorReference)"
+                :selected-resource="selectedResource(apiConnectorReference)"
+                :environment="resourceEnvironment"
+                :loading="resourceLoading"
+                :can-edit="canEdit"
+                :appearance="appearance"
+                :error="catalogError"
+                @select="selectApiConnector"
+                @created="createAndSelectApiConnector"
+              />
+              <WorkflowDatasourceConnectionStep
+                v-else-if="isDatabaseNode && datasourceReference"
+                :resources="resourceCatalog.DATASOURCE || []"
+                :selected-resource-id="selectedResourceId(datasourceReference)"
+                :selected-resource="selectedResource(datasourceReference)"
+                :environment="resourceEnvironment"
+                :loading="resourceLoading"
+                :can-edit="canEdit"
+                :appearance="appearance"
+                :error="catalogError"
+                @select="selectDatasource"
+                @created="createAndSelectDatasource"
+              />
+              <template v-else>
+                <div v-if="!selectedNode.resourceRefs.length" class="empty-resource">该节点不需要外部资源</div>
+                <div v-for="(reference, index) in selectedNode.resourceRefs" :key="`${reference.kind}:${index}`" class="resource-card">
                 <div class="resource-card-title">
                   <strong>{{ resourceKindLabel(reference.kind) }}</strong>
                   <span class="resource-card-actions">
@@ -218,7 +279,7 @@
                       </label>
                       <label>
                         <span>内部逻辑标识</span>
-                        <el-input v-model="reference.key" :disabled="!canEdit" @change="resourceKeyChanged" />
+                        <el-input v-model="reference.key" :disabled="!canEdit" @change="resourceKeyChanged(reference)" />
                       </label>
                       <div class="resource-behavior">
                         <span>未绑定时</span>
@@ -236,8 +297,9 @@
                   v-if="!resourceLoading && !(resourceCatalog[reference.kind] || []).length"
                   class="field-hint"
                 >当前操作范围没有可显示的{{ resourceKindLabel(reference.kind) }}。</small>
-              </div>
-              <el-button v-if="canEdit" class="resource-add" plain icon="Plus" @click="addResourceReference">添加扩展资源</el-button>
+                </div>
+                <el-button v-if="canEdit" class="resource-add" plain icon="Plus" @click="addResourceReference">添加扩展资源</el-button>
+              </template>
             </el-tab-pane>
             <el-tab-pane label="输入输出" name="mapping">
               <el-form label-position="top" size="small">
@@ -364,6 +426,9 @@ import {
 } from '@element-plus/icons-vue'
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
 import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
+import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
+import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
+import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -372,6 +437,9 @@ export default {
     Background,
     WorkflowSchemaConfig,
     WorkflowCanvasNode,
+    WorkflowApiConnectionStep,
+    WorkflowDatasourceConnectionStep,
+    WorkflowDatabaseQueryStep,
     ChatDotRound,
     CircleCheck,
     Coin,
@@ -411,6 +479,10 @@ export default {
     canExecute: {
       type: Boolean,
       default: false
+    },
+    appearance: {
+      type: String,
+      default: 'admin'
     }
   },
   emits: ['back', 'saved', 'published'],
@@ -444,6 +516,7 @@ export default {
       resourceCatalog: {},
       catalogError: '',
       resourceBindings: [],
+      pendingResourceBindings: [],
       testDialogOpen: false,
       testStarting: false,
       testInputJson: '{}',
@@ -467,11 +540,49 @@ export default {
     }
   },
   computed: {
+    isApiNode() {
+      return ['http_get', 'http_request'].includes(this.selectedNode?.type)
+    },
+    isDatabaseNode() {
+      return this.selectedNode?.type === 'database_query'
+    },
+    apiConnectorReference() {
+      return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'API_CONNECTOR') || null
+    },
+    datasourceReference() {
+      return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'DATASOURCE') || null
+    },
     selectedDescriptor() {
       if (!this.selectedNode) return null
       return this.descriptors.find(item =>
         item.type === this.selectedNode.type
           && item.handlerVersion === this.selectedNode.typeVersion) || null
+    },
+    nodeConfigSchema() {
+      if (!this.isApiNode) return this.selectedDescriptor?.configSchema || {}
+      const properties = {}
+      if (this.selectedNode?.type === 'http_request') {
+        properties.method = {
+          type: 'string',
+          title: '请求方法',
+          enum: ['POST', 'PUT', 'PATCH', 'DELETE'],
+          description: '写请求仅允许使用 POST、PUT、PATCH 或 DELETE。'
+        }
+      }
+      properties.path = {
+        type: 'string',
+        title: '接口路径',
+        placeholder: '/orders/query',
+        minLength: 1,
+        maxLength: 2048,
+        description: '只填写 Base URL 后面的相对路径，不要重复填写域名；建议以 / 开头。'
+      }
+      return {
+        type: 'object',
+        properties,
+        required: ['path'],
+        additionalProperties: false
+      }
     },
     compensationOptions() {
       if (!this.selectedNode) return []
@@ -689,7 +800,7 @@ export default {
       let id = `${base}_${index}`
       const ids = new Set(this.definition.nodes.map(item => item.id))
       while (ids.has(id)) id = `${base}_${++index}`
-      const resourceReferences = this.defaultResourceReferences(descriptor)
+      const resourceReferences = this.defaultResourceReferences(descriptor, id)
       const node = {
         id,
         type: descriptor.type,
@@ -721,9 +832,12 @@ export default {
       this.markDirty()
     },
     defaultNodeConfig(type) {
+      if (type === 'http_get') return {path: ''}
+      if (type === 'http_request') return {method: 'POST', path: ''}
       if (type === 'loop') return {maxIterations: 10}
       if (type === 'join') return {mode: 'ALL'}
       if (type === 'wait') return {delaySeconds: 60}
+      if (type === 'database_query') return {sql: '', maxRows: 100, queryTimeoutSeconds: 10}
       if (type === 'sub_workflow') {
         return {workflowCode: '', workflowVersionId: '', pollSeconds: 2}
       }
@@ -831,13 +945,13 @@ export default {
         this.mappingError = error.message
       }
     },
-    defaultResourceReferences(descriptor) {
+    defaultResourceReferences(descriptor, nodeId) {
       const keys = {
         MODEL: 'primary_model',
         AGENT: 'primary_agent',
         KNOWLEDGE_BASE: 'primary_knowledge',
-        API_CONNECTOR: 'primary_api',
-        DATASOURCE: 'primary_database'
+        API_CONNECTOR: `api.${nodeId}`,
+        DATASOURCE: `db.${nodeId}`
       }
       if (Array.isArray(descriptor.requiredResourceKinds)
           && descriptor.requiredResourceKinds.length) {
@@ -851,9 +965,9 @@ export default {
         llm: {kind: 'MODEL', key: 'primary_model', required: true},
         agent: {kind: 'AGENT', key: 'primary_agent', required: true},
         knowledge_rag: {kind: 'KNOWLEDGE_BASE', key: 'primary_knowledge', required: true},
-        http_get: {kind: 'API_CONNECTOR', key: 'primary_api', required: true},
-        http_request: {kind: 'API_CONNECTOR', key: 'primary_api', required: true},
-        database_query: {kind: 'DATASOURCE', key: 'primary_database', required: true}
+        http_get: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
+        http_request: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
+        database_query: {kind: 'DATASOURCE', key: `db.${nodeId}`, required: true}
       }
       const value = defaults[descriptor.type]
       return value ? [{...value}] : []
@@ -892,15 +1006,37 @@ export default {
       return [detail, attributes.toolNotice].filter(Boolean).join(' · ')
     },
     selectedResourceId(reference) {
-      return this.resourceBindings.find(binding =>
-        binding.status === 'ACTIVE'
-          && binding.resourceKind === reference.kind
-          && binding.resourceKey === reference.key)?.resourceId || ''
+      return this.bindingForReference(reference)?.resourceId || ''
     },
     selectedResource(reference) {
       const resourceId = this.selectedResourceId(reference)
       return (this.resourceCatalog[reference.kind] || [])
         .find(resource => resource.resourceId === resourceId) || null
+    },
+    bindingForReference(reference) {
+      const pending = this.pendingBindingForReference(reference)
+      if (pending) return pending
+      const matches = this.resourceBindings.filter(binding =>
+        binding.status === 'ACTIVE'
+          && binding.resourceKind === reference.kind
+          && binding.resourceKey === reference.key
+          && binding.environment === this.resourceEnvironment)
+      return matches.find(binding => binding.scopeType === 'WORKFLOW'
+          && binding.definitionId === this.currentDefinition?.id)
+        || matches.find(binding => binding.scopeType === 'OWNER')
+        || null
+    },
+    nodeIdForReference(reference) {
+      return this.definition.nodes.find(node =>
+        Array.isArray(node.resourceRefs) && node.resourceRefs.includes(reference))?.id || ''
+    },
+    pendingBindingForReference(reference) {
+      const nodeId = this.nodeIdForReference(reference)
+      return this.pendingResourceBindings.find(binding =>
+        binding.nodeId === nodeId
+          && binding.resourceKind === reference.kind
+          && binding.resourceKey === reference.key
+          && binding.environment === this.resourceEnvironment) || null
     },
     async refreshResourceContext() {
       this.resourceLoading = true
@@ -922,6 +1058,7 @@ export default {
             : `部分资源目录加载失败：${failedKinds.map(kind => this.resourceKindLabel(kind)).join('、')}`
         }
         const response = await listWorkflowResourceBindings({
+          definitionId: this.currentDefinition?.id,
           environment: this.resourceEnvironment
         })
         this.resourceBindings = response.data || []
@@ -935,14 +1072,45 @@ export default {
         this.$message.warning('请先填写逻辑资源键')
         return
       }
+      if (!this.currentDefinition?.id) {
+        const nodeId = this.nodeIdForReference(reference)
+        const existingIndex = this.pendingResourceBindings.findIndex(binding =>
+          binding.nodeId === nodeId
+            && binding.resourceKind === reference.kind
+            && binding.resourceKey === reference.key
+            && binding.environment === this.resourceEnvironment)
+        const pending = {
+          status: 'ACTIVE',
+          scopeType: 'WORKFLOW',
+          definitionId: null,
+          nodeId,
+          environment: this.resourceEnvironment,
+          resourceKind: reference.kind,
+          resourceKey: reference.key.trim(),
+          resourceId
+        }
+        if (existingIndex >= 0) {
+          this.pendingResourceBindings.splice(existingIndex, 1, pending)
+        } else {
+          this.pendingResourceBindings.push(pending)
+        }
+        this.markDirty()
+        this.refreshCanvasNodeData()
+        this.$message.success(`已选择${this.resourceKindLabel(reference.kind)}，保存工作流后完成关联`)
+        return true
+      }
       const existing = this.resourceBindings.find(binding =>
         binding.resourceKind === reference.kind
           && binding.resourceKey === reference.key
-          && binding.environment === this.resourceEnvironment)
+          && binding.environment === this.resourceEnvironment
+          && binding.scopeType === 'WORKFLOW'
+          && binding.definitionId === this.currentDefinition?.id)
       this.resourceLoading = true
       try {
         await saveWorkflowResourceBinding({
           id: existing?.id || null,
+          definitionId: this.currentDefinition?.id,
+          scopeType: 'WORKFLOW',
           environment: this.resourceEnvironment,
           resourceKind: reference.kind,
           resourceKey: reference.key.trim(),
@@ -951,18 +1119,51 @@ export default {
         })
         await this.refreshResourceContext()
         this.$message.success(`已关联${this.resourceKindLabel(reference.kind)}`)
+        return true
       } finally {
         this.resourceLoading = false
       }
     },
-    resourceKeyChanged() {
+    async selectApiConnector(resourceId) {
+      if (!this.apiConnectorReference) return
+      const selected = await this.bindResource(this.apiConnectorReference, resourceId)
+      if (selected) this.selectedInspectorTab = 'config'
+    },
+    async createAndSelectApiConnector(resourceId) {
+      await this.refreshResourceContext()
+      await this.selectApiConnector(resourceId)
+    },
+    async selectDatasource(resourceId) {
+      if (!this.datasourceReference) return
+      const selected = await this.bindResource(this.datasourceReference, resourceId)
+      if (selected) this.selectedInspectorTab = 'config'
+    },
+    async createAndSelectDatasource(resourceId) {
+      await this.refreshResourceContext()
+      await this.selectDatasource(resourceId)
+    },
+    resourceKeyChanged(reference) {
+      this.updatePendingBindingReference(reference)
       this.markDirty()
       this.refreshCanvasNodeData()
     },
     resourceKindChanged(reference) {
+      this.updatePendingBindingReference(reference)
       reference.key = this.nextResourceKey(reference.kind, reference)
       reference.required = this.isRequiredResourceReference(reference)
-      this.resourceKeyChanged()
+      this.resourceKeyChanged(reference)
+    },
+    updatePendingBindingReference(reference) {
+      if (!reference) return
+      const nodeId = this.nodeIdForReference(reference)
+      const candidates = this.pendingResourceBindings.filter(binding =>
+        binding.nodeId === nodeId
+          && binding.environment === this.resourceEnvironment
+          && (binding.resourceKind === reference.kind || binding.resourceKey === reference.key))
+      if (candidates.length === 1) {
+        candidates[0].resourceKind = reference.kind
+        candidates[0].resourceKey = reference.key.trim()
+      }
     },
     refreshCanvasNodeData() {
       this.definition.nodes.forEach(node => {
@@ -1055,6 +1256,12 @@ export default {
       this.markDirty()
     },
     removeResourceReference(index) {
+      const reference = this.selectedNode.resourceRefs[index]
+      const nodeId = this.selectedNode.id
+      this.pendingResourceBindings = this.pendingResourceBindings.filter(binding =>
+        !(binding.nodeId === nodeId
+          && binding.resourceKind === reference?.kind
+          && binding.resourceKey === reference?.key))
       this.selectedNode.resourceRefs.splice(index, 1)
       this.markDirty()
     },
@@ -1097,6 +1304,8 @@ export default {
     },
     removeSelectedNode() {
       const nodeId = this.selectedNode.id
+      this.pendingResourceBindings = this.pendingResourceBindings
+        .filter(binding => binding.nodeId !== nodeId)
       this.definition.nodes = this.definition.nodes.filter(item => item.id !== nodeId)
       this.definition.nodes.forEach(node => {
         if (node.compensationNodeId === nodeId) delete node.compensationNodeId
@@ -1149,11 +1358,26 @@ export default {
       this.historyRestoring = true
       this.historyIndex = index
       this.definition = JSON.parse(this.history[index])
+      this.reconcilePendingResourceBindings()
       this.buildCanvas()
       this.clearSelection()
       this.dirty = true
       this.$nextTick(() => {
         this.historyRestoring = false
+      })
+    },
+    reconcilePendingResourceBindings() {
+      this.pendingResourceBindings = this.pendingResourceBindings.flatMap(binding => {
+        const node = this.definition.nodes.find(item => item.id === binding.nodeId)
+        const references = node?.resourceRefs || []
+        const reference = references.find(item =>
+          item.kind === binding.resourceKind && item.key === binding.resourceKey)
+          || references.find(item => item.kind === binding.resourceKind)
+        return reference ? [{
+          ...binding,
+          resourceKind: reference.kind,
+          resourceKey: reference.key
+        }] : []
       })
     },
     undo() {
@@ -1180,6 +1404,7 @@ export default {
           response = await createWorkflowDraft(this.definitionJson())
         }
         this.currentDefinition = response.data
+        await this.flushPendingResourceBindings()
         this.dirty = false
         this.$message.success('草稿已保存')
         this.$emit('saved', response.data)
@@ -1189,6 +1414,45 @@ export default {
       } finally {
         this.saving = false
       }
+    },
+    async flushPendingResourceBindings() {
+      if (!this.currentDefinition?.id || !this.pendingResourceBindings.length) return
+      const bindingResponse = await listWorkflowResourceBindings({
+        definitionId: this.currentDefinition.id
+      })
+      const persistedBindings = bindingResponse.data || []
+      for (const pending of [...this.pendingResourceBindings]) {
+        const node = this.definition.nodes.find(item => item.id === pending.nodeId)
+        const references = node?.resourceRefs || []
+        const reference = references.find(item =>
+          item.kind === pending.resourceKind && item.key === pending.resourceKey)
+          || references.find(item => item.kind === pending.resourceKind)
+        if (!reference) {
+          this.pendingResourceBindings = this.pendingResourceBindings
+            .filter(item => item !== pending)
+          continue
+        }
+        const existing = persistedBindings.find(binding =>
+          binding.scopeType === 'WORKFLOW'
+            && binding.definitionId === this.currentDefinition.id
+            && binding.environment === pending.environment
+            && binding.resourceKind === reference.kind
+            && binding.resourceKey === reference.key)
+        const saveResponse = await saveWorkflowResourceBinding({
+          id: existing?.id || null,
+          definitionId: this.currentDefinition.id,
+          scopeType: 'WORKFLOW',
+          environment: pending.environment,
+          resourceKind: reference.kind,
+          resourceKey: reference.key.trim(),
+          resourceId: pending.resourceId,
+          expectedLockVersion: existing?.lockVersion ?? null
+        })
+        if (saveResponse.data) persistedBindings.push(saveResponse.data)
+        this.pendingResourceBindings = this.pendingResourceBindings
+          .filter(item => item !== pending)
+      }
+      await this.refreshResourceContext()
     },
     async validate() {
       if (!this.currentDefinition?.id || this.dirty) {
@@ -1681,6 +1945,10 @@ export default {
   background: var(--workflow-canvas, var(--el-bg-color-page));
 }
 
+.workbench-body--guided {
+  grid-template-columns: 248px minmax(420px, 1fr) minmax(540px, 680px);
+}
+
 .node-palette,
 .inspector-panel {
   padding: 0;
@@ -1853,6 +2121,12 @@ export default {
   border-left-color: var(--workflow-border, var(--el-border-color-lighter));
 }
 
+.inspector-panel--guided {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .inspector-heading {
   min-height: 72px;
   padding: 14px 16px;
@@ -1931,6 +2205,127 @@ export default {
   height: calc(100% - 44px);
   padding: 15px 16px 24px;
   overflow: auto;
+}
+
+.integration-stepper {
+  min-height: 82px;
+  padding: 18px 28px 14px;
+  display: grid;
+  grid-template-columns: auto minmax(48px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.integration-stepper button {
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: transparent;
+  cursor: pointer;
+}
+
+.integration-stepper button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.integration-stepper button > span {
+  width: 29px;
+  height: 29px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 50%;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-surface, var(--el-bg-color));
+  font-size: 12px;
+}
+
+.integration-stepper button > strong {
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.integration-stepper button.active,
+.integration-stepper button.completed {
+  color: var(--workflow-text, var(--el-text-color-primary));
+}
+
+.integration-stepper button.active > span,
+.integration-stepper button.completed > span {
+  border-color: var(--workflow-primary, var(--el-color-primary));
+  color: #fff;
+  background: var(--workflow-primary, var(--el-color-primary));
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--workflow-primary, #625bf6) 20%, transparent);
+}
+
+.integration-stepper > i {
+  height: 1px;
+  background: var(--workflow-border-strong, var(--el-border-color));
+}
+
+.api-config-tabs {
+  padding: 0 28px 10px;
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.api-config-tabs button {
+  position: relative;
+  padding: 0 0 10px;
+  border: 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.api-config-tabs button.active {
+  color: var(--workflow-primary, var(--el-color-primary));
+  font-weight: 650;
+}
+
+.api-config-tabs button.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  content: '';
+  background: var(--workflow-primary, var(--el-color-primary));
+}
+
+.inspector-tabs--guided {
+  min-height: 0;
+  flex: 1;
+  height: auto;
+}
+
+.inspector-tabs--guided :deep(.el-tabs__header) {
+  display: none;
+}
+
+.inspector-tabs--guided :deep(.el-tabs__content) {
+  height: 100%;
+  padding: 10px 28px 24px;
+}
+
+.inspector-tabs--guided :deep(.el-tab-pane) {
+  min-height: 100%;
+}
+
+.inspector-panel--guided .inspector-footer {
+  position: static;
+  width: 100%;
+  flex: 0 0 auto;
 }
 
 .edge-form {
@@ -2362,6 +2757,10 @@ export default {
     grid-template-columns: 220px minmax(440px, 1fr) 320px;
   }
 
+  .workbench-body--guided {
+    grid-template-columns: 210px minmax(340px, 1fr) minmax(480px, 580px);
+  }
+
   .inspector-footer {
     width: 320px;
   }
@@ -2374,6 +2773,10 @@ export default {
 
   .workbench-body {
     grid-template-columns: minmax(420px, 1fr) 320px;
+  }
+
+  .workbench-body--guided {
+    grid-template-columns: minmax(360px, 1fr) minmax(460px, 520px);
   }
 }
 </style>

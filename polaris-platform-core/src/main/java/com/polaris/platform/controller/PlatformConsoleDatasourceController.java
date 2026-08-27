@@ -12,6 +12,9 @@ import com.polaris.common.core.page.Page;
 import com.polaris.common.enums.BusinessType;
 import com.polaris.platform.domain.PlatformDatasource;
 import com.polaris.platform.dto.DatasourceQueryRequest;
+import com.polaris.platform.dto.DatasourceResponse;
+import com.polaris.platform.dto.DatasourceSaveRequest;
+import com.polaris.platform.dto.DatasourceTestResponse;
 import com.polaris.platform.service.IPlatformDatasourceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -40,14 +43,14 @@ public class PlatformConsoleDatasourceController extends BaseController {
      */
     @Operation(summary = "查询当前租户的外部数据源列表")
     @GetMapping("/list")
-    public ResultData<Page<PlatformDatasource>> list(PlatformDatasource datasource) {
+    public ResultData<Page<DatasourceResponse>> list(PlatformDatasource datasource) {
         CallerContext callerContext = CallerContextHolder.get();
         if (callerContext != null && callerContext.getTenantId() != null) {
             datasource.setTenantId(Long.parseLong(callerContext.getTenantId()));
         }
         startPage();
         List<PlatformDatasource> list = platformDatasourceService.selectDatasourceList(datasource);
-        return ResultData.ok(Page.of(PageInfo.of(list)));
+        return ResultData.ok(Page.of(PageInfo.of(list), DatasourceResponse::from));
     }
 
     /**
@@ -55,8 +58,9 @@ public class PlatformConsoleDatasourceController extends BaseController {
      */
     @Operation(summary = "获取外部数据源详细信息")
     @GetMapping("/{id}")
-    public ResultData<PlatformDatasource> getInfo(@PathVariable Long id) {
-        return ResultData.ok(platformDatasourceService.selectDatasourceById(id));
+    public ResultData<DatasourceResponse> getInfo(@PathVariable Long id) {
+        return ResultData.ok(DatasourceResponse.from(
+                platformDatasourceService.selectDatasourceById(id)));
     }
 
     /**
@@ -65,13 +69,11 @@ public class PlatformConsoleDatasourceController extends BaseController {
     @Operation(summary = "新增外部数据源")
     @Log(title = "中台外部数据源管理", businessType = BusinessType.INSERT)
     @PostMapping
-    public ResultData add(@RequestBody PlatformDatasource datasource) {
+    public ResultData<DatasourceResponse> add(@RequestBody DatasourceSaveRequest request) {
         CallerContext callerContext = CallerContextHolder.get();
-        if (callerContext != null && callerContext.getTenantId() != null) {
-            datasource.setTenantId(Long.parseLong(callerContext.getTenantId()));
-            datasource.setCreateBy(callerContext.getUsername());
-        }
-        return toAjaxResult(platformDatasourceService.insertDatasource(datasource));
+        String operator = callerContext == null ? null : callerContext.getUsername();
+        return ResultData.ok(DatasourceResponse.from(
+                platformDatasourceService.insertDatasource(request, operator)));
     }
 
     /**
@@ -80,12 +82,11 @@ public class PlatformConsoleDatasourceController extends BaseController {
     @Operation(summary = "修改外部数据源")
     @Log(title = "中台外部数据源管理", businessType = BusinessType.UPDATE)
     @PutMapping
-    public ResultData edit(@RequestBody PlatformDatasource datasource) {
+    public ResultData<DatasourceResponse> edit(@RequestBody DatasourceSaveRequest request) {
         CallerContext callerContext = CallerContextHolder.get();
-        if (callerContext != null) {
-            datasource.setUpdateBy(callerContext.getUsername());
-        }
-        return toAjaxResult(platformDatasourceService.updateDatasource(datasource));
+        String operator = callerContext == null ? null : callerContext.getUsername();
+        return ResultData.ok(DatasourceResponse.from(
+                platformDatasourceService.updateDatasource(request, operator)));
     }
 
     /**
@@ -98,18 +99,29 @@ public class PlatformConsoleDatasourceController extends BaseController {
         return toAjaxResult(platformDatasourceService.deleteDatasourceById(id));
     }
 
+    /** 查询数据源当前被工作流引用的数量。 */
+    @Operation(summary = "查询数据源引用数量")
+    @GetMapping("/{id}/usages")
+    public ResultData<Map<String, Long>> usages(@PathVariable Long id) {
+        return ResultData.ok(Map.of(
+                "activeBindingCount", platformDatasourceService.countDatasourceUsages(id)));
+    }
+
     /**
      * 测试外部数据源连接
      */
     @Operation(summary = "测试外部数据源连接")
     @PostMapping("/test")
-    public ResultData testConnection(@RequestBody PlatformDatasource datasource) {
-        try {
-            boolean connected = platformDatasourceService.testDatasourceConnection(datasource);
-            return ok(connected ? "连接成功" : "连接失败");
-        } catch (Exception e) {
-            return fail("连接失败: " + e.getMessage());
-        }
+    public ResultData<DatasourceTestResponse> testConnection(
+            @RequestBody DatasourceSaveRequest request) {
+        return ResultData.ok(platformDatasourceService.testDatasourceConnection(request));
+    }
+
+    /** 测试已经保存的当前连接版本。 */
+    @Operation(summary = "测试已保存的数据源连接")
+    @PostMapping("/{id}/test")
+    public ResultData<DatasourceTestResponse> testSavedConnection(@PathVariable Long id) {
+        return ResultData.ok(platformDatasourceService.testSavedDatasourceConnection(id));
     }
 
     /**
@@ -121,7 +133,8 @@ public class PlatformConsoleDatasourceController extends BaseController {
             @PathVariable Long id, @RequestBody DatasourceQueryRequest request) {
         try {
             return ResultData.ok(platformDatasourceService.executeDatasourceQuery(
-                    id, request.getSql(), request.getMaxRows()));
+                    id, request.getSql(), request.getParameters(), request.getMaxRows(),
+                    request.getQueryTimeoutSeconds()));
         } catch (Exception e) {
             return ResultData.fail(e.getMessage());
         }

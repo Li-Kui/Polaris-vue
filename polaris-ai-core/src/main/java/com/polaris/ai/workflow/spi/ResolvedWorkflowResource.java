@@ -7,7 +7,7 @@ public record ResolvedWorkflowResource(
         String kind,
         String key,
         String resourceId,
-        int bindingVersion,
+        int resourceVersion,
         Map<String, Object> attributes,
         Object handle) {
 

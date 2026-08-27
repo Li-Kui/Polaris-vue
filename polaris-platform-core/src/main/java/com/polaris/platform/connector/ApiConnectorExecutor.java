@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -28,12 +29,17 @@ public class ApiConnectorExecutor {
 
     private static final long MAX_RESPONSE_BYTES = 1024L * 1024L;
     private static final Set<String> BLOCKED_HEADERS = Set.of(
+            "authorization", "proxy-authorization", "cookie", "set-cookie",
             "host", "content-length", "connection", "transfer-encoding");
 
     private final ConnectorHttpSafetyPolicy safetyPolicy;
+    private final ConnectorCredentialCipher credentialCipher;
 
-    public ApiConnectorExecutor(ConnectorHttpSafetyPolicy safetyPolicy) {
+    public ApiConnectorExecutor(
+            ConnectorHttpSafetyPolicy safetyPolicy,
+            ConnectorCredentialCipher credentialCipher) {
         this.safetyPolicy = safetyPolicy;
+        this.credentialCipher = credentialCipher;
     }
 
     public ResponseEntity<String> execute(PlatformApiConnector connector, String path, HttpMethod method, Object body, Map<String, String> queryParams) {
@@ -81,8 +87,8 @@ public class ApiConnectorExecutor {
             try {
                 JSONObject json = JSON.parseObject(connector.getDefaultHeaders());
                 json.forEach((k, v) -> {
-                    if (k != null && !BLOCKED_HEADERS.contains(k.toLowerCase())) {
-                        headers.add(k, String.valueOf(v));
+                    if (k != null && !BLOCKED_HEADERS.contains(k.toLowerCase(Locale.ROOT))) {
+                        headers.set(k, String.valueOf(v));
                     }
                 });
             } catch (Exception ignored) {}
@@ -90,15 +96,16 @@ public class ApiConnectorExecutor {
 
         // 注入认证
         String authType = connector.getAuthType();
-        if ("API_KEY".equalsIgnoreCase(authType) && connector.getAuthConfig() != null) {
-            JSONObject auth = JSON.parseObject(connector.getAuthConfig());
+        String decryptedAuthConfig = credentialCipher.decrypt(connector.getAuthConfig());
+        if ("API_KEY".equalsIgnoreCase(authType) && decryptedAuthConfig != null) {
+            JSONObject auth = JSON.parseObject(decryptedAuthConfig);
             String headerName = auth.getString("headerName");
             String apiKey = auth.getString("apiKey");
             if (headerName != null && apiKey != null) {
-                headers.add(headerName, apiKey);
+                headers.set(headerName, apiKey);
             }
-        } else if ("BEARER".equalsIgnoreCase(authType) && connector.getAuthConfig() != null) {
-            JSONObject auth = JSON.parseObject(connector.getAuthConfig());
+        } else if ("BEARER".equalsIgnoreCase(authType) && decryptedAuthConfig != null) {
+            JSONObject auth = JSON.parseObject(decryptedAuthConfig);
             String token = auth.getString("token");
             if (token != null) {
                 headers.setBearerAuth(token);

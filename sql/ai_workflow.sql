@@ -1,6 +1,13 @@
--- 工作流正式表结构。历史工作流数据将直接清理，不做兼容迁移。
+-- ----------------------------------------------------------------------------
+-- Polaris AI 工作流引擎完整数据库建表与初始化脚本
+-- ----------------------------------------------------------------------------
+
+SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
--- 部分 SQL 客户端会逐条执行语句且不保留会话设置，因此历史子表必须先于父表删除。
+
+-- ----------------------------------------------------------------------------
+-- 历史工作流数据及旧表清理
+-- ----------------------------------------------------------------------------
 DROP TABLE IF EXISTS `ai_graph_checkpoint`;
 DROP TABLE IF EXISTS `ai_workflow_approval`;
 DROP TABLE IF EXISTS `ai_workflow_outbox`;
@@ -16,8 +23,16 @@ DROP TABLE IF EXISTS `ai_workflow_execution`;
 DROP TABLE IF EXISTS `ai_workflow_version`;
 DROP TABLE IF EXISTS `ai_workflow_definition`;
 DROP TABLE IF EXISTS `ai_workflow`;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
+-- ============================================================================
+-- 一、工作流核心表结构
+-- ============================================================================
+
+-- ----------------------------
+-- 1. Table structure for ai_workflow_definition (工作流定义及草稿)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_definition` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '定义主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户标识，系统工作流为空',
@@ -50,6 +65,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_definition` (
   CONSTRAINT `chk_wf_definition_status` CHECK (`status` IN ('DRAFT','ACTIVE','DISABLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流定义及可修改草稿';
 
+-- ----------------------------
+-- 2. Table structure for ai_workflow_version (工作流不可变发布版本)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_version` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '不可变版本主键',
   `version_id` varchar(64) NOT NULL COMMENT '服务端生成的公开不可变版本ID',
@@ -79,11 +97,16 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_version` (
   CONSTRAINT `chk_wf_version_status` CHECK (`status` IN ('PUBLISHED','RETIRED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流不可变发布版本';
 
+-- ----------------------------
+-- 3. Table structure for ai_workflow_resource_binding (工作流资源绑定)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_resource_binding` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '资源绑定主键',
   `owner_type` varchar(32) NOT NULL COMMENT '归属类型：SYSTEM系统、TENANT租户',
   `owner_id` bigint(20) NOT NULL COMMENT '归属标识，系统为0，租户为租户标识',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户标识，系统资源绑定为空',
+  `scope_type` varchar(32) NOT NULL DEFAULT 'OWNER' COMMENT '绑定作用域：OWNER所有者共享、WORKFLOW工作流独享',
+  `scope_id` bigint(20) NOT NULL COMMENT '作用域标识：OWNER为所有者标识、WORKFLOW为工作流定义标识',
   `environment` varchar(16) NOT NULL COMMENT '资源环境：DEV开发、TEST测试、PROD生产',
   `resource_kind` varchar(64) NOT NULL COMMENT '资源类型：MODEL模型、AGENT智能体、KNOWLEDGE_BASE知识库、API_CONNECTOR接口连接器、DATASOURCE数据源',
   `resource_key` varchar(128) NOT NULL COMMENT '定义中的逻辑资源标识',
@@ -97,16 +120,20 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_resource_binding` (
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `remark` varchar(500) DEFAULT NULL COMMENT '备注',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_wf_binding_key` (`owner_type`, `owner_id`, `environment`, `resource_kind`, `resource_key`),
-  KEY `idx_wf_binding_resource` (`owner_type`, `owner_id`, `resource_kind`, `resource_id`),
+  UNIQUE KEY `uk_wf_binding_key` (`owner_type`, `owner_id`, `scope_type`, `scope_id`, `environment`, `resource_kind`, `resource_key`),
+  KEY `idx_wf_binding_resource` (`owner_type`, `owner_id`, `scope_type`, `scope_id`, `resource_kind`, `resource_id`),
   CONSTRAINT `chk_wf_binding_owner` CHECK (
     (`owner_type` = 'SYSTEM' AND `owner_id` = 0 AND `tenant_id` IS NULL)
     OR (`owner_type` = 'TENANT' AND `owner_id` = `tenant_id` AND `tenant_id` IS NOT NULL)
   ),
   CONSTRAINT `chk_wf_binding_environment` CHECK (`environment` IN ('DEV','TEST','PROD')),
+  CONSTRAINT `chk_wf_binding_scope` CHECK (`scope_type` IN ('OWNER','WORKFLOW')),
   CONSTRAINT `chk_wf_binding_status` CHECK (`status` IN ('ACTIVE','DISABLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流资源绑定';
 
+-- ----------------------------
+-- 4. Table structure for ai_workflow_execution (工作流持久化执行记录)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_execution` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '执行记录主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -170,6 +197,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_execution` (
   ))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流持久化执行记录';
 
+-- ----------------------------
+-- 5. Table structure for ai_workflow_concurrency_quota (工作流原子并发配额)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_concurrency_quota` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '并发配额主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -185,6 +215,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_concurrency_quota` (
   CONSTRAINT `chk_wf_quota_count` CHECK (`active_count` >= 0 AND `max_active` > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流原子并发配额';
 
+-- ----------------------------
+-- 6. Table structure for ai_workflow_node_run (工作流节点运行尝试记录)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_node_run` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '节点运行主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -219,6 +252,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_node_run` (
   CONSTRAINT `chk_wf_node_side_effect` CHECK (`side_effect` IN ('NONE','READ','WRITE'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流节点运行尝试记录';
 
+-- ----------------------------
+-- 7. Table structure for ai_workflow_checkpoint (工作流恢复检查点)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_checkpoint` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '检查点主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -237,6 +273,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_checkpoint` (
   CONSTRAINT `chk_wf_checkpoint_status` CHECK (`status` IN ('SAFE','INVALID','CONSUMED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流恢复检查点';
 
+-- ----------------------------
+-- 8. Table structure for ai_workflow_event (工作流持久化事件)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_event` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '事件主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -254,6 +293,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_event` (
     REFERENCES `ai_workflow_execution` (`execution_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流持久化事件';
 
+-- ----------------------------
+-- 9. Table structure for ai_workflow_approval_task (工作流审批任务)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_approval_task` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批任务主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -281,6 +323,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_approval_task` (
   CONSTRAINT `chk_wf_approval_status` CHECK (`status` IN ('PENDING','APPROVED','REJECTED','EXPIRED','CANCELLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批任务';
 
+-- ----------------------------
+-- 10. Table structure for ai_workflow_artifact (工作流大体量输出产物)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_artifact` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '产物主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -302,6 +347,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_artifact` (
     REFERENCES `ai_workflow_execution` (`execution_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流大体量输出产物';
 
+-- ----------------------------
+-- 11. Table structure for ai_workflow_trigger (工作流触发器)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_trigger` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '触发器主键',
   `tenant_id` bigint(20) NOT NULL COMMENT '租户ID',
@@ -335,6 +383,9 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_trigger` (
   CONSTRAINT `chk_wf_trigger_status` CHECK (`status` IN ('ACTIVE','DISABLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流触发器';
 
+-- ----------------------------
+-- 12. Table structure for ai_workflow_outbox (工作流事务消息发件箱)
+-- ----------------------------
 CREATE TABLE IF NOT EXISTS `ai_workflow_outbox` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '事务消息主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
@@ -358,19 +409,12 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_outbox` (
   CONSTRAINT `chk_wf_outbox_status` CHECK (`publish_status` IN ('PENDING','PUBLISHING','PUBLISHED','FAILED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流事务消息发件箱';
 
--- ----------------------------
--- 工作流菜单与按钮权限
--- ----------------------------
--- 旧按钮ID的权限语义已经变化，仅清理仍关联旧权限编码的角色授权。
--- 脚本重复执行时，新权限编码对应的角色授权不会被再次清理。
--- 不删除2090，该菜单ID属于“安全策略”，与工作流无关。
-START TRANSACTION;
 
-DELETE role_menu
-FROM `sys_role_menu` role_menu
-INNER JOIN `sys_menu` menu ON menu.`menu_id` = role_menu.`menu_id`
-WHERE menu.`menu_id` IN (2060, 2061, 2062, 2063, 2064, 2065, 2066, 2067, 2068, 2069)
-  AND menu.`perms` LIKE 'ai:workflow:%';
+-- ============================================================================
+-- 二、工作流菜单与权限数据初始化
+-- ============================================================================
+
+START TRANSACTION;
 
 -- 工作流主菜单
 INSERT INTO `sys_menu`

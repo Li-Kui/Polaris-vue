@@ -12,11 +12,14 @@ public interface WorkflowResourceBindingMapper extends BaseMapper<WorkflowResour
 
     @Select("SELECT * FROM ai_workflow_resource_binding "
             + "WHERE owner_type = #{ownerType} AND owner_id = #{ownerId} "
+            + "AND scope_type = #{scopeType} AND scope_id = #{scopeId} "
             + "AND environment = #{environment} AND resource_kind = #{kind} "
             + "AND resource_key = #{key} AND status = 'ACTIVE' LIMIT 1")
     WorkflowResourceBinding selectActive(
             @Param("ownerType") String ownerType,
             @Param("ownerId") Long ownerId,
+            @Param("scopeType") String scopeType,
+            @Param("scopeId") Long scopeId,
             @Param("environment") String environment,
             @Param("kind") String kind,
             @Param("key") String key);

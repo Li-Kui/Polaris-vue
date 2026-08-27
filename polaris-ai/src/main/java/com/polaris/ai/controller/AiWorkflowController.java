@@ -271,8 +271,9 @@ public class AiWorkflowController extends BaseController {
     @PreAuthorize("@workflowAccess.canRead()")
     @GetMapping("/resource-bindings")
     public ResultData<List<WorkflowResourceBindingView>> listResourceBindings(
+            @RequestParam(required = false) Long definitionId,
             @RequestParam(required = false) String environment) {
-        return ok(resourceBindingFacade.list(environment));
+        return ok(resourceBindingFacade.list(definitionId, environment));
     }
 
     @Operation(summary = "查询工作流可用的现有资源")

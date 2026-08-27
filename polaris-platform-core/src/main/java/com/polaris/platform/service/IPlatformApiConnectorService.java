@@ -1,6 +1,7 @@
 package com.polaris.platform.service;
 
 import com.polaris.platform.domain.PlatformApiConnector;
+import com.polaris.platform.dto.ApiConnectorSaveRequest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 
@@ -20,11 +21,13 @@ public interface IPlatformApiConnectorService {
 
     PlatformApiConnector selectConnectorById(Long id);
 
-    int insertConnector(PlatformApiConnector connector);
+    PlatformApiConnector insertConnector(ApiConnectorSaveRequest request, String operator);
 
-    int updateConnector(PlatformApiConnector connector);
+    PlatformApiConnector updateConnector(ApiConnectorSaveRequest request, String operator);
 
     int deleteConnectorById(Long id);
+
+    long countConnectorUsages(Long id);
 
     ResponseEntity<String> invokeConnector(Long id, String path, HttpMethod method, Object body,
                                            Map<String, String> queryParams);

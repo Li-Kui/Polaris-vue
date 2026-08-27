@@ -1,5 +1,8 @@
 package com.polaris.platform.connector;
 
+import net.sf.jsqlparser.parser.CCJSqlParserUtil;
+import net.sf.jsqlparser.statement.Statement;
+import net.sf.jsqlparser.statement.select.Select;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -22,10 +25,7 @@ public class ReadOnlySqlPolicy {
         }
         String value = sql.trim();
         String lower = value.toLowerCase(Locale.ROOT);
-        if (!lower.startsWith("select ") && !lower.startsWith("select\n")
-                && !lower.startsWith("select\t")) {
-            throw new IllegalArgumentException("只读数据源仅允许SELECT语句");
-        }
+        if (!startsWithQuery(lower)) throw new IllegalArgumentException("只读数据源仅允许SELECT或WITH查询");
         if (value.indexOf(';') >= 0 || lower.contains("--") || lower.contains("/*")
                 || lower.contains("*/") || value.indexOf('\0') >= 0) {
             throw new IllegalArgumentException("只读SQL不允许多语句或注释");
@@ -37,7 +37,27 @@ public class ReadOnlySqlPolicy {
                 .matcher(tokenView).find()) {
             throw new IllegalArgumentException("只读SQL包含不允许的关键字或函数");
         }
+        try {
+            Statement statement = CCJSqlParserUtil.parse(value);
+            if (!(statement instanceof Select)) {
+                throw new IllegalArgumentException("只读数据源仅允许查询语句");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("只读SQL语法无效");
+        }
         return value;
+    }
+
+    private boolean startsWithQuery(String value) {
+        return startsWithKeyword(value, "select") || startsWithKeyword(value, "with");
+    }
+
+    private boolean startsWithKeyword(String value, String keyword) {
+        if (!value.startsWith(keyword)) return false;
+        return value.length() == keyword.length()
+                || Character.isWhitespace(value.charAt(keyword.length()));
     }
 
     private String maskStringLiterals(String sql) {

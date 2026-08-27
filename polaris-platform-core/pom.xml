@@ -34,6 +34,12 @@
             <artifactId>spring-webmvc</artifactId>
         </dependency>
 
+        <!-- 工作流外部数据源使用的小型隔离连接池 -->
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

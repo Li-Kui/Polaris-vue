@@ -1,20 +1,26 @@
 package com.polaris.ai.workflow.runtime;
 
+import com.polaris.ai.workflow.application.WorkflowTaskSignal;
 import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.domain.WorkflowExecution;
 import com.polaris.ai.workflow.mapper.WorkflowExecutionMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.lang.management.ManagementFactory;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 轮询持久化执行，并且只调度成功取得隔离令牌的任务。 */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "ai.workflow", name = "enabled", havingValue = "true")
 public class WorkflowWorker {
 
     private final WorkflowExecutionMapper executionMapper;
@@ -22,6 +28,7 @@ public class WorkflowWorker {
     private final WorkflowProperties properties;
     private final ThreadPoolTaskExecutor taskExecutor;
     private final String runnerId;
+    private final AtomicBoolean signalPending = new AtomicBoolean(false);
 
     public WorkflowWorker(
             WorkflowExecutionMapper executionMapper,
@@ -37,9 +44,10 @@ public class WorkflowWorker {
     }
 
     @Scheduled(
-            fixedDelayString = "${ai.workflow.worker-poll-ms:1000}",
-            initialDelayString = "${ai.workflow.worker-poll-ms:1000}")
+            fixedDelayString = "${ai.workflow.worker-poll-ms:30000}",
+            initialDelayString = "${ai.workflow.worker-poll-ms:30000}")
     public void poll() {
+        signalPending.set(false);
         if (!properties.isEnabled() || !properties.isWorkerEnabled()) {
             return;
         }
@@ -60,6 +68,14 @@ public class WorkflowWorker {
             } catch (RuntimeException e) {
                 log.warn("Workflow worker queue rejected execution {}", executionId, e);
             }
+        }
+    }
+
+    /** 事务提交后异步唤醒，带防抖。 */
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void onTaskSignal(WorkflowTaskSignal signal) {
+        if (signalPending.compareAndSet(false, true)) {
+            taskExecutor.execute(this::poll);
         }
     }
 }

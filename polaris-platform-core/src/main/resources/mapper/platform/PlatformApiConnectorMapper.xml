@@ -114,7 +114,8 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="connectorName != null and connectorName != ''">connector_name = #{connectorName},</if>
             <if test="baseUrl != null and baseUrl != ''">base_url = #{baseUrl},</if>
             <if test="authType != null and authType != ''">auth_type = #{authType},</if>
-            <if test="authConfig != null">auth_config = #{authConfig},</if>
+            <!-- 认证改为 NONE 时需要显式写入 NULL，不能保留历史凭证。 -->
+            auth_config = #{authConfig},
             <if test="defaultHeaders != null">default_headers = #{defaultHeaders},</if>
             <if test="timeoutMs != null">timeout_ms = #{timeoutMs},</if>
             <if test="status != null and status != ''">status = #{status},</if>

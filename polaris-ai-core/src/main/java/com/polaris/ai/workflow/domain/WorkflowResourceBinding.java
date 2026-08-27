@@ -20,6 +20,9 @@ public class WorkflowResourceBinding extends BaseEntity {
     private String ownerType;
     private Long ownerId;
     private Long tenantId;
+    /** OWNER 表示所有者共享，WORKFLOW 表示仅当前工作流使用。 */
+    private String scopeType;
+    private Long scopeId;
     private String environment;
     private String resourceKind;
     private String resourceKey;
