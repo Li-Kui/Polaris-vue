@@ -84,7 +84,8 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (definition == null || !"0".equals(definition.getDelFlag())) {
             throw new ServiceException("工作流定义不存在或无权访问");
         }
-        return startDefinition(definition, command.workflowVersionId(), command.input(),
+        return startDefinition(definition, command.workflowVersionId(),
+                WorkflowJsonPayload.toJsonNode(command.input(), objectMapper),
                 command.environment(), command.idempotencyKey());
     }
 
@@ -112,7 +113,8 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (definition == null) {
             throw new ServiceException("工作流不存在、未发布或无权访问");
         }
-        return startDefinition(definition, null, command.input(),
+        return startDefinition(definition, null,
+                WorkflowJsonPayload.toJsonNode(command.input(), objectMapper),
                 command.environment(), command.idempotencyKey());
     }
 

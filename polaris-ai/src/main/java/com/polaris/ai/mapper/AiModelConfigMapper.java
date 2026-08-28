@@ -18,7 +18,7 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
     @InterceptorIgnore(tenantLine = "true")
     @Select({"<script>",
             "SELECT * FROM ai_model_config WHERE id = #{id} AND del_flag = '0'",
-            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
             "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
             "LIMIT 1", "</script>"})
     AiModelConfig selectWorkflowResource(
@@ -26,10 +26,10 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
 
     @InterceptorIgnore(tenantLine = "true")
     @Select({"<script>",
-            "SELECT * FROM ai_model_config WHERE del_flag = '0'",
-            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "SELECT * FROM ai_model_config WHERE del_flag = '0' AND model_type = 'CHAT'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
             "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
-            "ORDER BY CASE WHEN tenant_id IS NULL THEN 1 ELSE 0 END, name, id",
+            "ORDER BY name, id",
             "</script>"})
     List<AiModelConfig> selectWorkflowResources(@Param("tenantId") Long tenantId);
 
@@ -41,11 +41,9 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
             "SELECT * FROM ai_model_config",
             "WHERE model_name = #{modelName} AND model_type = 'CHAT'",
             "AND status = '1' AND del_flag = '0'",
-            "<choose><when test='tenantId != null'>AND (tenant_id = #{tenantId} OR tenant_id IS NULL)</when>",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
             "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
-            "<choose><when test='tenantId != null'>",
-            "ORDER BY CASE WHEN tenant_id = #{tenantId} THEN 0 ELSE 1 END, is_default DESC, id DESC",
-            "</when><otherwise>ORDER BY is_default DESC, id DESC</otherwise></choose>",
+            "ORDER BY is_default DESC, id DESC",
             "LIMIT 1", "</script>"})
     AiModelConfig selectWorkflowResourceByModelName(
             @Param("tenantId") Long tenantId, @Param("modelName") String modelName);

@@ -70,7 +70,15 @@ public class WorkflowAiNodeConfig {
             @Override
             public List<WorkflowResourceOption> listAvailable(
                     WorkflowResourceCatalogRequest request) {
-                return modelMapper.selectWorkflowResources(request.tenantId()).stream()
+                // 中台严格使用当前租户模型；管理端复用模型管理的部门与管理员可见规则。
+                List<AiModelConfig> models = request.tenantId() != null
+                        ? modelMapper.selectWorkflowResources(request.tenantId())
+                        : modelMapper.selectAvailableModelConfigs(
+                                request.deptId(), request.superAdmin());
+                return models.stream()
+                        .filter(model -> request.tenantId() != null
+                                ? Objects.equals(model.getTenantId(), request.tenantId())
+                                : model.getTenantId() == null)
                         .map(model -> {
                             WorkflowResourceRequest validationRequest = resourceRequest(
                                     request, kind(), model.getId());

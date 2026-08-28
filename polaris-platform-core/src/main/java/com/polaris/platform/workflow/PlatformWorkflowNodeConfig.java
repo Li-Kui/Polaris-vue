@@ -370,18 +370,23 @@ public class PlatformWorkflowNodeConfig {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
         ObjectNode properties = schema.putObject("properties");
+        ObjectNode method = properties.putObject("method")
+                .put("type", "string")
+                .put("title", "请求方法")
+                .put("description", getOnly
+                        ? "GET按只读请求执行"
+                        : "POST、PUT、PATCH、DELETE按写请求安全策略执行");
+        if (getOnly) {
+            method.putArray("enum").add("GET");
+        } else {
+            method.putArray("enum").add("POST").add("PUT").add("PATCH").add("DELETE");
+        }
         properties.putObject("path")
                 .put("type", "string")
                 .put("title", "接口路径")
                 .put("description", "只填写Base URL后面的相对路径，建议以/开头")
                 .put("minLength", 1)
                 .put("maxLength", 2048);
-        if (!getOnly) {
-            properties.putObject("method")
-                    .put("type", "string")
-                    .put("title", "请求方法")
-                    .putArray("enum").add("POST").add("PUT").add("PATCH").add("DELETE");
-        }
         schema.putArray("required").add("path");
         schema.put("additionalProperties", false);
         return schema;

@@ -84,7 +84,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         }
         String type = command.triggerType().trim().toUpperCase(Locale.ROOT);
         if (!TYPES.contains(type)) throw new ServiceException("触发类型无效");
-        JsonNode config = command.config();
+        JsonNode config = WorkflowJsonPayload.toJsonNode(command.config(), objectMapper);
         if (config == null || !config.isObject()) throw new ServiceException("触发配置必须是JSON对象");
         validateNoSecrets(config);
         validateConfig(type, config);
@@ -95,8 +95,9 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         trigger.setWorkflowVersionId(command.workflowVersionId());
         trigger.setTriggerType(type);
         trigger.setConfigJson(writeJson(config));
-        trigger.setDedupPolicyJson(command.dedupPolicy() == null
-                ? "{}" : writeJson(command.dedupPolicy()));
+        JsonNode dedupPolicy = WorkflowJsonPayload.toJsonNode(
+                command.dedupPolicy(), objectMapper);
+        trigger.setDedupPolicyJson(dedupPolicy == null ? "{}" : writeJson(dedupPolicy));
         trigger.setStatus("ACTIVE");
         if ("SCHEDULE".equals(type)) {
             trigger.setNextFireTime(nextFireTime(config, new Date()));
@@ -158,7 +159,8 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         String callerKey = command == null ? null : command.idempotencyKey();
         String idempotencyKey = triggerIdempotencyKey(trigger, callerKey);
         JsonNode input = command == null || command.input() == null
-                ? objectMapper.createObjectNode() : command.input();
+                ? objectMapper.createObjectNode()
+                : WorkflowJsonPayload.toJsonNode(command.input(), objectMapper);
         return executionFacade.start(new WorkflowExecutionStartCommand(
                 trigger.getDefinitionId(), trigger.getWorkflowVersionId(), input,
                 "PROD", idempotencyKey));

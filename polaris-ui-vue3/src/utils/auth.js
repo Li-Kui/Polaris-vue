@@ -17,7 +17,15 @@ export function removeToken() {
 
 // === 中台 Token 管理 ===
 export function getPlatformToken() {
-  return Cookies.get(PlatformTokenKey)
+  const token = Cookies.get(PlatformTokenKey)
+  if (!token) return token
+
+  // 中台 JWT 到期后立即清理，避免页面继续携带失效令牌请求业务接口。
+  if (isJwtExpired(token)) {
+    Cookies.remove(PlatformTokenKey)
+    return undefined
+  }
+  return token
 }
 
 export function setPlatformToken(token) {
@@ -26,6 +34,20 @@ export function setPlatformToken(token) {
 
 export function removePlatformToken() {
   return Cookies.remove(PlatformTokenKey)
+}
+
+function isJwtExpired(token) {
+  try {
+    const parts = String(token).split('.')
+    if (parts.length !== 3) return true
+    const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const bytes = Uint8Array.from(atob(padded), char => char.charCodeAt(0))
+    const payload = JSON.parse(new TextDecoder().decode(bytes))
+    return !Number.isFinite(payload.exp) || payload.exp * 1000 <= Date.now()
+  } catch (error) {
+    return true
+  }
 }
 
 /**
@@ -37,17 +59,9 @@ export function getAuthHeaders() {
   const adminToken = getToken()
   const isPlatform = window.location.pathname.startsWith('/platform')
 
-  if (isPlatform && platformToken) {
-    return { 'Platform-Token': platformToken }
+  // 两套控制台严格使用各自令牌，防止中台会话失效后回退到管理端身份。
+  if (isPlatform) {
+    return platformToken ? { 'Platform-Token': platformToken } : {}
   }
-  if (!isPlatform && adminToken) {
-    return { 'Authorization': 'Bearer ' + adminToken }
-  }
-  if (platformToken) {
-    return { 'Platform-Token': platformToken }
-  }
-  if (adminToken) {
-    return { 'Authorization': 'Bearer ' + adminToken }
-  }
-  return {}
+  return adminToken ? { 'Authorization': 'Bearer ' + adminToken } : {}
 }

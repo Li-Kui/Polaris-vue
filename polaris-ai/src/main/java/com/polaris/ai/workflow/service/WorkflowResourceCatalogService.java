@@ -46,7 +46,9 @@ public class WorkflowResourceCatalogService
                 tenantId,
                 normalizeEnvironment(environment),
                 principalType(caller),
-                String.valueOf(CallerUtils.getUserId()));
+                String.valueOf(CallerUtils.getUserId()),
+                caller.getDeptId(),
+                caller.isSuperAdmin());
         List<WorkflowResourceOption> result = provider.listAvailable(request);
         if (result == null) return List.of();
         return result.stream()

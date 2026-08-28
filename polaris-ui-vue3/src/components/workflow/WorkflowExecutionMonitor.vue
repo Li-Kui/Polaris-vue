@@ -19,7 +19,9 @@
       </el-table-column>
       <el-table-column label="状态" width="150" align="center">
         <template #default="{row}">
-          <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
+            <i></i>{{ row.status }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column prop="createTime" label="创建时间" width="180" />
@@ -32,17 +34,39 @@
       </el-table-column>
     </el-table>
 
-    <el-drawer v-model="drawerOpen" title="执行详情" size="70%" destroy-on-close @closed="stopEventStream">
-      <template v-if="selected">
-        <div class="stream-state">
-          <el-tag :type="streamConnected ? 'success' : 'warning'" size="small">
-            {{ streamConnected ? '事件实时连接' : '事件重连中' }}
-          </el-tag>
-          <span>已同步至 #{{ lastSequence }}</span>
+    <el-drawer
+      v-model="drawerOpen"
+      class="workflow-execution-drawer"
+      size="min(1180px, 88%)"
+      destroy-on-close
+      @closed="stopEventStream"
+    >
+      <template #header>
+        <div class="detail-heading">
+          <div>
+            <span class="detail-eyebrow">EXECUTION DETAIL</span>
+            <strong>执行详情</strong>
+          </div>
+          <span v-if="selected" :class="['execution-status', `execution-status--${statusClass(selected.status)}`]">
+            <i></i>{{ selected.status }}
+          </span>
         </div>
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="执行 ID">{{ selected.executionId }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ selected.status }}</el-descriptions-item>
+      </template>
+      <template v-if="selected">
+        <div :class="['stream-state', {
+          'stream-state--connected': streamConnected,
+          'stream-state--terminal': terminal(selected.status)
+        }]">
+          <span class="stream-indicator"><i></i>{{ streamStateLabel }}</span>
+          <span class="stream-sequence">已同步至事件 #{{ lastSequence }}</span>
+        </div>
+        <el-descriptions :column="2" border class="execution-summary">
+          <el-descriptions-item label="执行 ID"><code>{{ selected.executionId }}</code></el-descriptions-item>
+          <el-descriptions-item label="状态">
+            <span :class="['execution-status', `execution-status--${statusClass(selected.status)}`]">
+              <i></i>{{ selected.status }}
+            </span>
+          </el-descriptions-item>
           <el-descriptions-item label="工作流">{{ selected.workflowCode }}</el-descriptions-item>
           <el-descriptions-item label="版本">v{{ selected.versionNo }}</el-descriptions-item>
           <el-descriptions-item label="父执行">{{ selected.parentExecutionId || '-' }}</el-descriptions-item>
@@ -50,18 +74,26 @@
           <el-descriptions-item label="错误码">{{ selected.errorCode || '-' }}</el-descriptions-item>
           <el-descriptions-item label="错误信息">{{ selected.errorMessage || '-' }}</el-descriptions-item>
         </el-descriptions>
-        <el-tabs class="detail-tabs">
-          <el-tab-pane label="节点运行">
-            <el-table :data="nodeRuns" size="small">
+        <el-tabs v-model="detailTab" class="detail-tabs">
+          <el-tab-pane name="nodes">
+            <template #label><span class="detail-tab-label">节点运行<em>{{ nodeRuns.length }}</em></span></template>
+            <el-table :data="nodeRuns" size="small" class="detail-table">
               <el-table-column prop="nodeId" label="节点" min-width="130" />
               <el-table-column prop="attemptNo" label="Attempt" width="90" />
-              <el-table-column prop="status" label="状态" width="130" />
+              <el-table-column label="状态" width="140">
+                <template #default="{row}">
+                  <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
+                    <i></i>{{ row.status }}
+                  </span>
+                </template>
+              </el-table-column>
               <el-table-column prop="sideEffectStatus" label="副作用" width="140" />
               <el-table-column prop="errorMessage" label="错误" min-width="220" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
-          <el-tab-pane label="事件日志">
-            <el-table :data="events" size="small">
+          <el-tab-pane name="events">
+            <template #label><span class="detail-tab-label">事件日志<em>{{ events.length }}</em></span></template>
+            <el-table :data="events" size="small" class="detail-table">
               <el-table-column prop="sequenceNo" label="#" width="70" />
               <el-table-column prop="eventType" label="事件" min-width="190" />
               <el-table-column prop="nodeId" label="节点" min-width="120" />
@@ -69,7 +101,8 @@
               <el-table-column prop="createTime" label="时间" width="180" />
             </el-table>
           </el-tab-pane>
-          <el-tab-pane :label="`执行产物 ${artifacts.length ? `(${artifacts.length})` : ''}`">
+          <el-tab-pane name="artifacts">
+            <template #label><span class="detail-tab-label">执行产物<em>{{ artifacts.length }}</em></span></template>
             <el-empty v-if="!artifacts.length" description="当前执行没有持久化产物" />
             <el-table v-else :data="artifacts" size="small">
               <el-table-column prop="fileName" label="文件名" min-width="220" />
@@ -88,7 +121,7 @@
               </el-table-column>
             </el-table>
           </el-tab-pane>
-          <el-tab-pane label="输入/输出">
+          <el-tab-pane label="输入 / 输出" name="io">
             <div class="json-grid">
               <div><strong>输入</strong><pre>{{ prettyJson(selected.inputJson) }}</pre></div>
               <div><strong>输出</strong><pre>{{ prettyJson(selected.outputJson) }}</pre></div>
@@ -137,7 +170,14 @@ export default {
       reconnectTimer: null,
       refreshTimer: null,
       streamConnected: false,
-      lastSequence: 0
+      lastSequence: 0,
+      detailTab: 'nodes'
+    }
+  },
+  computed: {
+    streamStateLabel() {
+      if (this.terminal(this.selected?.status)) return '执行已结束'
+      return this.streamConnected ? '事件实时连接' : '事件重连中'
     }
   },
   created() {
@@ -169,6 +209,7 @@ export default {
       this.artifacts = artifacts.data || []
       this.lastSequence = this.events.reduce((maximum, item) =>
         Math.max(maximum, item.sequenceNo || 0), 0)
+      this.detailTab = 'nodes'
       this.drawerOpen = true
       this.startEventStream()
     },
@@ -197,11 +238,11 @@ export default {
     retryable(status) {
       return ['FAILED', 'CANCELLED', 'REJECTED'].includes(status)
     },
-    statusType(status) {
+    statusClass(status) {
       if (status === 'SUCCEEDED') return 'success'
       if (['FAILED', 'REJECTED', 'NEEDS_ATTENTION'].includes(status)) return 'danger'
-      if (status === 'CANCELLED') return 'info'
-      return 'warning'
+      if (status === 'CANCELLED') return 'neutral'
+      return 'running'
     },
     formatBytes(value) {
       const bytes = Number(value || 0)
@@ -315,16 +356,202 @@ export default {
 }
 
 .detail-tabs {
-  margin-top: 18px;
+  margin-top: 20px;
+}
+
+.detail-heading {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detail-heading > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.detail-heading strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 20px;
+}
+
+.detail-eyebrow {
+  color: var(--workflow-primary, var(--el-color-primary));
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
 }
 
 .stream-state {
+  min-height: 40px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  color: var(--el-text-color-secondary);
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  border: 1px solid color-mix(in srgb, #d99215 24%, var(--workflow-border, var(--el-border-color-lighter)));
+  border-radius: 9px;
+  color: #a76508;
+  background: color-mix(in srgb, #f5a524 8%, var(--workflow-surface, var(--el-bg-color)));
   font-size: 12px;
+}
+
+.stream-state--connected {
+  border-color: color-mix(in srgb, #10a36e 24%, var(--workflow-border, var(--el-border-color-lighter)));
+  color: #087c55;
+  background: color-mix(in srgb, #10a36e 8%, var(--workflow-surface, var(--el-bg-color)));
+}
+
+.stream-state--terminal {
+  border-color: var(--workflow-border-strong, var(--el-border-color));
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+}
+
+.stream-indicator,
+.execution-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.stream-indicator i,
+.execution-status i {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.stream-sequence {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+}
+
+.execution-status {
+  padding: 5px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.execution-status--success {
+  color: #087c55;
+  background: color-mix(in srgb, #10a36e 10%, var(--workflow-surface, #fff));
+}
+
+.execution-status--danger {
+  color: #d63848;
+  background: color-mix(in srgb, #ef5261 9%, var(--workflow-surface, #fff));
+}
+
+.execution-status--running {
+  color: #a76508;
+  background: color-mix(in srgb, #f5a524 10%, var(--workflow-surface, #fff));
+}
+
+.execution-status--neutral {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-light));
+}
+
+.execution-summary {
+  overflow: hidden;
+  border-radius: 11px;
+}
+
+.execution-summary :deep(.el-descriptions__label.el-descriptions__cell) {
+  width: 128px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+  font-weight: 700;
+}
+
+.execution-summary :deep(.el-descriptions__content.el-descriptions__cell) {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface, var(--el-bg-color));
+  overflow-wrap: anywhere;
+}
+
+.execution-summary code {
+  color: var(--workflow-text, var(--el-text-color-primary));
+}
+
+.detail-tabs :deep(.el-tabs__header) {
+  margin-bottom: 14px;
+}
+
+.detail-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.detail-tabs :deep(.el-tabs__item) {
+  height: 46px;
+  padding: 0 18px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-weight: 650;
+}
+
+.detail-tabs :deep(.el-tabs__item:hover),
+.detail-tabs :deep(.el-tabs__item.is-active) {
+  color: var(--workflow-primary, var(--el-color-primary));
+}
+
+.detail-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--workflow-primary, var(--el-color-primary));
+}
+
+.detail-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.detail-tab-label em {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: inherit;
+  background: var(--workflow-muted, var(--el-fill-color-light));
+  font-size: 10px;
+  font-style: normal;
+}
+
+.detail-tabs :deep(.el-tabs__item.is-active) .detail-tab-label em {
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+}
+
+.detail-table {
+  overflow: hidden;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 10px;
+}
+
+.detail-table :deep(th.el-table__cell) {
+  height: 44px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+}
+
+.detail-table :deep(td.el-table__cell) {
+  height: 48px;
 }
 
 .json-grid {
@@ -340,6 +567,22 @@ export default {
   background: var(--el-fill-color-light);
 }
 
+:global(.workflow-execution-drawer.el-drawer) {
+  background: var(--workflow-surface, var(--el-bg-color));
+  box-shadow: -18px 0 50px rgb(15 23 42 / 16%);
+}
+
+:global(.workflow-execution-drawer .el-drawer__header) {
+  min-height: 76px;
+  margin: 0;
+  padding: 15px 24px;
+  border-bottom: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+}
+
+:global(.workflow-execution-drawer .el-drawer__body) {
+  padding: 20px 24px 32px;
+}
+
 @media (max-width: 760px) {
   .monitor-subtitle {
     display: none;
@@ -347,6 +590,30 @@ export default {
 
   .json-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stream-state {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-block: 10px;
+  }
+
+  .execution-summary :deep(.el-descriptions__body .el-descriptions__table) {
+    display: block;
+  }
+
+  .detail-tabs :deep(.el-tabs__nav-wrap) {
+    overflow-x: auto;
+  }
+
+  :global(.workflow-execution-drawer.el-drawer) {
+    width: 96% !important;
+  }
+
+  :global(.workflow-execution-drawer .el-drawer__header),
+  :global(.workflow-execution-drawer .el-drawer__body) {
+    padding-right: 16px;
+    padding-left: 16px;
   }
 }
 </style>

@@ -10,7 +10,7 @@
             <span class="version-label">r{{ currentDefinition?.draftRevision || 0 }}</span>
             <span v-if="dirty" class="dirty-state">未保存</span>
           </div>
-          <code>{{ definition.metadata.code || '保存后生成工作流标识' }}</code>
+          <code>{{ definition.metadata.code || '首次保存时自动生成编码' }}</code>
         </div>
       </div>
       <div class="header-context">
@@ -47,7 +47,10 @@
       </div>
     </header>
 
-    <div :class="['workbench-body', {'workbench-body--guided': isApiNode}]">
+    <div :class="['workbench-body', {
+      'workbench-body--guided': isApiNode,
+      'workbench-body--mapping': isMappingEditorOpen
+    }]">
       <aside class="node-palette">
         <div class="palette-heading"><strong>节点库</strong><small>{{ filteredDescriptors.length }} 个节点</small></div>
         <el-input v-model="descriptorKeyword" placeholder="搜索节点名称或类型" clearable size="small" prefix-icon="Search" />
@@ -115,7 +118,10 @@
         </VueFlow>
       </main>
 
-      <aside :class="['inspector-panel', {'inspector-panel--guided': isApiNode}]">
+      <aside :class="['inspector-panel', {
+        'inspector-panel--guided': isApiNode,
+        'inspector-panel--mapping': isMappingEditorOpen
+      }]">
         <template v-if="selectedNode">
           <div class="inspector-heading">
             <div><span class="inspector-node-icon"><el-icon><component :is="nodeIcon(selectedNode.type)" /></el-icon></span></div>
@@ -302,13 +308,17 @@
               </template>
             </el-tab-pane>
             <el-tab-pane label="输入输出" name="mapping">
-              <el-form label-position="top" size="small">
-                <el-form-item label="输入映射 JSON">
-                  <el-input v-model="selectedNodeInputMapping" type="textarea" :rows="13" :disabled="!canEdit" placeholder='{"prompt":{"expression":"$.input.question"}}' @input="inputMappingChanged" />
-                  <div v-if="mappingError" class="field-error">{{ mappingError }}</div>
-                </el-form-item>
-                <el-alert title="可引用输入、环境、执行信息及上游节点输出，保存前会进行表达式校验。" type="info" :closable="false" />
-              </el-form>
+              <WorkflowInputMappingEditor
+                :model-value="selectedNode.inputMapping || {}"
+                :json-value="selectedNodeInputMapping"
+                :definition="definition"
+                :selected-node="selectedNode"
+                :descriptors="descriptors"
+                :disabled="!canEdit"
+                :mapping-error="mappingError"
+                @update:model-value="visualInputMappingChanged"
+                @json-change="rawInputMappingChanged"
+              />
             </el-tab-pane>
             <el-tab-pane label="运行策略" name="policy">
               <el-form label-position="top" size="small">
@@ -351,8 +361,19 @@
         <template v-else>
           <div class="inspector-heading simple"><div><strong>工作流设置</strong><small>全局运行与预算策略</small></div></div>
           <el-form label-position="top" size="small" class="edge-form">
-            <el-form-item label="名称"><el-input v-model="definition.metadata.name" :disabled="!canEdit" @input="markDirty" /></el-form-item>
-            <el-form-item label="编码"><el-input v-model="definition.metadata.code" :disabled="!!currentDefinition?.id || !canEdit" @input="markDirty" /></el-form-item>
+            <el-form-item label="名称" required :error="workflowNameError">
+              <el-input v-model="definition.metadata.name" maxlength="128" :disabled="!canEdit" @input="workflowNameChanged" />
+            </el-form-item>
+            <el-form-item label="编码" :error="workflowCodeError">
+              <el-input
+                v-model="definition.metadata.code"
+                maxlength="64"
+                placeholder="留空将在首次保存时自动生成"
+                :disabled="!!currentDefinition?.id || !canEdit"
+                @input="workflowCodeChanged"
+              />
+              <small class="field-hint">字母开头，只能包含字母、数字、点、横线和下划线；创建后不可修改。</small>
+            </el-form-item>
             <el-form-item label="描述"><el-input v-model="definition.metadata.description" type="textarea" :rows="4" :disabled="!canEdit" @input="markDirty" /></el-form-item>
             <el-form-item label="最大节点运行数"><el-input-number v-model="definition.policies.maxNodeRuns" :min="1" :max="10000" :disabled="!canEdit" style="width: 100%" @change="markDirty" /></el-form-item>
             <el-form-item label="最大并行数"><el-input-number v-model="definition.policies.maxParallelism" :min="1" :max="100" :disabled="!canEdit" style="width: 100%" @change="markDirty" /></el-form-item>
@@ -429,6 +450,7 @@ import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
 import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
+import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -440,6 +462,7 @@ export default {
     WorkflowApiConnectionStep,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
+    WorkflowInputMappingEditor,
     ChatDotRound,
     CircleCheck,
     Coin,
@@ -498,6 +521,8 @@ export default {
       selectedNodeInputMapping: '{}',
       configError: '',
       mappingError: '',
+      workflowNameError: '',
+      workflowCodeError: '',
       descriptorKeyword: '',
       descriptorCategory: 'all',
       selectedInspectorTab: 'config',
@@ -546,6 +571,9 @@ export default {
     isDatabaseNode() {
       return this.selectedNode?.type === 'database_query'
     },
+    isMappingEditorOpen() {
+      return !!this.selectedNode && this.selectedInspectorTab === 'mapping'
+    },
     apiConnectorReference() {
       return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'API_CONNECTOR') || null
     },
@@ -560,13 +588,12 @@ export default {
     },
     nodeConfigSchema() {
       if (!this.isApiNode) return this.selectedDescriptor?.configSchema || {}
-      const properties = {}
-      if (this.selectedNode?.type === 'http_request') {
-        properties.method = {
+      const properties = {
+        method: {
           type: 'string',
           title: '请求方法',
-          enum: ['POST', 'PUT', 'PATCH', 'DELETE'],
-          description: '写请求仅允许使用 POST、PUT、PATCH 或 DELETE。'
+          enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+          description: 'GET 按只读请求执行，其他方法按写请求安全策略执行。'
         }
       }
       properties.path = {
@@ -580,7 +607,7 @@ export default {
       return {
         type: 'object',
         properties,
-        required: ['path'],
+        required: ['method', 'path'],
         additionalProperties: false
       }
     },
@@ -601,12 +628,31 @@ export default {
     },
     filteredDescriptors() {
       const keyword = this.descriptorKeyword.trim().toLowerCase()
-      return this.descriptors.filter(item => {
+      let httpDescriptorAdded = false
+      const paletteDescriptors = this.descriptors.reduce((result, item) => {
+        if (!['http_get', 'http_request'].includes(item.type)) {
+          result.push(item)
+          return result
+        }
+        if (!httpDescriptorAdded) {
+          const descriptor = this.descriptors.find(candidate => candidate.type === 'http_get') || item
+          result.push({
+            ...descriptor,
+            displayName: 'HTTP 请求',
+            unifiedHttp: true,
+            searchKeywords: 'http_get http_request get post put patch delete'
+          })
+          httpDescriptorAdded = true
+        }
+        return result
+      }, [])
+      return paletteDescriptors.filter(item => {
         const categoryMatched = this.descriptorCategory === 'all'
           || String(item.category || 'general').toLowerCase() === this.descriptorCategory
         const keywordMatched = !keyword
           || item.displayName?.toLowerCase().includes(keyword)
           || item.type?.toLowerCase().includes(keyword)
+          || item.searchKeywords?.includes(keyword)
         return categoryMatched && keywordMatched
       })
     },
@@ -659,6 +705,9 @@ export default {
       return icons[type] || 'Operation'
     },
     descriptorDescription(descriptor) {
+      if (descriptor.unifiedHttp) {
+        return '调用外部 API，支持 GET、POST、PUT、PATCH、DELETE'
+      }
       const descriptions = {
         llm: '调用现有大模型理解与生成',
         agent: '运行已配置的 AI 智能体',
@@ -720,6 +769,7 @@ export default {
       } else {
         this.definition = this.createEmptyDefinition()
       }
+      this.normalizeHttpNodeConfigs()
       this.buildCanvas()
       this.dirty = false
       this.resetHistory()
@@ -832,7 +882,7 @@ export default {
       this.markDirty()
     },
     defaultNodeConfig(type) {
-      if (type === 'http_get') return {path: ''}
+      if (type === 'http_get') return {method: 'GET', path: ''}
       if (type === 'http_request') return {method: 'POST', path: ''}
       if (type === 'loop') return {maxIterations: 10}
       if (type === 'join') return {mode: 'ALL'}
@@ -920,6 +970,7 @@ export default {
           throw new Error('配置必须是 JSON 对象')
         }
         this.selectedNode.config = value
+        this.syncHttpNodeType(value.method)
         this.configError = ''
         this.markDirty()
       } catch (error) {
@@ -928,9 +979,41 @@ export default {
     },
     schemaConfigChanged(value) {
       this.selectedNode.config = value
+      this.syncHttpNodeType(value?.method)
       this.selectedNodeConfig = JSON.stringify(value, null, 2)
       this.configError = ''
       this.markDirty()
+    },
+    normalizeHttpNodeConfigs() {
+      const nodes = this.definition.nodes || []
+      nodes.forEach(node => {
+        if (!['http_get', 'http_request'].includes(node.type)) return
+        if (!node.config || Array.isArray(node.config) || typeof node.config !== 'object') {
+          node.config = {}
+        }
+        if (!node.config.method) {
+          node.config.method = node.type === 'http_get' ? 'GET' : 'POST'
+        }
+      })
+    },
+    syncHttpNodeType(method) {
+      if (!this.isApiNode || !method) return
+      const normalizedMethod = String(method).toUpperCase()
+      const targetType = normalizedMethod === 'GET' ? 'http_get' : 'http_request'
+      if (this.selectedNode.type === targetType) return
+      const descriptor = this.descriptors.find(item => item.type === targetType)
+      if (!descriptor) {
+        this.$message.error(`当前环境未提供 ${targetType} 节点处理器`)
+        return
+      }
+      this.selectedNode.type = targetType
+      this.selectedNode.typeVersion = descriptor.handlerVersion
+      if (targetType === 'http_request') {
+        this.selectedNode.onError = 'FAIL'
+        delete this.selectedNode.retryPolicy
+      }
+      const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
+      if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
     },
     inputMappingChanged() {
       try {
@@ -944,6 +1027,18 @@ export default {
       } catch (error) {
         this.mappingError = error.message
       }
+    },
+    visualInputMappingChanged(value) {
+      this.selectedNode.inputMapping = value
+      this.selectedNodeInputMapping = JSON.stringify(value, null, 2)
+      this.mappingError = ''
+      const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
+      if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
+      this.markDirty()
+    },
+    rawInputMappingChanged(value) {
+      this.selectedNodeInputMapping = value
+      this.inputMappingChanged()
     },
     defaultResourceReferences(descriptor, nodeId) {
       const keys = {
@@ -1391,6 +1486,7 @@ export default {
     },
     async saveDraft() {
       if (!this.canEdit || this.configError || this.mappingError) return false
+      if (!this.validateWorkflowMetadata()) return false
       this.saving = true
       try {
         let response
@@ -1414,6 +1510,48 @@ export default {
       } finally {
         this.saving = false
       }
+    },
+    validateWorkflowMetadata() {
+      const name = String(this.definition.metadata.name || '').trim()
+      if (!name || name.length > 128) {
+        this.workflowNameError = '工作流名称不能为空且不能超过 128 个字符'
+        this.clearSelection()
+        this.$message.warning(this.workflowNameError)
+        return false
+      }
+      this.workflowNameError = ''
+      let code = String(this.definition.metadata.code || '').trim()
+      if (!code && !this.currentDefinition?.id) {
+        code = this.generateWorkflowCode(name)
+        this.definition.metadata.code = code
+      }
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(code)) {
+        this.workflowCodeError = '编码必须以字母开头，且只能包含字母、数字、点、横线和下划线'
+        this.clearSelection()
+        this.$message.warning(this.workflowCodeError)
+        return false
+      }
+      this.definition.metadata.name = name
+      this.definition.metadata.code = code
+      this.workflowCodeError = ''
+      return true
+    },
+    generateWorkflowCode(name) {
+      const normalized = name.normalize('NFKD')
+        .replace(/[^A-Za-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .toLowerCase()
+      const base = /^[a-z]/i.test(normalized) ? normalized : 'workflow'
+      const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+      return `${base.slice(0, 48)}_${suffix}`.slice(0, 64)
+    },
+    workflowNameChanged() {
+      this.workflowNameError = ''
+      this.markDirty()
+    },
+    workflowCodeChanged() {
+      this.workflowCodeError = ''
+      this.markDirty()
     },
     async flushPendingResourceBindings() {
       if (!this.currentDefinition?.id || !this.pendingResourceBindings.length) return
@@ -1949,6 +2087,10 @@ export default {
   grid-template-columns: 248px minmax(420px, 1fr) minmax(540px, 680px);
 }
 
+.workbench-body--mapping {
+  grid-template-columns: 248px minmax(380px, 1fr) minmax(680px, 760px);
+}
+
 .node-palette,
 .inspector-panel {
   padding: 0;
@@ -1978,15 +2120,20 @@ export default {
 
 .palette-tabs {
   margin: 12px 0;
+  padding: 3px;
   display: flex;
-  gap: 2px;
+  gap: 3px;
   overflow-x: auto;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 9px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
 }
 
 .palette-tabs button {
-  padding: 5px 9px;
-  border: 0;
-  border-radius: 7px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   background: transparent;
   font-size: 11px;
@@ -1995,8 +2142,10 @@ export default {
 
 .palette-tabs button.active {
   color: var(--workflow-primary, var(--el-color-primary));
-  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
-  font-weight: 650;
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 22%, transparent);
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+  box-shadow: 0 2px 7px rgb(15 23 42 / 8%);
+  font-weight: 700;
 }
 
 .descriptor-list {
@@ -2125,6 +2274,30 @@ export default {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.inspector-panel--mapping {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: -12px 0 34px rgb(42 34 110 / 6%);
+}
+
+.inspector-panel--mapping .inspector-tabs {
+  min-height: 0;
+  flex: 1;
+  height: auto;
+}
+
+.inspector-panel--mapping .inspector-tabs :deep(.el-tabs__content) {
+  min-height: 0;
+  padding-bottom: 36px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.inspector-panel--mapping .inspector-tabs :deep(.el-tab-pane) {
+  min-height: 100%;
 }
 
 .inspector-heading {
@@ -2271,16 +2444,21 @@ export default {
 }
 
 .api-config-tabs {
-  padding: 0 28px 10px;
+  margin: 0 28px 10px;
+  padding: 4px;
   display: flex;
-  gap: 18px;
-  border-bottom: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  gap: 4px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
 }
 
 .api-config-tabs button {
-  position: relative;
-  padding: 0 0 10px;
-  border: 0;
+  min-height: 32px;
+  padding: 0 13px;
+  flex: 1;
+  border: 1px solid transparent;
+  border-radius: 7px;
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   background: transparent;
   font-size: 12px;
@@ -2289,18 +2467,14 @@ export default {
 
 .api-config-tabs button.active {
   color: var(--workflow-primary, var(--el-color-primary));
-  font-weight: 650;
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 22%, transparent);
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+  box-shadow: 0 2px 8px rgb(15 23 42 / 8%);
+  font-weight: 700;
 }
 
 .api-config-tabs button.active::after {
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 2px;
-  border-radius: 2px;
-  content: '';
-  background: var(--workflow-primary, var(--el-color-primary));
+  display: none;
 }
 
 .inspector-tabs--guided {
@@ -2322,7 +2496,8 @@ export default {
   min-height: 100%;
 }
 
-.inspector-panel--guided .inspector-footer {
+.inspector-panel--guided .inspector-footer,
+.inspector-panel--mapping .inspector-footer {
   position: static;
   width: 100%;
   flex: 0 0 auto;
@@ -2646,11 +2821,12 @@ export default {
 }
 
 :global(html:not(.dark) body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option strong) {
-  color: #fff !important;
+  color: var(--workflow-primary, #625bf6) !important;
 }
 
 :global(html:not(.dark) body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option small) {
-  color: rgb(255 255 255 / 86%) !important;
+  color: var(--el-text-color-primary) !important;
+  opacity: 0.8;
 }
 
 :global(html.dark .workflow-resource-popper.el-popper) {
@@ -2761,6 +2937,10 @@ export default {
     grid-template-columns: 210px minmax(340px, 1fr) minmax(480px, 580px);
   }
 
+  .workbench-body--mapping {
+    grid-template-columns: 210px minmax(320px, 1fr) minmax(600px, 660px);
+  }
+
   .inspector-footer {
     width: 320px;
   }
@@ -2777,6 +2957,36 @@ export default {
 
   .workbench-body--guided {
     grid-template-columns: minmax(360px, 1fr) minmax(460px, 520px);
+  }
+
+  .workbench-body--mapping {
+    grid-template-columns: minmax(320px, 1fr) minmax(560px, 620px);
+  }
+}
+
+@media (max-width: 920px) {
+  .workbench-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header-context {
+    grid-column: auto;
+    justify-content: flex-start;
+  }
+
+  .header-actions {
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+
+  .header-actions :deep(.el-button),
+  .validation-state {
+    flex: 0 0 auto;
+  }
+
+  .workbench-body--mapping {
+    grid-template-columns: minmax(280px, 38%) minmax(520px, 62%);
+    overflow-x: auto;
   }
 }
 </style>

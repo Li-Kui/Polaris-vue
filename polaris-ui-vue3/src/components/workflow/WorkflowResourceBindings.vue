@@ -1,9 +1,12 @@
 <template>
   <div class="binding-page">
     <div class="page-header">
-      <div>
+      <div class="page-heading">
         <el-button icon="Back" circle @click="$emit('back')" />
-        <span class="page-title">工作流资源绑定</span>
+        <div>
+          <span class="page-title">工作流资源绑定</span>
+          <small>按环境管理逻辑资源与实际资源的映射关系</small>
+        </div>
       </div>
       <div class="header-actions">
         <el-select v-model="environment" style="width: 120px" @change="loadBindings">
@@ -24,16 +27,31 @@
       class="binding-tip"
     />
 
-    <el-table v-loading="loading" :data="bindings" class="polaris-el-table">
-      <el-table-column prop="environment" label="环境" width="100" />
-      <el-table-column label="作用范围" width="130">
+    <div class="binding-table-frame">
+      <el-table v-loading="loading" :data="bindings" class="polaris-el-table binding-table">
+      <el-table-column label="环境" width="110">
         <template #default="{row}">
-          <el-tag :type="row.scopeType === 'WORKFLOW' ? 'primary' : 'info'" size="small">
-            {{ scopeLabel(row.scopeType) }}
-          </el-tag>
+          <span :class="['environment-badge', `environment-badge--${row.environment?.toLowerCase()}`]">
+            {{ row.environment }}
+          </span>
         </template>
       </el-table-column>
-      <el-table-column prop="resourceKind" label="资源类型" width="180" />
+      <el-table-column label="作用范围" width="150">
+        <template #default="{row}">
+          <span :class="['scope-badge', {'scope-badge--workflow': row.scopeType === 'WORKFLOW'}]">
+            <i></i>
+            {{ scopeLabel(row.scopeType) }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column label="资源类型" width="180">
+        <template #default="{row}">
+          <div class="resource-kind">
+            <strong>{{ resourceKindLabel(row.resourceKind) }}</strong>
+            <code>{{ row.resourceKind }}</code>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="resourceKey" label="逻辑键" min-width="180" />
       <el-table-column label="已关联资源" min-width="240">
         <template #default="{row}">
@@ -48,7 +66,9 @@
       </el-table-column>
       <el-table-column label="状态" width="100" align="center">
         <template #default="{row}">
-          <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'">{{ row.status }}</el-tag>
+          <span :class="['status-badge', {'status-badge--active': row.status === 'ACTIVE'}]">
+            <i></i>{{ row.status === 'ACTIVE' ? '已启用' : '已停用' }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column v-if="canEdit" label="操作" width="150" align="center" fixed="right">
@@ -57,17 +77,26 @@
           <el-button v-if="row.status === 'ACTIVE'" link type="danger" @click="disable(row)">停用</el-button>
         </template>
       </el-table-column>
-    </el-table>
+      <template #empty>
+        <el-empty description="当前环境暂无资源绑定" :image-size="72" />
+      </template>
+      </el-table>
+    </div>
 
     <el-dialog v-model="dialogOpen" :title="form.id ? '修改资源绑定' : '新增资源绑定'" width="560px">
       <el-form label-width="110px">
         <el-form-item label="作用范围">
-          <el-input :model-value="scopeLabel(form.scopeType)" disabled />
-          <small class="scope-hint">
-            {{ form.scopeType === 'WORKFLOW'
-              ? `该绑定仅供工作流 #${form.definitionId} 使用`
-              : '共享绑定可被当前租户下的工作流作为默认值使用' }}
-          </small>
+          <div :class="['scope-summary', {'scope-summary--workflow': form.scopeType === 'WORKFLOW'}]">
+            <span class="scope-summary-icon"><el-icon><Connection /></el-icon></span>
+            <span>
+              <strong>{{ scopeLabel(form.scopeType) }}</strong>
+              <small>
+                {{ form.scopeType === 'WORKFLOW'
+                  ? `仅供工作流 #${form.definitionId} 使用，优先于共享绑定`
+                  : '可被当前租户下的工作流作为默认资源使用' }}
+              </small>
+            </span>
+          </div>
         </el-form-item>
         <el-form-item label="环境">
           <el-select v-model="form.environment" style="width: 100%" @change="loadDialogResources">
@@ -127,6 +156,7 @@
 </template>
 
 <script>
+import {Connection} from '@element-plus/icons-vue'
 import {
   disableWorkflowResourceBinding,
   listWorkflowResourceBindings,
@@ -136,6 +166,7 @@ import {
 
 export default {
   name: 'WorkflowResourceBindings',
+  components: {Connection},
   props: {
     canEdit: {
       type: Boolean,
@@ -266,6 +297,16 @@ export default {
     },
     scopeLabel(scopeType) {
       return scopeType === 'WORKFLOW' ? '当前工作流' : '租户共享'
+    },
+    resourceKindLabel(resourceKind) {
+      const labels = {
+        MODEL: '大模型',
+        AGENT: 'AI 智能体',
+        KNOWLEDGE_BASE: '知识库',
+        API_CONNECTOR: 'API 连接器',
+        DATASOURCE: '外部数据源'
+      }
+      return labels[resourceKind] || resourceKind
     }
   }
 }
@@ -273,7 +314,7 @@ export default {
 
 <style scoped>
 .binding-page {
-  padding: 24px;
+  padding: 26px;
   border: 1px solid var(--workflow-border, var(--el-border-color-light));
   border-radius: var(--workflow-radius, 18px);
   background: var(--workflow-surface, var(--el-bg-color));
@@ -288,14 +329,143 @@ export default {
   gap: 10px;
 }
 
+.page-header {
+  flex-wrap: wrap;
+}
+
+.page-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-heading > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .page-title {
-  margin-left: 12px;
   font-size: 20px;
   font-weight: 700;
 }
 
+.page-heading small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.header-actions :deep(.el-button--primary) {
+  border-color: var(--workflow-primary, var(--el-color-primary));
+  color: #fff;
+  background: var(--workflow-primary, var(--el-color-primary));
+}
+
 .binding-tip {
   margin: 16px 0;
+}
+
+.binding-table-frame {
+  overflow: hidden;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 14px;
+}
+
+.binding-table {
+  min-width: 1120px;
+}
+
+.binding-table :deep(.el-table__header th.el-table__cell) {
+  height: 48px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.binding-table :deep(.el-table__row td.el-table__cell) {
+  height: 72px;
+}
+
+.binding-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background: var(--workflow-hover, var(--el-fill-color-light));
+}
+
+.environment-badge,
+.scope-badge,
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.environment-badge {
+  min-width: 48px;
+  justify-content: center;
+  padding: 5px 8px;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 7px;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+  letter-spacing: 0.04em;
+}
+
+.environment-badge--prod {
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 30%, transparent);
+  color: var(--workflow-primary, #625bf6);
+  background: color-mix(in srgb, var(--workflow-primary, #625bf6) 9%, var(--workflow-surface, #fff));
+}
+
+.scope-badge,
+.status-badge {
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 999px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-light));
+}
+
+.scope-badge i,
+.status-badge i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.scope-badge--workflow {
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 32%, transparent);
+  color: var(--workflow-primary, #625bf6);
+  background: color-mix(in srgb, var(--workflow-primary, #625bf6) 11%, var(--workflow-surface, #fff));
+}
+
+.status-badge--active {
+  border-color: color-mix(in srgb, #10a36e 30%, transparent);
+  color: #087c55;
+  background: color-mix(in srgb, #10a36e 10%, var(--workflow-surface, #fff));
+}
+
+.resource-kind {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.resource-kind strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 13px;
+}
+
+.resource-kind code {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
 }
 
 .resource-cell,
@@ -307,16 +477,52 @@ export default {
 
 .resource-cell span,
 .resource-option small,
-.resource-warning,
-.scope-hint {
+.resource-warning {
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }
 
-.scope-hint {
-  display: block;
+.scope-summary {
   width: 100%;
-  margin-top: 5px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 10px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+}
+
+.scope-summary--workflow {
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 30%, transparent);
+  background: color-mix(in srgb, var(--workflow-primary, #625bf6) 8%, var(--workflow-surface, #fff));
+}
+
+.scope-summary-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: var(--workflow-primary, var(--el-color-primary));
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+}
+
+.scope-summary > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.scope-summary strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+}
+
+.scope-summary small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   line-height: 1.5;
 }
 
@@ -343,5 +549,29 @@ export default {
   display: block;
   margin-top: 6px;
   color: var(--el-color-danger);
+}
+
+@media (max-width: 760px) {
+  .binding-page {
+    padding: 16px;
+  }
+
+  .page-header,
+  .header-actions {
+    align-items: stretch;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions :deep(.el-select),
+  .header-actions :deep(.el-button) {
+    flex: 1;
+  }
+
+  .binding-table-frame {
+    overflow-x: auto;
+  }
 }
 </style>

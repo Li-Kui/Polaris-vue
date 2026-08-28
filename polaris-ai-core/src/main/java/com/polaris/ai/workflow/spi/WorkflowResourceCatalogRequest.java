@@ -5,5 +5,7 @@ public record WorkflowResourceCatalogRequest(
         Long tenantId,
         String environment,
         String principalType,
-        String principalId) {
+        String principalId,
+        Long deptId,
+        boolean superAdmin) {
 }

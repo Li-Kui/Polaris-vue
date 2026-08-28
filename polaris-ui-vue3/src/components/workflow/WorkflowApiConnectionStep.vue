@@ -29,12 +29,12 @@
         <span class="connection-row-main">
           <span class="connection-row-icon"><el-icon><Connection /></el-icon></span>
           <span class="connection-row-copy">
-            <strong>{{ resource.name }}</strong>
-            <small>{{ description(resource) }}</small>
+            <strong class="connection-name">{{ resource.name || resource.connectorName || resource.attributes?.name || '未命名连接' }}</strong>
+            <small class="connection-desc">{{ description(resource) }}</small>
           </span>
         </span>
-        <el-icon v-if="resource.resourceId === selectedResourceId"><CircleCheck /></el-icon>
-        <el-icon v-else><ArrowRight /></el-icon>
+        <el-icon v-if="resource.resourceId === selectedResourceId" class="connection-status-icon is-selected"><CircleCheck /></el-icon>
+        <el-icon v-else class="connection-status-icon"><ArrowRight /></el-icon>
       </button>
       <div v-if="!loading && !filteredResources.length" class="connection-empty">
         <el-icon><Connection /></el-icon>
@@ -140,11 +140,16 @@ export default {
       }
     },
     description(resource) {
+      if (!resource) return ''
       const attributes = resource.attributes || {}
-      const authLabel = attributes.authType && attributes.authType !== 'NONE'
-        ? `${attributes.authType} · ${attributes.credentialConfigured ? '凭证已配置' : '凭证缺失'}`
-        : '无需认证'
-      return [attributes.baseUrl, authLabel].filter(Boolean).join(' · ')
+      const baseUrl = attributes.baseUrl || resource.baseUrl || ''
+      const authType = attributes.authType || resource.authType
+      const isConfigured = attributes.credentialConfigured ?? resource.credentialConfigured ?? false
+      const authLabel = authType && authType !== 'NONE'
+        ? `${authType} · ${isConfigured ? '凭证已配置' : '凭证缺失'}`
+        : (authType === 'NONE' ? '无需认证' : '')
+      const desc = resource.description || resource.remark || ''
+      return [baseUrl, authLabel, desc].filter(Boolean).join(' · ')
     },
     toggleCreate() {
       this.creating = !this.creating
@@ -230,59 +235,98 @@ export default {
   padding: 10px 14px;
   border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
   border-radius: 9px;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-primary);
+  background: var(--workflow-surface, var(--el-bg-color));
+  color: var(--workflow-text, var(--el-text-color-primary));
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 
-  &:hover,
+  &:hover {
+    border-color: var(--workflow-primary, var(--el-color-primary));
+    background: var(--workflow-hover, var(--el-fill-color-light));
+  }
+
   &.selected {
     border-color: var(--workflow-primary, var(--el-color-primary));
-    background: var(--el-color-primary-light-9);
-    color: var(--el-color-primary);
+    background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+    box-shadow: 0 0 0 1px var(--workflow-primary, var(--el-color-primary)) inset;
+
+    .connection-name {
+      color: var(--workflow-primary, var(--el-color-primary));
+      font-weight: 700;
+    }
+
+    .connection-desc {
+      color: var(--workflow-text, #334155);
+      opacity: 0.88;
+    }
   }
 
   &:disabled {
     cursor: not-allowed;
     opacity: 0.55;
   }
-
-  .connection-row-copy strong,
-  .connection-row-copy small {
-    display: block;
-  }
-
-  .connection-row-copy small {
-    max-width: 360px;
-    margin-top: 4px;
-    color: var(--el-text-color-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 .connection-row-main {
   min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
 .connection-row-copy {
   min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.connection-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-desc {
+  display: block;
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .connection-row-icon {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 8px;
+  font-size: 16px;
   color: var(--workflow-primary, var(--el-color-primary));
   background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+}
+
+.connection-status-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+
+  &.is-selected {
+    color: var(--workflow-primary, var(--el-color-primary));
+  }
 }
 
 .connection-empty {

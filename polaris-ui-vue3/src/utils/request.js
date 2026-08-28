@@ -1,6 +1,6 @@
 import axios from 'axios'
 import {ElLoading, ElMessage, ElMessageBox, ElNotification} from 'element-plus'
-import {getAuthHeaders} from '@/utils/auth'
+import {getAuthHeaders, removePlatformToken} from '@/utils/auth'
 import errorCode from '@/utils/errorCode'
 import {blobValidate, tansParams} from '@/utils/ruoyi'
 import cache from '@/plugins/cache'
@@ -19,6 +19,32 @@ const service = axios.create({
   // 超时
   timeout: 10000
 })
+
+function showReloginDialog() {
+  if (isRelogin.show) return
+  isRelogin.show = true
+  ElMessageBox.confirm('登录状态已过期，请重新登录后继续操作', '系统提示', {
+    confirmButtonText: '重新登录',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(() => {
+    if (location.pathname.startsWith('/platform')) {
+      import('@/store/modules/platformUser').then(m => {
+        m.default().$reset()
+        removePlatformToken()
+        isRelogin.show = false
+        location.href = '/platform/login'
+      })
+    } else {
+      useUserStore().logOut().finally(() => {
+        isRelogin.show = false
+        location.href = '/index'
+      })
+    }
+  }).catch(() => {
+    isRelogin.show = false
+  })
+}
 
 // request拦截器
 service.interceptors.request.use(config => {
@@ -83,25 +109,7 @@ service.interceptors.response.use(res => {
       return res.data
     }
     if (code === 401) {
-      if (!isRelogin.show) {
-        isRelogin.show = true
-        ElMessageBox.confirm('登录状态已过期，您可以继续留在该页面，或者重新登录', '系统提示', { confirmButtonText: '重新登录', cancelButtonText: '取消', type: 'warning' }).then(() => {
-          isRelogin.show = false
-          if (location.pathname.startsWith('/platform')) {
-            import('@/store/modules/platformUser').then(m => {
-              m.default().logOut().then(() => {
-                location.href = '/platform/login'
-              })
-            })
-          } else {
-            useUserStore().logOut().then(() => {
-              location.href = '/index'
-            })
-          }
-      }).catch(() => {
-        isRelogin.show = false
-      })
-    }
+      showReloginDialog()
       return Promise.reject('无效的会话，或者会话已过期，请重新登录。')
     } else if (code === 500) {
       ElMessage({ message: msg, type: 'error' })
@@ -118,6 +126,11 @@ service.interceptors.response.use(res => {
   },
   error => {
     console.log('err' + error)
+    if (error.response?.status === 401) {
+      showReloginDialog()
+      const message = error.response?.data?.msg || '登录状态已过期，请重新登录。'
+      return Promise.reject(new Error(message))
+    }
     let { message } = error
     if (message == "Network Error") {
       message = "后端接口连接异常"

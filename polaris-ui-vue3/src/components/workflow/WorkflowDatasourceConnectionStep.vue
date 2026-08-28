@@ -15,9 +15,12 @@
         :disabled="!canEdit || !resource.available"
         @click="$emit('select', resource.resourceId)"
       >
-        <span><strong>{{ resource.name }}</strong><small>{{ description(resource) }}</small></span>
-        <el-icon v-if="resource.resourceId === selectedResourceId"><CircleCheck /></el-icon>
-        <el-icon v-else><ArrowRight /></el-icon>
+        <span class="connection-row-copy">
+          <strong class="connection-name">{{ resource.name || resource.dsName || '未命名数据源' }}</strong>
+          <small class="connection-desc">{{ description(resource) }}</small>
+        </span>
+        <el-icon v-if="resource.resourceId === selectedResourceId" class="connection-status-icon is-selected"><CircleCheck /></el-icon>
+        <el-icon v-else class="connection-status-icon"><ArrowRight /></el-icon>
       </button>
       <el-empty v-if="!loading && !filteredResources.length" description="暂无可用数据库连接" :image-size="64" />
     </div>
@@ -146,14 +149,11 @@ export default {
 }
 
 .step-heading strong,
-.step-heading small,
-.connection-row strong,
-.connection-row small {
+.step-heading small {
   display: block;
 }
 
-.step-heading small,
-.connection-row small {
+.step-heading small {
   margin-top: 4px;
   color: var(--el-text-color-secondary);
 }
@@ -162,7 +162,7 @@ export default {
   display: flex;
   flex-direction: column;
   min-height: 80px;
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
   border-radius: 10px;
   overflow: hidden;
 }
@@ -174,22 +174,75 @@ export default {
   gap: 12px;
   padding: 12px 14px;
   border: 0;
-  border-bottom: 1px solid var(--el-border-color-extra-light);
-  background: var(--el-bg-color);
-  color: var(--el-text-color-primary);
+  border-bottom: 1px solid var(--workflow-border, var(--el-border-color-extra-light));
+  background: var(--workflow-surface, var(--el-bg-color));
+  color: var(--workflow-text, var(--el-text-color-primary));
   text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: var(--workflow-hover, var(--el-fill-color-light));
+  }
+
+  &.selected {
+    background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+
+    .connection-name {
+      color: var(--workflow-primary, var(--el-color-primary));
+      font-weight: 700;
+    }
+
+    .connection-desc {
+      color: var(--workflow-text, #334155);
+      opacity: 0.88;
+    }
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
 }
 
-.connection-row:hover,
-.connection-row.selected {
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
+.connection-row-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
-.connection-row:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.connection-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.4;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-desc {
+  display: block;
+  max-width: 360px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-status-icon {
+  flex: 0 0 auto;
+  font-size: 16px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+
+  &.is-selected {
+    color: var(--workflow-primary, var(--el-color-primary));
+  }
 }
 
 .create-toggle {

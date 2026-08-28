@@ -161,8 +161,7 @@ public class WorkflowExecutionEngine {
         Map<String, List<WorkflowExecutionPlan.PlanEdge>> outgoing = outgoing(plan);
         Map<String, Integer> incomingCounts = incomingCounts(plan);
         int maxNodeRuns = intPolicy(plan, "maxNodeRuns", 200);
-        long workflowDeadline = (execution.getStartTime() == null
-                ? System.currentTimeMillis() : execution.getStartTime().getTime())
+        long workflowDeadline = workflowStartedAtMillis(execution)
                 + TimeUnit.SECONDS.toMillis(intPolicy(plan, "timeoutSeconds", 1800));
         WorkflowCancellation cancellation = () -> cancellationRequested(
                 execution.getExecutionId(), runnerId, fencingToken);
@@ -1482,6 +1481,25 @@ public class WorkflowExecutionEngine {
             throw new NodeFailure(WorkflowErrorCode.EXECUTION_TIMEOUT.name(),
                     "工作流总执行时间超过上限", false);
         }
+    }
+
+    /**
+     * 获取可信的工作流开始时间。
+     * 数据库与应用时区配置异常时，SQL NOW() 可能写出早于创建时间的开始时间；
+     * 开始时间不允许早于创建时间，避免任务被误判为已经超时。
+     */
+    private long workflowStartedAtMillis(WorkflowExecution execution) {
+        long currentTime = System.currentTimeMillis();
+        long startedAt = execution.getStartTime() == null
+                ? currentTime : execution.getStartTime().getTime();
+        if (execution.getCreateTime() == null
+                || startedAt >= execution.getCreateTime().getTime()) {
+            return startedAt;
+        }
+        log.warn("Workflow execution {} has start time {} before create time {}, "
+                        + "using create time to calculate deadline",
+                execution.getExecutionId(), execution.getStartTime(), execution.getCreateTime());
+        return execution.getCreateTime().getTime();
     }
 
     private String safeMessage(Throwable error) {
