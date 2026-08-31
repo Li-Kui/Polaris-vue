@@ -196,6 +196,25 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         }
         List<WorkflowDiagnostic> publishDiagnostics = publishDiagnostics(
                 compilation.diagnostics(), schemaSnapshots);
+        WorkflowVersion existingVersion = versionMapper.selectByDefinitionAndContentHash(
+                definition.getId(), compilation.plan().getContentHash());
+        if (existingVersion != null) {
+            if (!Objects.equals(definition.getCurrentPublishedVersionId(), existingVersion.getVersionId())
+                    || !"ACTIVE".equals(definition.getStatus())) {
+                definition.setCurrentPublishedVersionId(existingVersion.getVersionId());
+                definition.setStatus("ACTIVE");
+                definition.setUpdateBy(CallerUtils.getUsername());
+                if (definitionMapper.updateById(definition) != 1) {
+                    throw new ServiceException("工作流发布状态更新失败");
+                }
+            }
+            List<WorkflowDiagnostic> diagnostics = new ArrayList<>(publishDiagnostics);
+            diagnostics.add(WorkflowDiagnostic.warning(
+                    "PUBLISH_CONTENT_UNCHANGED", null, "$.metadata",
+                    "当前草稿内容已发布，已复用版本 v" + existingVersion.getVersionNo()
+                            + "，未重复创建新版本"));
+            return new WorkflowPublishResult(true, versionView(existingVersion), diagnostics);
+        }
         WorkflowVersion version = new WorkflowVersion();
         version.setVersionId(versionId);
         version.setTenantId(definition.getTenantId());

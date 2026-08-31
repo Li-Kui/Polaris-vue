@@ -55,7 +55,7 @@
 </template>
 
 <script>
-import {queryDatasource} from '@/api/platform/datasource'
+import {queryWorkflowDatasource} from '@/api/ai/workflow'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 
 export default {
@@ -106,7 +106,7 @@ export default {
       }
       this.previewing = true
       try {
-        const response = await queryDatasource(this.selectedResourceId, {
+        const response = await queryWorkflowDatasource(this.selectedResourceId, {
           sql: this.draft.sql,
           maxRows: this.draft.maxRows,
           queryTimeoutSeconds: this.draft.queryTimeoutSeconds,

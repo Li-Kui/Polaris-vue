@@ -11,7 +11,7 @@
       @bindings="pageMode = 'bindings'"
       @clone="openCloneDialog"
       @create="createDefinition"
-      @executions="pageMode = 'executions'"
+      @executions="openExecutions"
       @open="openDefinition"
       @run="openRunDialog"
       @triggers="pageMode = 'triggers'"
@@ -34,6 +34,9 @@
     <WorkflowExecutionMonitor
       v-else-if="pageMode === 'executions'"
       :can-execute="canExecute"
+      :definition-id="executionTarget.id"
+      :workflow-name="executionTarget.workflowName"
+      :workflow-code="executionTarget.workflowCode"
       @back="backToList"
     />
     <WorkflowApprovalInbox
@@ -256,6 +259,7 @@ export default {
       definitions: [],
       descriptors: [],
       selectedDefinition: null,
+      executionTarget: null,
       runDialogOpen: false,
       starting: false,
       runTarget: null,
@@ -333,7 +337,13 @@ export default {
     async backToList() {
       this.pageMode = 'list'
       this.selectedDefinition = null
+      this.executionTarget = null
       await this.loadPageData()
+    },
+    openExecutions(definition) {
+      if (!definition?.id) return
+      this.executionTarget = definition
+      this.pageMode = 'executions'
     },
     definitionSaved(definition) {
       this.selectedDefinition = definition
@@ -460,6 +470,7 @@ export default {
         })
         this.$message.success(`执行已创建：${response.data.executionId}`)
         this.runDialogOpen = false
+        this.executionTarget = this.runTarget
         this.pageMode = 'executions'
       } finally {
         this.starting = false

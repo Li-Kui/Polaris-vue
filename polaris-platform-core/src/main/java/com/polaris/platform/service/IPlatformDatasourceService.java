@@ -22,6 +22,8 @@ public interface IPlatformDatasourceService {
 
     PlatformDatasource insertDatasource(DatasourceSaveRequest request, String operator);
 
+    PlatformDatasource insertSharedDatasource(DatasourceSaveRequest request, String operator);
+
     PlatformDatasource updateDatasource(DatasourceSaveRequest request, String operator);
 
     int deleteDatasourceById(Long id);
@@ -33,6 +35,14 @@ public interface IPlatformDatasourceService {
     DatasourceTestResponse testSavedDatasourceConnection(Long id);
 
     List<Map<String, Object>> executeDatasourceQuery(
+            Long id,
+            String sql,
+            Map<String, Object> parameters,
+            int maxRows,
+            Integer queryTimeoutSeconds);
+
+    List<Map<String, Object>> executeWorkflowDatasourceQuery(
+            Long tenantId,
             Long id,
             String sql,
             Map<String, Object> parameters,

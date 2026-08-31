@@ -16,4 +16,10 @@ public interface WorkflowVersionMapper extends BaseMapper<WorkflowVersion> {
 
     @Select("SELECT * FROM ai_workflow_version WHERE version_id = #{versionId} LIMIT 1")
     WorkflowVersion selectByVersionId(@Param("versionId") String versionId);
+
+    @Select("SELECT * FROM ai_workflow_version "
+            + "WHERE definition_id = #{definitionId} AND content_hash = #{contentHash} LIMIT 1")
+    WorkflowVersion selectByDefinitionAndContentHash(
+            @Param("definitionId") Long definitionId,
+            @Param("contentHash") String contentHash);
 }

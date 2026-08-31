@@ -309,6 +309,26 @@ export function createWorkflowApiConnector(data) {
   })
 }
 
+/** 管理端创建可供工作流复用的全局数据库连接。 */
+export function createWorkflowDatasource(data) {
+  return request({
+    url: '/ai/workflow/datasources',
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
+/** 在工作流中预览当前身份可访问数据库连接上的只读查询。 */
+export function queryWorkflowDatasource(id, data) {
+  return request({
+    url: `/ai/workflow/datasources/${id}/query`,
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
 export function saveWorkflowResourceBinding(data) {
   return request({
     url: '/ai/workflow/resource-bindings',

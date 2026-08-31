@@ -77,8 +77,19 @@ public class PlatformDatasourceServiceImpl implements IPlatformDatasourceService
     @Override
     @Transactional(rollbackFor = Exception.class)
     public PlatformDatasource insertDatasource(DatasourceSaveRequest request, String operator) {
+        return insertDatasource(request, operator, PlatformTenantGuard.requireTenantId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PlatformDatasource insertSharedDatasource(DatasourceSaveRequest request, String operator) {
+        return insertDatasource(request, operator, null);
+    }
+
+    private PlatformDatasource insertDatasource(
+            DatasourceSaveRequest request, String operator, Long tenantId) {
         PlatformDatasource datasource = new PlatformDatasource();
-        datasource.setTenantId(PlatformTenantGuard.requireTenantId());
+        datasource.setTenantId(tenantId);
         applyAssetFields(datasource, request, true);
         applyConnectionFields(datasource, request, null, true);
         DatasourceConnectionTestResult testResult = requireSuccessfulTest(datasource);
@@ -182,6 +193,27 @@ public class PlatformDatasourceServiceImpl implements IPlatformDatasourceService
             int maxRows,
             Integer queryTimeoutSeconds) {
         PlatformDatasource datasource = selectDatasourceById(id);
+        return executeDatasourceQuery(datasource, sql, parameters, maxRows, queryTimeoutSeconds);
+    }
+
+    @Override
+    public List<Map<String, Object>> executeWorkflowDatasourceQuery(
+            Long tenantId,
+            Long id,
+            String sql,
+            Map<String, Object> parameters,
+            int maxRows,
+            Integer queryTimeoutSeconds) {
+        PlatformDatasource datasource = platformDatasourceMapper.selectWorkflowResource(tenantId, id);
+        return executeDatasourceQuery(datasource, sql, parameters, maxRows, queryTimeoutSeconds);
+    }
+
+    private List<Map<String, Object>> executeDatasourceQuery(
+            PlatformDatasource datasource,
+            String sql,
+            Map<String, Object> parameters,
+            int maxRows,
+            Integer queryTimeoutSeconds) {
         if (datasource == null) {
             throw new ServiceException("数据源不存在或无权访问");
         }

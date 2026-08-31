@@ -9,7 +9,6 @@
       <div class="header-buttons">
         <el-button class="header-button" icon="Connection" @click="$emit('bindings')">资源绑定</el-button>
         <el-button class="header-button" icon="Timer" @click="$emit('triggers')">触发器</el-button>
-        <el-button class="header-button" icon="List" @click="$emit('executions')">运行记录</el-button>
         <el-button v-if="canApprove" class="header-button" icon="Finished" @click="$emit('approvals')">审批箱</el-button>
         <el-button v-if="canEdit" class="header-button header-button--primary" type="primary" icon="Plus" @click="$emit('create')">
           新建工作流
@@ -54,13 +53,16 @@
         </template>
       </el-table-column>
       <el-table-column prop="updateTime" label="更新时间" width="170" />
-      <el-table-column label="操作" width="310" align="center" fixed="right">
+      <el-table-column label="操作" width="390" align="center" fixed="right">
         <template #default="{ row }">
           <el-button class="row-action" link type="primary" icon="EditPen" @click="$emit('open', row)">
             {{ canEdit ? '打开设计器' : '查看' }}
           </el-button>
           <el-button v-if="canExecute && row.currentPublishedVersionId" class="row-action" link type="success" icon="VideoPlay" @click="$emit('run', row)">
             运行
+          </el-button>
+          <el-button class="row-action" link type="primary" icon="List" @click="$emit('executions', row)">
+            运行记录
           </el-button>
           <el-dropdown trigger="click" @command="command => handleMore(command, row)">
             <el-button class="row-action" link>更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>

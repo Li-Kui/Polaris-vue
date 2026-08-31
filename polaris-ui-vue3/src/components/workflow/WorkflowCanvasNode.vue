@@ -1,5 +1,12 @@
 <template>
-  <article :class="['workflow-node-card', `workflow-node-card--${tone}`, {selected: data.selected}]">
+  <article
+    :class="['workflow-node-card', `workflow-node-card--${tone}`, {selected: data.selected}]"
+    draggable="false"
+    @pointerdown="blockSecondaryPointer"
+    @mousedown="blockSecondaryPointer"
+    @contextmenu.prevent.stop
+    @dragstart.prevent
+  >
     <Handle v-if="!data.start" type="target" :position="Position.Left" class="workflow-node-handle" />
     <header>
       <span class="node-icon"><el-icon><component :is="icon" /></el-icon></span>
@@ -26,11 +33,11 @@
       v-if="data.testable"
       type="button"
       class="node-test-action"
-      title="试运行当前节点"
+      :title="data.testTitle || '试运行当前节点'"
       @pointerdown.stop
       @click.stop="$emit('test')"
     >
-      <el-icon><VideoPlay /></el-icon><span>试运行</span>
+      <el-icon><VideoPlay /></el-icon><span>{{ data.testLabel || '试运行' }}</span>
     </button>
     <Handle v-if="!data.end" type="source" :position="Position.Right" class="workflow-node-handle" />
   </article>
@@ -95,6 +102,13 @@ export default {
   },
   data() {
     return {Position}
+  },
+  methods: {
+    blockSecondaryPointer(event) {
+      if (event?.button !== 2) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
   },
   computed: {
     tone() {

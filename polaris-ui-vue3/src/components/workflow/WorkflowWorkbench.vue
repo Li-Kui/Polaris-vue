@@ -21,10 +21,21 @@
         <span :class="['validation-state', {passed: validationPassed}]">
           <el-icon><CircleCheck /></el-icon>{{ validationPassed ? '已通过校验' : '等待校验' }}
         </span>
-        <el-button :loading="validating" @click="validate">校验</el-button>
-        <el-button v-if="canExecute" @click="openTestRun"><el-icon><VideoPlay /></el-icon><span>测试运行</span></el-button>
-        <el-button v-if="canEdit" :loading="saving" @click="saveDraft">保存</el-button>
-        <el-button v-if="canPublish" type="primary" :loading="publishing" @click="publish">发布</el-button>
+        <el-button :loading="validating" :disabled="publishing || saving" @click="validate">校验</el-button>
+        <el-button v-if="canDebug || canExecute" @click="openTestRun">
+          <el-icon><VideoPlay /></el-icon>
+          <span>{{ canDebug && workflowDraftTestAvailability.available
+            ? '试运行当前草稿'
+            : '测试已发布版本' }}</span>
+        </el-button>
+        <el-button v-if="canEdit" :loading="saving" :disabled="publishing || validating" @click="saveDraft">保存</el-button>
+        <el-button
+          v-if="canPublish"
+          type="primary"
+          :loading="publishing"
+          :disabled="publishing || validating || saving"
+          @click="publish"
+        >发布</el-button>
       </div>
     </header>
 
@@ -92,6 +103,7 @@
           class="workflow-canvas"
           @connect="onConnect"
           @node-click="selectNode"
+          @node-context-menu="suppressNodeContextMenu"
           @edge-click="selectEdge"
           @node-drag-start="nodeDragStarted"
           @node-drag-stop="nodeDragStopped"
@@ -101,7 +113,7 @@
           <template #node-workflow="nodeProps">
             <WorkflowCanvasNode
               :data="{...nodeProps.data, selected: nodeProps.selected}"
-              @test="openCanvasNodeTest(nodeProps.id)"
+              @test="nodeProps.id === '__start__' ? openTestRun() : openCanvasNodeTest(nodeProps.id)"
             />
           </template>
         </VueFlow>
@@ -109,7 +121,7 @@
 
       <aside
         :class="['inspector-panel', {
-        'inspector-panel--guided': isApiNode,
+        'inspector-panel--guided': isGuidedIntegrationNode,
         'inspector-panel--mapping': isMappingEditorOpen,
         'is-collapsed': inspectorCollapsed
       }]"
@@ -138,37 +150,57 @@
             <div><strong>{{ selectedNode.name }}</strong><small>{{ selectedNode.id }}</small></div>
             <el-button text circle title="收起面板" aria-label="收起面板" @click="collapseInspector"><el-icon><Close /></el-icon></el-button>
           </div>
-          <nav v-if="isApiNode" class="integration-stepper" aria-label="API 节点配置步骤">
+          <nav
+            v-if="isGuidedIntegrationNode"
+            class="integration-stepper"
+            :aria-label="isApiNode ? 'API 节点配置步骤' : '数据库查询节点配置步骤'"
+          >
             <button
               type="button"
               :class="{active: selectedInspectorTab === 'resource', completed: selectedInspectorTab !== 'resource'}"
               @click="selectedInspectorTab = 'resource'"
             >
               <span>1</span>
-              <strong>连接服务</strong>
+              <strong>{{ isApiNode ? '连接服务' : '连接数据库' }}</strong>
             </button>
             <i></i>
             <button
               type="button"
               :class="{active: selectedInspectorTab !== 'resource'}"
-              :disabled="!apiConnectorReference || !selectedResourceId(apiConnectorReference)"
+              :disabled="isApiNode
+                ? !apiConnectorReference || !selectedResourceId(apiConnectorReference)
+                : !datasourceReference || !selectedResourceId(datasourceReference)"
               @click="selectedInspectorTab = 'config'"
             >
               <span>2</span>
-              <strong>配置请求</strong>
+              <strong>{{ isApiNode ? '配置请求' : '编写查询' }}</strong>
             </button>
           </nav>
-          <div v-if="isApiNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
-            <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">请求参数</button>
+          <div v-if="isGuidedIntegrationNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
+            <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">
+              {{ isApiNode ? '请求参数' : '查询设置' }}
+            </button>
             <button type="button" :class="{active: selectedInspectorTab === 'mapping'}" @click="selectedInspectorTab = 'mapping'">输入输出</button>
             <button type="button" :class="{active: selectedInspectorTab === 'policy'}" @click="selectedInspectorTab = 'policy'">运行策略</button>
           </div>
-          <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isApiNode}]">
+          <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isGuidedIntegrationNode}]">
             <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
+                <WorkflowTransformEditor
+                  v-if="isTransformNode"
+                  :config="selectedNode.config"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :definition="definition"
+                  :selected-node="selectedNode"
+                  :descriptors="descriptors"
+                  :resolved-node-schemas="resolvedNodeSchemas"
+                  :disabled="!canEdit"
+                  @update:config="schemaConfigChanged"
+                  @update:input-mapping="visualInputMappingChanged"
+                />
                 <WorkflowDatabaseQueryStep
-                  v-if="isDatabaseNode"
+                  v-else-if="isDatabaseNode"
                   :config="selectedNode.config"
                   :selected-resource-id="datasourceReference ? selectedResourceId(datasourceReference) : ''"
                   :disabled="!canEdit"
@@ -374,7 +406,17 @@
               </template>
             </el-tab-pane>
             <el-tab-pane label="输入输出" name="mapping">
+              <section v-if="isTransformNode" class="transform-mapping-summary">
+                <div>
+                  <strong>转换来源与输出字段已统一到“配置”页</strong>
+                  <small>避免在两个位置重复配置。这里仅展示系统自动生成的正式输出结构。</small>
+                </div>
+                <el-button type="primary" plain size="small" @click="selectedInspectorTab = 'config'">
+                  返回整理数据
+                </el-button>
+              </section>
               <WorkflowInputMappingEditor
+                v-else
                 :model-value="selectedNode.inputMapping || {}"
                 :json-value="selectedNodeInputMapping"
                 :definition="definition"
@@ -393,11 +435,17 @@
                     <strong>正式输出结构</strong>
                     <small>发布后进入执行计划，并用于节点输出校验</small>
                   </div>
-                  <el-tag :type="selectedNode.outputSchemaOverride ? 'success' : 'info'" size="small">
-                    {{ selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约' }}
+                  <el-tag :type="isTransformNode || selectedNode.outputSchemaOverride ? 'success' : 'info'" size="small">
+                    {{ isTransformNode ? '转换规则自动生成' : (selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约') }}
                   </el-tag>
                 </div>
-                <template v-if="selectedNode.outputSchemaOverride">
+                <template v-if="isTransformNode">
+                  <pre>{{ formatNodeTestJson(resolvedNodeSchemas[selectedNode.id]?.outputSchema || {}) }}</pre>
+                  <div class="formal-schema-actions">
+                    <small>修改转换规则后自动更新，无需手写或再次确认。</small>
+                  </div>
+                </template>
+                <template v-else-if="selectedNode.outputSchemaOverride">
                   <pre>{{ formatNodeTestJson(selectedNode.outputSchemaOverride) }}</pre>
                   <div class="formal-schema-actions">
                     <small>
@@ -609,9 +657,40 @@
     </div>
 
     <section v-if="diagnostics.length" class="diagnostic-panel">
-      <div class="diagnostic-header"><strong>校验结果</strong><el-button link @click="diagnostics = []">关闭</el-button></div>
-      <div v-for="(item, index) in diagnostics" :key="`${item.code}-${index}`" class="diagnostic-item" @click="focusDiagnostic(item)">
-        <el-tag :type="item.severity === 'ERROR' ? 'danger' : 'warning'" size="small">{{ item.code }}</el-tag><span>{{ item.message }}</span><code>{{ item.fieldPath }}</code>
+      <div class="diagnostic-header">
+        <div>
+          <strong>{{ diagnosticHasErrors ? '校验未通过' : '校验通过，但有建议' }}</strong>
+          <span>
+            {{ diagnosticHasErrors
+              ? `发现 ${diagnostics.length} 个问题，请按提示修改后重新校验`
+              : `发现 ${diagnostics.length} 个建议，可按需优化` }}
+          </span>
+        </div>
+        <el-button link @click="diagnostics = []">关闭</el-button>
+      </div>
+      <div class="diagnostic-list">
+        <article
+          v-for="(item, index) in displayDiagnostics"
+          :key="`${item.code}-${index}`"
+          :class="['diagnostic-item', `is-${item.severity.toLowerCase()}`]"
+        >
+          <div class="diagnostic-status" aria-hidden="true">
+            <el-icon><CircleClose v-if="item.severity === 'ERROR'" /><QuestionFilled v-else /></el-icon>
+          </div>
+          <div class="diagnostic-content">
+            <div class="diagnostic-title-row">
+              <strong>{{ item.title }}</strong>
+              <el-tag :type="item.severity === 'ERROR' ? 'danger' : 'warning'" size="small">
+                {{ item.severity === 'ERROR' ? '必须修改' : '建议检查' }}
+              </el-tag>
+            </div>
+            <div class="diagnostic-location">问题位置：{{ item.location }}</div>
+            <p>{{ item.message }}</p>
+            <div class="diagnostic-suggestion"><strong>修改方法：</strong>{{ item.suggestion }}</div>
+            <code :title="item.fieldPath">错误代码：{{ item.code }}</code>
+          </div>
+          <el-button v-if="item.nodeId" type="primary" link @click="focusDiagnostic(item)">定位节点</el-button>
+        </article>
       </div>
     </section>
 
@@ -681,12 +760,16 @@
     <el-dialog
       v-model="nodeTestDialogOpen"
       class="workflow-dialog"
-      :title="`试运行节点 · ${nodeTestNodeName}`"
+      :title="workflowDraftTest
+        ? `试运行工作流 · ${definition.metadata.name || '未命名工作流'}`
+        : `试运行节点 · ${nodeTestNodeName}`"
       width="720px"
       destroy-on-close
     >
       <el-alert
-        :title="nodeTestMode === 'UPSTREAM_CHAIN'
+        :title="workflowDraftTest
+          ? '直接运行当前草稿，不创建发布版本或正式运行记录；仅支持无写操作的线性安全流程。'
+          : nodeTestMode === 'UPSTREAM_CHAIN'
           ? '按普通连线依次执行安全的线性上游链；条件、并行、循环、多入口和写节点会被阻止。输入表示流程输入。'
           : '仅执行当前节点，不执行上游；输入表示当前节点最终输入。写操作节点不会执行。'"
         type="info"
@@ -694,7 +777,7 @@
         show-icon
       />
       <el-form label-width="100px" class="node-test-form">
-        <el-form-item label="执行范围">
+        <el-form-item v-if="!workflowDraftTest" label="执行范围">
           <el-radio-group v-model="nodeTestMode" class="node-test-mode">
             <el-radio-button value="NODE">仅当前节点</el-radio-button>
             <el-tooltip
@@ -715,7 +798,7 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+        <el-form-item :label="workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
           <el-input v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
       </el-form>
@@ -736,7 +819,9 @@
           show-icon
         />
         <div class="node-test-meta">
-          <span>范围 <strong>{{ nodeTestResult.mode === 'UPSTREAM_CHAIN' ? '线性上游链' : '仅当前节点' }}</strong></span>
+          <span>范围 <strong>{{ workflowDraftTest
+            ? '当前草稿'
+            : nodeTestResult.mode === 'UPSTREAM_CHAIN' ? '线性上游链' : '仅当前节点' }}</strong></span>
           <span>副作用 <strong>{{ nodeTestResult.sideEffect }}</strong></span>
           <span>Schema <strong>{{ nodeTestSchemaLabel(nodeTestResult.schemaSource) }}</strong></span>
           <span v-if="nodeTestResult.schemaSourceVersion">版本 <code>{{ nodeTestResult.schemaSourceVersion }}</code></span>
@@ -778,7 +863,9 @@
           plain
           @click="cancelNodeTest"
         >取消运行</el-button>
-        <el-button v-else type="primary" @click="runNodeTest">运行当前节点</el-button>
+        <el-button v-else type="primary" @click="runNodeTest">
+          {{ workflowDraftTest ? '运行当前草稿' : '运行当前节点' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -848,6 +935,7 @@ import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
 import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
+import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -864,6 +952,7 @@ export default {
     WorkflowDisclosureCard,
     WorkflowInputMappingEditor,
     WorkflowExecutionInput,
+    WorkflowTransformEditor,
     ChatDotRound,
     CircleCheck,
     CircleClose,
@@ -992,6 +1081,7 @@ export default {
       nodeTestNodeId: '',
       nodeTestNodeName: '',
       nodeTestMode: 'NODE',
+      workflowDraftTest: false,
       nodeTestTimeoutSeconds: 60,
       nodeTestInputJson: '{}',
       nodeTestResult: null,
@@ -1023,14 +1113,26 @@ export default {
     }
   },
   computed: {
+    diagnosticHasErrors() {
+      return this.diagnostics.some(item => item.severity === 'ERROR')
+    },
+    displayDiagnostics() {
+      return this.diagnostics.map(item => this.presentDiagnostic(item))
+    },
     isApiNode() {
       return ['http_get', 'http_request'].includes(this.selectedNode?.type)
     },
     isDatabaseNode() {
       return this.selectedNode?.type === 'database_query'
     },
+    isGuidedIntegrationNode() {
+      return this.isApiNode || this.isDatabaseNode
+    },
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
+    },
+    isTransformNode() {
+      return this.selectedNode?.type === 'transform'
     },
     nodePromptValue() {
       return this.isLlmNode ? String(this.selectedNode?.config?.prompt || '') : ''
@@ -1085,36 +1187,41 @@ export default {
       return {available: true, reason: ''}
     },
     nodeTestChainAvailability() {
-      if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
-      const nodes = new Map((this.definition.nodes || []).map(node => [node.id, node]))
-      const visited = new Set()
-      let current = this.selectedNode.id
-      while (current) {
-        if (visited.has(current)) return {available: false, reason: '上游路径包含循环'}
-        visited.add(current)
-        const node = nodes.get(current)
-        if (!node) return {available: false, reason: '上游路径节点已失效'}
-        if (['approval', 'wait', 'sub_workflow', 'condition', 'parallel', 'join',
-          'loop', 'llm_classifier'].includes(node.type)) {
-          return {available: false, reason: `路径包含控制节点「${node.name}」`}
-        }
-        const descriptor = this.descriptors.find(item => item.type === node.type
-          && item.handlerVersion === node.typeVersion)
-        if (!descriptor || descriptor.sideEffect === 'WRITE'
-          || !(descriptor.capabilities || []).includes('CANCELLABLE')) {
-          return {available: false, reason: `路径节点「${node.name}」不满足安全执行要求`}
-        }
-        const incoming = (this.definition.edges || [])
-          .filter(edge => edge.target === current)
-        if (incoming.length !== 1 || incoming[0].kind !== 'NORMAL') {
-          return {available: false, reason: '仅支持单入口普通连线组成的线性路径'}
-        }
-        current = incoming[0].source === '__start__' ? null : incoming[0].source
+      return this.testChainAvailability(this.selectedNode)
+    },
+    workflowDraftTestAvailability() {
+      if ((!this.currentDefinition?.id || this.dirty) && !this.canEdit) {
+        return {available: false, reason: '当前修改尚未保存，暂无权限同步草稿'}
       }
-      return {available: true, reason: ''}
+      const endEdges = (this.definition.edges || [])
+        .filter(edge => edge.target === '__end__')
+      if (endEdges.length !== 1 || endEdges[0].kind !== 'NORMAL') {
+        return {available: false, reason: '当前仅支持只有一个普通结束出口的线性流程直接试运行'}
+      }
+      const target = (this.definition.nodes || [])
+        .find(node => node.id === endEdges[0].source)
+      if (!target) return {available: false, reason: '结束节点前没有可运行节点'}
+      const chain = this.testChainAvailability(target)
+      if (!chain.available) return chain
+      if (chain.nodeIds.length !== (this.definition.nodes || []).length) {
+        return {available: false, reason: '当前流程包含分支或不在线性主路径上的节点'}
+      }
+      return {available: true, reason: '', target}
     },
     resolvedNodeSchemas() {
       const result = (this.definition.nodes || []).reduce((schemas, node) => {
+        if (node.type === 'transform') {
+          const descriptor = this.descriptors.find(item => item.type === node.type
+            && item.handlerVersion === node.typeVersion)
+          schemas[node.id] = {
+            inputSchema: descriptor?.inputSchema || {type: 'object', additionalProperties: true},
+            outputSchema: this.transformEditorOutputSchema(node),
+            source: '转换规则',
+            sourceCode: 'TRANSFORM_RULES',
+            diagnostics: this.transformEditorDiagnostics(node)
+          }
+          return schemas
+        }
         if (!['http_get', 'http_request'].includes(node.type)) return schemas
         const reference = (node.resourceRefs || [])
           .find(item => item.kind === 'API_CONNECTOR')
@@ -1403,6 +1510,46 @@ export default {
     window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    presentDiagnostic(item) {
+      const node = item.nodeId
+        ? this.definition.nodes.find(value => value.id === item.nodeId)
+        : null
+      const presentations = {
+        CONDITION_BRANCH_INVALID: {
+          title: '条件分支设置不完整',
+          suggestion: '从该条件节点至少连接 2 条条件分支，并将其中 1 条设为“默认分支”。只能有 1 条默认分支。'
+        },
+        CONDITION_PRIORITY_DUPLICATE: {
+          title: '条件分支优先级重复',
+          suggestion: '打开该节点的各条非默认连线，为每条分支设置不同的优先级，例如 10、20、30。'
+        },
+        EXPRESSION_INVALID: {
+          title: '条件表达式无法识别',
+          suggestion: '定位节点后检查条件连线，补全或修正表达式，再重新校验。'
+        },
+        NODE_UNREACHABLE: {
+          title: '节点不会被执行',
+          suggestion: '补充一条从开始节点或其他可执行节点到该节点的连线。'
+        },
+        NODE_CANNOT_REACH_END: {
+          title: '节点无法走到结束',
+          suggestion: '从该节点补充后续连线，确保最终能够连接到结束节点。'
+        },
+        PUBLISH_CONTENT_UNCHANGED: {
+          title: '当前内容已经发布',
+          suggestion: '无需重复发布；如需生成新版本，请先修改并保存草稿。'
+        }
+      }
+      const presentation = presentations[item.code] || {}
+      return {
+        ...item,
+        severity: item.severity || 'ERROR',
+        title: presentation.title || (item.severity === 'WARNING' ? '请检查此项配置' : '此项配置需要修改'),
+        location: node ? `节点“${node.name || node.id}”（${node.id}）` : '工作流整体设置',
+        suggestion: presentation.suggestion
+          || (item.nodeId ? '点击“定位节点”检查对应配置，修改后重新校验。' : '检查工作流设置，修改后重新校验。')
+      }
+    },
     inspectorTabLabel(value) {
       return this.inspectorTabOptions.find(item => item.value === value)?.label || '配置'
     },
@@ -1571,7 +1718,14 @@ export default {
         id: '__start__',
         type: 'workflow',
         position: canvasUi.startPosition || { x: 60, y: 220 },
-        data: {label: '开始', start: true, movable: true},
+        data: {
+          label: '开始',
+          start: true,
+          movable: true,
+          testable: this.canDebug && this.workflowDraftTestAvailability.available,
+          testLabel: '试运行工作流',
+          testTitle: '直接试运行当前草稿'
+        },
         draggable: this.canEdit,
         deletable: false
       }
@@ -1652,6 +1806,15 @@ export default {
     defaultNodeConfig(type) {
       if (type === 'http_get') return {method: 'GET', path: ''}
       if (type === 'http_request') return {method: 'POST', path: ''}
+      if (type === 'transform') {
+        return {
+          version: 1,
+          mode: 'OBJECT_MAP',
+          rules: [],
+          preserveUnmapped: false,
+          maxItems: 1000
+        }
+      }
       if (type === 'loop') return {maxIterations: 10}
       if (type === 'join') return {mode: 'ALL'}
       if (type === 'wait') return {delaySeconds: 60}
@@ -1713,6 +1876,10 @@ export default {
       this.mappingError = ''
       this.inspectorCollapsed = false
       this.refreshCanvasLayout()
+    },
+    suppressNodeContextMenu({event}) {
+      event?.preventDefault()
+      event?.stopPropagation()
     },
     nodeDragStarted({node}) {
       this.nodeDragOrigin = node?.position ? {...node.position} : null
@@ -1901,6 +2068,128 @@ export default {
       }
       return {type: typeof value === 'boolean' ? 'boolean' : 'string'}
     },
+    transformEditorOutputSchema(node) {
+      const config = node?.config || {}
+      const item = {
+        type: 'object',
+        properties: {},
+        additionalProperties: !!config.preserveUnmapped
+      }
+      ;(Array.isArray(config.rules) ? config.rules : []).forEach(rule => {
+        if (!this.validTransformTargetPath(rule.targetPath)) return
+        const defaultWhen = rule.defaultWhen || 'NEVER'
+        const guaranteed = !!rule.required || rule.operation === 'CONSTANT'
+          || defaultWhen === 'MISSING' || !rule.sourcePath
+        this.addTransformEditorSchemaPath(item, rule.targetPath,
+          this.transformRuleResultSchema(rule), guaranteed)
+      })
+      return config.mode === 'ARRAY_MAP' ? {type: 'array', items: item} : item
+    },
+    transformPathTokens(path) {
+      const tokens = []
+      String(path || '').split('.').filter(Boolean).forEach(segment => {
+        const bracket = segment.indexOf('[')
+        const field = bracket < 0 ? segment : segment.slice(0, bracket)
+        if (field) tokens.push({field, each: false})
+        let suffix = bracket < 0 ? '' : segment.slice(bracket)
+        while (suffix.startsWith('[]')) {
+          tokens.push({field: '', each: true})
+          suffix = suffix.slice(2)
+        }
+      })
+      return tokens
+    },
+    validTransformTargetPath(path) {
+      return /^[A-Za-z_][A-Za-z0-9_]*(?:\[\])*(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])*){0,9}$/.test(path || '')
+    },
+    addTransformEditorSchemaPath(root, path, resultSchema, guaranteed) {
+      const tokens = this.transformPathTokens(path)
+      const type = resultSchema?.type || 'object'
+      let current = root
+      tokens.forEach((token, index) => {
+        const next = tokens[index + 1]
+        const leaf = !next
+        if (token.each) {
+          if (!current.type) current.type = 'array'
+          if (current.type !== 'array') return
+          current.items = current.items || {}
+          if (leaf) Object.assign(current.items, JSON.parse(JSON.stringify(resultSchema || {type})))
+          else if (!current.items.type) {
+            current.items.type = next.each ? 'array' : 'object'
+            if (!next.each) {
+              current.items.properties = {}
+              current.items.additionalProperties = false
+            }
+          }
+          current = current.items
+          return
+        }
+        current.type = current.type || 'object'
+        current.properties = current.properties || {}
+        if (guaranteed) current.required = [...new Set([...(current.required || []), token.field])]
+        const field = current.properties[token.field] || {}
+        current.properties[token.field] = field
+        if (leaf) Object.assign(field, JSON.parse(JSON.stringify(resultSchema || {type})))
+        else if (!field.type) {
+          field.type = next.each ? 'array' : 'object'
+          if (!next.each) {
+            field.properties = {}
+            field.additionalProperties = false
+          }
+        }
+        current = field
+      })
+    },
+    transformRuleResultType(rule) {
+      const operation = rule?.operation || 'COPY'
+      if (['TO_STRING', 'TRIM', 'UPPERCASE', 'LOWERCASE', 'ARRAY_JOIN'].includes(operation)) return 'string'
+      if (['TO_INTEGER', 'ARRAY_LENGTH'].includes(operation)) return 'integer'
+      if (operation === 'TO_NUMBER') return 'number'
+      if (operation === 'TO_BOOLEAN') return 'boolean'
+      return ['object', 'array', 'string', 'integer', 'number', 'boolean', 'null']
+        .includes(rule?.resultType) ? rule.resultType : 'object'
+    },
+    transformRuleResultSchema(rule) {
+      if (rule?.operation === 'COPY' && rule?.resultSchema?.type) {
+        return JSON.parse(JSON.stringify(rule.resultSchema))
+      }
+      if (rule?.operation === 'CONSTANT') return this.inferEditorSchema(rule.value)
+      return {type: this.transformRuleResultType(rule)}
+    },
+    transformEditorDiagnostics(node) {
+      const rules = Array.isArray(node?.config?.rules) ? node.config.rules : []
+      const targets = []
+      const diagnostics = []
+      rules.forEach(rule => {
+        const path = String(rule?.targetPath || '')
+        if (!this.validTransformTargetPath(path)) {
+          diagnostics.push(`输出字段路径无效：${path || '未填写'}`)
+        } else if (targets.some(existing => this.transformPathsConflict(existing, path))) {
+          diagnostics.push(`输出字段路径冲突：${path}`)
+        }
+        const sourceArrays = (String(rule?.sourcePath || '').match(/\[\]/g) || []).length
+        const targetArrays = (path.match(/\[\]/g) || []).length
+        if (rule?.operation === 'CONSTANT' && targetArrays) {
+          diagnostics.push(`固定值不能写入数组通配路径：${path}`)
+        } else if (rule?.operation !== 'CONSTANT' && sourceArrays !== targetArrays) {
+          diagnostics.push(`来源与输出数组层级不一致：${rule?.sourcePath || '当前数据'} → ${path}`)
+        }
+        targets.push(path)
+      })
+      return diagnostics
+    },
+    transformPathsConflict(left, right) {
+      const leftTokens = this.transformPathTokens(left)
+      const rightTokens = this.transformPathTokens(right)
+      const maximum = Math.min(leftTokens.length, rightTokens.length)
+      for (let index = 0; index < maximum; index++) {
+        const leftToken = leftTokens[index]
+        const rightToken = rightTokens[index]
+        if (leftToken.each === rightToken.each && leftToken.field === rightToken.field) continue
+        return leftToken.each !== rightToken.each
+      }
+      return true
+    },
     inputMappingChanged() {
       try {
         const value = JSON.parse(this.selectedNodeInputMapping)
@@ -2080,6 +2369,7 @@ export default {
         OPENAPI: 'OpenAPI',
         DATABASE_METADATA: '数据库元数据',
         LLM_STRUCTURED_OUTPUT: '结构化输出',
+        TRANSFORM_RULES: '转换规则',
         NODE_TEST: '试运行样本',
         USER_OVERRIDE: '用户正式覆盖'
       }
@@ -2192,6 +2482,15 @@ export default {
         const canvasNode = this.canvasNodes.find(item => item.id === node.id)
         if (canvasNode) canvasNode.data = this.canvasNodeData(node)
       })
+      const startNode = this.canvasNodes.find(item => item.id === '__start__')
+      if (startNode) {
+        startNode.data = {
+          ...startNode.data,
+          testable: this.canDebug && this.workflowDraftTestAvailability.available,
+          testLabel: '试运行工作流',
+          testTitle: '直接试运行当前草稿'
+        }
+      }
     },
     latestNodeStatus(nodeId) {
       return this.debugNodeRuns
@@ -2207,6 +2506,51 @@ export default {
       const capabilities = descriptor.capabilities || []
       if (descriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) return false
       return capabilities.includes('CANCELLABLE')
+    },
+    testChainAvailability(target) {
+      if (!target) return {available: false, reason: '请先选择节点', nodeIds: []}
+      const nodes = new Map((this.definition.nodes || []).map(node => [node.id, node]))
+      const visited = new Set()
+      let current = target.id
+      while (current) {
+        if (visited.has(current)) {
+          return {available: false, reason: '上游路径包含循环', nodeIds: [...visited]}
+        }
+        visited.add(current)
+        const node = nodes.get(current)
+        if (!node) {
+          return {available: false, reason: '上游路径节点已失效', nodeIds: [...visited]}
+        }
+        if (['approval', 'wait', 'sub_workflow', 'condition', 'parallel', 'join',
+          'loop', 'llm_classifier'].includes(node.type)) {
+          return {
+            available: false,
+            reason: `路径包含暂不支持直接试运行的控制节点「${node.name}」`,
+            nodeIds: [...visited]
+          }
+        }
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        if (!descriptor || descriptor.sideEffect === 'WRITE'
+          || !(descriptor.capabilities || []).includes('CANCELLABLE')) {
+          return {
+            available: false,
+            reason: `路径节点「${node.name}」不满足安全执行要求`,
+            nodeIds: [...visited]
+          }
+        }
+        const incoming = (this.definition.edges || [])
+          .filter(edge => edge.target === current)
+        if (incoming.length !== 1 || incoming[0].kind !== 'NORMAL') {
+          return {
+            available: false,
+            reason: '仅支持单入口普通连线组成的线性路径',
+            nodeIds: [...visited]
+          }
+        }
+        current = incoming[0].source === '__start__' ? null : incoming[0].source
+      }
+      return {available: true, reason: '', nodeIds: [...visited]}
     },
     openCanvasNodeTest(nodeId) {
       const node = this.definition.nodes.find(item => item.id === nodeId)
@@ -2227,6 +2571,7 @@ export default {
       this.nodeTestNodeName = this.selectedNode.name
       this.nodeTestTimeoutSeconds = Math.min(this.selectedNode.timeoutSeconds || 60, 120)
       this.nodeTestMode = 'NODE'
+      this.workflowDraftTest = false
       this.nodeTestResult = null
       this.nodeTestSchemaApplied = false
       this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
@@ -2245,7 +2590,9 @@ export default {
       try {
         input = JSON.parse(this.nodeTestInputJson)
       } catch (error) {
-        this.$message.error('节点输入必须是有效 JSON')
+        this.$message.error(this.workflowDraftTest
+          ? '流程输入必须是有效 JSON'
+          : '节点输入必须是有效 JSON')
         return
       }
       if (!this.currentDefinition?.id || this.dirty) {
@@ -2254,7 +2601,9 @@ export default {
           this.nodeTestAutoPersistSchema = false
           return
         }
-        this.$message.info('已同步当前草稿，正在试运行接口')
+        this.$message.info(this.workflowDraftTest
+          ? '已同步当前草稿，正在试运行工作流'
+          : '已同步当前草稿，正在试运行节点')
       }
       this.nodeTestRunning = true
       this.nodeTestResult = null
@@ -2297,9 +2646,15 @@ export default {
             await this.saveDraft({silent: true})
           }
           this.nodeTestAutoPersistSchema = false
-          this.$message.success(schemaUpdated
-            ? '当前节点试运行成功，响应字段已自动更新'
-            : '当前节点试运行成功')
+          if (this.workflowDraftTest) {
+            this.$message.success(schemaUpdated
+              ? '当前草稿试运行成功，末节点响应字段已自动更新'
+              : '当前草稿试运行成功')
+          } else {
+            this.$message.success(schemaUpdated
+              ? '当前节点试运行成功，响应字段已自动更新'
+              : '当前节点试运行成功')
+          }
         } else {
           this.nodeTestAutoPersistSchema = false
         }
@@ -2316,9 +2671,9 @@ export default {
         const response = await cancelWorkflowNodeTest(testRunId)
         this.nodeTestResult = response.data
         if (response.data?.status === 'CANCELLED') {
-          this.$message.success('已取消当前节点试运行')
+          this.$message.success(this.workflowDraftTest ? '已取消工作流试运行' : '已取消当前节点试运行')
         } else {
-          this.$message.info('节点试运行已经结束')
+          this.$message.info(this.workflowDraftTest ? '工作流试运行已经结束' : '节点试运行已经结束')
         }
         this.nodeTestRunning = false
         this.nodeTestAutoPersistSchema = false
@@ -2514,8 +2869,15 @@ export default {
       return JSON.stringify(value, null, 2)
     },
     async openTestRun() {
+      if (this.canDebug && this.workflowDraftTestAvailability.available) {
+        this.openDraftWorkflowTest()
+        return
+      }
       if (!this.currentDefinition?.currentPublishedVersionId) {
-        this.$message.warning('请先发布工作流版本')
+        const reason = this.canDebug ? this.workflowDraftTestAvailability.reason : ''
+        this.$message.warning(reason
+          ? `当前草稿暂不能直接试运行：${reason}；请发布后测试完整流程`
+          : '请先发布工作流版本')
         return
       }
       this.testInput = {}
@@ -2536,6 +2898,30 @@ export default {
         this.testInputSchemaLoading = false
         this.$nextTick(() => this.$refs.testInputEditor?.reset())
       }
+    },
+    openDraftWorkflowTest() {
+      if (this.nodeTestRunning) {
+        this.nodeTestDialogOpen = true
+        return
+      }
+      const availability = this.workflowDraftTestAvailability
+      if (!availability.available) {
+        this.$message.warning(`当前草稿暂不能直接试运行：${availability.reason}`)
+        return
+      }
+      const target = availability.target
+      this.nodeTestNodeId = target.id
+      this.nodeTestNodeName = target.name
+      this.nodeTestTimeoutSeconds = Math.min(
+        this.definition.policies?.timeoutSeconds || 120, 120)
+      this.nodeTestMode = 'UPSTREAM_CHAIN'
+      this.workflowDraftTest = true
+      this.nodeTestInputJson = '{}'
+      this.nodeTestResult = null
+      this.nodeTestSchemaApplied = false
+      this.nodeTestSchemaPromoted = !!target.outputSchemaOverride
+      this.nodeTestInferredSchema = target.ui?.inferredOutputSchema?.schema || null
+      this.nodeTestDialogOpen = true
     },
     async startTestRun() {
       if (!this.testInputValidation.valid) {
@@ -3000,11 +3386,11 @@ export default {
       }
     },
     async publish() {
-      if (!this.canPublish) return
-      const valid = await this.validate()
-      if (!valid) return
+      if (!this.canPublish || this.publishing || this.validating || this.saving) return
       this.publishing = true
       try {
+        const valid = await this.validate()
+        if (!valid) return
         const response = await publishWorkflowDraft(
           this.currentDefinition.id,
           this.currentDefinition.draftRevision
@@ -3015,7 +3401,13 @@ export default {
           return
         }
         this.currentDefinition.currentPublishedVersionId = response.data.version.versionId
-        this.$message.success(`已发布版本 v${response.data.version.versionNo}`)
+        const contentUnchanged = this.diagnostics
+          .some(item => item.code === 'PUBLISH_CONTENT_UNCHANGED')
+        if (contentUnchanged) {
+          this.$message.info(`当前内容已是版本 v${response.data.version.versionNo}，无需重复发布`)
+        } else {
+          this.$message.success(`已发布版本 v${response.data.version.versionNo}`)
+        }
         this.$emit('published', response.data)
       } finally {
         this.publishing = false
@@ -3037,6 +3429,13 @@ export default {
       if (this.canEdit) {
         this.dirty = true
         this.validationPassed = false
+        const startNode = this.canvasNodes.find(item => item.id === '__start__')
+        if (startNode) {
+          startNode.data = {
+            ...startNode.data,
+            testable: this.canDebug && this.workflowDraftTestAvailability.available
+          }
+        }
         this.scheduleHistory()
       }
     },
@@ -3330,30 +3729,106 @@ export default {
 }
 
 .diagnostic-panel {
-  max-height: 180px;
-  padding: 10px 14px;
+  max-height: 320px;
+  padding: 14px 16px 16px;
   overflow: auto;
   border-top: 1px solid var(--el-border-color-light);
-}
-
-.diagnostic-header,
-.diagnostic-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  background: var(--el-fill-color-extra-light);
 }
 
 .diagnostic-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.diagnostic-header > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.diagnostic-header strong {
+  font-size: 15px;
+}
+
+.diagnostic-header span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.diagnostic-list {
+  display: grid;
+  gap: 10px;
 }
 
 .diagnostic-item {
-  padding: 7px 0;
-  cursor: pointer;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-left: 3px solid var(--el-color-danger);
+  border-radius: 8px;
+  background: var(--el-bg-color);
 }
 
-.diagnostic-item code {
-  margin-left: auto;
+.diagnostic-item.is-warning {
+  border-left-color: var(--el-color-warning);
+}
+
+.diagnostic-status {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  color: var(--el-color-danger);
+  font-size: 18px;
+}
+
+.diagnostic-item.is-warning .diagnostic-status {
+  color: var(--el-color-warning);
+}
+
+.diagnostic-content {
+  min-width: 0;
+}
+
+.diagnostic-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostic-title-row > strong {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+}
+
+.diagnostic-location {
+  margin-top: 5px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.diagnostic-content p {
+  margin: 7px 0 0;
+  color: var(--el-text-color-regular);
+  line-height: 1.5;
+}
+
+.diagnostic-suggestion {
+  margin-top: 7px;
+  color: var(--el-text-color-primary);
+  line-height: 1.5;
+}
+
+.diagnostic-content code {
+  display: block;
+  margin-top: 7px;
   color: var(--el-text-color-secondary);
   font-size: 11px;
 }
@@ -5232,5 +5707,26 @@ export default {
   margin: 0 auto;
   padding: 14px 18px 22px;
   overflow: auto;
+}
+
+.transform-mapping-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 10px;
+}
+
+.transform-mapping-summary > div {
+  display: grid;
+  gap: 4px;
+}
+
+.transform-mapping-summary small {
+  color: var(--workflow-text-muted, var(--el-text-color-secondary));
 }
 </style>

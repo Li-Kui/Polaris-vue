@@ -24,39 +24,46 @@
           <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" />
         </el-form-item>
       </div>
-      <div class="field-grid">
-        <el-form-item label="数据库名称" prop="databaseName">
-          <el-input v-model="form.databaseName" placeholder="orders" />
-        </el-form-item>
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" maxlength="128" placeholder="workflow_reader" />
-        </el-form-item>
-      </div>
+      <el-form-item label="数据库名称" prop="databaseName">
+        <el-input v-model="form.databaseName" placeholder="例如：orders" />
+      </el-form-item>
 
-      <el-alert
-        v-if="editing && form.passwordConfigured && form.credentialAction === 'KEEP'"
-        title="密码已配置，保存其他字段不会修改现有密码。"
-        type="success"
-        :closable="false"
-        show-icon
-        class="credential-alert"
-      >
-        <template #default>
-          <el-button link type="primary" @click="replacePassword">更换密码</el-button>
-        </template>
-      </el-alert>
-      <template v-else>
-        <el-form-item label="数据库密码" prop="credential.password">
+      <div class="credential-heading">
+        <strong>登录凭据</strong>
+        <small>填写用于连接该数据库的只读账号和密码</small>
+      </div>
+      <div class="field-grid credential-grid">
+        <el-form-item label="数据库账号（用户名）" prop="username">
+          <el-input v-model="form.username" maxlength="128" placeholder="例如：workflow_reader" />
+        </el-form-item>
+        <el-form-item
+          v-if="editing && form.passwordConfigured && form.credentialAction === 'KEEP'"
+          label="账号密码"
+        >
+          <el-alert
+            title="密码已配置"
+            type="success"
+            :closable="false"
+            show-icon
+            class="credential-alert"
+          >
+            <template #default>
+              <el-button link type="primary" @click="replacePassword">更换密码</el-button>
+            </template>
+          </el-alert>
+        </el-form-item>
+        <el-form-item v-else label="账号密码" prop="credential.password">
           <el-input
             v-model="form.credential.password"
             type="password"
             show-password
             autocomplete="new-password"
-            placeholder="请输入只读数据库账号密码"
+            placeholder="请输入该数据库账号的密码"
           />
         </el-form-item>
+      </div>
+      <template v-if="editing && form.passwordConfigured && form.credentialAction !== 'KEEP'">
         <el-button
-          v-if="editing && form.passwordConfigured"
           link
           @click="keepPassword"
         >取消更换，保留原密码</el-button>
@@ -99,7 +106,7 @@ const defaultPorts = {MYSQL: 3306, POSTGRESQL: 5432, SQLSERVER: 1433}
 
 const passwordRequired = (rule, value, callback) => {
   if (props.form.credentialAction === 'REPLACE' && !String(value || '')) {
-    callback(new Error('请输入数据库密码'))
+    callback(new Error('请输入账号密码'))
     return
   }
   callback()
@@ -111,7 +118,7 @@ const rules = {
   host: [{required: true, message: '请输入主机地址', trigger: 'blur'}],
   port: [{required: true, message: '请输入端口', trigger: 'change'}],
   databaseName: [{required: true, message: '请输入数据库名称', trigger: 'blur'}],
-  username: [{required: true, message: '请输入用户名', trigger: 'blur'}],
+  username: [{required: true, message: '请输入数据库账号（用户名）', trigger: 'blur'}],
   'credential.password': [{validator: passwordRequired, trigger: 'blur'}]
 }
 
@@ -181,7 +188,24 @@ defineExpose({validate, buildPayload})
 }
 
 .credential-alert {
-  margin-bottom: 4px;
+  width: 100%;
+  min-height: 32px;
+}
+
+.credential-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 4px 0 12px;
+
+  strong {
+    color: var(--el-text-color-primary);
+    font-size: 14px;
+  }
+
+  small {
+    color: var(--el-text-color-secondary);
+  }
 }
 
 .field-hint {

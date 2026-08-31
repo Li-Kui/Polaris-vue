@@ -5,8 +5,10 @@
         <el-button class="monitor-back" circle aria-label="返回工作流列表" title="返回工作流列表" @click="$emit('back')">
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <span class="monitor-title">工作流运行记录</span>
-        <span class="monitor-subtitle">实时追踪节点、事件与恢复状态</span>
+        <div class="monitor-title-group">
+          <span class="monitor-title">{{ workflowName }} · 运行记录</span>
+          <span class="monitor-subtitle">{{ workflowCode }} · 仅显示当前工作流，实时追踪节点、事件与恢复状态</span>
+        </div>
       </div>
       <el-button class="monitor-refresh" :loading="loading" @click="loadExecutions">
         <el-icon v-if="!loading"><Refresh /></el-icon>
@@ -18,7 +20,6 @@
       <el-table-column prop="executionId" label="执行 ID" min-width="260">
         <template #default="{row}"><code>{{ row.executionId }}</code></template>
       </el-table-column>
-      <el-table-column prop="workflowCode" label="工作流" min-width="150" />
       <el-table-column label="版本" width="80" align="center">
         <template #default="{row}">v{{ row.versionNo }}</template>
       </el-table-column>
@@ -37,6 +38,9 @@
           <el-button v-if="canExecute && retryable(row.status)" link type="warning" @click="retry(row)">安全重试</el-button>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="该工作流暂无运行记录" :image-size="72" />
+      </template>
     </el-table>
 
     <el-drawer
@@ -161,6 +165,18 @@ export default {
     canExecute: {
       type: Boolean,
       default: false
+    },
+    definitionId: {
+      type: [Number, String],
+      required: true
+    },
+    workflowName: {
+      type: String,
+      default: '工作流'
+    },
+    workflowCode: {
+      type: String,
+      default: ''
     }
   },
   emits: ['back'],
@@ -197,7 +213,7 @@ export default {
     async loadExecutions() {
       this.loading = true
       try {
-        const response = await listWorkflowExecutions({})
+        const response = await listWorkflowExecutions({definitionId: this.definitionId})
         this.executions = response.data || []
       } finally {
         this.loading = false
@@ -435,13 +451,23 @@ export default {
 }
 
 .monitor-title {
-  margin-left: 12px;
   font-size: 20px;
   font-weight: 700;
 }
 
+.monitor-title-group {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 12px;
+}
+
+.monitor-title-group span {
+  display: block;
+}
+
 .monitor-subtitle {
-  margin-left: 10px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }

@@ -13,6 +13,7 @@ import request from '../../src/utils/request'
 const searchParams = new URLSearchParams(window.location.search)
 const tenantMode = searchParams.get('scope') === 'tenant'
 const listMode = searchParams.get('view') === 'list'
+const emptyDatasource = searchParams.get('emptyDatasource') === '1'
 if (searchParams.get('theme') === 'dark') document.documentElement.classList.add('dark')
 
 const resourceCatalog = {
@@ -22,7 +23,9 @@ const resourceCatalog = {
     : [resource('AGENT', '11', '意图分发员', '使用现有默认聊天模型', true)],
   KNOWLEDGE_BASE: [resource('KNOWLEDGE_BASE', '21', '风控知识库', '索引已就绪', true)],
   API_CONNECTOR: [resource('API_CONNECTOR', '31', '订单服务 API', 'https://api.example.test', false)],
-  DATASOURCE: [resource('DATASOURCE', '41', '用户只读数据库', 'MySQL · 只读', false)]
+  DATASOURCE: emptyDatasource
+    ? []
+    : [resource('DATASOURCE', '41', '用户只读数据库', 'MySQL · 只读', false)]
 }
 
 let bindingSequence = 0
@@ -189,7 +192,8 @@ const app = createApp({
       descriptors,
       canEdit: true,
       canPublish: true,
-      canExecute: true
+      canExecute: true,
+      appearance: tenantMode ? 'platform' : 'admin'
     })
   }
 })
