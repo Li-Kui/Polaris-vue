@@ -68,6 +68,7 @@
           "additionalProperties": { "$ref": "#/$defs/valueBinding" }
         },
         "config": { "type": "object", "additionalProperties": true },
+        "outputSchemaOverride": { "$ref": "#/$defs/jsonSchema" },
         "retryPolicy": { "$ref": "#/$defs/retryPolicy" },
         "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
         "onError": { "enum": ["FAIL", "CONTINUE", "ROUTE"] },

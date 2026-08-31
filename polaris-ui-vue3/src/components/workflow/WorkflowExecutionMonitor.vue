@@ -1,12 +1,17 @@
 <template>
   <div class="execution-monitor">
     <div class="monitor-header">
-      <div>
-        <el-button icon="Back" circle @click="$emit('back')" />
+      <div class="monitor-heading">
+        <el-button class="monitor-back" circle aria-label="返回工作流列表" title="返回工作流列表" @click="$emit('back')">
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
         <span class="monitor-title">工作流运行记录</span>
         <span class="monitor-subtitle">实时追踪节点、事件与恢复状态</span>
       </div>
-      <el-button :loading="loading" icon="Refresh" @click="loadExecutions">刷新</el-button>
+      <el-button class="monitor-refresh" :loading="loading" @click="loadExecutions">
+        <el-icon v-if="!loading"><Refresh /></el-icon>
+        <span>刷新记录</span>
+      </el-button>
     </div>
 
     <el-table v-loading="loading" :data="executions" class="polaris-el-table">
@@ -147,9 +152,11 @@ import {
   retryWorkflowExecution,
   streamWorkflowExecutionEvents
 } from '@/api/ai/workflow'
+import {ArrowLeft, Refresh} from '@element-plus/icons-vue'
 
 export default {
   name: 'WorkflowExecutionMonitor',
+  components: {ArrowLeft, Refresh},
   props: {
     canExecute: {
       type: Boolean,
@@ -341,6 +348,90 @@ export default {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+
+.monitor-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.monitor-back.el-button {
+  --el-button-text-color: var(--workflow-text-secondary, #64748b);
+  --el-button-bg-color: var(--workflow-surface-raised, #fff);
+  --el-button-border-color: var(--workflow-border-strong, #d9deea);
+  --el-button-hover-text-color: var(--workflow-primary, #625bf6);
+  --el-button-hover-bg-color: var(--workflow-primary-soft, #efedff);
+  --el-button-hover-border-color: var(--workflow-primary, #625bf6);
+  color: var(--workflow-text-secondary, #64748b) !important;
+  background: var(--workflow-surface-raised, #fff) !important;
+  border-color: var(--workflow-border-strong, #d9deea) !important;
+}
+
+.monitor-refresh.el-button {
+  --el-button-text-color: #fff;
+  --el-button-bg-color: var(--workflow-primary, #625bf6);
+  --el-button-border-color: var(--workflow-primary, #625bf6);
+  --el-button-hover-text-color: #fff;
+  --el-button-hover-bg-color: var(--workflow-primary-hover, #5149e8);
+  --el-button-hover-border-color: var(--workflow-primary-hover, #5149e8);
+  min-width: 104px;
+  color: #fff !important;
+  background: var(--workflow-primary, #625bf6) !important;
+  border-color: var(--workflow-primary, #625bf6) !important;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--workflow-primary, #625bf6) 22%, transparent);
+  font-weight: 650;
+}
+
+.monitor-refresh.el-button:hover {
+  color: #fff !important;
+  background: var(--workflow-primary-hover, #5149e8) !important;
+  border-color: var(--workflow-primary-hover, #5149e8) !important;
+}
+
+.monitor-back.el-button :deep(.el-icon),
+.monitor-refresh.el-button :deep(.el-icon),
+.monitor-refresh.el-button :deep(span) {
+  color: inherit !important;
+}
+
+.execution-monitor :deep(.el-button.is-link) {
+  --el-button-bg-color: transparent;
+  --el-button-border-color: transparent;
+  background: transparent !important;
+  border-color: transparent !important;
+  font-weight: 650;
+}
+
+.execution-monitor :deep(.el-button.is-link .el-icon),
+.execution-monitor :deep(.el-button.is-link span) {
+  color: inherit !important;
+}
+
+.execution-monitor :deep(.el-button.is-link.el-button--primary) {
+  --el-button-text-color: #4f46e5;
+  color: #4f46e5 !important;
+}
+
+.execution-monitor :deep(.el-button.is-link.el-button--danger) {
+  --el-button-text-color: #dc2626;
+  color: #dc2626 !important;
+}
+
+.execution-monitor :deep(.el-button.is-link.el-button--warning) {
+  --el-button-text-color: #b45309;
+  color: #b45309 !important;
+}
+
+:global(.workflow-execution-drawer .el-button.is-link.el-button--primary) {
+  --el-button-text-color: #4f46e5;
+  color: #4f46e5 !important;
+  background: transparent !important;
+}
+
+:global(.workflow-execution-drawer .el-button.is-link.el-button--primary .el-icon),
+:global(.workflow-execution-drawer .el-button.is-link.el-button--primary span) {
+  color: inherit !important;
 }
 
 .monitor-title {

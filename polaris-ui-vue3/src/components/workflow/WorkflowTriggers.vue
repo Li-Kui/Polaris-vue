@@ -57,7 +57,7 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogOpen" title="新建自动触发器" width="620px">
+    <el-dialog v-model="dialogOpen" class="workflow-dialog" title="新建自动触发器" width="620px">
       <el-form label-width="120px">
         <el-form-item label="工作流">
           <el-select v-model="form.definitionId" filterable style="width: 100%" @change="definitionChanged">

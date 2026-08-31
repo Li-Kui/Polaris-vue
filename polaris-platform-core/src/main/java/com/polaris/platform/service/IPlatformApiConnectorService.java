@@ -23,6 +23,8 @@ public interface IPlatformApiConnectorService {
 
     PlatformApiConnector insertConnector(ApiConnectorSaveRequest request, String operator);
 
+    PlatformApiConnector insertSharedConnector(ApiConnectorSaveRequest request, String operator);
+
     PlatformApiConnector updateConnector(ApiConnectorSaveRequest request, String operator);
 
     int deleteConnectorById(Long id);

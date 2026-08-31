@@ -30,6 +30,11 @@ public class WorkflowExecutionPlan {
         private Map<String, PlanValueBinding> inputMapping = new LinkedHashMap<>();
         private JsonNode config;
         private String sideEffect;
+        private JsonNode inputSchema;
+        private JsonNode outputSchema;
+        private String schemaSource;
+        private String schemaSourceVersion;
+        private String outputSchemaBaseHash;
         private String onError;
         private String compensationNodeId;
         private Integer timeoutSeconds;

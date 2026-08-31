@@ -1,5 +1,7 @@
 package com.polaris.ai.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
 import com.polaris.ai.workflow.runtime.WorkflowEventStreamService;
@@ -18,8 +20,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** 工作流草稿、校验、发布和执行的共享接口。 */
 @Tag(name = "AI工作流")
@@ -33,9 +36,12 @@ public class AiWorkflowController extends BaseController {
     private final WorkflowExecutionApplicationFacade executionFacade;
     private final WorkflowResourceBindingApplicationFacade resourceBindingFacade;
     private final WorkflowResourceCatalogApplicationFacade resourceCatalogFacade;
+    private final WorkflowNodeSchemaApplicationFacade nodeSchemaFacade;
+    private final WorkflowNodeTestApplicationFacade nodeTestFacade;
     private final WorkflowEventStreamService eventStreamService;
     private final WorkflowTriggerApplicationFacade triggerFacade;
     private final WorkflowArtifactApplicationFacade artifactFacade;
+    private final ObjectMapper objectMapper;
 
     public AiWorkflowController(
             WorkflowDefinitionApplicationFacade workflowFacade,
@@ -43,17 +49,23 @@ public class AiWorkflowController extends BaseController {
             WorkflowExecutionApplicationFacade executionFacade,
             WorkflowResourceBindingApplicationFacade resourceBindingFacade,
             WorkflowResourceCatalogApplicationFacade resourceCatalogFacade,
+            WorkflowNodeSchemaApplicationFacade nodeSchemaFacade,
+            WorkflowNodeTestApplicationFacade nodeTestFacade,
             WorkflowEventStreamService eventStreamService,
             WorkflowTriggerApplicationFacade triggerFacade,
-            WorkflowArtifactApplicationFacade artifactFacade) {
+            WorkflowArtifactApplicationFacade artifactFacade,
+            ObjectMapper objectMapper) {
         this.workflowFacade = workflowFacade;
         this.approvalFacade = approvalFacade;
         this.executionFacade = executionFacade;
         this.resourceBindingFacade = resourceBindingFacade;
         this.resourceCatalogFacade = resourceCatalogFacade;
+        this.nodeSchemaFacade = nodeSchemaFacade;
+        this.nodeTestFacade = nodeTestFacade;
         this.eventStreamService = eventStreamService;
         this.triggerFacade = triggerFacade;
         this.artifactFacade = artifactFacade;
+        this.objectMapper = objectMapper;
     }
 
     @Operation(summary = "查询工作流定义")
@@ -142,8 +154,63 @@ public class AiWorkflowController extends BaseController {
     @Operation(summary = "查询工作流可用节点描述")
     @PreAuthorize("@workflowAccess.canRead()")
     @GetMapping("/node-descriptors")
-    public ResultData<Collection<WorkflowNodeDescriptor>> listNodeDescriptors() {
-        return ok(workflowFacade.listNodeDescriptors());
+    public ResultData<List<Map<String, Object>>> listNodeDescriptors() {
+        return ok(workflowFacade.listNodeDescriptors().stream()
+                .map(this::nodeDescriptorView).toList());
+    }
+
+    @Operation(summary = "解析工作流草稿节点有效 Schema")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/node-schemas")
+    public ResultData<List<Map<String, Object>>> resolveNodeSchemas(
+            @PathVariable Long definitionId,
+            @RequestParam(defaultValue = "PROD") String environment) {
+        return ok(nodeSchemaFacade.resolve(definitionId, environment).stream()
+                .map(this::resolvedNodeSchemaView).toList());
+    }
+
+    @Operation(summary = "创建单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/definitions/{definitionId}/nodes/{nodeId}/tests")
+    public ResultData<Map<String, Object>> createNodeTest(
+            @PathVariable Long definitionId,
+            @PathVariable String nodeId,
+            @RequestBody(required = false) WorkflowNodeTestCommand command) {
+        return ok(nodeTestView(nodeTestFacade.create(definitionId, nodeId, command)));
+    }
+
+    @Operation(summary = "查询单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @GetMapping("/node-tests/{testRunId}")
+    public ResultData<Map<String, Object>> getNodeTest(@PathVariable String testRunId) {
+        return ok(nodeTestView(nodeTestFacade.get(testRunId)));
+    }
+
+    @Operation(summary = "取消单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/node-tests/{testRunId}/cancel")
+    public ResultData<Map<String, Object>> cancelNodeTest(@PathVariable String testRunId) {
+        return ok(nodeTestView(nodeTestFacade.cancel(testRunId)));
+    }
+
+    @Operation(summary = "从成功的单节点试运行推导样本 Schema")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/node-tests/{testRunId}/inferred-schema")
+    public ResultData<Map<String, Object>> inferNodeTestSchema(
+            @PathVariable String testRunId) {
+        WorkflowInferredSchemaResult result = nodeTestFacade.inferSchema(testRunId);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("testRunId", result.testRunId());
+        view.put("definitionId", result.definitionId());
+        view.put("draftRevision", result.draftRevision());
+        view.put("nodeId", result.nodeId());
+        view.put("schema", plainJson(result.schema()));
+        view.put("inferredAt", result.inferredAt());
+        view.put("sampleCount", result.sampleCount());
+        view.put("nodeConfigHash", result.nodeConfigHash());
+        view.put("schemaSourceVersion", result.schemaSourceVersion());
+        view.put("diagnostics", result.diagnostics());
+        return ok(view);
     }
 
     @Operation(summary = "启动工作流持久化执行")
@@ -333,5 +400,64 @@ public class AiWorkflowController extends BaseController {
             @PathVariable String triggerId,
             @RequestBody(required = false) WorkflowTriggerInvocationCommand command) {
         return ok(triggerFacade.invoke(triggerId, command));
+    }
+
+    private Map<String, Object> nodeDescriptorView(WorkflowNodeDescriptor descriptor) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("type", descriptor.type());
+        view.put("handlerVersion", descriptor.handlerVersion());
+        view.put("displayName", descriptor.displayName());
+        view.put("category", descriptor.category());
+        view.put("configSchema", plainJson(descriptor.configSchema()));
+        view.put("inputSchema", plainJson(descriptor.inputSchema()));
+        view.put("outputSchema", plainJson(descriptor.outputSchema()));
+        view.put("sideEffect", descriptor.sideEffect().name());
+        view.put("requiredResourceKinds", descriptor.requiredResourceKinds());
+        view.put("capabilities", descriptor.capabilities().stream()
+                .map(Enum::name).toList());
+        return view;
+    }
+
+    private Map<String, Object> resolvedNodeSchemaView(
+            WorkflowResolvedNodeSchemaView schema) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("nodeId", schema.nodeId());
+        view.put("nodeType", schema.nodeType());
+        view.put("handlerVersion", schema.handlerVersion());
+        view.put("inputSchema", plainJson(schema.inputSchema()));
+        view.put("outputSchema", plainJson(schema.outputSchema()));
+        view.put("source", schema.source());
+        view.put("sourceVersion", schema.sourceVersion());
+        view.put("fieldSources", schema.fieldSources());
+        view.put("diagnostics", schema.diagnostics());
+        return view;
+    }
+
+    private Map<String, Object> nodeTestView(WorkflowNodeTestResult result) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("testRunId", result.testRunId());
+        view.put("definitionId", result.definitionId());
+        view.put("draftRevision", result.draftRevision());
+        view.put("nodeId", result.nodeId());
+        view.put("nodeType", result.nodeType());
+        view.put("handlerVersion", result.handlerVersion());
+        view.put("environment", result.environment());
+        view.put("mode", result.mode());
+        view.put("status", result.status());
+        view.put("sideEffect", result.sideEffect());
+        view.put("input", plainJson(result.input()));
+        view.put("output", plainJson(result.output()));
+        view.put("usage", result.usage());
+        view.put("schemaSource", result.schemaSource());
+        view.put("schemaSourceVersion", result.schemaSourceVersion());
+        view.put("schemaDiagnostics", result.schemaDiagnostics());
+        view.put("errorCode", result.errorCode());
+        view.put("errorMessage", result.errorMessage());
+        view.put("durationMs", result.durationMs());
+        return view;
+    }
+
+    private Object plainJson(JsonNode value) {
+        return value == null ? null : objectMapper.convertValue(value, Object.class);
     }
 }

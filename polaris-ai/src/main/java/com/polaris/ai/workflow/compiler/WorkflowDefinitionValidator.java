@@ -7,6 +7,8 @@ import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowDefinitionSpec;
 import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
 import com.polaris.ai.workflow.runtime.WorkflowInputValidator;
+import com.polaris.ai.workflow.runtime.WorkflowOutputSchemaGovernance;
+import com.polaris.ai.workflow.runtime.WorkflowStructuredOutput;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 
@@ -41,6 +43,7 @@ public class WorkflowDefinitionValidator {
         Map<String, WorkflowDefinitionSpec.Node> nodes = validateNodes(definition, diagnostics);
         validateCompensations(nodes, diagnostics);
         validateEdges(definition, nodes, diagnostics);
+        validateOutputOverrideImpacts(definition, nodes, diagnostics);
         validateOutputBindings(definition, diagnostics);
         return diagnostics;
     }
@@ -140,6 +143,8 @@ public class WorkflowDefinitionValidator {
                 schemaValidator.validate(descriptor.configSchema(), node.getConfig(), path + ".config")
                         .forEach(message -> diagnostics.add(error(
                                 "NODE_CONFIG_SCHEMA_INVALID", nodeId, path + ".config", message)));
+                validateStructuredOutput(node, path, diagnostics);
+                validateOutputSchemaOverride(node, descriptor, path, diagnostics);
             }
             if (node.getTimeoutSeconds() != null
                     && (node.getTimeoutSeconds() < 1 || node.getTimeoutSeconds() > 86400)) {
@@ -172,6 +177,91 @@ public class WorkflowDefinitionValidator {
             validateResources(node, descriptor, path, diagnostics);
         }
         return result;
+    }
+
+    private void validateStructuredOutput(
+            WorkflowDefinitionSpec.Node node, String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!"llm".equals(node.getType()) || node.getConfig() == null
+                || !node.getConfig().has("structuredOutputSchema")) {
+            return;
+        }
+        WorkflowStructuredOutput.validateSchema(
+                        node.getConfig().get("structuredOutputSchema"))
+                .forEach(message -> diagnostics.add(error(
+                        "LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID", node.getId(),
+                        path + ".config.structuredOutputSchema", message)));
+    }
+
+    private void validateOutputSchemaOverride(
+            WorkflowDefinitionSpec.Node node,
+            WorkflowNodeDescriptor descriptor,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        JsonNode override = node.getOutputSchemaOverride();
+        if (override == null || override.isNull()) return;
+        WorkflowOutputSchemaGovernance.validate(override)
+                .forEach(message -> diagnostics.add(error(
+                        "OUTPUT_SCHEMA_OVERRIDE_INVALID", node.getId(),
+                        path + ".outputSchemaOverride", message)));
+        WorkflowOutputSchemaGovernance.conflicts(descriptor.outputSchema(), override)
+                .forEach(message -> diagnostics.add(WorkflowDiagnostic.warning(
+                        "OUTPUT_SCHEMA_OVERRIDE_CONFLICT", node.getId(),
+                        path + ".outputSchemaOverride", message)));
+    }
+
+    private void validateOutputOverrideImpacts(
+            WorkflowDefinitionSpec definition,
+            Map<String, WorkflowDefinitionSpec.Node> nodes,
+            List<WorkflowDiagnostic> diagnostics) {
+        for (WorkflowDefinitionSpec.Node source : nodes.values()) {
+            JsonNode override = source.getOutputSchemaOverride();
+            if (override == null || override.isNull()
+                    || !WorkflowOutputSchemaGovernance.validate(override).isEmpty()) {
+                continue;
+            }
+            String prefix = "$.nodes." + source.getId() + ".output";
+            for (WorkflowDefinitionSpec.Node target : nodes.values()) {
+                Map<String, WorkflowDefinitionSpec.ValueBinding> mappings =
+                        target.getInputMapping() == null ? Map.of() : target.getInputMapping();
+                mappings.forEach((key, binding) -> {
+                    String expression = binding == null ? null : binding.getExpression();
+                    if (expression == null || !expression.startsWith(prefix)) return;
+                    String remainder = expression.substring(prefix.length());
+                    if (remainder.startsWith(".")) remainder = remainder.substring(1);
+                    if (remainder.isBlank()) return;
+                    List<String> segments = Arrays.stream(remainder.split("\\."))
+                            .map(segment -> segment.replaceAll("\\[[0-9]+]$", ""))
+                            .filter(segment -> !segment.isBlank())
+                            .toList();
+                    if (!WorkflowOutputSchemaGovernance.containsPath(override, segments)) {
+                        diagnostics.add(WorkflowDiagnostic.warning(
+                                "OUTPUT_SCHEMA_OVERRIDE_BREAKING_REFERENCE", target.getId(),
+                                "$.nodes." + target.getId() + ".inputMapping." + key,
+                                "映射引用的正式输出路径已不存在: " + expression));
+                    }
+                });
+            }
+            Map<String, WorkflowDefinitionSpec.ValueBinding> workflowOutputs =
+                    definition.getOutputs() == null ? Map.of() : definition.getOutputs();
+            workflowOutputs.forEach((key, binding) -> {
+                String expression = binding == null ? null : binding.getExpression();
+                if (expression == null || !expression.startsWith(prefix)) return;
+                String remainder = expression.substring(prefix.length());
+                if (remainder.startsWith(".")) remainder = remainder.substring(1);
+                if (remainder.isBlank()) return;
+                List<String> segments = Arrays.stream(remainder.split("\\."))
+                        .map(segment -> segment.replaceAll("\\[[0-9]+]$", ""))
+                        .filter(segment -> !segment.isBlank())
+                        .toList();
+                if (!WorkflowOutputSchemaGovernance.containsPath(override, segments)) {
+                    diagnostics.add(WorkflowDiagnostic.warning(
+                            "OUTPUT_SCHEMA_OVERRIDE_BREAKING_REFERENCE", source.getId(),
+                            "$.outputs." + key,
+                            "工作流输出引用的正式路径已不存在: " + expression));
+                }
+            });
+        }
     }
 
     private void validateLoop(

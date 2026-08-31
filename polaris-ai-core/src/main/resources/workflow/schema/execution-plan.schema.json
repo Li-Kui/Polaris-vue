@@ -31,6 +31,13 @@
           "inputMapping": { "type": "object", "additionalProperties": true },
           "config": { "type": "object", "additionalProperties": true },
           "sideEffect": { "enum": ["NONE", "READ", "WRITE"] },
+          "inputSchema": { "type": "object", "additionalProperties": true },
+          "outputSchema": { "type": "object", "additionalProperties": true },
+          "schemaSource": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "schemaSourceVersion": { "type": ["string", "null"], "maxLength": 128 },
+          "outputSchemaBaseHash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "onError": { "enum": ["FAIL", "SKIP"] },
+          "compensationNodeId": { "type": ["string", "null"], "maxLength": 128 },
           "timeoutSeconds": { "type": "integer", "minimum": 1 },
           "retryPolicy": { "type": "object", "additionalProperties": true },
           "resourceRefs": { "type": "array", "items": { "type": "object" } }

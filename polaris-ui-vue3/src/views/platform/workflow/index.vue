@@ -5,6 +5,7 @@
       :can-edit="canEdit"
       :can-publish="canPublish"
       :can-execute="canExecute"
+      :can-debug="canDebug"
       :can-approve="canApprove"
     />
   </div>
@@ -40,6 +41,9 @@ export default {
       return !!this.platformUserStore.token
         || this.isTenantAdmin
         || this.permissions.includes('workflow:execute')
+    },
+    canDebug() {
+      return this.isTenantAdmin || this.permissions.includes('workflow:debug')
     },
     canApprove() {
       return !!this.platformUserStore.token

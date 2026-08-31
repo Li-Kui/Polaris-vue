@@ -30,9 +30,10 @@ public class WorkflowInputValidator {
                 || schema.isMissingNode() || !schema.isObject() || schema.isEmpty()) {
             return;
         }
-        String type = schema.path("type").asText();
-        if (!type.isBlank() && !matches(type, value)) {
-            add(errors, path + " 类型应为 " + type);
+        JsonNode typeNode = schema.path("type");
+        String type = matchingType(typeNode, value);
+        if (!typeNode.isMissingNode() && type == null) {
+            add(errors, path + " 类型应为 " + expectedTypes(typeNode));
             return;
         }
         validateEnum(schema, value, path, errors);
@@ -193,5 +194,29 @@ public class WorkflowInputValidator {
             case "null" -> value.isNull();
             default -> false;
         };
+    }
+
+    private String matchingType(JsonNode typeNode, JsonNode value) {
+        if (typeNode == null || typeNode.isMissingNode() || typeNode.isNull()) return "";
+        if (typeNode.isTextual()) {
+            return matches(typeNode.asText(), value) ? typeNode.asText() : null;
+        }
+        if (typeNode.isArray()) {
+            for (JsonNode item : typeNode) {
+                if (item.isTextual() && matches(item.asText(), value)) return item.asText();
+            }
+        }
+        return null;
+    }
+
+    private String expectedTypes(JsonNode typeNode) {
+        if (typeNode == null || typeNode.isMissingNode()) return "未声明类型";
+        if (typeNode.isTextual()) return typeNode.asText();
+        if (typeNode.isArray()) {
+            List<String> types = new ArrayList<>();
+            typeNode.forEach(item -> types.add(item.asText()));
+            return String.join(" 或 ", types);
+        }
+        return "有效 JSON 类型";
     }
 }

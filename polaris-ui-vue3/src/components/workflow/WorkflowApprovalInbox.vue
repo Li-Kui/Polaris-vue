@@ -43,7 +43,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogOpen" :title="decision === 'APPROVE' ? '通过审批' : '拒绝审批'" width="520px">
+    <el-dialog v-model="dialogOpen" class="workflow-dialog" :title="decision === 'APPROVE' ? '通过审批' : '拒绝审批'" width="520px">
       <el-alert
         :type="decision === 'APPROVE' ? 'success' : 'warning'"
         :closable="false"

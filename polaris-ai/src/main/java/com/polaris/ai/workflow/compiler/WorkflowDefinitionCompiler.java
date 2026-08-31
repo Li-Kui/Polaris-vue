@@ -6,11 +6,13 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.polaris.ai.workflow.application.WorkflowResolvedNodeSchemaView;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
 import com.polaris.ai.workflow.definition.WorkflowDefinitionSpec;
 import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
+import com.polaris.ai.workflow.runtime.WorkflowOutputSchemaGovernance;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 import org.springframework.stereotype.Component;
@@ -41,6 +43,13 @@ public class WorkflowDefinitionCompiler {
     }
 
     public WorkflowCompilationResult compile(String definitionJson, String workflowVersionId) {
+        return compile(definitionJson, workflowVersionId, List.of());
+    }
+
+    public WorkflowCompilationResult compile(
+            String definitionJson,
+            String workflowVersionId,
+            List<WorkflowResolvedNodeSchemaView> resolvedSchemas) {
         if (definitionJson == null || definitionJson.isBlank()) {
             return invalid("DEFINITION_REQUIRED", "$", "工作流定义不能为空");
         }
@@ -57,7 +66,8 @@ public class WorkflowDefinitionCompiler {
             return new WorkflowCompilationResult(null, diagnostics);
         }
         try {
-            WorkflowExecutionPlan plan = buildPlan(definition, workflowVersionId);
+            WorkflowExecutionPlan plan = buildPlan(
+                    definition, workflowVersionId, schemaSnapshots(resolvedSchemas));
             plan.setContentHash(calculateContentHash(plan));
             return new WorkflowCompilationResult(plan, diagnostics);
         } catch (RuntimeException e) {
@@ -68,7 +78,9 @@ public class WorkflowDefinitionCompiler {
     }
 
     private WorkflowExecutionPlan buildPlan(
-            WorkflowDefinitionSpec definition, String workflowVersionId) {
+            WorkflowDefinitionSpec definition,
+            String workflowVersionId,
+            Map<String, WorkflowResolvedNodeSchemaView> resolvedSchemas) {
         WorkflowExecutionPlan plan = new WorkflowExecutionPlan();
         plan.setPlanSchemaVersion(WorkflowSchemaVersions.EXECUTION_PLAN);
         plan.setDefinitionSchemaVersion(WorkflowSchemaVersions.DEFINITION);
@@ -85,7 +97,7 @@ public class WorkflowDefinitionCompiler {
 
         definition.getNodes().stream()
                 .sorted(Comparator.comparing(WorkflowDefinitionSpec.Node::getId))
-                .map(this::compileNode)
+                .map(node -> compileNode(node, resolvedSchemas.get(node.getId())))
                 .forEach(plan.getNodes()::add);
 
         definition.getEdges().stream()
@@ -112,7 +124,9 @@ public class WorkflowDefinitionCompiler {
         return plan;
     }
 
-    private WorkflowExecutionPlan.PlanNode compileNode(WorkflowDefinitionSpec.Node node) {
+    private WorkflowExecutionPlan.PlanNode compileNode(
+            WorkflowDefinitionSpec.Node node,
+            WorkflowResolvedNodeSchemaView resolvedSchema) {
         WorkflowNodeDescriptor descriptor = descriptors.find(node.getType(), node.getTypeVersion())
                 .orElseThrow(() -> new IllegalStateException(
                         "节点处理器不存在: " + node.getType() + ":" + node.getTypeVersion()));
@@ -123,6 +137,39 @@ public class WorkflowDefinitionCompiler {
         result.setInputMapping(compileBindings(node.getInputMapping()));
         result.setConfig(node.getConfig());
         result.setSideEffect(descriptor.sideEffect().name());
+        JsonNode baseOutputSchema;
+        if (resolvedSchema != null) {
+            if (!Objects.equals(node.getType(), resolvedSchema.nodeType())
+                    || !Objects.equals(node.getTypeVersion(), resolvedSchema.handlerVersion())) {
+                throw new IllegalStateException("动态 Schema 与节点版本不一致: " + node.getId());
+            }
+            result.setInputSchema(copySchema(
+                    resolvedSchema.inputSchema(), descriptor.inputSchema()));
+            baseOutputSchema = copySchema(
+                    resolvedSchema.outputSchema(), descriptor.outputSchema());
+            result.setOutputSchema(baseOutputSchema);
+            result.setSchemaSource(resolvedSchema.source());
+            result.setSchemaSourceVersion(resolvedSchema.sourceVersion());
+        } else {
+            result.setInputSchema(copySchema(descriptor.inputSchema(), null));
+            baseOutputSchema = copySchema(descriptor.outputSchema(), null);
+            result.setOutputSchema(baseOutputSchema);
+            result.setSchemaSource("NODE_CONTRACT");
+            result.setSchemaSourceVersion(descriptor.handlerVersion());
+        }
+        if (node.getOutputSchemaOverride() != null
+                && !node.getOutputSchemaOverride().isNull()) {
+            String resolvedBaseHash = resolvedSchema == null
+                    || resolvedSchema.fieldSources() == null
+                    ? null : resolvedSchema.fieldSources().get("$baseHash");
+            result.setOutputSchemaBaseHash(resolvedBaseHash == null
+                    ? WorkflowOutputSchemaGovernance.fingerprint(baseOutputSchema)
+                    : resolvedBaseHash);
+            result.setOutputSchema(node.getOutputSchemaOverride().deepCopy());
+            result.setSchemaSource("USER_OVERRIDE");
+            result.setSchemaSourceVersion(WorkflowOutputSchemaGovernance.fingerprint(
+                    node.getOutputSchemaOverride()));
+        }
         result.setOnError(node.getOnError() == null || node.getOnError().isBlank()
                 ? "FAIL" : node.getOnError());
         result.setCompensationNodeId(node.getCompensationNodeId());
@@ -130,6 +177,24 @@ public class WorkflowDefinitionCompiler {
         result.setRetryPolicy(node.getRetryPolicy());
         result.setResourceRefs(node.getResourceRefs() == null ? List.of() : node.getResourceRefs());
         return result;
+    }
+
+    private Map<String, WorkflowResolvedNodeSchemaView> schemaSnapshots(
+            List<WorkflowResolvedNodeSchemaView> resolvedSchemas) {
+        Map<String, WorkflowResolvedNodeSchemaView> result = new LinkedHashMap<>();
+        if (resolvedSchemas == null) return result;
+        for (WorkflowResolvedNodeSchemaView schema : resolvedSchemas) {
+            if (schema == null || schema.nodeId() == null || schema.nodeId().isBlank()) continue;
+            if (result.putIfAbsent(schema.nodeId(), schema) != null) {
+                throw new IllegalStateException("节点动态 Schema 重复: " + schema.nodeId());
+            }
+        }
+        return result;
+    }
+
+    private JsonNode copySchema(JsonNode preferred, JsonNode fallback) {
+        JsonNode schema = preferred == null || preferred.isNull() ? fallback : preferred;
+        return schema == null ? objectMapper.createObjectNode() : schema.deepCopy();
     }
 
     private WorkflowExecutionPlan.PlanEdge compileEdge(WorkflowDefinitionSpec.Edge edge) {

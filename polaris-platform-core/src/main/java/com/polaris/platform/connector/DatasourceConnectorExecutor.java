@@ -5,8 +5,11 @@ import com.polaris.platform.domain.PlatformDatasource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** 外部数据库只读连接与查询执行器。 */
 @Slf4j
@@ -17,6 +20,8 @@ public class DatasourceConnectorExecutor {
     private static final int MAX_COLUMNS = 100;
     private static final long MAX_RESULT_BYTES = 1024L * 1024L;
     private static final int MAX_CELL_BYTES = 64 * 1024;
+    private static final long METADATA_CACHE_TTL_MS = 5 * 60_000L;
+    private static final int MAX_METADATA_CACHE_ENTRIES = 512;
 
     private final ReadOnlySqlPolicy sqlPolicy;
     private final NamedSqlParameters namedSqlParameters;
@@ -24,6 +29,7 @@ public class DatasourceConnectorExecutor {
     private final DatasourceHostSafetyPolicy hostSafetyPolicy;
     private final ConnectorCredentialCipher credentialCipher;
     private final DatasourceConnectionPoolManager connectionPoolManager;
+    private final Map<String, CachedQueryMetadata> metadataCache = new ConcurrentHashMap<>();
 
     public DatasourceConnectorExecutor(
             ReadOnlySqlPolicy sqlPolicy,
@@ -94,6 +100,44 @@ public class DatasourceConnectorExecutor {
         }
     }
 
+    /**
+     * 只 prepare SQL 并读取 JDBC 列元数据，不执行查询、不拉取业务数据。
+     */
+    public DatasourceQueryMetadata inspectQuery(
+            PlatformDatasource datasource, String sql) {
+        String safeSql = sqlPolicy.validate(sql);
+        NamedSqlParameters.ParsedSql parsed = namedSqlParameters.parse(safeSql);
+        String cacheKey = metadataCacheKey(datasource, parsed.sql());
+        long now = System.currentTimeMillis();
+        CachedQueryMetadata cached = metadataCache.get(cacheKey);
+        if (cached != null && cached.expiresAt() > now) {
+            return cached.metadata();
+        }
+        try (Connection connection = connectionPoolManager.getConnection(datasource)) {
+            connection.setReadOnly(true);
+            try (PreparedStatement statement = connection.prepareStatement(parsed.sql())) {
+                int timeout = datasource.getQueryTimeoutSeconds() == null
+                        ? 10 : datasource.getQueryTimeoutSeconds();
+                statement.setQueryTimeout(Math.max(1, Math.min(timeout, 30)));
+                ResultSetMetaData metadata = statement.getMetaData();
+                if (metadata == null) {
+                    throw new ServiceException("数据库驱动不支持预执行列元数据解析");
+                }
+                DatasourceQueryMetadata result = readMetadata(metadata);
+                pruneMetadataCache(now);
+                metadataCache.put(cacheKey,
+                        new CachedQueryMetadata(result, now + METADATA_CACHE_TTL_MS));
+                return result;
+            }
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("解析数据源查询元数据失败: datasourceId={}, error={}",
+                    datasource.getId(), e.getClass().getSimpleName());
+            throw new ServiceException("数据库查询元数据解析失败");
+        }
+    }
+
     public List<Map<String, Object>> executeQuery(
             PlatformDatasource datasource, String sql, int maxRows) {
         return executeQuery(datasource, sql, Map.of(), maxRows, null);
@@ -157,6 +201,81 @@ public class DatasourceConnectorExecutor {
         return rows;
     }
 
+    private DatasourceQueryMetadata readMetadata(ResultSetMetaData metadata) throws Exception {
+        int columnCount = metadata.getColumnCount();
+        if (columnCount > MAX_COLUMNS) {
+            throw new ServiceException("查询结果列数超过 " + MAX_COLUMNS + " 列限制");
+        }
+        Set<String> labels = new HashSet<>();
+        List<DatasourceQueryMetadata.Column> columns = new ArrayList<>();
+        for (int index = 1; index <= columnCount; index++) {
+            String label = metadata.getColumnLabel(index);
+            if (label == null || label.isBlank()) label = metadata.getColumnName(index);
+            if (label == null || label.isBlank()) label = "column_" + index;
+            if (!labels.add(label.toLowerCase(Locale.ROOT))) {
+                throw new ServiceException("查询结果包含重复列名，请使用 SQL 别名区分");
+            }
+            int jdbcType = metadata.getColumnType(index);
+            if (binaryType(jdbcType)) {
+                throw new ServiceException("查询结果不能包含 BLOB、CLOB 或二进制大字段");
+            }
+            String nativeType = metadata.getColumnTypeName(index);
+            JdbcJsonType jsonType = jsonType(jdbcType, nativeType);
+            columns.add(new DatasourceQueryMetadata.Column(
+                    label, jsonType.type(), jsonType.format(),
+                    metadata.isNullable(index) != ResultSetMetaData.columnNoNulls,
+                    nativeType));
+        }
+        String signature = columns.stream()
+                .map(column -> String.join(":",
+                        column.name(), column.jsonType(), String.valueOf(column.format()),
+                        String.valueOf(column.nullable()), String.valueOf(column.nativeType())))
+                .reduce((left, right) -> left + "|" + right)
+                .orElse("empty");
+        return new DatasourceQueryMetadata(columns, sha256(signature));
+    }
+
+    private JdbcJsonType jsonType(int jdbcType, String nativeType) {
+        return switch (jdbcType) {
+            case Types.BOOLEAN, Types.BIT -> new JdbcJsonType("boolean", null);
+            case Types.TINYINT, Types.SMALLINT, Types.INTEGER, Types.BIGINT ->
+                    new JdbcJsonType("integer", null);
+            case Types.NUMERIC, Types.DECIMAL, Types.REAL, Types.FLOAT, Types.DOUBLE ->
+                    new JdbcJsonType("number", null);
+            case Types.DATE -> new JdbcJsonType("string", "date");
+            case Types.TIME, Types.TIME_WITH_TIMEZONE -> new JdbcJsonType("string", "time");
+            case Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE ->
+                    new JdbcJsonType("string", "date-time");
+            case Types.ARRAY -> new JdbcJsonType("array", null);
+            case Types.OTHER -> nativeType != null
+                    && Set.of("json", "jsonb").contains(nativeType.toLowerCase(Locale.ROOT))
+                    ? new JdbcJsonType("object", null)
+                    : new JdbcJsonType("string", null);
+            default -> new JdbcJsonType("string", null);
+        };
+    }
+
+    private String metadataCacheKey(PlatformDatasource datasource, String sql) {
+        return datasource.getId() + ":" + datasource.getConfigVersion()
+                + ":" + datasource.getCurrentVersionId() + ":" + sha256(sql);
+    }
+
+    private void pruneMetadataCache(long now) {
+        if (metadataCache.size() < MAX_METADATA_CACHE_ENTRIES) return;
+        metadataCache.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
+        if (metadataCache.size() >= MAX_METADATA_CACHE_ENTRIES) metadataCache.clear();
+    }
+
+    private String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new IllegalStateException("无法计算 SQL 元数据摘要", e);
+        }
+    }
+
     private boolean binaryType(int type) {
         return type == Types.BLOB || type == Types.CLOB || type == Types.NCLOB
                 || type == Types.BINARY || type == Types.VARBINARY
@@ -170,5 +289,13 @@ public class DatasourceConnectorExecutor {
     private String safeTarget(PlatformDatasource datasource) {
         return datasource.getHost() + ":" + datasource.getPort()
                 + "/" + datasource.getDatabaseName();
+    }
+
+    private record JdbcJsonType(String type, String format) {
+    }
+
+    private record CachedQueryMetadata(
+            DatasourceQueryMetadata metadata,
+            long expiresAt) {
     }
 }

@@ -30,6 +30,7 @@ import java.util.concurrent.TimeoutException;
 public class WorkflowExecutionEngine {
 
     private static final int MAX_INLINE_OUTPUT_BYTES = 1024 * 1024;
+    private static final WorkflowInputValidator OUTPUT_VALIDATOR = new WorkflowInputValidator();
 
     private final WorkflowExecutionMapper executionMapper;
     private final WorkflowVersionMapper versionMapper;
@@ -282,6 +283,9 @@ public class WorkflowExecutionEngine {
             state.getOutputs().put(node.getId(), nodeExecution.result().output() == null
                     ? com.fasterxml.jackson.databind.node.NullNode.instance
                     : nodeExecution.result().output());
+            if ("approval".equals(node.getType())) {
+                state.setApproval(nodeExecution.result().output());
+            }
             NodeFailure budgetFailure = accumulateUsage(plan, state, nodeExecution.result());
             state.getCompletedKeys().add(instanceKey);
             registerCompensation(state, node, token);
@@ -398,6 +402,7 @@ public class WorkflowExecutionEngine {
                         handler, context, compensation.getTimeoutSeconds(),
                         execution.getExecutionId(), runnerId, fencingToken, leaseSeconds,
                         deadline, compensationCancellation);
+                validateFrozenOutput(compensation, result);
                 String outputJson = writeJson(result.output());
                 ensureInlineSize(outputJson);
                 run.setStatus("SUCCEEDED");
@@ -723,6 +728,7 @@ public class WorkflowExecutionEngine {
             try {
                 WorkflowNodeResult result = attempt.future().get(
                         Math.min(remainingMs, heartbeatMs), TimeUnit.MILLISECONDS);
+                validateFrozenOutput(attempt.node(), result);
                 String outputJson = writeJson(result.output());
                 ensureInlineSize(outputJson);
                 return new ParallelOutcome(attempt, result, null);
@@ -772,10 +778,12 @@ public class WorkflowExecutionEngine {
             output.put("approvalTaskId", existing.getApprovalTaskId());
             output.put("finishedAt", existing.getFinishTime() == null
                     ? System.currentTimeMillis() : existing.getFinishTime().getTime());
+            WorkflowNodeResult result = WorkflowNodeResult.success(output);
+            validateFrozenOutput(node, result);
             run.setStatus("SUCCEEDED");
             run.setOutputJson(persistedJson(output));
             run.setFinishTime(new Date());
-            return new NodeExecution(WorkflowNodeResult.success(output), run);
+            return new NodeExecution(result, run);
         }
         WorkflowNodeRun run = newNodeRun(
                 execution, node, token, nodeRunId,
@@ -834,10 +842,12 @@ public class WorkflowExecutionEngine {
             ObjectNode output = objectMapper.createObjectNode();
             output.put("status", "RESUMED");
             output.put("resumedAt", System.currentTimeMillis());
+            WorkflowNodeResult result = WorkflowNodeResult.success(output);
+            validateFrozenOutput(node, result);
             run.setStatus("SUCCEEDED");
             run.setOutputJson(persistedJson(output));
             run.setFinishTime(new Date());
-            return new NodeExecution(WorkflowNodeResult.success(output), run);
+            return new NodeExecution(result, run);
         }
         WorkflowNodeRun run = newNodeRun(
                 execution, node, token, nodeRunId,
@@ -923,10 +933,12 @@ public class WorkflowExecutionEngine {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
                         "子工作流输出格式无效", false);
             }
+            WorkflowNodeResult result = WorkflowNodeResult.success(output);
+            validateFrozenOutput(node, result);
             run.setStatus("SUCCEEDED");
             run.setOutputJson(persistedJson(output));
             run.setFinishTime(new Date());
-            return new NodeExecution(WorkflowNodeResult.success(output), run);
+            return new NodeExecution(result, run);
         }
         if (Set.of("FAILED", "CANCELLED", "REJECTED", "NEEDS_ATTENTION")
                 .contains(child.getStatus())) {
@@ -1010,6 +1022,7 @@ public class WorkflowExecutionEngine {
                 WorkflowNodeResult result = executeWithHeartbeat(
                         handler, context, node.getTimeoutSeconds(), execution.getExecutionId(),
                         runnerId, fencingToken, leaseSeconds, workflowDeadline, cancellation);
+                validateFrozenOutput(node, result);
                 String outputJson = writeJson(result.output());
                 ensureInlineSize(outputJson);
                 run.setStatus("SUCCEEDED");
@@ -1257,13 +1270,27 @@ public class WorkflowExecutionEngine {
                 nodes.putObject(nodeId).set("output", output));
         ObjectNode environment = root.putObject("env");
         environment.put("name", execution.getEnvironment());
+        environment.put("production", "PROD".equals(execution.getEnvironment()));
         ObjectNode executionNode = root.putObject("execution");
         executionNode.put("id", execution.getExecutionId());
         executionNode.put("workflowCode", execution.getWorkflowCode());
+        executionNode.put("workflowVersionId", execution.getWorkflowVersionId());
+        if (execution.getVersionNo() != null) executionNode.put("versionNo", execution.getVersionNo());
+        if (execution.getRootExecutionId() != null) {
+            executionNode.put("rootId", execution.getRootExecutionId());
+        }
+        if (execution.getParentExecutionId() != null) {
+            executionNode.put("parentId", execution.getParentExecutionId());
+        }
+        if (execution.getExecutionDepth() != null) {
+            executionNode.put("depth", execution.getExecutionDepth());
+        }
+        executionNode.put("principalType", execution.getPrincipalType());
         ObjectNode loop = root.putObject("loop");
         loop.put("branchPath", branchPath);
         state.getLoopCounts().forEach(loop::put);
-        root.putObject("approval");
+        root.set("approval", state.getApproval() == null
+                ? objectMapper.createObjectNode() : state.getApproval());
         return root;
     }
 
@@ -1436,6 +1463,31 @@ public class WorkflowExecutionEngine {
     private String errorCode(Throwable error) {
         if (error instanceof NodeFailure failure) return failure.code;
         return WorkflowErrorCode.INTERNAL_ERROR.name();
+    }
+
+    private void validateFrozenOutput(
+            WorkflowExecutionPlan.PlanNode node, WorkflowNodeResult result) {
+        List<String> errors = frozenOutputErrors(node, result);
+        if (!errors.isEmpty()) {
+            throw new NodeFailure(
+                    WorkflowErrorCode.OUTPUT_SCHEMA_MISMATCH.name(),
+                    "节点输出不符合发布契约: "
+                            + String.join("；", errors.subList(0, Math.min(errors.size(), 5))),
+                    false);
+        }
+    }
+
+    static List<String> frozenOutputErrors(
+            WorkflowExecutionPlan.PlanNode node, WorkflowNodeResult result) {
+        if (node.getSchemaSource() == null
+                || "NODE_CONTRACT".equals(node.getSchemaSource())
+                || node.getOutputSchema() == null
+                || node.getOutputSchema().isEmpty()) {
+            return List.of();
+        }
+        JsonNode output = result == null ? null : result.output();
+        return OUTPUT_VALIDATOR.validate(
+                node.getOutputSchema(), output, "$.nodes." + node.getId() + ".output");
     }
 
     private boolean canSkip(NodeFailure failure) {

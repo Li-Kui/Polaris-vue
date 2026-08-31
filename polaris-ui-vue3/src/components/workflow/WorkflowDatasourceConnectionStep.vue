@@ -2,7 +2,7 @@
   <div class="connection-step">
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <div class="step-heading">
-      <div><strong>选择数据库连接</strong><small>{{ environment }} · 默认仅当前工作流生效</small></div>
+      <div><strong>选择数据库连接</strong><small>默认仅当前工作流生效</small></div>
       <el-tag v-if="selectedResource" type="success" size="small">已连接</el-tag>
     </div>
     <el-input v-model="keyword" prefix-icon="Search" clearable placeholder="搜索数据库连接" />

@@ -4,10 +4,15 @@
     <header>
       <span class="node-icon"><el-icon><component :is="icon" /></el-icon></span>
       <strong>{{ data.label }}</strong>
+      <el-tooltip v-if="data.movable" content="可移动 · 不可删除" placement="top">
+        <span class="node-drag-grip" aria-label="可移动，不可删除">
+          <el-icon><Grid /></el-icon>
+        </span>
+      </el-tooltip>
       <el-icon v-if="data.status === 'SUCCEEDED'" class="node-status node-status--success"><CircleCheck /></el-icon>
       <el-icon v-else-if="data.status === 'RUNNING'" class="node-status node-status--running"><Loading /></el-icon>
       <el-icon v-else-if="data.status === 'FAILED'" class="node-status node-status--failed"><CircleClose /></el-icon>
-      <span v-else class="node-status-dot" />
+      <span v-else-if="!data.movable" class="node-status-dot" />
     </header>
     <div v-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
@@ -17,6 +22,16 @@
       </div>
     </div>
     <div v-else class="node-terminal-copy">{{ data.start ? '流程起始节点' : '流程结束节点' }}</div>
+    <button
+      v-if="data.testable"
+      type="button"
+      class="node-test-action"
+      title="试运行当前节点"
+      @pointerdown.stop
+      @click.stop="$emit('test')"
+    >
+      <el-icon><VideoPlay /></el-icon><span>试运行</span>
+    </button>
     <Handle v-if="!data.end" type="source" :position="Position.Right" class="workflow-node-handle" />
   </article>
 </template>
@@ -48,6 +63,7 @@ import {
 
 export default {
   name: 'WorkflowCanvasNode',
+  emits: ['test'],
   components: {
     Handle,
     ChatDotRound,
@@ -205,6 +221,28 @@ export default {
   background: var(--el-text-color-placeholder);
 }
 
+.node-drag-grip {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  cursor: grab;
+  opacity: 0.68;
+}
+
+.node-drag-grip:hover {
+  color: var(--workflow-primary, var(--el-color-primary));
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+  opacity: 1;
+}
+
+.node-drag-grip:active {
+  cursor: grabbing;
+}
+
 .node-content {
   padding: 9px 11px 11px;
   display: flex;
@@ -242,6 +280,32 @@ export default {
 
 .node-terminal-copy {
   padding: 10px 12px 12px;
+}
+
+.node-test-action {
+  width: 100%;
+  min-height: 31px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 0 0 11px 11px;
+  color: var(--workflow-primary, #625bf6);
+  background: color-mix(in srgb, var(--workflow-primary-soft, #f0efff) 58%, var(--workflow-surface, #fff));
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.node-test-action:hover,
+.node-test-action:focus-visible {
+  color: #fff;
+  background: var(--workflow-primary, #625bf6);
+  outline: none;
 }
 
 .workflow-node-handle {

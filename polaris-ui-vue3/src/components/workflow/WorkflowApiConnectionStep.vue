@@ -11,7 +11,7 @@
     <div class="step-heading">
       <div>
         <strong>API 连接</strong>
-        <small>{{ environment }} · 选择已有连接或在当前工作流中新建</small>
+        <small>选择已有连接或在当前工作流中新建</small>
       </div>
       <el-tag v-if="selectedResource" type="success" size="small">已连接</el-tag>
     </div>
@@ -43,7 +43,7 @@
       </div>
     </div>
 
-    <section v-if="appearance === 'platform' && canEdit" :class="['inline-create-form', {expanded: creating}]">
+    <section v-if="canEdit" :class="['inline-create-form', {expanded: creating}]">
       <button type="button" class="create-connection-toggle" @click="toggleCreate">
         <span class="create-connection-title">
           <el-icon><CirclePlus /></el-icon>
@@ -53,7 +53,11 @@
       </button>
       <div v-if="creating" class="inline-create-body">
         <ApiConnectorForm ref="connectorFormRef" :form="form" compact />
-        <p class="reuse-hint">连接信息将独立保存，可在其他工作流复用。</p>
+        <p class="reuse-hint">
+          {{ appearance === 'platform'
+            ? '连接信息将保存到当前租户，可在其他工作流复用。'
+            : '连接信息将保存为管理端共享连接，可在其他工作流复用。' }}
+        </p>
         <div class="inline-actions">
           <el-button @click="cancelCreate">取消新建</el-button>
           <el-button type="primary" :loading="saving" @click="saveAndUse">保存连接并继续</el-button>
@@ -66,6 +70,7 @@
 <script>
 import {ArrowDown, ArrowRight, ArrowUp, CircleCheck, CirclePlus, Connection} from '@element-plus/icons-vue'
 import {addConnector} from '@/api/platform/connector'
+import {createWorkflowApiConnector} from '@/api/ai/workflow'
 import ApiConnectorForm from '@/components/platform/ApiConnectorForm.vue'
 
 export default {
@@ -134,6 +139,7 @@ export default {
         credentialConfigured: false,
         credential: {headerName: 'X-API-Key', secret: ''},
         headerRows: [],
+        responseSchemaText: '',
         timeoutSeconds: 30,
         status: '0',
         remark: ''
@@ -165,8 +171,7 @@ export default {
       this.form = this.emptyForm()
     },
     openCreateForEmptyState() {
-      if (this.appearance !== 'platform'
-          || this.loading
+      if (this.loading
           || this.emptyStateHandled
           || this.resources.length) return
       this.creating = true
@@ -180,7 +185,10 @@ export default {
       }
       this.saving = true
       try {
-        const response = await addConnector(this.$refs.connectorFormRef.buildPayload())
+        const createConnector = this.appearance === 'platform'
+          ? addConnector
+          : createWorkflowApiConnector
+        const response = await createConnector(this.$refs.connectorFormRef.buildPayload())
         const connector = response.data
         if (!connector?.id) throw new Error('连接器创建成功，但未返回连接器 ID')
         this.creating = false
@@ -199,14 +207,22 @@ export default {
 .api-connection-step {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   min-height: 100%;
 }
 
 .step-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
+  min-height: 28px;
+
+  > div {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 9px;
+    min-width: 0;
+  }
 
   strong,
   small {
@@ -214,16 +230,17 @@ export default {
   }
 
   small {
-    margin-top: 4px;
+    margin-top: 0;
     color: var(--el-text-color-secondary);
+    font-size: 11px;
   }
 }
 
 .connection-list {
   display: flex;
   flex-direction: column;
-  min-height: 92px;
-  gap: 8px;
+  min-height: 72px;
+  gap: 6px;
 }
 
 .connection-row {
@@ -330,29 +347,37 @@ export default {
 }
 
 .connection-empty {
-  min-height: 120px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
+  min-height: 72px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 32px minmax(0, auto);
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-content: start;
+  column-gap: 11px;
+  row-gap: 2px;
   border: 1px dashed var(--workflow-border-strong, var(--el-border-color));
   border-radius: 10px;
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   background: var(--workflow-muted, var(--el-fill-color-extra-light));
 
   > .el-icon {
-    margin-bottom: 3px;
+    grid-row: 1 / 3;
+    align-self: center;
+    margin-bottom: 0;
     color: var(--workflow-primary, var(--el-color-primary));
-    font-size: 24px;
+    font-size: 22px;
   }
 
   strong {
+    grid-column: 2;
     color: var(--workflow-text, var(--el-text-color-primary));
     font-size: 13px;
   }
 
   small {
+    grid-column: 2;
     font-size: 11px;
   }
 }
@@ -375,8 +400,8 @@ export default {
 
 .create-connection-toggle {
   width: 100%;
-  min-height: 48px;
-  padding: 0 14px;
+  min-height: 42px;
+  padding: 0 13px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -405,7 +430,7 @@ export default {
 }
 
 .inline-create-body {
-  padding: 10px 16px 0;
+  padding: 8px 14px 0;
 }
 
 .inline-actions {
@@ -415,8 +440,8 @@ export default {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin: 14px -16px 0;
-  padding: 14px 16px;
+  margin: 10px -14px 0;
+  padding: 10px 14px;
   border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
   background: var(--workflow-surface, var(--el-bg-color));
 
@@ -435,7 +460,7 @@ export default {
 }
 
 .reuse-hint {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   font-size: 11px;
 }

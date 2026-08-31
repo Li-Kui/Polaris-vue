@@ -44,7 +44,7 @@ public class BuiltInWorkflowNodeConfig {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "approval", "1.0", "人工审批", "control",
                 approvalConfigSchema(), JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(), WorkflowSideEffect.NONE, Set.of(),
+                approvalOutputSchema(), WorkflowSideEffect.NONE, Set.of(),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
                         WorkflowNodeCapability.MOCKABLE,
                         WorkflowNodeCapability.CHECKPOINT_SAFE));
@@ -64,7 +64,7 @@ public class BuiltInWorkflowNodeConfig {
         schema.put("additionalProperties", false);
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "wait", "1.0", "定时等待", "control", schema,
-                JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode(),
+                JsonNodeFactory.instance.objectNode(), waitOutputSchema(),
                 WorkflowSideEffect.NONE, Set.of(),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
                         WorkflowNodeCapability.MOCKABLE,
@@ -87,7 +87,7 @@ public class BuiltInWorkflowNodeConfig {
         schema.put("additionalProperties", false);
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "artifact", "1.0", "保存产物", "data", schema,
-                JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode(),
+                JsonNodeFactory.instance.objectNode(), artifactOutputSchema(),
                 WorkflowSideEffect.NONE, Set.of(),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
                         WorkflowNodeCapability.RETRYABLE,
@@ -132,7 +132,7 @@ public class BuiltInWorkflowNodeConfig {
         schema.put("additionalProperties", false);
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "sub_workflow", "1.0", "子工作流", "control", schema,
-                JsonNodeFactory.instance.objectNode(), JsonNodeFactory.instance.objectNode(),
+                JsonNodeFactory.instance.objectNode(), subWorkflowOutputSchema(),
                 WorkflowSideEffect.NONE, Set.of(),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
                         WorkflowNodeCapability.CHECKPOINT_SAFE));
@@ -235,6 +235,61 @@ public class BuiltInWorkflowNodeConfig {
         properties.putObject("allowSelfApproval").put("type", "boolean");
         properties.putObject("timeoutSeconds").put("type", "integer")
                 .put("minimum", 60).put("maximum", 604800);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private ObjectNode approvalOutputSchema() {
+        ObjectNode schema = objectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("status").put("type", "string")
+                .putArray("enum").add("APPROVED");
+        properties.putObject("approvalTaskId").put("type", "string");
+        properties.putObject("finishedAt").put("type", "integer");
+        schema.putArray("required")
+                .add("status").add("approvalTaskId").add("finishedAt");
+        return schema;
+    }
+
+    private ObjectNode waitOutputSchema() {
+        ObjectNode schema = objectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("status").put("type", "string")
+                .putArray("enum").add("RESUMED");
+        properties.putObject("resumedAt").put("type", "integer");
+        schema.putArray("required").add("status").add("resumedAt");
+        return schema;
+    }
+
+    private ObjectNode artifactOutputSchema() {
+        ObjectNode schema = objectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("artifactId").put("type", "string");
+        properties.putObject("fileName").put("type", "string");
+        properties.putObject("mimeType").put("type", "string");
+        properties.putObject("sizeBytes").put("type", "integer");
+        properties.putObject("contentHash").put("type", "string");
+        schema.putArray("required")
+                .add("artifactId").add("fileName").add("mimeType")
+                .add("sizeBytes").add("contentHash");
+        return schema;
+    }
+
+    private ObjectNode subWorkflowOutputSchema() {
+        ObjectNode schema = objectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("childExecutionId").put("type", "string");
+        properties.putObject("status").put("type", "string")
+                .putArray("enum").add("SUCCEEDED");
+        properties.set("output", JsonNodeFactory.instance.objectNode());
+        schema.putArray("required").add("childExecutionId").add("status").add("output");
+        return schema;
+    }
+
+    private ObjectNode objectSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        schema.putObject("properties");
         schema.put("additionalProperties", false);
         return schema;
     }

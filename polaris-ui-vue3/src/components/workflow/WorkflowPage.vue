@@ -25,6 +25,7 @@
       :can-edit="canEdit"
       :can-publish="canPublish"
       :can-execute="canExecute"
+      :can-debug="canDebug"
       :appearance="appearance"
       @back="backToList"
       @saved="definitionSaved"
@@ -50,32 +51,70 @@
       @back="backToList"
     />
 
-    <el-dialog v-model="runDialogOpen" title="运行工作流" width="620px">
-      <el-form label-width="110px">
-        <el-form-item label="工作流">
-          <el-input :model-value="runTarget?.workflowName" disabled />
-        </el-form-item>
-        <el-form-item label="环境">
-          <el-select v-model="runForm.environment" style="width: 100%">
-            <el-option label="开发 DEV" value="DEV" />
-            <el-option label="测试 TEST" value="TEST" />
-            <el-option label="生产 PROD" value="PROD" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="幂等键">
-          <el-input v-model="runForm.idempotencyKey" placeholder="可选；调用方重试时保持不变" />
-        </el-form-item>
-        <el-form-item label="输入 JSON">
-          <el-input v-model="runForm.inputJson" type="textarea" :rows="12" />
-        </el-form-item>
-      </el-form>
+    <el-dialog
+      v-model="runDialogOpen"
+      class="workflow-dialog workflow-run-dialog"
+      title="运行工作流"
+      width="720px"
+      destroy-on-close
+    >
+      <div class="workflow-run-summary">
+        <div>
+          <span>工作流</span>
+          <strong>{{ runTarget?.workflowName }}</strong>
+        </div>
+        <el-tag type="success" effect="plain">当前发布版本</el-tag>
+      </div>
+      <el-alert
+        v-if="runSchemaError"
+        :title="runSchemaError"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <WorkflowExecutionInput
+        ref="runInputEditor"
+        v-model="runInput"
+        :schema="runInputSchema"
+        :loading="runInputLoading"
+        @validation="runInputValidation = $event"
+      />
+      <el-collapse v-model="runAdvancedPanels" class="workflow-run-advanced">
+        <el-collapse-item name="advanced">
+          <template #title>
+            <div class="workflow-run-advanced-title">
+              <div>
+                <strong>高级选项</strong>
+                <span>仅在调用方重试同一次请求时需要配置</span>
+              </div>
+              <el-tag
+                v-if="runForm.idempotencyKey"
+                size="small"
+                type="success"
+                effect="plain"
+              >已配置</el-tag>
+            </div>
+          </template>
+          <el-form label-position="top">
+            <el-form-item label="幂等键">
+              <el-input v-model="runForm.idempotencyKey" placeholder="可选；调用方重试时保持不变" />
+              <small class="workflow-run-help">不填写时每次都会创建新执行；仅在调用方重试同一次请求时复用。</small>
+            </el-form-item>
+          </el-form>
+        </el-collapse-item>
+      </el-collapse>
       <template #footer>
         <el-button @click="runDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="starting" @click="startExecution">开始运行</el-button>
+        <el-button
+          type="primary"
+          :loading="starting"
+          :disabled="runInputLoading || !runInputValidation.valid"
+          @click="startExecution"
+        >开始运行</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="cloneDialogOpen" title="克隆工作流" width="520px">
+    <el-dialog v-model="cloneDialogOpen" class="workflow-dialog" title="克隆工作流" width="520px">
       <el-alert
         title="将复制当前草稿内容，新工作流拥有独立编码、草稿和发布版本。"
         type="info"
@@ -99,7 +138,7 @@
       </template>
     </el-dialog>
 
-    <el-drawer v-model="versionDrawerOpen" title="发布版本" size="78%" destroy-on-close>
+    <el-drawer v-model="versionDrawerOpen" class="workflow-version-drawer" title="发布版本" size="78%" destroy-on-close>
       <div v-loading="versionLoading" class="version-layout">
         <aside class="version-list">
           <div class="version-list-title">
@@ -160,6 +199,7 @@ import WorkflowExecutionMonitor from '@/components/workflow/WorkflowExecutionMon
 import WorkflowResourceBindings from '@/components/workflow/WorkflowResourceBindings.vue'
 import WorkflowApprovalInbox from '@/components/workflow/WorkflowApprovalInbox.vue'
 import WorkflowTriggers from '@/components/workflow/WorkflowTriggers.vue'
+import WorkflowExecutionInput from '@/components/workflow/WorkflowExecutionInput.vue'
 import {
   cloneWorkflowDefinition,
   getWorkflowDefinition,
@@ -179,7 +219,8 @@ export default {
     WorkflowExecutionMonitor,
     WorkflowResourceBindings,
     WorkflowApprovalInbox,
-    WorkflowTriggers
+    WorkflowTriggers,
+    WorkflowExecutionInput
   },
   props: {
     canEdit: {
@@ -191,6 +232,10 @@ export default {
       default: false
     },
     canExecute: {
+      type: Boolean,
+      default: false
+    },
+    canDebug: {
       type: Boolean,
       default: false
     },
@@ -214,6 +259,12 @@ export default {
       runDialogOpen: false,
       starting: false,
       runTarget: null,
+      runInput: {},
+      runInputSchema: {type: 'object', properties: {}},
+      runInputLoading: false,
+      runInputValidation: {valid: false, message: '', errors: []},
+      runSchemaError: '',
+      runAdvancedPanels: [],
       cloneDialogOpen: false,
       cloning: false,
       cloneTarget: null,
@@ -230,8 +281,7 @@ export default {
       selectedVersionDetail: null,
       runForm: {
         environment: 'PROD',
-        idempotencyKey: '',
-        inputJson: '{}'
+        idempotencyKey: ''
       }
     }
   },
@@ -367,22 +417,36 @@ export default {
         this.rollingBack = false
       }
     },
-    openRunDialog(definition) {
+    async openRunDialog(definition) {
       if (!this.canExecute) return
       this.runTarget = definition
       this.runForm = {
         environment: 'PROD',
-        idempotencyKey: '',
-        inputJson: '{}'
+        idempotencyKey: ''
       }
+      this.runInput = {}
+      this.runInputSchema = {type: 'object', properties: {}}
+      this.runInputValidation = {valid: false, message: '', errors: []}
+      this.runSchemaError = ''
+      this.runAdvancedPanels = []
+      this.runInputLoading = true
       this.runDialogOpen = true
+      try {
+        const response = await getWorkflowVersion(
+          definition.id,
+          definition.currentPublishedVersionId
+        )
+        this.runInputSchema = this.publishedInputSchema(response.data?.definitionJson)
+      } catch (error) {
+        this.runSchemaError = '未能读取发布版本的输入契约，仍可切换到 JSON 模式填写。'
+      } finally {
+        this.runInputLoading = false
+        this.$nextTick(() => this.$refs.runInputEditor?.reset())
+      }
     },
     async startExecution() {
-      let input
-      try {
-        input = JSON.parse(this.runForm.inputJson)
-      } catch (error) {
-        this.$message.error('输入必须是有效 JSON')
+      if (!this.runInputValidation.valid) {
+        this.$message.error(this.runInputValidation.message || '请先修正工作流输入')
         return
       }
       this.starting = true
@@ -390,7 +454,7 @@ export default {
         const response = await startWorkflowExecution({
           definitionId: this.runTarget.id,
           workflowVersionId: this.runTarget.currentPublishedVersionId,
-          input,
+          input: this.runInput,
           environment: this.runForm.environment,
           idempotencyKey: this.runForm.idempotencyKey || null
         })
@@ -399,6 +463,24 @@ export default {
         this.pageMode = 'executions'
       } finally {
         this.starting = false
+      }
+    },
+    publishedInputSchema(definitionJson) {
+      try {
+        const definition = typeof definitionJson === 'string'
+          ? JSON.parse(definitionJson) : definitionJson
+        const schema = definition?.inputs
+        if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+          return {type: 'object', properties: {}}
+        }
+        return {
+          ...schema,
+          type: schema.type || 'object',
+          properties: schema.properties && typeof schema.properties === 'object'
+            ? schema.properties : {}
+        }
+      } catch (error) {
+        return {type: 'object', properties: {}}
       }
     },
     prettyDefinition(value) {
@@ -474,6 +556,94 @@ export default {
 
 .dialog-form {
   margin-top: 18px;
+}
+
+.workflow-run-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+}
+
+.workflow-run-summary > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workflow-run-summary span,
+.workflow-run-help {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.workflow-run-advanced {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 11px;
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.workflow-run-advanced :deep(.el-collapse-item__header) {
+  min-height: 58px;
+  height: auto;
+  padding: 10px 14px;
+  border-bottom: 0;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+  font-weight: 650;
+}
+
+.workflow-run-advanced :deep(.el-collapse-item__wrap) {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.workflow-run-advanced :deep(.el-collapse-item__content) {
+  padding: 14px 14px 8px;
+}
+
+.workflow-run-advanced-title {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-right: 10px;
+}
+
+.workflow-run-advanced-title > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workflow-run-advanced-title strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.workflow-run-advanced-title span {
+  overflow: hidden;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-run-help {
+  display: block;
+  margin-top: 5px;
 }
 
 .version-layout {
@@ -608,5 +778,282 @@ export default {
   .diff-grid pre {
     height: 420px;
   }
+}
+</style>
+
+<style>
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer) {
+  --workflow-control-surface: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 5%, var(--workflow-surface-raised, var(--el-bg-color-overlay)));
+  --workflow-control-hover: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 12%, var(--workflow-surface-raised, var(--el-bg-color-overlay)));
+  --workflow-control-border: color-mix(in srgb, var(--workflow-text-secondary, var(--el-text-color-secondary)) 48%, var(--workflow-surface, var(--el-bg-color)));
+  --workflow-control-icon: color-mix(in srgb, var(--workflow-text, var(--el-text-color-primary)) 76%, var(--workflow-surface, var(--el-bg-color)));
+  --workflow-control-disabled-bg: color-mix(in srgb, var(--workflow-text-secondary, var(--el-text-color-secondary)) 12%, var(--workflow-surface, var(--el-bg-color)));
+  --workflow-control-disabled-text: color-mix(in srgb, var(--workflow-text-secondary, var(--el-text-color-secondary)) 74%, var(--workflow-surface, var(--el-bg-color)));
+  --workflow-danger: #dc2626;
+  --workflow-warning: #a44908;
+  --workflow-success: #047857;
+  --workflow-info: #475569;
+}
+
+html.dark :is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer) {
+  --workflow-danger: #f87171;
+  --workflow-warning: #fbbf24;
+  --workflow-success: #34d399;
+  --workflow-info: #cbd5e1;
+}
+
+/* 工作流中的默认按钮始终保留清晰边界，避免和浅色面板融为一体。 */
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-link):not(.is-text) {
+  --el-button-text-color: var(--workflow-control-icon);
+  --el-button-bg-color: var(--workflow-control-surface);
+  --el-button-border-color: var(--workflow-control-border);
+  --el-button-hover-text-color: var(--workflow-primary, var(--el-color-primary));
+  --el-button-hover-bg-color: var(--workflow-control-hover);
+  --el-button-hover-border-color: var(--workflow-primary, var(--el-color-primary));
+  color: var(--workflow-control-icon) !important;
+  background: var(--workflow-control-surface) !important;
+  border-color: var(--workflow-control-border) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-disabled):not(.is-link):not(.is-text):hover {
+  color: var(--workflow-primary, var(--el-color-primary)) !important;
+  background: var(--workflow-control-hover) !important;
+  border-color: var(--workflow-primary, var(--el-color-primary)) !important;
+}
+
+/* 主操作和状态操作固定使用实色，内部图标、文字统一继承前景色。 */
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--primary:not(.is-plain):not(.is-link):not(.is-text) {
+  color: #fff !important;
+  background: var(--workflow-primary, var(--el-color-primary)) !important;
+  border-color: var(--workflow-primary, var(--el-color-primary)) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--success:not(.is-plain):not(.is-link):not(.is-text) {
+  color: #fff !important;
+  background: #047857 !important;
+  border-color: #047857 !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--warning:not(.is-plain):not(.is-link):not(.is-text) {
+  color: #fff !important;
+  background: #a44908 !important;
+  border-color: #a44908 !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--danger:not(.is-plain):not(.is-link):not(.is-text) {
+  color: #fff !important;
+  background: #c81e35 !important;
+  border-color: #c81e35 !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--primary:not(.is-disabled):not(.is-plain):not(.is-link):not(.is-text):hover {
+  color: #fff !important;
+  background: var(--workflow-primary-hover, #4f46e5) !important;
+  border-color: var(--workflow-primary-hover, #4f46e5) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--success:not(.is-disabled):not(.is-plain):not(.is-link):not(.is-text):hover {
+  color: #fff !important;
+  background: #036449 !important;
+  border-color: #036449 !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--warning:not(.is-disabled):not(.is-plain):not(.is-link):not(.is-text):hover {
+  color: #fff !important;
+  background: #873b07 !important;
+  border-color: #873b07 !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--danger:not(.is-disabled):not(.is-plain):not(.is-link):not(.is-text):hover {
+  color: #fff !important;
+  background: #a9162b !important;
+  border-color: #a9162b !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button.is-plain {
+  background: var(--workflow-control-surface) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--primary.is-plain {
+  color: var(--workflow-primary, var(--el-color-primary)) !important;
+  border-color: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 52%, var(--workflow-control-border)) !important;
+  background: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 10%, var(--workflow-surface, var(--el-bg-color))) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--danger.is-plain {
+  color: var(--workflow-danger) !important;
+  border-color: color-mix(in srgb, var(--workflow-danger) 48%, var(--workflow-control-border)) !important;
+  background: color-mix(in srgb, var(--workflow-danger) 9%, var(--workflow-surface, var(--el-bg-color))) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--warning.is-plain {
+  color: var(--workflow-warning) !important;
+  border-color: color-mix(in srgb, var(--workflow-warning) 48%, var(--workflow-control-border)) !important;
+  background: color-mix(in srgb, var(--workflow-warning) 9%, var(--workflow-surface, var(--el-bg-color))) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--success.is-plain {
+  color: var(--workflow-success) !important;
+  border-color: color-mix(in srgb, var(--workflow-success) 48%, var(--workflow-control-border)) !important;
+  background: color-mix(in srgb, var(--workflow-success) 9%, var(--workflow-surface, var(--el-bg-color))) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--info.is-plain {
+  color: var(--workflow-info) !important;
+  border-color: color-mix(in srgb, var(--workflow-info) 48%, var(--workflow-control-border)) !important;
+  background: color-mix(in srgb, var(--workflow-info) 9%, var(--workflow-surface, var(--el-bg-color))) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button:is(.is-link, .is-text) {
+  color: var(--workflow-control-icon) !important;
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--primary:is(.is-link, .is-text) {
+  color: var(--workflow-primary, var(--el-color-primary)) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--success:is(.is-link, .is-text) {
+  color: var(--workflow-success) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--warning:is(.is-link, .is-text) {
+  color: var(--workflow-warning) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button--danger:is(.is-link, .is-text) {
+  color: var(--workflow-danger) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button.is-disabled:not(.is-link):not(.is-text) {
+  color: var(--workflow-control-disabled-text) !important;
+  background: var(--workflow-control-disabled-bg) !important;
+  border-color: var(--workflow-control-border) !important;
+  opacity: 1;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button.is-disabled:is(.is-link, .is-text) {
+  color: var(--workflow-control-disabled-text) !important;
+  opacity: 1;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button span,
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-button .el-icon {
+  color: inherit !important;
+}
+
+/* 开关关闭态也必须可见；禁用态降低强调度但不消失。 */
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer) .el-switch {
+  --el-switch-on-color: var(--workflow-primary, var(--el-color-primary));
+  --el-switch-off-color: var(--workflow-control-icon);
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-switch .el-switch__core {
+  border-color: var(--workflow-control-icon) !important;
+  background: var(--workflow-control-icon) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--workflow-control-icon) 28%, transparent);
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-switch.is-checked .el-switch__core {
+  border-color: var(--workflow-primary, var(--el-color-primary)) !important;
+  background: var(--workflow-primary, var(--el-color-primary)) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-switch.is-disabled .el-switch__core {
+  border-color: var(--workflow-control-border) !important;
+  background: var(--workflow-control-disabled-text) !important;
+  opacity: 0.78;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-switch .el-switch__action {
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay)) !important;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 24%);
+}
+
+/* 数字输入框的增减按钮使用独立底色和深色图标。 */
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__decrease,
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__increase {
+  color: var(--workflow-control-icon) !important;
+  background: var(--workflow-control-surface) !important;
+  border-color: var(--workflow-control-border) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__decrease:not(.is-disabled):hover,
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__increase:not(.is-disabled):hover {
+  color: var(--workflow-primary, var(--el-color-primary)) !important;
+  background: var(--workflow-control-hover) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__decrease.is-disabled,
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__increase.is-disabled {
+  color: var(--workflow-control-disabled-text) !important;
+  background: var(--workflow-control-disabled-bg) !important;
+  opacity: 1;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__decrease .el-icon,
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-input-number__increase .el-icon {
+  color: inherit !important;
+}
+
+/* 分段选择未选中与选中状态都保持明确。 */
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-radio-button__inner {
+  color: var(--workflow-control-icon) !important;
+  background: var(--workflow-control-surface) !important;
+  border-color: var(--workflow-control-border) !important;
+  box-shadow: none !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  .el-radio-button__original-radio:checked + .el-radio-button__inner {
+  color: #fff !important;
+  background: var(--workflow-primary, var(--el-color-primary)) !important;
+  border-color: var(--workflow-primary, var(--el-color-primary)) !important;
+  box-shadow: -1px 0 0 0 var(--workflow-primary, var(--el-color-primary)) !important;
+}
+
+:is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer)
+  :is(.el-button, .el-switch, .el-input-number__decrease, .el-input-number__increase, .el-radio-button__inner):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 58%, transparent);
+  outline-offset: 2px;
 }
 </style>

@@ -88,6 +88,46 @@ export function listWorkflowNodeDescriptors() {
   })
 }
 
+export function resolveWorkflowNodeSchemas(definitionId, environment = 'PROD') {
+  return request({
+    url: `/ai/workflow/definitions/${definitionId}/node-schemas`,
+    method: 'get',
+    params: {environment}
+  })
+}
+
+export function testWorkflowNode(definitionId, nodeId, data) {
+  return request({
+    url: `/ai/workflow/definitions/${definitionId}/nodes/${nodeId}/tests`,
+    method: 'post',
+    data,
+    headers: { repeatSubmit: false }
+  })
+}
+
+export function getWorkflowNodeTest(testRunId) {
+  return request({
+    url: `/ai/workflow/node-tests/${testRunId}`,
+    method: 'get'
+  })
+}
+
+export function cancelWorkflowNodeTest(testRunId) {
+  return request({
+    url: `/ai/workflow/node-tests/${testRunId}/cancel`,
+    method: 'post',
+    headers: { repeatSubmit: false }
+  })
+}
+
+export function inferWorkflowNodeTestSchema(testRunId) {
+  return request({
+    url: `/ai/workflow/node-tests/${testRunId}/inferred-schema`,
+    method: 'post',
+    headers: { repeatSubmit: false }
+  })
+}
+
 export function startWorkflowExecution(data) {
   return request({
     url: '/ai/workflow/executions',
@@ -256,6 +296,16 @@ export function listWorkflowResources(params) {
     url: '/ai/workflow/resources',
     method: 'get',
     params
+  })
+}
+
+/** 管理端创建可供工作流复用的全局 API 连接。 */
+export function createWorkflowApiConnector(data) {
+  return request({
+    url: '/ai/workflow/connectors',
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
   })
 }
 

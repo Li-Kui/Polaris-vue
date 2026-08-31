@@ -31,29 +31,36 @@
     </div>
     <small class="field-hint">运行时参数来自该节点的“输入映射”；预览参数只用于当前测试，不会保存到工作流。</small>
 
-    <el-collapse class="preview-collapse">
-      <el-collapse-item title="预览查询" name="preview">
-        <el-form-item label="预览参数 JSON">
-          <el-input v-model="previewParameters" type="textarea" :rows="5" placeholder='{"userId": 10001}' />
-        </el-form-item>
-        <el-button type="primary" plain :loading="previewing" :disabled="!selectedResourceId || !draft.sql" @click="runPreview">
-          执行预览
-        </el-button>
-        <el-alert v-if="!selectedResourceId" title="请先完成第 1 步，选择数据库连接。" type="warning" :closable="false" />
-        <el-table v-if="previewRows.length" :data="previewRows" size="small" max-height="280" class="preview-table">
-          <el-table-column v-for="column in previewColumns" :key="column" :prop="column" :label="column" min-width="120" show-overflow-tooltip />
-        </el-table>
-        <el-empty v-else-if="previewed" description="查询成功，未返回数据" :image-size="56" />
-      </el-collapse-item>
-    </el-collapse>
+    <WorkflowDisclosureCard
+      class="preview-collapse"
+      name="preview"
+      title="预览查询"
+      description="使用临时参数验证 SQL 和返回字段"
+      badge="测试工具"
+      icon="preview"
+    >
+      <el-form-item label="预览参数 JSON">
+        <el-input v-model="previewParameters" type="textarea" :rows="5" placeholder='{"userId": 10001}' />
+      </el-form-item>
+      <el-button type="primary" plain :loading="previewing" :disabled="!selectedResourceId || !draft.sql" @click="runPreview">
+        执行预览
+      </el-button>
+      <el-alert v-if="!selectedResourceId" title="请先完成第 1 步，选择数据库连接。" type="warning" :closable="false" />
+      <el-table v-if="previewRows.length" :data="previewRows" size="small" max-height="280" class="preview-table">
+        <el-table-column v-for="column in previewColumns" :key="column" :prop="column" :label="column" min-width="120" show-overflow-tooltip />
+      </el-table>
+      <el-empty v-else-if="previewed" description="查询成功，未返回数据" :image-size="56" />
+    </WorkflowDisclosureCard>
   </div>
 </template>
 
 <script>
 import {queryDatasource} from '@/api/platform/datasource'
+import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 
 export default {
   name: 'WorkflowDatabaseQueryStep',
+  components: {WorkflowDisclosureCard},
   props: {
     config: {type: Object, default: () => ({})},
     selectedResourceId: {type: String, default: ''},

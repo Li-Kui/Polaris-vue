@@ -15,6 +15,7 @@ export {
   listWorkflowResources,
   listWorkflowVersions,
   publishWorkflowDraft,
+  resolveWorkflowNodeSchemas,
   saveWorkflowResourceBinding,
   startWorkflowExecution,
   updateWorkflowDraft,

@@ -2,7 +2,7 @@
   <div class="workflow-workbench">
     <header class="workbench-header">
       <div class="header-left">
-        <el-button icon="Back" text circle @click="back" />
+        <el-button text circle title="返回" aria-label="返回" @click="back"><el-icon><Back /></el-icon></el-button>
         <div class="workflow-title">
           <div class="title-row">
             <strong>{{ definition.metadata.name || '未命名工作流' }}</strong>
@@ -13,44 +13,22 @@
           <code>{{ definition.metadata.code || '首次保存时自动生成编码' }}</code>
         </div>
       </div>
-      <div class="header-context">
-        <el-select
-          v-model="resourceEnvironment"
-          class="environment-select"
-          size="small"
-          title="资源环境"
-          @change="refreshResourceContext"
-        >
-          <el-option label="生产（默认）" value="PROD" />
-          <el-option label="测试" value="TEST" />
-          <el-option label="开发" value="DEV" />
-        </el-select>
-        <el-tooltip
-          content="同一个逻辑资源可以在开发、测试、生产环境绑定不同实体；没有隔离需求时保持生产即可。"
-          placement="bottom"
-        >
-          <el-icon class="context-help"><QuestionFilled /></el-icon>
-        </el-tooltip>
-      </div>
       <div class="header-actions">
         <el-button-group v-if="canEdit">
-          <el-button icon="RefreshLeft" :disabled="!canUndo" title="撤销" @click="undo" />
-          <el-button icon="RefreshRight" :disabled="!canRedo" title="重做" @click="redo" />
+          <el-button :disabled="!canUndo" title="撤销" aria-label="撤销" @click="undo"><el-icon><RefreshLeft /></el-icon></el-button>
+          <el-button :disabled="!canRedo" title="重做" aria-label="重做" @click="redo"><el-icon><RefreshRight /></el-icon></el-button>
         </el-button-group>
         <span :class="['validation-state', {passed: validationPassed}]">
           <el-icon><CircleCheck /></el-icon>{{ validationPassed ? '已通过校验' : '等待校验' }}
         </span>
         <el-button :loading="validating" @click="validate">校验</el-button>
-        <el-button v-if="canExecute" icon="VideoPlay" @click="openTestRun">测试运行</el-button>
+        <el-button v-if="canExecute" @click="openTestRun"><el-icon><VideoPlay /></el-icon><span>测试运行</span></el-button>
         <el-button v-if="canEdit" :loading="saving" @click="saveDraft">保存</el-button>
         <el-button v-if="canPublish" type="primary" :loading="publishing" @click="publish">发布</el-button>
       </div>
     </header>
 
-    <div :class="['workbench-body', {
-      'workbench-body--guided': isApiNode,
-      'workbench-body--mapping': isMappingEditorOpen
-    }]">
+    <div :class="['workbench-body', {'workbench-body--dock-open': !inspectorCollapsed}]">
       <aside class="node-palette">
         <div class="palette-heading"><strong>节点库</strong><small>{{ filteredDescriptors.length }} 个节点</small></div>
         <el-input v-model="descriptorKeyword" placeholder="搜索节点名称或类型" clearable size="small" prefix-icon="Search" />
@@ -82,13 +60,20 @@
         </div>
       </aside>
 
+      <section class="workspace-stage">
       <main class="canvas-panel">
         <div class="canvas-toolbar">
           <span>{{ definition.nodes.length }} 节点 · {{ definition.edges.length }} 连线</span>
           <el-button-group>
-            <el-button size="small" icon="ZoomOut" title="缩小" @click="zoomCanvas(-0.15)" />
-            <el-button size="small" icon="Aim" title="适应画布" @click="fitCanvas" />
-            <el-button size="small" icon="ZoomIn" title="放大" @click="zoomCanvas(0.15)" />
+            <el-button size="small" title="缩小" aria-label="缩小画布" @click="zoomCanvas(-0.15)">
+              <el-icon><ZoomOut /></el-icon>
+            </el-button>
+            <el-button size="small" title="适应画布" aria-label="适应画布" @click="fitCanvas">
+              <el-icon><Aim /></el-icon>
+            </el-button>
+            <el-button size="small" title="放大" aria-label="放大画布" @click="zoomCanvas(0.15)">
+              <el-icon><ZoomIn /></el-icon>
+            </el-button>
           </el-button-group>
         </div>
         <VueFlow
@@ -108,25 +93,50 @@
           @connect="onConnect"
           @node-click="selectNode"
           @edge-click="selectEdge"
-          @node-drag-stop="markDirty"
+          @node-drag-start="nodeDragStarted"
+          @node-drag-stop="nodeDragStopped"
           @pane-click="clearSelection"
         >
           <Background :gap="20" pattern-color="var(--workflow-grid)" />
           <template #node-workflow="nodeProps">
-            <WorkflowCanvasNode :data="{...nodeProps.data, selected: nodeProps.selected}" />
+            <WorkflowCanvasNode
+              :data="{...nodeProps.data, selected: nodeProps.selected}"
+              @test="openCanvasNodeTest(nodeProps.id)"
+            />
           </template>
         </VueFlow>
       </main>
 
-      <aside :class="['inspector-panel', {
+      <aside
+        :class="['inspector-panel', {
         'inspector-panel--guided': isApiNode,
-        'inspector-panel--mapping': isMappingEditorOpen
-      }]">
-        <template v-if="selectedNode">
+        'inspector-panel--mapping': isMappingEditorOpen,
+        'is-collapsed': inspectorCollapsed
+      }]"
+        :style="inspectorDockStyle"
+      >
+        <button
+          v-if="!inspectorCollapsed"
+          type="button"
+          class="inspector-resize-handle"
+          title="拖动调整面板高度"
+          aria-label="拖动调整面板高度"
+          @pointerdown="startInspectorResize"
+        ><span></span></button>
+        <button
+          v-if="inspectorCollapsed"
+          type="button"
+          class="inspector-collapsed-bar"
+          @click="expandInspector"
+        >
+          <span><el-icon><Setting /></el-icon>{{ inspectorSummary }}</span>
+          <small>点击展开</small>
+        </button>
+        <template v-else-if="selectedNode">
           <div class="inspector-heading">
             <div><span class="inspector-node-icon"><el-icon><component :is="nodeIcon(selectedNode.type)" /></el-icon></span></div>
             <div><strong>{{ selectedNode.name }}</strong><small>{{ selectedNode.id }}</small></div>
-            <el-button icon="Close" text circle @click="clearSelection" />
+            <el-button text circle title="收起面板" aria-label="收起面板" @click="collapseInspector"><el-icon><Close /></el-icon></el-button>
           </div>
           <nav v-if="isApiNode" class="integration-stepper" aria-label="API 节点配置步骤">
             <button
@@ -165,18 +175,74 @@
                   @update:config="schemaConfigChanged"
                 />
                 <template v-else>
+                  <section v-if="isLlmNode" class="node-prompt-editor">
+                    <div class="node-prompt-heading">
+                      <div>
+                        <strong>节点提示词</strong>
+                        <small>告诉大模型当前节点要完成什么任务</small>
+                      </div>
+                      <el-tag v-if="nodePromptValue" size="small" type="success" effect="plain">已填写</el-tag>
+                    </div>
+                    <el-input
+                      :model-value="nodePromptValue"
+                      type="textarea"
+                      :rows="7"
+                      maxlength="12000"
+                      show-word-limit
+                      resize="vertical"
+                      :disabled="!canEdit"
+                      placeholder="例如：将输入的 JSON 转换成清晰、自然的文本，只输出转换结果。\n或：总结输入内容，提取关键信息。"
+                      @input="nodePromptChanged"
+                    />
+                    <small class="node-prompt-hint">
+                      上游内容请在“输入输出”中选择；运行时会自动附在提示词后，无需手工拼接 JSON。
+                    </small>
+                  </section>
                   <WorkflowSchemaConfig
-                    :schema="nodeConfigSchema"
+                    :schema="nodeConfigFormSchema"
                     :model-value="selectedNode.config"
                     :disabled="!canEdit"
                     @update:model-value="schemaConfigChanged"
                   />
-                  <el-collapse>
-                    <el-collapse-item title="高级 JSON 配置" name="json">
-                      <el-input v-model="selectedNodeConfig" type="textarea" :rows="9" :disabled="!canEdit" @input="configChanged" />
-                      <div v-if="configError" class="field-error">{{ configError }}</div>
-                    </el-collapse-item>
-                  </el-collapse>
+                  <WorkflowDisclosureCard
+                    v-if="isLlmNode"
+                    class="inspector-advanced structured-output-disclosure"
+                    name="structured-output"
+                    title="结构化输出格式（可选）"
+                    description="默认输出普通文本；仅在下游需要按字段读取 JSON 时配置"
+                    :badge="structuredOutputConfigured ? '已配置' : ''"
+                    badge-type="success"
+                  >
+                    <WorkflowSchemaConfig
+                      :schema="llmStructuredOutputSchema"
+                      :model-value="selectedNode.config"
+                      :disabled="!canEdit"
+                      @update:model-value="schemaConfigChanged"
+                    />
+                    <small class="inspector-advanced-hint">
+                      例如定义 summary、score 等字段；不需要固定 JSON 字段时请保持为空。
+                    </small>
+                  </WorkflowDisclosureCard>
+                  <WorkflowDisclosureCard
+                    class="inspector-advanced"
+                    name="json"
+                    title="高级 JSON 配置"
+                    description="仅在需要编辑表单未展示的字段时使用"
+                    :badge="configError ? '格式有误' : ''"
+                    badge-type="danger"
+                  >
+                    <el-input
+                      v-model="selectedNodeConfig"
+                      class="inspector-json-editor"
+                      type="textarea"
+                      :rows="9"
+                      :disabled="!canEdit"
+                      spellcheck="false"
+                      @input="configChanged"
+                    />
+                    <div v-if="configError" class="field-error">{{ configError }}</div>
+                    <small v-else class="inspector-advanced-hint">修改后会同步到当前节点配置；常规字段优先使用上方表单。</small>
+                  </WorkflowDisclosureCard>
                 </template>
               </el-form>
             </el-tab-pane>
@@ -304,7 +370,7 @@
                   class="field-hint"
                 >当前操作范围没有可显示的{{ resourceKindLabel(reference.kind) }}。</small>
                 </div>
-                <el-button v-if="canEdit" class="resource-add" plain icon="Plus" @click="addResourceReference">添加扩展资源</el-button>
+                <el-button v-if="canEdit" class="resource-add" plain @click="addResourceReference"><el-icon><Plus /></el-icon><span>添加扩展资源</span></el-button>
               </template>
             </el-tab-pane>
             <el-tab-pane label="输入输出" name="mapping">
@@ -314,11 +380,48 @@
                 :definition="definition"
                 :selected-node="selectedNode"
                 :descriptors="descriptors"
+                :resolved-node-schemas="resolvedNodeSchemas"
                 :disabled="!canEdit"
                 :mapping-error="mappingError"
                 @update:model-value="visualInputMappingChanged"
                 @json-change="rawInputMappingChanged"
+                @request-node-test="fetchNodeFields"
               />
+              <section class="formal-schema-card">
+                <div class="formal-schema-heading">
+                  <div>
+                    <strong>正式输出结构</strong>
+                    <small>发布后进入执行计划，并用于节点输出校验</small>
+                  </div>
+                  <el-tag :type="selectedNode.outputSchemaOverride ? 'success' : 'info'" size="small">
+                    {{ selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约' }}
+                  </el-tag>
+                </div>
+                <template v-if="selectedNode.outputSchemaOverride">
+                  <pre>{{ formatNodeTestJson(selectedNode.outputSchemaOverride) }}</pre>
+                  <div class="formal-schema-actions">
+                    <small>
+                      确认于 {{ selectedNode.ui?.outputSchemaOverrideMetadata?.confirmedAt || '当前草稿' }}；
+                      发布版本可用于回滚。
+                    </small>
+                    <el-button v-if="canEdit" type="danger" plain size="small" @click="clearFormalOutputSchema">
+                      恢复节点契约
+                    </el-button>
+                  </div>
+                </template>
+                <template v-else-if="selectedNode.ui?.inferredOutputSchema?.schema">
+                  <p>已有试运行样本结构；确认后才会成为正式约束。</p>
+                  <el-button
+                    v-if="canEdit"
+                    type="primary"
+                    plain
+                    size="small"
+                    :disabled="selectedNode.ui.inferredOutputSchema.stale"
+                    @click="promoteSelectedInferredSchema"
+                  >设为正式输出结构</el-button>
+                </template>
+                <p v-else>当前没有用户覆盖，运行时沿用发布时固化的节点或资源契约。</p>
+              </section>
             </el-tab-pane>
             <el-tab-pane label="运行策略" name="policy">
               <el-form label-position="top" size="small">
@@ -341,25 +444,122 @@
               </el-form>
             </el-tab-pane>
           </el-tabs>
-          <div class="inspector-footer"><el-button v-if="canEdit" type="danger" text icon="Delete" @click="removeSelectedNode">删除节点</el-button></div>
+          <div class="inspector-footer">
+            <el-tooltip
+              v-if="canDebug"
+              :content="nodeTestAvailability.reason"
+              :disabled="nodeTestAvailability.available"
+              placement="top"
+            >
+              <span>
+                <el-button
+                  type="primary"
+                  plain
+                  class="node-test-trigger"
+                  :disabled="!nodeTestAvailability.available"
+                  @click="openNodeTest"
+                ><el-icon><VideoPlay /></el-icon><span>{{ nodeTestRunning ? '查看试运行' : '试运行当前节点' }}</span></el-button>
+              </span>
+            </el-tooltip>
+            <el-button v-if="canEdit" class="node-delete-button" type="danger" text @click="removeSelectedNode">
+              <el-icon><Delete /></el-icon><span>删除节点</span>
+            </el-button>
+          </div>
         </template>
 
         <template v-else-if="selectedEdge">
-          <div class="inspector-heading simple"><div><strong>连线设置</strong><small>{{ selectedEdge.source }} → {{ selectedEdge.target }}</small></div></div>
+          <div class="inspector-heading simple">
+            <div><strong>连线设置</strong><small>{{ selectedEdge.source }} → {{ selectedEdge.target }}</small></div>
+            <el-button text circle title="收起面板" aria-label="收起面板" @click="collapseInspector"><el-icon><Close /></el-icon></el-button>
+          </div>
           <el-form label-position="top" size="small" class="edge-form">
             <el-form-item label="连线类型"><el-select v-model="selectedEdge.kind" :disabled="!canEdit" style="width: 100%" @change="edgeChanged"><el-option label="普通" value="NORMAL" /><el-option label="条件" value="CONDITION" /><el-option label="并行" value="PARALLEL" /><el-option label="循环" value="LOOP" /><el-option label="语义分类" value="SEMANTIC" /></el-select></el-form-item>
             <el-form-item v-if="selectedEdge.kind === 'SEMANTIC'" label="分类分支标识"><el-input v-model="selectedEdge.sourcePort" :disabled="!canEdit" @input="edgeChanged" /></el-form-item>
             <template v-if="selectedEdge.kind === 'CONDITION'">
-              <el-form-item label="默认分支"><el-switch v-model="selectedEdge.default" :disabled="!canEdit" @change="edgeChanged" /></el-form-item>
-              <el-form-item v-if="!selectedEdge.default" label="条件表达式"><el-input v-model="selectedEdge.condition.expression" type="textarea" :rows="5" :disabled="!canEdit" placeholder="$.input.amount >= 10000" @input="edgeChanged" /></el-form-item>
-              <el-form-item v-if="!selectedEdge.default" label="优先级"><el-input-number v-model="selectedEdge.condition.priority" :min="0" :max="10000" :disabled="!canEdit" style="width: 100%" @change="edgeChanged" /></el-form-item>
+              <el-form-item label="默认分支">
+                <el-switch v-model="selectedEdge.default" :disabled="!canEdit" @change="edgeChanged" />
+                <small class="edge-field-help">其他条件都不满足时走此分支，不需要填写表达式。</small>
+              </el-form-item>
+              <template v-if="!selectedEdge.default">
+                <section class="condition-guide">
+                  <div class="condition-guide-heading">
+                    <span>
+                      <strong>满足条件时走此分支</strong>
+                      <small>选择上游字段，再补充判断方式和值；表达式结果必须是 true 或 false。</small>
+                    </span>
+                    <el-tooltip content="字符串需要加引号；数字、true、false 和 null 不加引号。" placement="top">
+                      <el-icon><QuestionFilled /></el-icon>
+                    </el-tooltip>
+                  </div>
+                  <el-select
+                    v-model="conditionFieldSelection"
+                    class="condition-field-select"
+                    filterable
+                    clearable
+                    :disabled="!canEdit || !conditionFieldGroups.length"
+                    :placeholder="conditionFieldGroups.length ? '选择上游字段并插入' : '暂无可用字段，请先试运行上游节点'"
+                    @change="insertConditionField"
+                  >
+                    <el-option-group
+                      v-for="group in conditionFieldGroups"
+                      :key="group.id"
+                      :label="group.label"
+                    >
+                      <el-option
+                        v-for="field in group.fields"
+                        :key="field.expression"
+                        :label="`${field.label} · ${field.typeLabel} · ${field.expression}`"
+                        :value="field.expression"
+                      >
+                        <span class="condition-option-label">{{ field.label }}</span>
+                        <small>{{ field.typeLabel }} · {{ field.expression }}</small>
+                      </el-option>
+                    </el-option-group>
+                  </el-select>
+                  <div class="condition-operator-bar" aria-label="快捷插入运算符">
+                    <button
+                      v-for="operator in conditionOperators"
+                      :key="operator.value"
+                      type="button"
+                      :disabled="!canEdit"
+                      :title="operator.title"
+                      @click="insertConditionToken(operator.value)"
+                    >{{ operator.label }}</button>
+                  </div>
+                </section>
+                <el-form-item label="条件表达式" class="condition-expression-item">
+                  <el-input
+                    ref="conditionExpressionInput"
+                    v-model="selectedEdge.condition.expression"
+                    type="textarea"
+                    :rows="5"
+                    maxlength="2000"
+                    show-word-limit
+                    :disabled="!canEdit"
+                    placeholder="例如：选择字段后填写  >= 10000"
+                    @input="edgeChanged"
+                  />
+                  <div class="condition-syntax-help">
+                    <span>示例</span>
+                    <code>字段 == 'SUCCESS'</code>
+                    <code>字段 >= 10000 && 字段 != null</code>
+                  </div>
+                </el-form-item>
+                <el-form-item label="优先级">
+                  <el-input-number v-model="selectedEdge.condition.priority" :min="0" :max="10000" :disabled="!canEdit" style="width: 100%" @change="edgeChanged" />
+                  <small class="edge-field-help">数字越小越先判断；同一个条件节点的分支优先级不能重复。</small>
+                </el-form-item>
+              </template>
             </template>
             <el-button v-if="canEdit" type="danger" plain style="width: 100%" @click="removeSelectedEdge">删除连线</el-button>
           </el-form>
         </template>
 
         <template v-else>
-          <div class="inspector-heading simple"><div><strong>工作流设置</strong><small>全局运行与预算策略</small></div></div>
+          <div class="inspector-heading simple">
+            <div><strong>工作流设置</strong><small>全局运行与预算策略</small></div>
+            <el-button text circle title="收起面板" aria-label="收起面板" @click="collapseInspector"><el-icon><Close /></el-icon></el-button>
+          </div>
           <el-form label-position="top" size="small" class="edge-form">
             <el-form-item label="名称" required :error="workflowNameError">
               <el-input v-model="definition.metadata.name" maxlength="128" :disabled="!canEdit" @input="workflowNameChanged" />
@@ -380,6 +580,32 @@
           </el-form>
         </template>
       </aside>
+      </section>
+
+      <nav class="context-rail" aria-label="节点属性入口">
+        <button
+          v-for="item in inspectorTabOptions"
+          :key="item.value"
+          type="button"
+          :class="{active: selectedNode && !inspectorCollapsed && selectedInspectorTab === item.value}"
+          :disabled="!selectedNode"
+          :title="selectedNode ? item.label : '请先选择节点'"
+          @click="openInspectorTab(item.value)"
+        >
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </button>
+        <span class="context-rail-spacer"></span>
+        <button
+          type="button"
+          :class="{active: !selectedNode && !selectedEdge && !inspectorCollapsed}"
+          title="工作流设置"
+          @click="openWorkflowInspector"
+        >
+          <el-icon><Grid /></el-icon>
+          <span>工作流</span>
+        </button>
+      </nav>
     </div>
 
     <section v-if="diagnostics.length" class="diagnostic-panel">
@@ -390,20 +616,170 @@
     </section>
 
     <div v-if="debugExecution" class="execution-dock">
-      <el-button :icon="executionFinished ? 'RefreshRight' : 'VideoPause'" circle @click="executionFinished ? openTestRun() : stopPolling()" />
+      <div class="execution-state-icon" :class="`is-${executionStateTone}`">
+        <el-icon v-if="!executionFinished" class="is-loading"><Loading /></el-icon>
+        <el-icon v-else-if="debugExecution.status === 'SUCCEEDED'"><CircleCheck /></el-icon>
+        <el-icon v-else><CircleClose /></el-icon>
+      </div>
       <div class="execution-progress"><strong>{{ executionStatusLabel }}</strong><el-progress :percentage="executionProgress" :show-text="false" /></div>
       <span>{{ completedNodeRuns }}/{{ Math.max(1, definition.nodes.length) }} 节点</span>
-      <code>{{ debugExecution.executionId }}</code>
-      <el-button text @click="pollExecution">刷新状态</el-button>
+      <code class="execution-id" :title="debugExecution.executionId">{{ debugExecution.executionId }}</code>
+      <div class="execution-actions">
+        <el-button class="execution-action" text @click="pollExecution">
+          <el-icon><Refresh /></el-icon><span>刷新</span>
+        </el-button>
+        <el-button
+          v-if="!executionFinished"
+          class="execution-action execution-action--cancel"
+          text
+          :loading="executionCancelling"
+          @click="cancelExecution"
+        >取消运行</el-button>
+        <el-button
+          class="execution-close"
+          text
+          aria-label="关闭运行状态"
+          title="关闭运行状态"
+          @click="closeExecutionDock"
+        ><el-icon><Close /></el-icon></el-button>
+      </div>
     </div>
 
-    <el-dialog v-model="testDialogOpen" title="测试运行" width="620px">
+    <el-dialog
+      v-model="testDialogOpen"
+      class="workflow-dialog"
+      title="测试运行"
+      width="720px"
+      destroy-on-close
+    >
       <el-alert v-if="!currentDefinition?.currentPublishedVersionId" title="请先发布一个版本后再运行测试。" type="warning" :closable="false" />
-      <el-form label-width="100px" class="test-run-form">
-        <el-form-item label="运行环境"><el-select v-model="resourceEnvironment" style="width: 100%"><el-option label="开发 DEV" value="DEV" /><el-option label="测试 TEST" value="TEST" /><el-option label="生产 PROD" value="PROD" /></el-select></el-form-item>
-        <el-form-item label="输入 JSON"><el-input v-model="testInputJson" type="textarea" :rows="10" /></el-form-item>
+      <el-alert
+        v-if="testInputSchemaError"
+        :title="testInputSchemaError"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <WorkflowExecutionInput
+        ref="testInputEditor"
+        v-model="testInput"
+        :schema="testInputSchema"
+        :loading="testInputSchemaLoading"
+        @validation="testInputValidation = $event"
+      />
+      <template #footer>
+        <el-button @click="testDialogOpen = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="testStarting"
+          :disabled="!currentDefinition?.currentPublishedVersionId || testInputSchemaLoading || !testInputValidation.valid"
+          @click="startTestRun"
+        >开始运行</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="nodeTestDialogOpen"
+      class="workflow-dialog"
+      :title="`试运行节点 · ${nodeTestNodeName}`"
+      width="720px"
+      destroy-on-close
+    >
+      <el-alert
+        :title="nodeTestMode === 'UPSTREAM_CHAIN'
+          ? '按普通连线依次执行安全的线性上游链；条件、并行、循环、多入口和写节点会被阻止。输入表示流程输入。'
+          : '仅执行当前节点，不执行上游；输入表示当前节点最终输入。写操作节点不会执行。'"
+        type="info"
+        :closable="false"
+        show-icon
+      />
+      <el-form label-width="100px" class="node-test-form">
+        <el-form-item label="执行范围">
+          <el-radio-group v-model="nodeTestMode" class="node-test-mode">
+            <el-radio-button value="NODE">仅当前节点</el-radio-button>
+            <el-tooltip
+              :content="nodeTestChainAvailability.reason"
+              :disabled="nodeTestChainAvailability.available"
+              placement="top"
+            >
+              <span>
+                <el-radio-button
+                  value="UPSTREAM_CHAIN"
+                  :disabled="!nodeTestChainAvailability.available"
+                >线性上游链</el-radio-button>
+              </span>
+            </el-tooltip>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="超时时间">
+          <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
+          <span class="node-test-unit">秒</span>
+        </el-form-item>
+        <el-form-item :label="nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+          <el-input v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
+        </el-form-item>
       </el-form>
-      <template #footer><el-button @click="testDialogOpen = false">取消</el-button><el-button type="primary" :loading="testStarting" :disabled="!currentDefinition?.currentPublishedVersionId" @click="startTestRun">开始运行</el-button></template>
+      <section v-if="nodeTestResult" class="node-test-result">
+        <header>
+          <strong>运行结果</strong>
+          <el-tag :type="nodeTestStatusType(nodeTestResult.status)">
+            {{ nodeTestStatusLabel(nodeTestResult.status) }}
+          </el-tag>
+          <span>{{ nodeTestResult.durationMs }} ms</span>
+          <code>{{ nodeTestResult.testRunId }}</code>
+        </header>
+        <el-alert
+          v-if="nodeTestResult.errorMessage"
+          :title="`${nodeTestResult.errorCode || 'NODE_TEST_FAILED'}：${nodeTestResult.errorMessage}`"
+          type="error"
+          :closable="false"
+          show-icon
+        />
+        <div class="node-test-meta">
+          <span>范围 <strong>{{ nodeTestResult.mode === 'UPSTREAM_CHAIN' ? '线性上游链' : '仅当前节点' }}</strong></span>
+          <span>副作用 <strong>{{ nodeTestResult.sideEffect }}</strong></span>
+          <span>Schema <strong>{{ nodeTestSchemaLabel(nodeTestResult.schemaSource) }}</strong></span>
+          <span v-if="nodeTestResult.schemaSourceVersion">版本 <code>{{ nodeTestResult.schemaSourceVersion }}</code></span>
+        </div>
+        <div v-if="nodeTestResult.schemaDiagnostics?.length" class="node-test-diagnostics">
+          <span v-for="item in nodeTestResult.schemaDiagnostics" :key="item">{{ item }}</span>
+        </div>
+        <div v-if="nodeTestResult.status === 'SUCCEEDED'" class="node-test-schema-action">
+          <div>
+            <strong>样本字段结构</strong>
+            <small>仅补充编辑器字段提示，不会改变正式 Schema 或运行校验。</small>
+          </div>
+          <el-button
+            v-if="canEdit"
+            type="primary"
+            plain
+            :loading="nodeTestGeneratingSchema"
+            :disabled="nodeTestSchemaApplied"
+            @click="generateNodeTestSchema"
+          >{{ nodeTestSchemaApplied ? '已加入草稿' : '生成字段结构' }}</el-button>
+          <el-button
+            v-if="canEdit && nodeTestInferredSchema"
+            type="success"
+            plain
+            :disabled="nodeTestSchemaPromoted"
+            @click="promoteNodeTestSchema"
+          >{{ nodeTestSchemaPromoted ? '已设为正式结构' : '设为正式结构' }}</el-button>
+        </div>
+        <label class="node-test-output">
+          <span>脱敏输出</span>
+          <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
+        </label>
+      </section>
+      <template #footer>
+        <el-button @click="nodeTestDialogOpen = false">关闭</el-button>
+        <el-button
+          v-if="nodeTestRunning"
+          type="danger"
+          plain
+          @click="cancelNodeTest"
+        >取消运行</el-button>
+        <el-button v-else type="primary" @click="runNodeTest">运行当前节点</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -414,47 +790,70 @@ import {Background} from '@vue-flow/background'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
 import {
+  cancelWorkflowExecution,
+  cancelWorkflowNodeTest,
   createWorkflowDraft,
   getWorkflowExecution,
+  getWorkflowNodeTest,
+  getWorkflowVersion,
+  inferWorkflowNodeTestSchema,
   listWorkflowNodeRuns,
   listWorkflowResourceBindings,
   listWorkflowResources,
   publishWorkflowDraft,
+  resolveWorkflowNodeSchemas,
   saveWorkflowResourceBinding,
   startWorkflowExecution,
+  testWorkflowNode,
   updateWorkflowDraft,
   validateWorkflowDraft
 } from '@/api/ai/workflow'
 import {
+  Aim,
+  Back,
   ChatDotRound,
   CircleCheck,
+  CircleClose,
+  Close,
   Coin,
   Collection,
   Connection,
   Cpu,
   DataAnalysis,
+  Delete,
   Finished,
   Grid,
+  Loading,
   MagicStick,
   Operation,
   Plus,
   QuestionFilled,
   Refresh,
+  RefreshLeft,
+  RefreshRight,
+  Setting,
   Share,
   Switch,
   Timer,
-  User
+  User,
+  VideoPlay,
+  ZoomIn,
+  ZoomOut
 } from '@element-plus/icons-vue'
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
 import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
 import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
+import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
+import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
 
 export default {
   name: 'WorkflowWorkbench',
   components: {
+    Aim,
+    Back,
     VueFlow,
     Background,
     WorkflowSchemaConfig,
@@ -462,25 +861,37 @@ export default {
     WorkflowApiConnectionStep,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
+    WorkflowDisclosureCard,
     WorkflowInputMappingEditor,
+    WorkflowExecutionInput,
     ChatDotRound,
     CircleCheck,
+    CircleClose,
+    Close,
     Coin,
     Collection,
     Connection,
     Cpu,
     DataAnalysis,
+    Delete,
     Finished,
     Grid,
+    Loading,
     MagicStick,
     Operation,
     Plus,
     QuestionFilled,
     Refresh,
+    RefreshLeft,
+    RefreshRight,
+    Setting,
     Share,
     Switch,
     Timer,
-    User
+    User,
+    VideoPlay,
+    ZoomIn,
+    ZoomOut
   },
   props: {
     modelValue: {
@@ -500,6 +911,10 @@ export default {
       default: false
     },
     canExecute: {
+      type: Boolean,
+      default: false
+    },
+    canDebug: {
       type: Boolean,
       default: false
     },
@@ -525,7 +940,29 @@ export default {
       workflowCodeError: '',
       descriptorKeyword: '',
       descriptorCategory: 'all',
+      conditionFieldSelection: '',
+      conditionOperators: [
+        {label: '等于 ==', value: ' == ', title: '等于'},
+        {label: '不等于 !=', value: ' != ', title: '不等于'},
+        {label: '大于 >', value: ' > ', title: '大于'},
+        {label: '大于等于 >=', value: ' >= ', title: '大于等于'},
+        {label: '小于 <', value: ' < ', title: '小于'},
+        {label: '小于等于 <=', value: ' <= ', title: '小于等于'},
+        {label: '并且 &&', value: ' && ', title: '并且'},
+        {label: '或者 ||', value: ' || ', title: '或者'},
+        {label: '非 !', value: '!', title: '取反'},
+        {label: '( )', value: '()', title: '括号'}
+      ],
       selectedInspectorTab: 'config',
+      inspectorCollapsed: true,
+      inspectorHeight: 430,
+      inspectorResizeState: null,
+      inspectorTabOptions: [
+        {label: '配置', value: 'config', icon: 'Setting'},
+        {label: '资源', value: 'resource', icon: 'Connection'},
+        {label: '输入输出', value: 'mapping', icon: 'Operation'},
+        {label: '运行策略', value: 'policy', icon: 'Timer'}
+      ],
       diagnostics: [],
       validationPassed: false,
       dirty: false,
@@ -539,15 +976,36 @@ export default {
       resourceEnvironment: 'PROD',
       resourceLoading: false,
       resourceCatalog: {},
+      backendResolvedNodeSchemas: {},
       catalogError: '',
       resourceBindings: [],
       pendingResourceBindings: [],
       testDialogOpen: false,
       testStarting: false,
-      testInputJson: '{}',
+      testInput: {},
+      testInputSchema: {type: 'object', properties: {}},
+      testInputSchemaLoading: false,
+      testInputSchemaError: '',
+      testInputValidation: {valid: false, message: '', errors: []},
+      nodeTestDialogOpen: false,
+      nodeTestRunning: false,
+      nodeTestNodeId: '',
+      nodeTestNodeName: '',
+      nodeTestMode: 'NODE',
+      nodeTestTimeoutSeconds: 60,
+      nodeTestInputJson: '{}',
+      nodeTestResult: null,
+      nodeTestPollTimer: null,
+      nodeTestGeneratingSchema: false,
+      nodeTestSchemaApplied: false,
+      nodeTestSchemaPromoted: false,
+      nodeTestInferredSchema: null,
+      nodeTestAutoPersistSchema: false,
+      nodeDragOrigin: null,
       debugExecution: null,
       debugNodeRuns: [],
       executionPollTimer: null,
+      executionCancelling: false,
       paletteCategories: [
         {label: '全部', value: 'all'},
         {label: '数据', value: 'data'},
@@ -571,8 +1029,26 @@ export default {
     isDatabaseNode() {
       return this.selectedNode?.type === 'database_query'
     },
+    isLlmNode() {
+      return this.selectedNode?.type === 'llm'
+    },
+    nodePromptValue() {
+      return this.isLlmNode ? String(this.selectedNode?.config?.prompt || '') : ''
+    },
+    structuredOutputConfigured() {
+      const schema = this.selectedNode?.config?.structuredOutputSchema
+      return !!schema && typeof schema === 'object' && !Array.isArray(schema)
+    },
     isMappingEditorOpen() {
       return !!this.selectedNode && this.selectedInspectorTab === 'mapping'
+    },
+    inspectorDockStyle() {
+      return {height: this.inspectorCollapsed ? '44px' : `${this.inspectorHeight}px`}
+    },
+    inspectorSummary() {
+      if (this.selectedNode) return `${this.selectedNode.name} · ${this.inspectorTabLabel(this.selectedInspectorTab)}`
+      if (this.selectedEdge) return '连线设置'
+      return '工作流设置'
     },
     apiConnectorReference() {
       return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'API_CONNECTOR') || null
@@ -585,6 +1061,195 @@ export default {
       return this.descriptors.find(item =>
         item.type === this.selectedNode.type
           && item.handlerVersion === this.selectedNode.typeVersion) || null
+    },
+    nodeTestAvailability() {
+      if (this.nodeTestRunning) return {available: true, reason: ''}
+      if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
+      if ((!this.currentDefinition?.id || this.dirty) && !this.canEdit) {
+        return {available: false, reason: '当前修改尚未保存，暂无权限同步草稿'}
+      }
+      if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
+      if (this.selectedDescriptor.sideEffect === 'WRITE') {
+        return {available: false, reason: '写操作节点暂不允许单节点真实试运行'}
+      }
+      if (['approval', 'wait', 'sub_workflow'].includes(this.selectedNode.type)) {
+        return {available: false, reason: '持久化控制节点暂不支持隔离试运行'}
+      }
+      const capabilities = this.selectedDescriptor.capabilities || []
+      if (this.selectedDescriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) {
+        return {available: false, reason: '该节点未声明可安全模拟能力'}
+      }
+      if (!capabilities.includes('CANCELLABLE')) {
+        return {available: false, reason: '该节点未声明可取消能力'}
+      }
+      return {available: true, reason: ''}
+    },
+    nodeTestChainAvailability() {
+      if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
+      const nodes = new Map((this.definition.nodes || []).map(node => [node.id, node]))
+      const visited = new Set()
+      let current = this.selectedNode.id
+      while (current) {
+        if (visited.has(current)) return {available: false, reason: '上游路径包含循环'}
+        visited.add(current)
+        const node = nodes.get(current)
+        if (!node) return {available: false, reason: '上游路径节点已失效'}
+        if (['approval', 'wait', 'sub_workflow', 'condition', 'parallel', 'join',
+          'loop', 'llm_classifier'].includes(node.type)) {
+          return {available: false, reason: `路径包含控制节点「${node.name}」`}
+        }
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        if (!descriptor || descriptor.sideEffect === 'WRITE'
+          || !(descriptor.capabilities || []).includes('CANCELLABLE')) {
+          return {available: false, reason: `路径节点「${node.name}」不满足安全执行要求`}
+        }
+        const incoming = (this.definition.edges || [])
+          .filter(edge => edge.target === current)
+        if (incoming.length !== 1 || incoming[0].kind !== 'NORMAL') {
+          return {available: false, reason: '仅支持单入口普通连线组成的线性路径'}
+        }
+        current = incoming[0].source === '__start__' ? null : incoming[0].source
+      }
+      return {available: true, reason: ''}
+    },
+    resolvedNodeSchemas() {
+      const result = (this.definition.nodes || []).reduce((schemas, node) => {
+        if (!['http_get', 'http_request'].includes(node.type)) return schemas
+        const reference = (node.resourceRefs || [])
+          .find(item => item.kind === 'API_CONNECTOR')
+        const resource = reference ? this.selectedResource(reference) : null
+        const responseSchema = resource?.attributes?.responseSchema
+        if (!responseSchema || Array.isArray(responseSchema)
+          || typeof responseSchema !== 'object') return schemas
+        const hasPendingBinding = this.pendingResourceBindings.some(binding =>
+          binding.nodeId === node.id
+            && binding.resourceKind === 'API_CONNECTOR'
+            && binding.environment === this.resourceEnvironment)
+        if (schemas[node.id] && !hasPendingBinding) return schemas
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const outputSchema = JSON.parse(JSON.stringify(descriptor?.outputSchema || {
+          type: 'object',
+          properties: {}
+        }))
+        outputSchema.type = 'object'
+        outputSchema.properties = {
+          ...(outputSchema.properties || {}),
+          body: responseSchema
+        }
+        schemas[node.id] = {
+          outputSchema,
+          source: '连接器 Schema',
+          sourceCode: resource.attributes.responseSchemaSource || 'API_CONNECTOR',
+          sourceVersion: resource.attributes.responseSchemaVersion || resource.resourceId
+        }
+        return schemas
+      }, {...this.backendResolvedNodeSchemas})
+      const nodes = this.definition.nodes || []
+      nodes.forEach(node => {
+        if (!node.outputSchemaOverride) return
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const current = result[node.id] || {
+          inputSchema: descriptor?.inputSchema || {type: 'object', properties: {}},
+          outputSchema: descriptor?.outputSchema || {type: 'object', properties: {}},
+          diagnostics: []
+        }
+        result[node.id] = {
+          ...current,
+          outputSchema: node.outputSchemaOverride,
+          source: '用户正式覆盖',
+          sourceCode: 'USER_OVERRIDE',
+          diagnostics: current.diagnostics || []
+        }
+      })
+      const latestRuntimeOutputs = (this.debugNodeRuns || [])
+        .filter(run => run.status === 'SUCCEEDED' && run.outputJson)
+        .sort((left, right) => (right.attemptNo || 0) - (left.attemptNo || 0))
+        .reduce((outputs, run) => {
+          if (!outputs.has(run.nodeId)) outputs.set(run.nodeId, run.outputJson)
+          return outputs
+        }, new Map())
+      nodes.forEach(node => {
+        const outputJson = latestRuntimeOutputs.get(node.id)
+        if (!outputJson) return
+        try {
+          const output = typeof outputJson === 'string' ? JSON.parse(outputJson) : outputJson
+          const sampleSchema = this.inferEditorSchema(output)
+          const descriptor = this.descriptors.find(item => item.type === node.type
+            && item.handlerVersion === node.typeVersion)
+          const current = result[node.id] || {
+            outputSchema: descriptor?.outputSchema || {type: 'object', properties: {}},
+            source: '节点契约',
+            sourceCode: 'NODE_CONTRACT',
+            diagnostics: []
+          }
+          result[node.id] = {
+            ...current,
+            outputSchema: this.mergeEditorSchema(current.outputSchema, sampleSchema),
+            source: `${current.source || '节点契约'} + 本次运行`,
+            runtimeSample: true,
+            diagnostics: current.diagnostics || []
+          }
+        } catch (error) {
+          // 运行输出不可解析时继续使用正式或动态 Schema。
+        }
+      })
+      nodes.forEach(node => {
+        const inferred = node.ui?.inferredOutputSchema
+        if (!inferred?.schema) return
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const current = result[node.id] || {
+          outputSchema: descriptor?.outputSchema || {type: 'object', properties: {}},
+          source: '节点契约',
+          sourceCode: 'NODE_CONTRACT',
+          diagnostics: []
+        }
+        if (!this.isUsableEditorSchema(inferred.schema)) {
+          result[node.id] = {
+            ...current,
+            diagnostics: [
+              ...(current.diagnostics || []),
+              '旧版试运行字段结构无效，请重新运行上游节点获取字段'
+            ]
+          }
+          return
+        }
+        const sourceVersionChanged = inferred.schemaSourceVersion
+          && current.sourceVersion
+          && inferred.schemaSourceVersion !== current.sourceVersion
+        if (inferred.stale || sourceVersionChanged) {
+          result[node.id] = {
+            ...current,
+            diagnostics: [
+              ...(current.diagnostics || []),
+              sourceVersionChanged
+                ? '资源契约已变化，试运行样本已过期，请重新运行节点'
+                : '试运行样本已过期，请重新运行节点'
+            ]
+          }
+          return
+        }
+        const sampleCount = inferred.sampleCount || 1
+        const sampleLabel = sampleCount > 1
+          ? `试运行样本（${sampleCount} 次）` : '试运行样本'
+        result[node.id] = {
+          ...current,
+          outputSchema: this.mergeEditorSchema(current.outputSchema, inferred.schema),
+          source: `${current.source || '节点契约'} + ${sampleLabel}`,
+          sourceCode: current.sourceCode || 'NODE_TEST',
+          sampleSource: 'NODE_TEST',
+          sampleCount,
+          diagnostics: [...(current.diagnostics || []), ...(inferred.diagnostics || [])]
+        }
+      })
+      return result
+    },
+    conditionFieldGroups() {
+      if (this.selectedEdge?.kind !== 'CONDITION' || this.selectedEdge.default) return []
+      return this.buildConditionFieldGroups(this.selectedEdge.source)
     },
     nodeConfigSchema() {
       if (!this.isApiNode) return this.selectedDescriptor?.configSchema || {}
@@ -608,6 +1273,39 @@ export default {
         type: 'object',
         properties,
         required: ['method', 'path'],
+        additionalProperties: false
+      }
+    },
+    nodeConfigFormSchema() {
+      if (!this.isLlmNode) return this.nodeConfigSchema
+      const schema = this.nodeConfigSchema || {}
+      const properties = {...(schema.properties || {})}
+      delete properties.prompt
+      delete properties.systemPrompt
+      delete properties.structuredOutputSchema
+      return {
+        ...schema,
+        properties,
+        required: Array.isArray(schema.required)
+          ? schema.required.filter(name => !['prompt', 'systemPrompt'].includes(name))
+          : schema.required
+      }
+    },
+    llmStructuredOutputSchema() {
+      const declared = this.nodeConfigSchema?.properties?.structuredOutputSchema || {}
+      return {
+        type: 'object',
+        properties: {
+          structuredOutputSchema: {
+            ...declared,
+            type: 'object',
+            title: 'JSON 字段定义',
+            format: 'json-schema',
+            description: '模型返回结果必须符合此结构，下游节点才能稳定读取对应字段',
+            placeholder: '{\n  "type": "object",\n  "properties": {\n    "summary": { "type": "string" }\n  },\n  "required": ["summary"]\n}',
+            additionalProperties: true
+          }
+        },
         additionalProperties: false
       }
     },
@@ -675,6 +1373,14 @@ export default {
       return ['SUCCEEDED', 'FAILED', 'CANCELLED', 'REJECTED', 'NEEDS_ATTENTION']
         .includes(this.debugExecution?.status)
     },
+    executionStateTone() {
+      const status = this.debugExecution?.status
+      if (status === 'SUCCEEDED') return 'success'
+      if (['FAILED', 'REJECTED', 'NEEDS_ATTENTION'].includes(status)) return 'danger'
+      if (status === 'CANCELLED') return 'neutral'
+      if (['WAITING_APPROVAL', 'WAITING_EVENT'].includes(status)) return 'warning'
+      return 'running'
+    },
     executionStatusLabel() {
       const labels = {
         QUEUED: '等待执行', RUNNING: '正在执行', WAITING_APPROVAL: '等待审批',
@@ -692,8 +1398,64 @@ export default {
   beforeUnmount() {
     clearTimeout(this.historyTimer)
     clearTimeout(this.executionPollTimer)
+    clearTimeout(this.nodeTestPollTimer)
+    window.removeEventListener('pointermove', this.resizeInspector)
+    window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    inspectorTabLabel(value) {
+      return this.inspectorTabOptions.find(item => item.value === value)?.label || '配置'
+    },
+    openInspectorTab(value) {
+      if (!this.selectedNode) return
+      this.selectedInspectorTab = value
+      this.inspectorCollapsed = false
+      this.refreshCanvasLayout()
+    },
+    openWorkflowInspector() {
+      this.selectedNode = null
+      this.selectedEdge = null
+      this.inspectorCollapsed = false
+      this.refreshCanvasLayout()
+    },
+    collapseInspector() {
+      this.inspectorCollapsed = true
+      this.refreshCanvasLayout()
+    },
+    expandInspector() {
+      this.inspectorCollapsed = false
+      this.refreshCanvasLayout()
+    },
+    refreshCanvasLayout() {
+      this.$nextTick(() => {
+        window.dispatchEvent(new Event('resize'))
+      })
+    },
+    startInspectorResize(event) {
+      if (this.inspectorCollapsed) return
+      event.preventDefault()
+      this.inspectorResizeState = {
+        startY: event.clientY,
+        startHeight: this.inspectorHeight
+      }
+      window.addEventListener('pointermove', this.resizeInspector)
+      window.addEventListener('pointerup', this.stopInspectorResize, {once: true})
+    },
+    resizeInspector(event) {
+      if (!this.inspectorResizeState) return
+      const stageHeight = this.$el?.querySelector('.workspace-stage')?.clientHeight
+        || window.innerHeight * 0.7
+      const maxHeight = Math.max(360, Math.min(720, stageHeight - 140))
+      const nextHeight = this.inspectorResizeState.startHeight
+        + this.inspectorResizeState.startY - event.clientY
+      this.inspectorHeight = Math.round(Math.min(maxHeight, Math.max(300, nextHeight)))
+    },
+    stopInspectorResize() {
+      this.inspectorResizeState = null
+      window.removeEventListener('pointermove', this.resizeInspector)
+      window.removeEventListener('pointerup', this.stopInspectorResize)
+      this.refreshCanvasLayout()
+    },
     nodeIcon(type) {
       const icons = {
         llm: 'Cpu', agent: 'ChatDotRound', llm_classifier: 'MagicStick',
@@ -748,6 +1510,7 @@ export default {
         nodes: [],
         edges: [],
         outputs: {},
+        ui: {},
         policies: {
           timeoutSeconds: 1800,
           maxNodeRuns: 200,
@@ -770,6 +1533,7 @@ export default {
         this.definition = this.createEmptyDefinition()
       }
       this.normalizeHttpNodeConfigs()
+      this.normalizeInferredOutputSchemas()
       this.buildCanvas()
       this.dirty = false
       this.resetHistory()
@@ -786,7 +1550,8 @@ export default {
           ? `${Object.keys(node.inputMapping).length} 个映射` : '对象',
         outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
         resourceName: reference ? this.selectedResource(reference)?.name : '',
-        status: this.latestNodeStatus(node.id)
+        status: this.latestNodeStatus(node.id),
+        testable: this.canDebug && this.nodeSupportsTest(node)
       }
     },
     buildCanvas() {
@@ -801,23 +1566,24 @@ export default {
         x: Math.max(result.x, item.position.x),
         y: Math.max(result.y, item.position.y)
       }), {x: 520, y: 220})
+      const canvasUi = this.definition.ui || {}
       const start = {
         id: '__start__',
         type: 'workflow',
-        position: { x: 60, y: 220 },
-        data: {label: '开始', start: true},
-        draggable: false,
+        position: canvasUi.startPosition || { x: 60, y: 220 },
+        data: {label: '开始', start: true, movable: true},
+        draggable: this.canEdit,
         deletable: false
       }
       const end = {
         id: '__end__',
         type: 'workflow',
-        position: {
+        position: canvasUi.endPosition || {
           x: positionedNodes.length > 4 ? furthestPosition.x : furthestPosition.x + 260,
           y: positionedNodes.length > 4 ? furthestPosition.y + 210 : 220
         },
-        data: {label: '结束', end: true},
-        draggable: false,
+        data: {label: '结束', end: true, movable: true},
+        draggable: this.canEdit,
         deletable: false
       }
       this.canvasNodes = [start, ...positionedNodes.map(({node, position}) => ({
@@ -879,7 +1645,9 @@ export default {
       this.selectedNodeConfig = JSON.stringify(node.config, null, 2)
       this.selectedNodeInputMapping = JSON.stringify(node.inputMapping, null, 2)
       this.selectedInspectorTab = resourceReferences.length ? 'resource' : 'config'
+      this.inspectorCollapsed = false
       this.markDirty()
+      this.refreshCanvasLayout()
     },
     defaultNodeConfig(type) {
       if (type === 'http_get') return {method: 'GET', path: ''}
@@ -943,20 +1711,50 @@ export default {
       this.selectedInspectorTab = this.selectedNode?.resourceRefs?.length ? 'resource' : 'config'
       this.configError = ''
       this.mappingError = ''
+      this.inspectorCollapsed = false
+      this.refreshCanvasLayout()
+    },
+    nodeDragStarted({node}) {
+      this.nodeDragOrigin = node?.position ? {...node.position} : null
+    },
+    nodeDragStopped({node}) {
+      const origin = this.nodeDragOrigin
+      this.nodeDragOrigin = null
+      if (!node?.position || !origin
+          || (node.position.x === origin.x && node.position.y === origin.y)) return
+      if (node.id === '__start__' || node.id === '__end__') {
+        const positionKey = node.id === '__start__' ? 'startPosition' : 'endPosition'
+        this.definition.ui = {
+          ...(this.definition.ui || {}),
+          [positionKey]: {...node.position}
+        }
+        this.markDirty()
+        return
+      }
+      const definitionNode = this.definition.nodes.find(item => item.id === node.id)
+      if (definitionNode) {
+        definitionNode.ui = {...(definitionNode.ui || {}), ...node.position}
+      }
+      this.markDirty()
     },
     selectEdge({edge}) {
       this.selectedEdge = this.definition.edges.find(item => item.id === edge.id)
         || edge.data?.definitionEdge || null
+      this.conditionFieldSelection = ''
       if (this.selectedEdge?.kind === 'CONDITION' && !this.selectedEdge.condition && !this.selectedEdge.default) {
         this.selectedEdge.condition = { expression: '', priority: 100, onError: 'FAIL' }
       }
       this.selectedNode = null
+      this.inspectorCollapsed = false
+      this.refreshCanvasLayout()
     },
     clearSelection() {
       this.selectedNode = null
       this.selectedEdge = null
       this.configError = ''
       this.mappingError = ''
+      this.inspectorCollapsed = true
+      this.refreshCanvasLayout()
     },
     nodeChanged() {
       const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
@@ -970,6 +1768,7 @@ export default {
           throw new Error('配置必须是 JSON 对象')
         }
         this.selectedNode.config = value
+        this.invalidateSelectedInferredSchema()
         this.syncHttpNodeType(value.method)
         this.configError = ''
         this.markDirty()
@@ -979,10 +1778,18 @@ export default {
     },
     schemaConfigChanged(value) {
       this.selectedNode.config = value
+      this.invalidateSelectedInferredSchema()
       this.syncHttpNodeType(value?.method)
       this.selectedNodeConfig = JSON.stringify(value, null, 2)
       this.configError = ''
       this.markDirty()
+    },
+    nodePromptChanged(value) {
+      const config = {...(this.selectedNode?.config || {})}
+      const prompt = String(value || '')
+      if (prompt) config.prompt = prompt
+      else delete config.prompt
+      this.schemaConfigChanged(config)
     },
     normalizeHttpNodeConfigs() {
       const nodes = this.definition.nodes || []
@@ -994,6 +1801,13 @@ export default {
         if (!node.config.method) {
           node.config.method = node.type === 'http_get' ? 'GET' : 'POST'
         }
+      })
+    },
+    normalizeInferredOutputSchemas() {
+      ;(this.definition.nodes || []).forEach(node => {
+        const inferred = node.ui?.inferredOutputSchema
+        if (!inferred?.schema || this.isUsableEditorSchema(inferred.schema)) return
+        delete node.ui.inferredOutputSchema
       })
     },
     syncHttpNodeType(method) {
@@ -1014,6 +1828,78 @@ export default {
       }
       const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
       if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
+    },
+    invalidateSelectedInferredSchema() {
+      const inferred = this.selectedNode?.ui?.inferredOutputSchema
+      if (!inferred || inferred.stale) return
+      inferred.stale = true
+      inferred.staleAt = new Date().toISOString()
+    },
+    mergeEditorSchema(formalSchema, sampleSchema) {
+      if (!this.isUsableEditorSchema(formalSchema)) {
+        return JSON.parse(JSON.stringify(sampleSchema || {}))
+      }
+      if (!this.isUsableEditorSchema(sampleSchema)) {
+        return JSON.parse(JSON.stringify(formalSchema))
+      }
+      const formal = JSON.parse(JSON.stringify(formalSchema))
+      const formalTypes = Array.isArray(formal.type) ? formal.type : [formal.type]
+      const sampleTypes = Array.isArray(sampleSchema.type)
+        ? sampleSchema.type : [sampleSchema.type]
+      if (formalTypes.includes('object') && sampleTypes.includes('object')) {
+        const formalPropertyNames = new Set(Object.keys(formal.properties || {}))
+        formal.properties = {...(formal.properties || {})}
+        const formalRequired = Array.isArray(formal.required) ? formal.required : []
+        const inferredRequired = Array.isArray(sampleSchema.required)
+          ? sampleSchema.required.filter(name => !formalPropertyNames.has(name)) : []
+        const required = [...new Set([...formalRequired, ...inferredRequired])]
+        if (required.length) formal.required = required
+        Object.entries(sampleSchema.properties || {}).forEach(([name, child]) => {
+          formal.properties[name] = formal.properties[name]
+            ? this.mergeEditorSchema(formal.properties[name], child)
+            : JSON.parse(JSON.stringify(child))
+        })
+      }
+      if (formalTypes.includes('array') && sampleTypes.includes('array')
+        && sampleSchema.items) {
+        formal.items = formal.items
+          ? this.mergeEditorSchema(formal.items, sampleSchema.items)
+          : JSON.parse(JSON.stringify(sampleSchema.items))
+      }
+      return formal
+    },
+    isUsableEditorSchema(schema) {
+      if (!schema || Array.isArray(schema) || typeof schema !== 'object') return false
+      return ['type', 'properties', 'items', 'oneOf', 'anyOf', 'allOf', '$ref',
+        'enum', 'const', 'additionalProperties']
+        .some(key => Object.prototype.hasOwnProperty.call(schema, key))
+    },
+    inferEditorSchema(value, depth = 0) {
+      if (value === null) return {type: ['object', 'null']}
+      if (Array.isArray(value)) {
+        const sample = value.find(item => item !== null && item !== undefined)
+        return {
+          type: 'array',
+          items: depth >= 6 || sample === undefined
+            ? {} : this.inferEditorSchema(sample, depth + 1)
+        }
+      }
+      if (typeof value === 'object') {
+        if (depth >= 6) return {type: 'object'}
+        const properties = Object.entries(value).reduce((result, [key, child]) => {
+          result[key] = this.inferEditorSchema(child, depth + 1)
+          return result
+        }, {})
+        return {
+          type: 'object',
+          properties,
+          required: Object.keys(properties)
+        }
+      }
+      if (typeof value === 'number') {
+        return {type: Number.isInteger(value) ? 'integer' : 'number'}
+      }
+      return {type: typeof value === 'boolean' ? 'boolean' : 'string'}
     },
     inputMappingChanged() {
       try {
@@ -1157,10 +2043,47 @@ export default {
           environment: this.resourceEnvironment
         })
         this.resourceBindings = response.data || []
+        await this.refreshResolvedNodeSchemas()
         this.refreshCanvasNodeData()
       } finally {
         this.resourceLoading = false
       }
+    },
+    async refreshResolvedNodeSchemas() {
+      if (!this.currentDefinition?.id) {
+        this.backendResolvedNodeSchemas = {}
+        return
+      }
+      try {
+        const response = await resolveWorkflowNodeSchemas(
+          this.currentDefinition.id, this.resourceEnvironment)
+        this.backendResolvedNodeSchemas = (response.data || []).reduce((result, item) => {
+          result[item.nodeId] = {
+            inputSchema: item.inputSchema,
+            outputSchema: item.outputSchema,
+            source: this.schemaSourceLabel(item.source),
+            sourceCode: item.source,
+            sourceVersion: item.sourceVersion,
+            diagnostics: item.diagnostics || [],
+            fieldSources: item.fieldSources || {}
+          }
+          return result
+        }, {})
+      } catch (error) {
+        this.backendResolvedNodeSchemas = {}
+      }
+    },
+    schemaSourceLabel(source) {
+      const labels = {
+        NODE_CONTRACT: '节点契约',
+        API_CONNECTOR: '连接器 Schema',
+        OPENAPI: 'OpenAPI',
+        DATABASE_METADATA: '数据库元数据',
+        LLM_STRUCTURED_OUTPUT: '结构化输出',
+        NODE_TEST: '试运行样本',
+        USER_OVERRIDE: '用户正式覆盖'
+      }
+      return labels[source] || source || '节点契约'
     },
     async bindResource(reference, resourceId) {
       if (!reference.key?.trim()) {
@@ -1189,6 +2112,7 @@ export default {
         } else {
           this.pendingResourceBindings.push(pending)
         }
+        this.invalidateSelectedInferredSchema()
         this.markDirty()
         this.refreshCanvasNodeData()
         this.$message.success(`已选择${this.resourceKindLabel(reference.kind)}，保存工作流后完成关联`)
@@ -1213,6 +2137,8 @@ export default {
           expectedLockVersion: existing?.lockVersion ?? null
         })
         await this.refreshResourceContext()
+        this.invalidateSelectedInferredSchema()
+        this.markDirty()
         this.$message.success(`已关联${this.resourceKindLabel(reference.kind)}`)
         return true
       } finally {
@@ -1239,6 +2165,7 @@ export default {
     },
     resourceKeyChanged(reference) {
       this.updatePendingBindingReference(reference)
+      this.invalidateSelectedInferredSchema()
       this.markDirty()
       this.refreshCanvasNodeData()
     },
@@ -1271,18 +2198,348 @@ export default {
         .filter(item => item.nodeId === nodeId)
         .sort((left, right) => (right.attemptNo || 0) - (left.attemptNo || 0))[0]?.status || ''
     },
-    openTestRun() {
-      if (!this.currentDefinition?.currentPublishedVersionId) {
-        this.$message.warning('请先发布工作流版本')
-      }
-      this.testDialogOpen = true
+    nodeSupportsTest(node) {
+      if (!node || ((!this.currentDefinition?.id || this.dirty) && !this.canEdit)) return false
+      const descriptor = this.descriptors.find(item => item.type === node.type
+        && item.handlerVersion === node.typeVersion)
+      if (!descriptor || descriptor.sideEffect === 'WRITE') return false
+      if (['approval', 'wait', 'sub_workflow'].includes(node.type)) return false
+      const capabilities = descriptor.capabilities || []
+      if (descriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) return false
+      return capabilities.includes('CANCELLABLE')
     },
-    async startTestRun() {
+    openCanvasNodeTest(nodeId) {
+      const node = this.definition.nodes.find(item => item.id === nodeId)
+      if (!node) return
+      this.selectNode({node: {id: nodeId}})
+      this.openNodeTest()
+    },
+    openNodeTest() {
+      if (this.nodeTestRunning) {
+        this.nodeTestDialogOpen = true
+        return
+      }
+      if (!this.nodeTestAvailability.available) {
+        this.$message.warning(this.nodeTestAvailability.reason)
+        return
+      }
+      this.nodeTestNodeId = this.selectedNode.id
+      this.nodeTestNodeName = this.selectedNode.name
+      this.nodeTestTimeoutSeconds = Math.min(this.selectedNode.timeoutSeconds || 60, 120)
+      this.nodeTestMode = 'NODE'
+      this.nodeTestResult = null
+      this.nodeTestSchemaApplied = false
+      this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
+      this.nodeTestInferredSchema = this.selectedNode.ui?.inferredOutputSchema?.schema || null
+      this.nodeTestDialogOpen = true
+    },
+    async fetchNodeFields() {
+      this.openNodeTest()
+      if (!this.nodeTestDialogOpen || this.nodeTestRunning) return
+      this.nodeTestInputJson = '{}'
+      this.nodeTestAutoPersistSchema = true
+      await this.runNodeTest()
+    },
+    async runNodeTest() {
       let input
       try {
-        input = JSON.parse(this.testInputJson)
+        input = JSON.parse(this.nodeTestInputJson)
       } catch (error) {
-        this.$message.error('测试输入必须是有效 JSON')
+        this.$message.error('节点输入必须是有效 JSON')
+        return
+      }
+      if (!this.currentDefinition?.id || this.dirty) {
+        const saved = await this.saveDraft({silent: true})
+        if (!saved) {
+          this.nodeTestAutoPersistSchema = false
+          return
+        }
+        this.$message.info('已同步当前草稿，正在试运行接口')
+      }
+      this.nodeTestRunning = true
+      this.nodeTestResult = null
+      this.nodeTestSchemaApplied = false
+      this.nodeTestSchemaPromoted = false
+      this.nodeTestInferredSchema = null
+      try {
+        const response = await testWorkflowNode(
+          this.currentDefinition.id,
+          this.nodeTestNodeId,
+          {
+            input,
+            environment: this.resourceEnvironment,
+            timeoutSeconds: this.nodeTestTimeoutSeconds,
+            mode: this.nodeTestMode
+          }
+        )
+        this.nodeTestResult = response.data
+        this.pollNodeTest()
+      } catch (error) {
+        this.nodeTestRunning = false
+        this.nodeTestAutoPersistSchema = false
+      }
+    },
+    async pollNodeTest() {
+      const testRunId = this.nodeTestResult?.testRunId
+      if (!testRunId) return
+      clearTimeout(this.nodeTestPollTimer)
+      try {
+        const response = await getWorkflowNodeTest(testRunId)
+        this.nodeTestResult = response.data
+        if (['QUEUED', 'RUNNING'].includes(response.data?.status)) {
+          this.nodeTestPollTimer = setTimeout(() => this.pollNodeTest(), 800)
+          return
+        }
+        this.nodeTestRunning = false
+        if (response.data?.status === 'SUCCEEDED') {
+          const schemaUpdated = await this.generateNodeTestSchema({silent: true})
+          if (schemaUpdated && this.nodeTestAutoPersistSchema) {
+            await this.saveDraft({silent: true})
+          }
+          this.nodeTestAutoPersistSchema = false
+          this.$message.success(schemaUpdated
+            ? '当前节点试运行成功，响应字段已自动更新'
+            : '当前节点试运行成功')
+        } else {
+          this.nodeTestAutoPersistSchema = false
+        }
+      } catch (error) {
+        this.nodeTestRunning = false
+        this.nodeTestAutoPersistSchema = false
+      }
+    },
+    async cancelNodeTest() {
+      const testRunId = this.nodeTestResult?.testRunId
+      if (!testRunId) return
+      clearTimeout(this.nodeTestPollTimer)
+      try {
+        const response = await cancelWorkflowNodeTest(testRunId)
+        this.nodeTestResult = response.data
+        if (response.data?.status === 'CANCELLED') {
+          this.$message.success('已取消当前节点试运行')
+        } else {
+          this.$message.info('节点试运行已经结束')
+        }
+        this.nodeTestRunning = false
+        this.nodeTestAutoPersistSchema = false
+      } catch (error) {
+        this.pollNodeTest()
+      }
+    },
+    async generateNodeTestSchema(options = {}) {
+      const silent = options?.silent === true
+      const testRunId = this.nodeTestResult?.testRunId
+      if (!testRunId || this.nodeTestResult?.status !== 'SUCCEEDED') return false
+      if (this.dirty) {
+        if (!silent) this.$message.warning('当前草稿已有修改，请保存后重新试运行再生成字段结构')
+        return false
+      }
+      this.nodeTestGeneratingSchema = true
+      try {
+        const response = await inferWorkflowNodeTestSchema(testRunId)
+        const inferred = response.data
+        if (!this.isUsableEditorSchema(inferred?.schema)) {
+          if (!silent) this.$message.error('接口返回的字段结构无效，请重启后端后重新运行')
+          return false
+        }
+        if (inferred.draftRevision !== this.currentDefinition?.draftRevision) {
+          this.$message.warning('试运行对应的草稿修订已变化，请重新试运行')
+          return false
+        }
+        const node = this.definition.nodes.find(item => item.id === inferred.nodeId)
+        if (!node) {
+          this.$message.error('试运行对应节点已不存在')
+          return false
+        }
+        node.ui = {
+          ...(node.ui || {}),
+          inferredOutputSchema: {
+            schema: inferred.schema,
+            source: 'NODE_TEST',
+            inferredAt: inferred.inferredAt,
+            sampleCount: inferred.sampleCount,
+            nodeConfigHash: inferred.nodeConfigHash,
+            schemaSourceVersion: inferred.schemaSourceVersion,
+            testRunId: inferred.testRunId,
+            diagnostics: inferred.diagnostics || [],
+            stale: false
+          }
+        }
+        this.nodeTestInferredSchema = inferred.schema
+        this.nodeTestSchemaApplied = true
+        this.markDirty()
+        if (this.selectedNode?.id === node.id) this.selectedInspectorTab = 'mapping'
+        if (!silent) {
+          this.$message.success(inferred.sampleCount > 1
+            ? `已聚合 ${inferred.sampleCount} 次兼容试运行，字段结构已加入草稿`
+            : '样本字段结构已加入草稿，请保存后生效')
+        }
+        return true
+      } finally {
+        this.nodeTestGeneratingSchema = false
+      }
+    },
+    async promoteNodeTestSchema() {
+      const node = this.definition.nodes.find(item => item.id === this.nodeTestNodeId)
+      const schema = this.nodeTestInferredSchema || node?.ui?.inferredOutputSchema?.schema
+      if (!node || !schema) return
+      const promoted = await this.promoteOutputSchema(
+        node, schema, this.nodeTestResult?.testRunId)
+      if (promoted) this.nodeTestSchemaPromoted = true
+    },
+    async promoteSelectedInferredSchema() {
+      const inferred = this.selectedNode?.ui?.inferredOutputSchema
+      if (!this.selectedNode || !inferred?.schema || inferred.stale) return
+      await this.promoteOutputSchema(this.selectedNode, inferred.schema, null)
+    },
+    async promoteOutputSchema(node, schema, testRunId) {
+      const impacts = this.outputSchemaImpacts(node.id, schema)
+      const detail = impacts.length
+        ? `检测到 ${impacts.length} 个下游映射路径不在新结构中，保存前需要重新检查。`
+        : '发布后节点输出不符合该结构时，运行会以 OUTPUT_SCHEMA_MISMATCH 失败。'
+      try {
+        await this.$confirm(detail, '确认设为正式输出结构', {
+          confirmButtonText: '确认设置',
+          cancelButtonText: '取消',
+          type: impacts.length ? 'warning' : 'info'
+        })
+      } catch (error) {
+        return false
+      }
+      node.outputSchemaOverride = JSON.parse(JSON.stringify(schema))
+      node.ui = {
+        ...(node.ui || {}),
+        outputSchemaOverrideMetadata: {
+          source: 'NODE_TEST',
+          confirmedAt: new Date().toISOString(),
+          testRunId: testRunId || undefined,
+          sampleCount: node.ui?.inferredOutputSchema?.sampleCount || 1
+        }
+      }
+      this.markDirty()
+      this.refreshCanvasNodeData()
+      if (impacts.length) {
+        this.$message.warning(`正式结构已加入草稿，${impacts.length} 个下游映射需要检查`)
+      } else {
+        this.$message.success('正式输出结构已加入草稿，保存并发布后参与运行校验')
+      }
+      return true
+    },
+    async clearFormalOutputSchema() {
+      if (!this.selectedNode?.outputSchemaOverride) return
+      try {
+        await this.$confirm(
+          '恢复后将重新使用节点或资源契约；已发布版本不受影响。',
+          '恢复节点契约',
+          {confirmButtonText: '确认恢复', cancelButtonText: '取消', type: 'warning'})
+      } catch (error) {
+        return
+      }
+      delete this.selectedNode.outputSchemaOverride
+      if (this.selectedNode.ui) delete this.selectedNode.ui.outputSchemaOverrideMetadata
+      this.markDirty()
+      this.refreshCanvasNodeData()
+    },
+    outputSchemaImpacts(nodeId, schema) {
+      const prefix = `$.nodes.${nodeId}.output`
+      const nodeImpacts = (this.definition.nodes || []).flatMap(node =>
+        Object.entries(node.inputMapping || {}).flatMap(([target, binding]) => {
+          const expression = binding?.expression
+          if (!expression?.startsWith(prefix)) return []
+          const path = expression.slice(prefix.length).replace(/^\./, '')
+          if (!path || this.schemaContainsPath(schema, path.split('.'))) return []
+          return [{nodeId: node.id, target, expression}]
+        }))
+      const outputImpacts = Object.entries(this.definition.outputs || {})
+        .flatMap(([target, binding]) => {
+          const expression = binding?.expression
+          if (!expression?.startsWith(prefix)) return []
+          const path = expression.slice(prefix.length).replace(/^\./, '')
+          if (!path || this.schemaContainsPath(schema, path.split('.'))) return []
+          return [{nodeId: '__end__', target, expression}]
+        })
+      return [...nodeImpacts, ...outputImpacts]
+    },
+    schemaContainsPath(schema, segments) {
+      let current = schema
+      for (const rawSegment of segments) {
+        const segment = rawSegment.replace(/\[[0-9]+]$/, '')
+        const types = Array.isArray(current?.type) ? current.type : [current?.type]
+        if (types.includes('array')) current = current?.items
+        if (current?.properties?.[segment]) {
+          current = current.properties[segment]
+          continue
+        }
+        if (current?.additionalProperties === true
+          || (current?.additionalProperties && typeof current.additionalProperties === 'object')) {
+          current = current.additionalProperties === true ? {} : current.additionalProperties
+          continue
+        }
+        return false
+      }
+      return true
+    },
+    nodeTestStatusLabel(status) {
+      const labels = {
+        QUEUED: '等待运行',
+        RUNNING: '正在运行',
+        SUCCEEDED: '运行成功',
+        FAILED: '运行失败',
+        CANCELLED: '已取消'
+      }
+      return labels[status] || status || '-'
+    },
+    nodeTestStatusType(status) {
+      return {
+        QUEUED: 'info',
+        RUNNING: 'warning',
+        SUCCEEDED: 'success',
+        FAILED: 'danger',
+        CANCELLED: 'info'
+      }[status] || 'info'
+    },
+    nodeTestSchemaLabel(source) {
+      const labels = {
+        NODE_CONTRACT: '节点契约',
+        API_CONNECTOR: 'API 连接器',
+        DATABASE_METADATA: '数据库元数据',
+        LLM_STRUCTURED_OUTPUT: '大模型结构化输出',
+        PUBLISHED_SNAPSHOT: '发布快照',
+        USER_OVERRIDE: '用户正式覆盖'
+      }
+      return labels[source] || source || '节点契约'
+    },
+    formatNodeTestJson(value) {
+      if (value === undefined || value === null) return '无输出'
+      return JSON.stringify(value, null, 2)
+    },
+    async openTestRun() {
+      if (!this.currentDefinition?.currentPublishedVersionId) {
+        this.$message.warning('请先发布工作流版本')
+        return
+      }
+      this.testInput = {}
+      this.testInputSchema = {type: 'object', properties: {}}
+      this.testInputSchemaError = ''
+      this.testInputValidation = {valid: false, message: '', errors: []}
+      this.testInputSchemaLoading = true
+      this.testDialogOpen = true
+      try {
+        const response = await getWorkflowVersion(
+          this.currentDefinition.id,
+          this.currentDefinition.currentPublishedVersionId
+        )
+        this.testInputSchema = this.publishedInputSchema(response.data?.definitionJson)
+      } catch (error) {
+        this.testInputSchemaError = '未能读取发布版本的输入契约，仍可切换到 JSON 模式填写。'
+      } finally {
+        this.testInputSchemaLoading = false
+        this.$nextTick(() => this.$refs.testInputEditor?.reset())
+      }
+    },
+    async startTestRun() {
+      if (!this.testInputValidation.valid) {
+        this.$message.error(this.testInputValidation.message || '请先修正测试输入')
         return
       }
       this.testStarting = true
@@ -1290,7 +2547,7 @@ export default {
         const response = await startWorkflowExecution({
           definitionId: this.currentDefinition.id,
           workflowVersionId: this.currentDefinition.currentPublishedVersionId,
-          input,
+          input: this.testInput,
           environment: this.resourceEnvironment,
           idempotencyKey: `debug-${Date.now()}`
         })
@@ -1300,6 +2557,24 @@ export default {
         this.pollExecution()
       } finally {
         this.testStarting = false
+      }
+    },
+    publishedInputSchema(definitionJson) {
+      try {
+        const definition = typeof definitionJson === 'string'
+          ? JSON.parse(definitionJson) : definitionJson
+        const schema = definition?.inputs
+        if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+          return {type: 'object', properties: {}}
+        }
+        return {
+          ...schema,
+          type: schema.type || 'object',
+          properties: schema.properties && typeof schema.properties === 'object'
+            ? schema.properties : {}
+        }
+      } catch (error) {
+        return {type: 'object', properties: {}}
       }
     },
     async pollExecution() {
@@ -1320,6 +2595,24 @@ export default {
       } catch (error) {
         this.stopPolling()
       }
+    },
+    async cancelExecution() {
+      if (!this.debugExecution?.executionId || this.executionFinished || this.executionCancelling) return
+      this.executionCancelling = true
+      try {
+        const response = await cancelWorkflowExecution(this.debugExecution.executionId)
+        this.debugExecution = response.data
+        this.stopPolling()
+        await this.pollExecution()
+        this.$message.success('运行已取消')
+      } finally {
+        this.executionCancelling = false
+      }
+    },
+    closeExecutionDock() {
+      this.stopPolling()
+      this.debugExecution = null
+      this.debugNodeRuns = []
     },
     stopPolling() {
       clearTimeout(this.executionPollTimer)
@@ -1347,6 +2640,7 @@ export default {
         key: this.nextResourceKey(kind),
         required: false
       })
+      this.invalidateSelectedInferredSchema()
       this.selectedInspectorTab = 'resource'
       this.markDirty()
     },
@@ -1358,6 +2652,7 @@ export default {
           && binding.resourceKind === reference?.kind
           && binding.resourceKey === reference?.key))
       this.selectedNode.resourceRefs.splice(index, 1)
+      this.invalidateSelectedInferredSchema()
       this.markDirty()
     },
     compensationChanged() {
@@ -1378,6 +2673,96 @@ export default {
       const flow = this.$refs.workflowCanvas
       if (delta > 0) flow?.zoomIn?.({duration: 160})
       else flow?.zoomOut?.({duration: 160})
+    },
+    buildConditionFieldGroups(sourceNodeId) {
+      const upstreamIds = new Set()
+      const pending = [sourceNodeId]
+      while (pending.length) {
+        const current = pending.shift()
+        const incomingEdges = (this.definition.edges || [])
+          .filter(edge => edge.target === current)
+        incomingEdges.forEach(edge => {
+          if (edge.source === '__start__' || edge.source === sourceNodeId
+            || upstreamIds.has(edge.source)) return
+          upstreamIds.add(edge.source)
+          pending.push(edge.source)
+        })
+      }
+      const groups = []
+      const inputFields = this.conditionSchemaFields(
+        this.definition.inputs, '$.input', '流程输入')
+      if (inputFields.length) {
+        groups.push({id: '__input__', label: '流程输入', fields: inputFields})
+      }
+      const upstreamNodes = (this.definition.nodes || [])
+        .filter(node => upstreamIds.has(node.id))
+      upstreamNodes.forEach(node => {
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const schema = this.resolvedNodeSchemas[node.id]?.outputSchema
+          || descriptor?.outputSchema
+        const fields = this.conditionSchemaFields(
+          schema, `$.nodes.${node.id}.output`, node.name)
+        if (fields.length) groups.push({id: node.id, label: node.name, fields})
+      })
+      return groups
+    },
+    conditionSchemaFields(schema, baseExpression, sourceLabel) {
+      const fields = []
+      const visit = (currentSchema, currentExpression, parentPath, depth) => {
+        if (!currentSchema || depth > 5) return
+        Object.entries(currentSchema.properties || {}).forEach(([key, property]) => {
+          const expression = `${currentExpression}.${key}`
+          const path = parentPath ? `${parentPath}.${key}` : key
+          const rawType = Array.isArray(property?.type)
+            ? property.type.find(type => type !== 'null')
+            : property?.type
+          if (['string', 'number', 'integer', 'boolean'].includes(rawType)) {
+            fields.push({
+              label: property?.title || path,
+              expression,
+              typeLabel: this.conditionTypeLabel(rawType),
+              sourceLabel
+            })
+          }
+          if (property?.properties) visit(property, expression, path, depth + 1)
+        })
+      }
+      visit(schema, baseExpression, '', 1)
+      return fields.slice(0, 100)
+    },
+    conditionTypeLabel(type) {
+      return {
+        string: '文本', number: '数字', integer: '整数', boolean: '布尔'
+      }[type] || type
+    },
+    insertConditionField(expression) {
+      if (!expression) return
+      this.insertConditionToken(expression)
+      this.$nextTick(() => {
+        this.conditionFieldSelection = ''
+      })
+    },
+    insertConditionToken(token) {
+      if (!this.canEdit || !this.selectedEdge?.condition) return
+      const input = this.$refs.conditionExpressionInput
+      const textarea = input?.textarea
+      const value = this.selectedEdge.condition.expression || ''
+      const start = textarea?.selectionStart ?? value.length
+      const end = textarea?.selectionEnd ?? start
+      let insertion = token
+      if (token.startsWith('$.') && start > 0 && !/[\s(!]/.test(value.charAt(start - 1))) {
+        insertion = ` ${token}`
+      }
+      this.selectedEdge.condition.expression = `${value.slice(0, start)}${insertion}${value.slice(end)}`
+      this.edgeChanged()
+      this.$nextTick(() => {
+        const target = this.$refs.conditionExpressionInput?.textarea
+        if (!target) return
+        const cursor = start + insertion.length - (token === '()' ? 1 : 0)
+        target.focus()
+        target.setSelectionRange(cursor, cursor)
+      })
     },
     edgeChanged() {
       if (this.selectedEdge.kind !== 'CONDITION') {
@@ -1421,7 +2806,7 @@ export default {
     syncPositions() {
       this.definition.nodes.forEach(node => {
         const canvasNode = this.canvasNodes.find(item => item.id === node.id)
-        if (canvasNode?.position) node.ui = {...canvasNode.position}
+        if (canvasNode?.position) node.ui = {...(node.ui || {}), ...canvasNode.position}
       })
     },
     definitionJson() {
@@ -1484,7 +2869,7 @@ export default {
       if (!this.canRedo) return
       this.restoreHistory(this.historyIndex + 1)
     },
-    async saveDraft() {
+    async saveDraft(options = {}) {
       if (!this.canEdit || this.configError || this.mappingError) return false
       if (!this.validateWorkflowMetadata()) return false
       this.saving = true
@@ -1501,8 +2886,9 @@ export default {
         }
         this.currentDefinition = response.data
         await this.flushPendingResourceBindings()
+        await this.refreshResolvedNodeSchemas()
         this.dirty = false
-        this.$message.success('草稿已保存')
+        if (!options?.silent) this.$message.success('草稿已保存')
         this.$emit('saved', response.data)
         return true
       } catch (error) {
@@ -1643,6 +3029,8 @@ export default {
         this.selectedEdge = null
         this.selectedNodeConfig = JSON.stringify(node.config || {}, null, 2)
         this.selectedNodeInputMapping = JSON.stringify(node.inputMapping || {}, null, 2)
+        this.inspectorCollapsed = false
+        this.refreshCanvasLayout()
       }
     },
     markDirty() {
@@ -1840,6 +3228,32 @@ export default {
   transform: translateX(-50%);
 }
 
+.canvas-toolbar :deep(.el-button) {
+  min-width: 34px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+}
+
+.canvas-toolbar :deep(.el-button:hover),
+.canvas-toolbar :deep(.el-button:focus-visible) {
+  z-index: 1;
+  border-color: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 42%, transparent);
+  color: var(--workflow-primary, var(--el-color-primary));
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+}
+
+.canvas-toolbar :deep(.el-button:active) {
+  border-color: var(--workflow-primary, var(--el-color-primary));
+  color: #fff;
+  background: var(--workflow-primary, var(--el-color-primary));
+}
+
+.canvas-toolbar :deep(.el-button .el-icon),
+.canvas-toolbar :deep(.el-button .el-icon svg) {
+  width: 16px;
+  height: 16px;
+}
+
 .workflow-canvas :deep(.vue-flow__node) {
   min-width: 132px;
   padding: 11px 14px;
@@ -1952,6 +3366,270 @@ export default {
 </style>
 
 <style scoped>
+/* Canvas-first layout: stable navigation, flexible graph, contextual bottom dock. */
+.workbench-body,
+.workbench-body--guided,
+.workbench-body--mapping {
+  grid-template-columns: 256px minmax(0, 1fr) 56px !important;
+  overflow: hidden;
+}
+
+.node-palette {
+  width: 256px;
+  box-sizing: border-box;
+}
+
+.workspace-stage {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: var(--workflow-canvas, var(--el-bg-color-page));
+}
+
+.workspace-stage > .canvas-panel {
+  min-height: 0;
+  height: auto;
+}
+
+.context-rail {
+  min-width: 0;
+  padding: 10px 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  border-left: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.context-rail button {
+  min-height: 54px;
+  padding: 5px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.context-rail button .el-icon {
+  font-size: 17px;
+}
+
+.context-rail button span {
+  font-size: 10px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.context-rail button:not(:disabled):hover,
+.context-rail button:not(:disabled):focus-visible,
+.context-rail button.active {
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 24%, transparent);
+  color: var(--workflow-primary, #625bf6);
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+  outline: none;
+}
+
+.context-rail button.active {
+  font-weight: 700;
+}
+
+.context-rail button:disabled {
+  color: var(--workflow-text-tertiary, var(--el-text-color-placeholder));
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.context-rail-spacer {
+  flex: 1;
+}
+
+.inspector-panel,
+.inspector-panel--guided,
+.inspector-panel--mapping {
+  position: relative;
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-left: 0;
+  background: var(--workflow-surface, var(--el-bg-color));
+  box-shadow: 0 -10px 28px rgb(42 34 110 / 5%);
+}
+
+.inspector-panel.is-collapsed {
+  box-shadow: none;
+}
+
+.inspector-resize-handle {
+  position: absolute;
+  z-index: 9;
+  top: -7px;
+  left: 50%;
+  width: 56px;
+  height: 15px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: ns-resize;
+  transform: translateX(-50%);
+}
+
+.inspector-resize-handle span {
+  width: 30px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--workflow-border-strong, var(--el-border-color));
+}
+
+.inspector-resize-handle:hover span,
+.inspector-resize-handle:focus-visible span {
+  background: var(--workflow-primary, #625bf6);
+}
+
+.inspector-collapsed-bar {
+  width: 100%;
+  height: 44px;
+  padding: 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface, var(--el-bg-color));
+  cursor: pointer;
+}
+
+.inspector-collapsed-bar > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.inspector-collapsed-bar .el-icon {
+  color: var(--workflow-primary, #625bf6);
+}
+
+.inspector-collapsed-bar small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+}
+
+.inspector-collapsed-bar:hover,
+.inspector-collapsed-bar:focus-visible {
+  color: var(--workflow-primary, #625bf6);
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+  outline: none;
+}
+
+.inspector-heading {
+  min-height: 62px;
+  padding: 10px 18px;
+  flex: 0 0 auto;
+}
+
+.inspector-heading.simple {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-tabs,
+.inspector-tabs--guided,
+.inspector-panel--mapping .inspector-tabs {
+  min-height: 0;
+  height: auto;
+  flex: 1;
+}
+
+.inspector-tabs :deep(.el-tabs__header) {
+  padding: 0 18px;
+}
+
+.inspector-tabs :deep(.el-tabs__content),
+.inspector-tabs--guided :deep(.el-tabs__content),
+.inspector-panel--mapping .inspector-tabs :deep(.el-tabs__content) {
+  min-height: 0;
+  height: calc(100% - 44px);
+  padding: 12px 18px 18px;
+  overflow: auto;
+}
+
+.integration-stepper {
+  min-height: 62px;
+  padding: 10px 28px;
+  flex: 0 0 auto;
+}
+
+.api-config-tabs {
+  margin: 0 28px 8px;
+  flex: 0 0 auto;
+}
+
+.inspector-footer,
+.inspector-panel--guided .inspector-footer,
+.inspector-panel--mapping .inspector-footer {
+  position: static;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 18px;
+  flex: 0 0 auto;
+}
+
+.inspector-panel > .edge-form {
+  min-height: 0;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 14px 18px 22px;
+  overflow: auto;
+}
+
+@media (max-width: 1180px) {
+  .workbench-body,
+  .workbench-body--guided,
+  .workbench-body--mapping {
+    grid-template-columns: 232px minmax(0, 1fr) 54px !important;
+  }
+
+  .node-palette {
+    width: 232px;
+  }
+}
+
+@media (max-width: 960px) {
+  .workbench-body,
+  .workbench-body--guided,
+  .workbench-body--mapping {
+    grid-template-columns: minmax(0, 1fr) 52px !important;
+  }
+
+  .node-palette {
+    display: none;
+  }
+}
+</style>
+
+<style scoped>
 .workflow-workbench {
   position: relative;
   height: calc(100vh - 112px);
@@ -1966,7 +3644,7 @@ export default {
   min-height: 66px;
   padding: 0 16px;
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto minmax(460px, 1fr);
+  grid-template-columns: minmax(260px, 1fr) auto;
   gap: 14px;
   background: var(--workflow-surface, var(--el-bg-color));
 }
@@ -1998,26 +3676,6 @@ export default {
 .version-label {
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   font-size: 12px;
-}
-
-.header-context {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-context :deep(.el-select) {
-  width: 112px;
-}
-
-.header-context :deep(.environment-select) {
-  width: 124px;
-}
-
-.context-help {
-  flex: 0 0 auto;
-  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
-  cursor: help;
 }
 
 .header-actions {
@@ -2380,6 +4038,73 @@ export default {
   overflow: auto;
 }
 
+.inspector-advanced {
+  margin-top: 10px;
+}
+
+.node-prompt-editor {
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--workflow-primary, #625bf6) 22%, var(--workflow-border, var(--el-border-color)));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--workflow-primary-soft, var(--el-color-primary-light-9)) 58%, var(--workflow-surface, var(--el-bg-color)));
+}
+
+.node-prompt-heading {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.node-prompt-heading strong,
+.node-prompt-heading small,
+.node-prompt-hint {
+  display: block;
+}
+
+.node-prompt-heading strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 13px;
+}
+
+.node-prompt-heading small,
+.node-prompt-hint {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.node-prompt-heading small {
+  margin-top: 3px;
+}
+
+.node-prompt-hint {
+  margin-top: 8px;
+}
+
+.node-prompt-editor :deep(.el-textarea__inner) {
+  min-height: 126px !important;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+}
+
+.inspector-advanced-hint {
+  display: block;
+  margin-top: 7px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.inspector-json-editor :deep(.el-textarea__inner) {
+  min-height: 168px !important;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+  font: 11px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .integration-stepper {
   min-height: 82px;
   padding: 18px 28px 14px;
@@ -2507,14 +4232,183 @@ export default {
   padding: 18px 16px;
 }
 
+.edge-field-help {
+  width: 100%;
+  margin-top: 6px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.condition-guide {
+  margin: 2px 0 18px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--workflow-primary, #625bf6) 24%, var(--workflow-border, #dfe3ee));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--workflow-primary-soft, #f0efff) 56%, var(--workflow-surface, #fff));
+}
+
+.condition-guide-heading {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.condition-guide-heading strong,
+.condition-guide-heading small {
+  display: block;
+}
+
+.condition-guide-heading strong {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 12px;
+}
+
+.condition-guide-heading small {
+  margin-top: 4px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.condition-guide-heading .el-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  cursor: help;
+}
+
+.condition-field-select {
+  width: 100%;
+}
+
+.condition-option-label {
+  margin-right: 8px;
+  font-weight: 650;
+}
+
+.condition-option-label + small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+}
+
+.condition-operator-bar {
+  margin-top: 9px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.condition-operator-bar button {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 6px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-surface, var(--el-bg-color));
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.condition-operator-bar button:not(:disabled):hover,
+.condition-operator-bar button:not(:disabled):focus-visible {
+  border-color: var(--workflow-primary, #625bf6);
+  color: var(--workflow-primary, #625bf6);
+  outline: none;
+}
+
+.condition-operator-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.condition-expression-item :deep(.el-form-item__content) {
+  display: block;
+}
+
+.condition-syntax-help {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+}
+
+.condition-syntax-help code {
+  max-width: 100%;
+  padding: 3px 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-muted, var(--el-fill-color-light));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inspector-footer {
   position: absolute;
   right: 0;
   bottom: 0;
   width: 360px;
   padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
   background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.node-test-trigger.el-button {
+  --el-button-text-color: var(--workflow-primary, #625bf6);
+  --el-button-bg-color: var(--workflow-primary-soft, #f0efff);
+  --el-button-border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 34%, var(--workflow-border, #dfe3ee));
+  --el-button-hover-text-color: #fff;
+  --el-button-hover-bg-color: var(--workflow-primary, #625bf6);
+  --el-button-hover-border-color: var(--workflow-primary, #625bf6);
+  color: var(--workflow-primary, #625bf6) !important;
+  background: var(--workflow-primary-soft, #f0efff) !important;
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 34%, var(--workflow-border, #dfe3ee)) !important;
+  font-weight: 650;
+}
+
+.node-test-trigger.el-button:not(.is-disabled):hover {
+  color: #fff !important;
+  background: var(--workflow-primary, #625bf6) !important;
+  border-color: var(--workflow-primary, #625bf6) !important;
+}
+
+.node-test-trigger.el-button.is-disabled {
+  color: color-mix(in srgb, var(--workflow-primary, #625bf6) 62%, var(--workflow-text-secondary, #9097a6)) !important;
+  background: color-mix(in srgb, var(--workflow-primary-soft, #f0efff) 72%, var(--workflow-surface, #fff)) !important;
+  border-color: var(--workflow-border, #dfe3ee) !important;
+  opacity: 1;
+}
+
+.node-test-trigger.el-button span,
+.node-test-trigger.el-button .el-icon,
+.node-delete-button.el-button span,
+.node-delete-button.el-button .el-icon {
+  color: inherit !important;
+}
+
+.node-delete-button.el-button {
+  --el-button-text-color: #dc4c5c;
+  --el-button-hover-text-color: #c93648;
+  --el-button-hover-bg-color: rgb(239 82 97 / 10%);
+  color: #dc4c5c !important;
+  background: transparent !important;
+  font-weight: 650;
+}
+
+.node-delete-button.el-button:hover {
+  color: #c93648 !important;
+  background: rgb(239 82 97 / 10%) !important;
 }
 
 .resource-card {
@@ -2788,9 +4682,9 @@ export default {
 }
 
 :global(.workflow-resource-popper .el-select-dropdown__item.is-selected) {
-  color: var(--el-text-color-primary) !important;
-  background: color-mix(in srgb, #625bf6 12%, var(--el-bg-color-overlay)) !important;
-  box-shadow: 3px 0 0 #625bf6 inset;
+  color: #fff !important;
+  background: #5148dd !important;
+  box-shadow: 3px 0 0 #8b85ff inset, 0 6px 16px rgb(81 72 221 / 22%) !important;
 }
 
 :global(.workflow-resource-popper .resource-option) {
@@ -2820,13 +4714,13 @@ export default {
   color: var(--el-text-color-secondary) !important;
 }
 
-:global(html:not(.dark) body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option strong) {
-  color: var(--workflow-primary, #625bf6) !important;
+:global(body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option strong) {
+  color: #fff !important;
 }
 
-:global(html:not(.dark) body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option small) {
-  color: var(--el-text-color-primary) !important;
-  opacity: 0.8;
+:global(body .workflow-resource-popper.el-popper .el-select-dropdown__item.is-selected .resource-option small) {
+  color: rgb(255 255 255 / 82%) !important;
+  opacity: 1;
 }
 
 :global(html.dark .workflow-resource-popper.el-popper) {
@@ -2839,9 +4733,9 @@ export default {
 }
 
 :global(html.dark .workflow-resource-popper .el-select-dropdown__item.is-selected) {
-  color: var(--el-text-color-primary) !important;
-  background: rgb(129 140 248 / 18%) !important;
-  box-shadow: 3px 0 0 #818cf8 inset;
+  color: #fff !important;
+  background: #5148dd !important;
+  box-shadow: 3px 0 0 #a5b4fc inset, 0 8px 18px rgb(0 0 0 / 28%) !important;
 }
 
 :global(html.dark .workflow-resource-popper .resource-scope-badge) {
@@ -2883,8 +4777,8 @@ export default {
   z-index: 20;
   left: 50%;
   bottom: 18px;
-  width: min(620px, calc(100% - 700px));
-  min-width: 460px;
+  width: min(720px, calc(100% - 700px));
+  min-width: 520px;
   padding: 9px 12px;
   display: flex;
   align-items: center;
@@ -2896,10 +4790,59 @@ export default {
   transform: translateX(-50%);
 }
 
+.execution-state-icon {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  font-size: 19px;
+}
+
+.execution-state-icon.is-running {
+  border-color: color-mix(in srgb, var(--workflow-primary, #625bf6) 32%, transparent);
+  color: var(--workflow-primary, #625bf6);
+  background: var(--workflow-primary-soft, #eeecff);
+}
+
+.execution-state-icon.is-success {
+  border-color: rgb(16 185 129 / 30%);
+  color: #059669;
+  background: rgb(16 185 129 / 12%);
+}
+
+.execution-state-icon.is-warning {
+  border-color: rgb(245 158 11 / 32%);
+  color: #d97706;
+  background: rgb(245 158 11 / 12%);
+}
+
+.execution-state-icon.is-danger {
+  border-color: rgb(239 68 68 / 30%);
+  color: #dc2626;
+  background: rgb(239 68 68 / 11%);
+}
+
+.execution-state-icon.is-neutral {
+  border-color: var(--workflow-border-strong, var(--el-border-color));
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  background: var(--workflow-muted, var(--el-fill-color-light));
+}
+
 .execution-dock span,
 .execution-dock code {
   color: var(--workflow-text-secondary, var(--el-text-color-secondary));
   font-size: 10px;
+}
+
+.execution-id {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .execution-progress {
@@ -2914,19 +4857,225 @@ export default {
   font-size: 11px;
 }
 
+.execution-progress :deep(.el-progress-bar__outer) {
+  background: color-mix(in srgb, var(--workflow-primary, #625bf6) 12%, var(--workflow-muted, #eef0f6));
+}
+
+.execution-progress :deep(.el-progress-bar__inner) {
+  background: var(--workflow-primary, #625bf6);
+}
+
+.execution-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 4px;
+  border-left: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.execution-action.el-button,
+.execution-close.el-button {
+  margin-left: 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-weight: 600;
+}
+
+.execution-action.el-button {
+  padding: 6px 8px;
+}
+
+.execution-action.el-button span {
+  color: inherit;
+  font-size: 12px;
+}
+
+.execution-action--cancel.el-button {
+  color: #dc2626;
+}
+
+.execution-action.el-button:hover,
+.execution-close.el-button:hover {
+  color: var(--workflow-primary, #625bf6);
+  background: var(--workflow-hover, var(--el-fill-color-light));
+}
+
+.execution-action--cancel.el-button:hover {
+  color: #b91c1c;
+  background: rgb(239 68 68 / 10%);
+}
+
+.execution-close.el-button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 8px;
+  background: var(--workflow-surface, var(--el-bg-color));
+  font-size: 16px;
+}
+
 .test-run-form {
   margin-top: 16px;
+}
+
+.node-test-form {
+  margin-top: 18px;
+}
+
+.node-test-mode :deep(.el-radio-button__inner) {
+  border-color: var(--workflow-border-strong, var(--el-border-color)) !important;
+  color: var(--workflow-text, var(--el-text-color-primary)) !important;
+  background: var(--workflow-surface, var(--el-bg-color)) !important;
+  box-shadow: none !important;
+}
+
+.node-test-mode :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  border-color: var(--workflow-primary, #625bf6) !important;
+  color: #fff !important;
+  background: var(--workflow-primary, #625bf6) !important;
+  box-shadow: -1px 0 0 0 var(--workflow-primary, #625bf6) !important;
+}
+
+.node-test-mode :deep(.el-radio-button.is-disabled .el-radio-button__inner) {
+  color: var(--workflow-text-tertiary, var(--el-text-color-placeholder)) !important;
+  background: var(--workflow-muted, var(--el-fill-color-light)) !important;
+}
+
+.node-test-unit {
+  margin-left: 8px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+}
+
+.node-test-result {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 10px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+}
+
+.node-test-result header,
+.node-test-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.node-test-result header {
+  margin-bottom: 12px;
+}
+
+.node-test-result header code {
+  margin-left: auto;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+}
+
+.node-test-meta {
+  margin: 12px 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.node-test-diagnostics {
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--el-color-warning);
+  font-size: 12px;
+}
+
+.formal-schema-card {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 9px;
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+}
+
+.formal-schema-heading,
+.formal-schema-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.formal-schema-heading div,
+.formal-schema-heading small {
+  display: block;
+}
+
+.formal-schema-heading small,
+.formal-schema-card p,
+.formal-schema-actions small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+}
+
+.formal-schema-card pre {
+  max-height: 220px;
+  margin: 10px 0;
+  padding: 10px;
+  overflow: auto;
+  border-radius: 7px;
+  background: var(--workflow-surface, var(--el-bg-color));
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.node-test-schema-action {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px dashed var(--workflow-border-strong, var(--el-border-color));
+  border-radius: 8px;
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.node-test-schema-action strong,
+.node-test-schema-action small {
+  display: block;
+}
+
+.node-test-schema-action small {
+  margin-top: 3px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+}
+
+.node-test-output > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.node-test-output pre {
+  max-height: 280px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 8px;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  background: var(--workflow-surface, var(--el-bg-color));
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 1360px) {
   .workbench-header {
     grid-template-columns: minmax(220px, 1fr) auto;
     padding-block: 8px;
-  }
-
-  .header-context {
-    grid-column: 1 / -1;
-    justify-content: center;
   }
 
   .workbench-body {
@@ -2969,11 +5118,6 @@ export default {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .header-context {
-    grid-column: auto;
-    justify-content: flex-start;
-  }
-
   .header-actions {
     justify-content: flex-start;
     overflow-x: auto;
@@ -2988,5 +5132,105 @@ export default {
     grid-template-columns: minmax(280px, 38%) minmax(520px, 62%);
     overflow-x: auto;
   }
+}
+</style>
+
+<style scoped>
+/* Final dock overrides stay last because this component retains legacy style layers. */
+.workspace-stage > .inspector-panel,
+.workspace-stage > .inspector-panel--guided,
+.workspace-stage > .inspector-panel--mapping {
+  position: relative;
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-left: 0;
+  background: var(--workflow-surface, var(--el-bg-color));
+  box-shadow: 0 -10px 28px rgb(42 34 110 / 5%);
+}
+
+.workspace-stage > .inspector-panel.is-collapsed {
+  box-shadow: none;
+}
+
+.workspace-stage .inspector-heading {
+  min-height: 56px;
+  padding: 8px 18px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+}
+
+.workspace-stage .inspector-heading.simple {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.workspace-stage .inspector-tabs,
+.workspace-stage .inspector-tabs--guided,
+.workspace-stage .inspector-panel--mapping .inspector-tabs {
+  min-height: 0;
+  height: auto;
+  flex: 1;
+}
+
+.workspace-stage .inspector-tabs :deep(.el-tabs__content),
+.workspace-stage .inspector-tabs--guided :deep(.el-tabs__content),
+.workspace-stage .inspector-panel--mapping .inspector-tabs :deep(.el-tabs__content) {
+  min-height: 0;
+  height: calc(100% - 44px);
+  padding: 9px 18px 16px;
+  overflow: auto;
+}
+
+.workspace-stage .integration-stepper {
+  min-height: 50px;
+  padding: 6px 20px;
+  box-sizing: border-box;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.workspace-stage .integration-stepper button {
+  gap: 7px;
+}
+
+.workspace-stage .integration-stepper button > span {
+  width: 25px;
+  height: 25px;
+  font-size: 11px;
+}
+
+.workspace-stage .integration-stepper button > strong {
+  font-size: 13px;
+}
+
+.workspace-stage .api-config-tabs {
+  margin: 0 20px 7px;
+  flex: 0 0 auto;
+}
+
+.workspace-stage .inspector-footer,
+.workspace-stage .inspector-panel--guided .inspector-footer,
+.workspace-stage .inspector-panel--mapping .inspector-footer {
+  position: static;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 18px;
+  flex: 0 0 auto;
+}
+
+.workspace-stage > .inspector-panel > .edge-form {
+  min-height: 0;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 14px 18px 22px;
+  overflow: auto;
 }
 </style>

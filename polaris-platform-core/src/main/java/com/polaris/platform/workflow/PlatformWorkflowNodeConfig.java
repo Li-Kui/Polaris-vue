@@ -9,10 +9,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.application.WorkflowResourceOption;
 import com.polaris.ai.workflow.spi.*;
-import com.polaris.platform.connector.ApiConnectorExecutor;
-import com.polaris.platform.connector.ConnectorCredentialCipher;
-import com.polaris.platform.connector.ConnectorHttpSafetyPolicy;
-import com.polaris.platform.connector.DatasourceConnectorExecutor;
+import com.polaris.platform.connector.*;
 import com.polaris.platform.domain.PlatformApiConnector;
 import com.polaris.platform.domain.PlatformDatasource;
 import com.polaris.platform.domain.PlatformDatasourceVersion;
@@ -37,7 +34,8 @@ public class PlatformWorkflowNodeConfig {
     public WorkflowResourceProvider workflowApiConnectorResourceProvider(
             PlatformApiConnectorMapper mapper,
             ConnectorHttpSafetyPolicy safetyPolicy,
-            ConnectorCredentialCipher credentialCipher) {
+            ConnectorCredentialCipher credentialCipher,
+            ObjectMapper objectMapper) {
         return new WorkflowResourceProvider() {
             @Override
             public String kind() {
@@ -66,6 +64,7 @@ public class PlatformWorkflowNodeConfig {
                 Map<String, Object> attributes = new LinkedHashMap<>();
                 attributes.put("name", connector.getConnectorName());
                 attributes.put("baseUrl", connector.getBaseUrl());
+                putResponseSchema(attributes, connector, objectMapper);
                 return new ResolvedWorkflowResource(
                         kind(), request.resourceKey(), request.resourceId(), 0,
                         attributes, connector);
@@ -84,6 +83,7 @@ public class PlatformWorkflowNodeConfig {
                             attributes.put("credentialConfigured",
                                     connector.getAuthConfig() != null
                                             && !connector.getAuthConfig().isBlank());
+                            putResponseSchema(attributes, connector, objectMapper);
                             return option(kind(), connector.getId(),
                                     connector.getConnectorName(), connector.getRemark(),
                                     connector.getStatus(), errors,
@@ -158,6 +158,104 @@ public class PlatformWorkflowNodeConfig {
     }
 
     @Bean
+    public WorkflowNodeSchemaResolver workflowApiConnectorSchemaResolver(
+            ObjectMapper objectMapper) {
+        return new WorkflowNodeSchemaResolver() {
+            @Override
+            public boolean supports(String nodeType, String handlerVersion) {
+                return "1.0".equals(handlerVersion)
+                        && Set.of("http_get", "http_request").contains(nodeType);
+            }
+
+            @Override
+            public ResolvedNodeSchema resolve(WorkflowNodeSchemaContext context) {
+                ResolvedWorkflowResource connector = context.resources().values().stream()
+                        .filter(resource -> "API_CONNECTOR".equals(resource.kind()))
+                        .findFirst()
+                        .orElse(null);
+                if (connector == null) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("API连接器尚未绑定，当前使用节点契约"));
+                }
+                JsonNode responseSchema = responseSchema(connector, objectMapper);
+                if (responseSchema == null) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("API连接器未声明响应 Schema，body 仅能作为整体值使用"));
+                }
+                ObjectNode outputSchema = context.declaredOutputSchema() != null
+                        && context.declaredOutputSchema().isObject()
+                        ? ((ObjectNode) context.declaredOutputSchema()).deepCopy()
+                        : closedObjectSchema();
+                JsonNode propertiesNode = outputSchema.get("properties");
+                ObjectNode properties = propertiesNode != null && propertiesNode.isObject()
+                        ? (ObjectNode) propertiesNode : outputSchema.putObject("properties");
+                properties.set("body", responseSchema.deepCopy());
+                String sourceVersion = String.valueOf(connector.attributes().getOrDefault(
+                        "responseSchemaVersion", connector.resourceId()));
+                return new ResolvedNodeSchema(
+                        context.declaredInputSchema(), outputSchema,
+                        "API_CONNECTOR", sourceVersion,
+                        Map.of("$.body", "API_CONNECTOR"), List.of());
+            }
+        };
+    }
+
+    @Bean
+    public WorkflowNodeSchemaResolver workflowDatasourceSchemaResolver(
+            DatasourceConnectorExecutor executor) {
+        return new WorkflowNodeSchemaResolver() {
+            @Override
+            public boolean supports(String nodeType, String handlerVersion) {
+                return "database_query".equals(nodeType) && "1.0".equals(handlerVersion);
+            }
+
+            @Override
+            public ResolvedNodeSchema resolve(WorkflowNodeSchemaContext context) {
+                ResolvedWorkflowResource resource = context.resources().values().stream()
+                        .filter(item -> "DATASOURCE".equals(item.kind()))
+                        .findFirst()
+                        .orElse(null);
+                if (resource == null || !(resource.handle() instanceof PlatformDatasource datasource)) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("外部数据源尚未绑定，当前使用节点契约"));
+                }
+                String sql = context.config() == null
+                        ? null : context.config().path("sql").asText(null);
+                if (sql == null || sql.isBlank()) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("配置只读 SQL 后可解析查询列结构"));
+                }
+                try {
+                    DatasourceQueryMetadata metadata = executor.inspectQuery(datasource, sql);
+                    JsonNode outputSchema = databaseMetadataOutputSchema(
+                            context.declaredOutputSchema(), metadata);
+                    Map<String, String> fieldSources = new LinkedHashMap<>();
+                    metadata.columns().forEach(column -> fieldSources.put(
+                            "$.rows[]." + column.name(), "DATABASE_METADATA"));
+                    String sourceVersion = datasource.getConfigVersion()
+                            + ":" + metadata.fingerprint();
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), outputSchema,
+                            "DATABASE_METADATA", sourceVersion, fieldSources, List.of());
+                } catch (Exception ignored) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("数据库列元数据暂时无法解析，当前使用通用 rows 结构"));
+                }
+            }
+        };
+    }
+
+    @Bean
     public WorkflowNodeHandler httpGetWorkflowNodeHandler(
             ApiConnectorExecutor executor, ObjectMapper objectMapper) {
         return httpHandler("http_get", "HTTP GET", WorkflowSideEffect.READ,
@@ -177,8 +275,8 @@ public class PlatformWorkflowNodeConfig {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "database_query", "1.0", "数据库只读查询", "data",
                 databaseSchema(),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                openObjectSchema(),
+                databaseOutputSchema(),
                 WorkflowSideEffect.READ,
                 Set.of("DATASOURCE"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -223,8 +321,8 @@ public class PlatformWorkflowNodeConfig {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 type, "1.0", displayName, "integration",
                 httpSchema(getOnly),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                httpInputSchema(),
+                httpOutputSchema(),
                 sideEffect,
                 Set.of("API_CONNECTOR"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -306,6 +404,85 @@ public class PlatformWorkflowNodeConfig {
 
     private static void put(Map<String, Object> target, String key, Object value) {
         if (value != null) target.put(key, value);
+    }
+
+    static void putResponseSchema(
+            Map<String, Object> attributes,
+            PlatformApiConnector connector,
+            ObjectMapper objectMapper) {
+        if (connector.getResponseSchema() == null || connector.getResponseSchema().isBlank()) {
+            return;
+        }
+        try {
+            JsonNode schema = objectMapper.readTree(connector.getResponseSchema());
+            if (schema != null && schema.isObject()) {
+                attributes.put("responseSchema", schema);
+                attributes.put("responseSchemaSource", "API_CONNECTOR");
+                if (connector.getUpdateTime() != null) {
+                    attributes.put("responseSchemaVersion",
+                            String.valueOf(connector.getUpdateTime().getTime()));
+                }
+            }
+        } catch (Exception ignored) {
+            // 非法历史配置不进入工作流契约，节点继续使用静态兜底 Schema。
+        }
+    }
+
+    private static JsonNode responseSchema(
+            ResolvedWorkflowResource resource,
+            ObjectMapper objectMapper) {
+        Object declared = resource.attributes().get("responseSchema");
+        if (declared instanceof JsonNode schema && schema.isObject()) {
+            return schema;
+        }
+        if (resource.handle() instanceof PlatformApiConnector connector
+                && connector.getResponseSchema() != null
+                && !connector.getResponseSchema().isBlank()) {
+            try {
+                JsonNode schema = objectMapper.readTree(connector.getResponseSchema());
+                return schema != null && schema.isObject() ? schema : null;
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    static JsonNode databaseMetadataOutputSchema(
+            JsonNode declaredOutputSchema,
+            DatasourceQueryMetadata metadata) {
+        ObjectNode output = declaredOutputSchema != null && declaredOutputSchema.isObject()
+                ? ((ObjectNode) declaredOutputSchema).deepCopy()
+                : databaseOutputSchema();
+        JsonNode propertiesNode = output.get("properties");
+        ObjectNode properties = propertiesNode != null && propertiesNode.isObject()
+                ? (ObjectNode) propertiesNode : output.putObject("properties");
+        ObjectNode row = closedObjectSchema();
+        ObjectNode rowProperties = (ObjectNode) row.get("properties");
+        var required = row.putArray("required");
+        for (DatasourceQueryMetadata.Column column : metadata.columns()) {
+            ObjectNode field = rowProperties.putObject(column.name());
+            field.put("title", column.name());
+            if (column.nullable()) {
+                field.putArray("type").add(column.jsonType()).add("null");
+            } else {
+                field.put("type", column.jsonType());
+            }
+            if (column.format() != null) field.put("format", column.format());
+            if (column.nativeType() != null) {
+                field.put("description", "数据库类型: " + column.nativeType());
+            }
+            if ("object".equals(column.jsonType())) field.put("additionalProperties", true);
+            if ("array".equals(column.jsonType())) {
+                field.set("items", JsonNodeFactory.instance.objectNode());
+            }
+            required.add(column.name());
+        }
+        ObjectNode rows = JsonNodeFactory.instance.objectNode();
+        rows.put("type", "array");
+        rows.set("items", row);
+        properties.set("rows", rows);
+        return output;
     }
 
     private static PlatformDatasource datasource(
@@ -402,6 +579,50 @@ public class PlatformWorkflowNodeConfig {
         properties.putObject("queryTimeoutSeconds").put("type", "integer")
                 .put("minimum", 1).put("maximum", 30);
         schema.putArray("required").add("sql");
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private static ObjectNode httpInputSchema() {
+        ObjectNode schema = openObjectSchema();
+        schema.putObject("properties").set("query", openObjectSchema());
+        return schema;
+    }
+
+    private static ObjectNode httpOutputSchema() {
+        ObjectNode schema = closedObjectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("status").put("type", "integer");
+        properties.set("body", JsonNodeFactory.instance.objectNode());
+        schema.putArray("required").add("status");
+        return schema;
+    }
+
+    private static ObjectNode databaseOutputSchema() {
+        ObjectNode row = openObjectSchema();
+        ObjectNode rows = JsonNodeFactory.instance.objectNode();
+        rows.put("type", "array");
+        rows.set("items", row);
+        ObjectNode schema = closedObjectSchema();
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("rowCount").put("type", "integer").put("minimum", 0);
+        properties.set("rows", rows);
+        schema.putArray("required").add("rowCount").add("rows");
+        return schema;
+    }
+
+    private static ObjectNode openObjectSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        schema.putObject("properties");
+        schema.put("additionalProperties", true);
+        return schema;
+    }
+
+    private static ObjectNode closedObjectSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        schema.putObject("properties");
         schema.put("additionalProperties", false);
         return schema;
     }

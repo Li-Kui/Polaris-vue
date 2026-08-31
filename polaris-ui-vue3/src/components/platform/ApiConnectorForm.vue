@@ -85,6 +85,22 @@
           </el-form-item>
         </section>
       </el-collapse-item>
+      <el-collapse-item title="响应数据结构（JSON Schema）" name="responseSchema">
+        <section class="connector-form-section advanced-section">
+          <el-form-item label="响应体 Schema" prop="responseSchemaText" class="response-schema-field">
+            <el-input
+              v-model="form.responseSchemaText"
+              type="textarea"
+              :rows="8"
+              spellcheck="false"
+              placeholder='{"type":"object","properties":{"data":{"type":"object"}}}'
+            />
+            <small class="field-hint">
+              可选。声明接口响应 body 的结构后，工作流映射面板可以直接选择其中字段；不会读取真实响应数据。
+            </small>
+          </el-form-item>
+        </section>
+      </el-collapse-item>
     </el-collapse>
   </el-form>
 </template>
@@ -129,11 +145,36 @@ const headerNameRequired = (rule, value, callback) => {
   callback()
 }
 
+const responseSchemaValid = (rule, value, callback) => {
+  const text = String(value || '').trim()
+  if (!text) {
+    callback()
+    return
+  }
+  try {
+    const schema = JSON.parse(text)
+    if (!schema || Array.isArray(schema) || typeof schema !== 'object') {
+      callback(new Error('响应 Schema 必须是 JSON 对象'))
+      return
+    }
+    if (schema.type !== undefined
+      && typeof schema.type !== 'string'
+      && !Array.isArray(schema.type)) {
+      callback(new Error('响应 Schema 的 type 必须是字符串或字符串数组'))
+      return
+    }
+    callback()
+  } catch (error) {
+    callback(new Error('请输入合法的 JSON Schema'))
+  }
+}
+
 const rules = {
   connectorName: [{required: true, message: '请输入连接名称', trigger: 'blur'}],
   baseUrl: [{required: true, message: '请输入 Base URL', trigger: 'blur'}],
   'credential.headerName': [{validator: headerNameRequired, trigger: 'blur'}],
-  'credential.secret': [{validator: credentialRequired, trigger: 'blur'}]
+  'credential.secret': [{validator: credentialRequired, trigger: 'blur'}],
+  responseSchemaText: [{validator: responseSchemaValid, trigger: 'blur'}]
 }
 
 function authTypeChanged(value) {
@@ -193,6 +234,8 @@ function buildPayload() {
         }
       : undefined,
     defaultHeaders,
+    responseSchema: String(props.form.responseSchemaText || '').trim()
+      ? JSON.parse(props.form.responseSchemaText) : null,
     timeoutMs: Number(props.form.timeoutSeconds || 30) * 1000,
     status: props.form.status || '0',
     remark: props.form.remark
@@ -252,6 +295,16 @@ defineExpose({validate, buildPayload})
 .timeout-field {
   margin-top: 18px;
   margin-bottom: 0;
+}
+
+.response-schema-field {
+  margin-bottom: 0;
+}
+
+.response-schema-field :deep(textarea) {
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .field-hint {

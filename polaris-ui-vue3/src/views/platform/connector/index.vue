@@ -98,6 +98,7 @@ const form = reactive({
   credentialConfigured: false,
   credential: {headerName: 'X-API-Key', secret: ''},
   headerRows: [],
+  responseSchemaText: '',
   timeoutSeconds: 30,
   status: '0',
   remark: ''
@@ -122,6 +123,7 @@ function handleAdd() {
     credentialConfigured: false,
     credential: {headerName: 'X-API-Key', secret: ''},
     headerRows: [],
+    responseSchemaText: '',
     timeoutSeconds: 30,
     status: '0',
     remark: ''
@@ -143,6 +145,7 @@ async function handleUpdate(row) {
     credentialConfigured: !!detail.credentialConfigured,
     credential: {headerName: 'X-API-Key', secret: ''},
     headerRows: parseHeaders(detail.defaultHeaders),
+    responseSchemaText: formatSchema(detail.responseSchema),
     timeoutSeconds: Math.max(1, Math.round((detail.timeoutMs || 30000) / 1000)),
     status: detail.status || '0',
     remark: detail.remark || ''
@@ -175,6 +178,16 @@ function parseHeaders(value) {
     return Object.entries(headers).map(([name, headerValue]) => ({name, value: String(headerValue)}))
   } catch (error) {
     return []
+  }
+}
+
+function formatSchema(value) {
+  if (!value) return ''
+  try {
+    const schema = typeof value === 'string' ? JSON.parse(value) : value
+    return JSON.stringify(schema, null, 2)
+  } catch (error) {
+    return ''
   }
 }
 

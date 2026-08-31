@@ -1,5 +1,6 @@
 package com.polaris.platform.dto;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
@@ -32,6 +33,9 @@ public class ApiConnectorSaveRequest {
 
     @Schema(description = "默认请求头")
     private Map<String, String> defaultHeaders;
+
+    @Schema(description = "响应体 JSON Schema；为空表示未声明")
+    private JsonNode responseSchema;
 
     @Schema(description = "请求超时时间，单位毫秒")
     private Integer timeoutMs;

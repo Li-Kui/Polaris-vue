@@ -6,6 +6,7 @@ public enum WorkflowErrorCode {
     PLAN_INCOMPATIBLE(WorkflowErrorCategory.CONFIGURATION, false),
     EXPRESSION_INVALID(WorkflowErrorCategory.VALIDATION, false),
     EXPRESSION_EVALUATION_FAILED(WorkflowErrorCategory.BUSINESS, false),
+    OUTPUT_SCHEMA_MISMATCH(WorkflowErrorCategory.VALIDATION, false),
     PERMISSION_DENIED(WorkflowErrorCategory.AUTHORIZATION, false),
     TENANT_CONTEXT_MISSING(WorkflowErrorCategory.AUTHORIZATION, false),
     RESOURCE_NOT_FOUND(WorkflowErrorCategory.RESOURCE, false),

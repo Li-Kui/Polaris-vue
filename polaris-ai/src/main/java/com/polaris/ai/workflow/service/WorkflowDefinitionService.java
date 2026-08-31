@@ -9,6 +9,7 @@ import com.polaris.ai.workflow.compiler.WorkflowDefinitionCompiler;
 import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
+import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
 import com.polaris.ai.workflow.domain.WorkflowDefinition;
 import com.polaris.ai.workflow.domain.WorkflowVersion;
 import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
@@ -16,6 +17,8 @@ import com.polaris.ai.workflow.mapper.WorkflowVersionMapper;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 import com.polaris.common.exception.ServiceException;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,20 +34,35 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     private final WorkflowNodeDescriptorResolver descriptors;
     private final WorkflowProperties properties;
     private final ObjectMapper objectMapper;
+    private final ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider;
 
+    @Autowired
     public WorkflowDefinitionService(
             WorkflowDefinitionMapper definitionMapper,
             WorkflowVersionMapper versionMapper,
             WorkflowDefinitionCompiler compiler,
             WorkflowNodeDescriptorResolver descriptors,
             WorkflowProperties properties,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider) {
         this.definitionMapper = definitionMapper;
         this.versionMapper = versionMapper;
         this.compiler = compiler;
         this.descriptors = descriptors;
         this.properties = properties;
         this.objectMapper = objectMapper;
+        this.nodeSchemaProvider = nodeSchemaProvider;
+    }
+
+    WorkflowDefinitionService(
+            WorkflowDefinitionMapper definitionMapper,
+            WorkflowVersionMapper versionMapper,
+            WorkflowDefinitionCompiler compiler,
+            WorkflowNodeDescriptorResolver descriptors,
+            WorkflowProperties properties,
+            ObjectMapper objectMapper) {
+        this(definitionMapper, versionMapper, compiler, descriptors,
+                properties, objectMapper, null);
     }
 
     @Override
@@ -164,6 +182,20 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         if (!compilation.isValid()) {
             return new WorkflowPublishResult(false, null, compilation.diagnostics());
         }
+        List<WorkflowResolvedNodeSchemaView> schemaSnapshots;
+        try {
+            schemaSnapshots = resolvePublishSchemas(definitionId);
+        } catch (Exception e) {
+            return new WorkflowPublishResult(false, null, List.of(WorkflowDiagnostic.error(
+                    "DYNAMIC_SCHEMA_RESOLUTION_FAILED", null, "$.nodes",
+                    "发布时无法解析节点 Schema，请检查节点配置和资源绑定")));
+        }
+        compilation = compiler.compile(definition.getDraftJson(), versionId, schemaSnapshots);
+        if (!compilation.isValid()) {
+            return new WorkflowPublishResult(false, null, compilation.diagnostics());
+        }
+        List<WorkflowDiagnostic> publishDiagnostics = publishDiagnostics(
+                compilation.diagnostics(), schemaSnapshots);
         WorkflowVersion version = new WorkflowVersion();
         version.setVersionId(versionId);
         version.setTenantId(definition.getTenantId());
@@ -188,7 +220,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         if (definitionMapper.updateById(definition) != 1) {
             throw new ServiceException("工作流发布状态更新失败");
         }
-        return new WorkflowPublishResult(true, versionView(version), compilation.diagnostics());
+        return new WorkflowPublishResult(true, versionView(version), publishDiagnostics);
     }
 
     @Override
@@ -265,6 +297,28 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     public Collection<WorkflowNodeDescriptor> listNodeDescriptors() {
         requireEnabled();
         return descriptors.list();
+    }
+
+    private List<WorkflowResolvedNodeSchemaView> resolvePublishSchemas(Long definitionId) {
+        if (nodeSchemaProvider == null) return List.of();
+        WorkflowNodeSchemaApplicationFacade facade = nodeSchemaProvider.getIfAvailable();
+        return facade == null ? List.of() : facade.resolve(definitionId, "PROD");
+    }
+
+    private List<WorkflowDiagnostic> publishDiagnostics(
+            List<WorkflowDiagnostic> compilationDiagnostics,
+            List<WorkflowResolvedNodeSchemaView> snapshots) {
+        List<WorkflowDiagnostic> result = new ArrayList<>(
+                compilationDiagnostics == null ? List.of() : compilationDiagnostics);
+        for (WorkflowResolvedNodeSchemaView snapshot
+                : snapshots == null ? List.<WorkflowResolvedNodeSchemaView>of() : snapshots) {
+            for (String message : snapshot.diagnostics()) {
+                result.add(WorkflowDiagnostic.warning(
+                        "DYNAMIC_SCHEMA_RESOLUTION_WARNING", snapshot.nodeId(),
+                        "$.nodes." + snapshot.nodeId(), message));
+            }
+        }
+        return List.copyOf(result);
     }
 
     private WorkflowDefinition requireDefinition(Long definitionId) {

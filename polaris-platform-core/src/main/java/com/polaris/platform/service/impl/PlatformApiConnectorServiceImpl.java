@@ -2,6 +2,7 @@ package com.polaris.platform.service.impl;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.polaris.ai.workflow.spi.WorkflowResourceUsageInspector;
 import com.polaris.common.exception.ServiceException;
 import com.polaris.platform.connector.ApiConnectorExecutor;
@@ -39,6 +40,7 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
             "authorization", "proxy-authorization", "cookie", "set-cookie",
             "host", "content-length", "connection", "transfer-encoding");
     private static final Pattern HEADER_NAME = Pattern.compile("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$");
+    private static final int MAX_RESPONSE_SCHEMA_LENGTH = 65_535;
 
     @Autowired
     private PlatformApiConnectorMapper platformApiConnectorMapper;
@@ -78,8 +80,18 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
 
     @Override
     public PlatformApiConnector insertConnector(ApiConnectorSaveRequest request, String operator) {
+        return insertConnector(request, operator, PlatformTenantGuard.requireTenantId());
+    }
+
+    @Override
+    public PlatformApiConnector insertSharedConnector(ApiConnectorSaveRequest request, String operator) {
+        return insertConnector(request, operator, null);
+    }
+
+    private PlatformApiConnector insertConnector(
+            ApiConnectorSaveRequest request, String operator, Long tenantId) {
         PlatformApiConnector connector = new PlatformApiConnector();
-        connector.setTenantId(PlatformTenantGuard.requireTenantId());
+        connector.setTenantId(tenantId);
         applyCommonFields(connector, request, true);
         connector.setCreateBy(operator);
         connector.setUpdateBy(operator);
@@ -105,6 +117,7 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
         connector.setCreateBy(current.getCreateBy());
         connector.setCreateTime(current.getCreateTime());
         connector.setDefaultHeaders(current.getDefaultHeaders());
+        connector.setResponseSchema(current.getResponseSchema());
         connector.setStatus(current.getStatus());
         connector.setUpdateBy(operator);
         applyCommonFields(connector, request, false);
@@ -190,6 +203,7 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
         if (creating || request.getDefaultHeaders() != null) {
             connector.setDefaultHeaders(serializeHeaders(request.getDefaultHeaders()));
         }
+        connector.setResponseSchema(serializeResponseSchema(request.getResponseSchema()));
         connector.setTimeoutMs(timeoutMs);
         String status = trim(request.getStatus());
         if (status == null && creating) status = "0";
@@ -264,6 +278,24 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
             result.put(safeName, value == null ? "" : value);
         });
         return result.toJSONString();
+    }
+
+    private String serializeResponseSchema(JsonNode schema) {
+        if (schema == null || schema.isNull()) {
+            return null;
+        }
+        if (!schema.isObject()) {
+            throw new ServiceException("响应 Schema 必须是 JSON 对象");
+        }
+        JsonNode type = schema.get("type");
+        if (type != null && !type.isTextual() && !type.isArray()) {
+            throw new ServiceException("响应 Schema 的 type 必须是字符串或字符串数组");
+        }
+        String value = schema.toString();
+        if (value.length() > MAX_RESPONSE_SCHEMA_LENGTH) {
+            throw new ServiceException("响应 Schema 不能超过 65535 个字符");
+        }
+        return value;
     }
 
     private void validateCredentialHeader(String headerName, Map<String, String> defaultHeaders) {

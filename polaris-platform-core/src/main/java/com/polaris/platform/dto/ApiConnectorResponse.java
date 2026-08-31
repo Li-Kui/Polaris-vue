@@ -2,6 +2,8 @@ package com.polaris.platform.dto;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.common.core.domain.BaseEntity;
 import com.polaris.platform.domain.PlatformApiConnector;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -21,6 +23,7 @@ import java.util.Set;
 @Schema(description = "API 连接器安全响应")
 public class ApiConnectorResponse extends BaseEntity {
     private static final long serialVersionUID = 1L;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> SENSITIVE_HEADERS = Set.of(
             "authorization", "proxy-authorization", "cookie", "set-cookie");
 
@@ -31,6 +34,7 @@ public class ApiConnectorResponse extends BaseEntity {
     private String authType;
     private Boolean credentialConfigured;
     private Map<String, String> defaultHeaders;
+    private JsonNode responseSchema;
     private Integer timeoutMs;
     private String status;
 
@@ -48,6 +52,7 @@ public class ApiConnectorResponse extends BaseEntity {
                 && connector.getAuthConfig() != null
                 && !connector.getAuthConfig().isBlank());
         response.setDefaultHeaders(safeHeaders(connector.getDefaultHeaders()));
+        response.setResponseSchema(safeSchema(connector.getResponseSchema()));
         response.setTimeoutMs(connector.getTimeoutMs());
         response.setStatus(connector.getStatus());
         response.setCreateBy(connector.getCreateBy());
@@ -56,6 +61,18 @@ public class ApiConnectorResponse extends BaseEntity {
         response.setUpdateTime(connector.getUpdateTime());
         response.setRemark(connector.getRemark());
         return response;
+    }
+
+    private static JsonNode safeSchema(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode schema = OBJECT_MAPPER.readTree(value);
+            return schema != null && schema.isObject() ? schema : null;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static Map<String, String> safeHeaders(String value) {

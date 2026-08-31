@@ -83,7 +83,7 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogOpen" :title="form.id ? '修改资源绑定' : '新增资源绑定'" width="560px">
+    <el-dialog v-model="dialogOpen" class="workflow-dialog" :title="form.id ? '修改资源绑定' : '新增资源绑定'" width="560px">
       <el-form label-width="110px">
         <el-form-item label="作用范围">
           <div :class="['scope-summary', {'scope-summary--workflow': form.scopeType === 'WORKFLOW'}]">

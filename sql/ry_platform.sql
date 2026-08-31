@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS `platform_api_connector` (
     `auth_type`       VARCHAR(32)  DEFAULT 'NONE' COMMENT '认证类型',
     `auth_config`     JSON         DEFAULT NULL COMMENT '加密认证配置 JSON 信封',
     `default_headers` JSON         DEFAULT NULL COMMENT '默认请求头',
+    `response_schema` JSON         DEFAULT NULL COMMENT '响应体 JSON Schema',
     `timeout_ms`      INT          DEFAULT 30000 COMMENT '超时(毫秒)',
     `status`          CHAR(1)      DEFAULT '0' COMMENT '状态',
     `create_by`       VARCHAR(64)  DEFAULT '' COMMENT '创建者',

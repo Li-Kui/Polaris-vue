@@ -39,6 +39,9 @@ public class PlatformApiConnector extends BaseEntity {
     @Schema(description = "默认请求头 JSON")
     private String defaultHeaders;
 
+    @Schema(description = "响应体 JSON Schema")
+    private String responseSchema;
+
     @Schema(description = "请求超时时间，单位毫秒")
     private Integer timeoutMs;
 

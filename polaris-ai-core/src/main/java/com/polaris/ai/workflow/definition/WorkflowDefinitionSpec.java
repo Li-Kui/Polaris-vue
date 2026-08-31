@@ -37,6 +37,7 @@ public class WorkflowDefinitionSpec {
         private String name;
         private Map<String, ValueBinding> inputMapping = new LinkedHashMap<>();
         private JsonNode config;
+        private JsonNode outputSchemaOverride;
         private RetryPolicy retryPolicy;
         private Integer timeoutSeconds;
         private String onError;

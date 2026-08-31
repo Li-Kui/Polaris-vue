@@ -13,6 +13,8 @@ import com.polaris.ai.mapper.AiModelConfigMapper;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.workflow.application.WorkflowResourceOption;
+import com.polaris.ai.workflow.runtime.WorkflowInputValidator;
+import com.polaris.ai.workflow.runtime.WorkflowStructuredOutput;
 import com.polaris.ai.workflow.spi.*;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -236,14 +238,13 @@ public class WorkflowAiNodeConfig {
     }
 
     @Bean
-    public WorkflowNodeHandler llmWorkflowNodeHandler(ObjectMapper objectMapper) {
+    public WorkflowNodeHandler llmWorkflowNodeHandler(
+            ObjectMapper objectMapper, WorkflowInputValidator outputValidator) {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "llm", "1.0", "大模型调用", "ai",
-                objectSchema(Map.of(
-                        "systemPrompt", stringSchema(),
-                        "maxWaitSeconds", integerSchema(1, 600))),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                llmConfigSchema(),
+                promptInputSchema(),
+                requiredObjectSchema(Map.of("text", stringSchema()), "text"),
                 WorkflowSideEffect.READ,
                 Set.of("MODEL"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -261,16 +262,62 @@ public class WorkflowAiNodeConfig {
                 if (!(resource.handle() instanceof StreamingChatModel model)) {
                     throw new IllegalArgumentException("LLM节点缺少MODEL资源");
                 }
-                String prompt = prompt(context.input());
+                String prompt = composePrompt(context.config(), context.input());
                 List<ChatMessage> messages = new ArrayList<>();
                 String systemPrompt = context.config().path("systemPrompt").asText();
                 if (!systemPrompt.isBlank()) messages.add(SystemMessage.from(systemPrompt));
+                JsonNode outputSchema = structuredOutputSchema(context.config());
+                if (outputSchema != null) {
+                    List<String> errors = WorkflowStructuredOutput.validateSchema(outputSchema);
+                    if (!errors.isEmpty()) {
+                        throw new IllegalArgumentException(
+                                "结构化输出 Schema 无效: " + errors.get(0));
+                    }
+                    messages.add(SystemMessage.from(
+                            WorkflowStructuredOutput.instruction(outputSchema)));
+                }
                 messages.add(UserMessage.from(prompt));
                 int waitSeconds = context.config().path("maxWaitSeconds").asInt(300);
                 ChatCallResult response = chat(model, messages, context, waitSeconds);
+                if (outputSchema != null) {
+                    JsonNode result = WorkflowStructuredOutput.parseAndValidate(
+                            objectMapper, outputValidator, response.text(), outputSchema);
+                    return new WorkflowNodeResult(result, response.usage(), "NONE");
+                }
                 ObjectNode result = objectMapper.createObjectNode();
                 result.put("text", response.text());
                 return new WorkflowNodeResult(result, response.usage(), "NONE");
+            }
+        };
+    }
+
+    @Bean
+    public WorkflowNodeSchemaResolver llmWorkflowNodeSchemaResolver() {
+        return new WorkflowNodeSchemaResolver() {
+            @Override
+            public boolean supports(String nodeType, String handlerVersion) {
+                return "llm".equals(nodeType) && "1.0".equals(handlerVersion);
+            }
+
+            @Override
+            public ResolvedNodeSchema resolve(WorkflowNodeSchemaContext context) {
+                JsonNode schema = structuredOutputSchema(context.config());
+                if (schema == null) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(), List.of());
+                }
+                List<String> errors = WorkflowStructuredOutput.validateSchema(schema);
+                if (!errors.isEmpty()) {
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), context.declaredOutputSchema(),
+                            "NODE_CONTRACT", context.handlerVersion(), Map.of(),
+                            List.of("结构化输出 Schema 无效: " + errors.get(0)));
+                }
+                return new ResolvedNodeSchema(
+                        context.declaredInputSchema(), schema.deepCopy(),
+                        "LLM_STRUCTURED_OUTPUT", WorkflowStructuredOutput.fingerprint(schema),
+                        structuredFieldSources(schema), List.of());
             }
         };
     }
@@ -282,8 +329,12 @@ public class WorkflowAiNodeConfig {
                 objectSchema(Map.of(
                         "additionalSystemPrompt", stringSchema(),
                         "maxWaitSeconds", integerSchema(1, 600))),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                promptInputSchema(),
+                requiredObjectSchema(Map.of(
+                        "text", stringSchema(),
+                        "agentCode", stringSchema(),
+                        "agentName", stringSchema()),
+                        "text", "agentCode", "agentName"),
                 WorkflowSideEffect.READ,
                 Set.of("AGENT"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -345,8 +396,8 @@ public class WorkflowAiNodeConfig {
                         "branches", branches,
                         "systemPrompt", stringSchema(),
                         "maxWaitSeconds", integerSchema(1, 600)), "branches"),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                promptInputSchema(),
+                classifierOutputSchema(),
                 WorkflowSideEffect.READ,
                 Set.of("MODEL"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -402,8 +453,8 @@ public class WorkflowAiNodeConfig {
                 objectSchema(Map.of(
                         "topK", integerSchema(1, 50),
                         "minScore", numberSchema(0, 1))),
-                JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                promptInputSchema(),
+                knowledgeOutputSchema(),
                 WorkflowSideEffect.READ,
                 Set.of("KNOWLEDGE_BASE"),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -541,12 +592,120 @@ public class WorkflowAiNodeConfig {
                 .orElseThrow(() -> new IllegalArgumentException("缺少资源: " + kind));
     }
 
+    static String composePrompt(JsonNode config, JsonNode input) {
+        String nodePrompt = config == null ? "" : config.path("prompt").asText();
+        if (!nodePrompt.isBlank()) {
+            String content = promptContent(input);
+            return content.isBlank()
+                    ? nodePrompt
+                    : nodePrompt + "\n\n输入内容：\n" + content;
+        }
+        return promptContent(input);
+    }
+
     private static String prompt(JsonNode input) {
+        return promptContent(input);
+    }
+
+    private static String promptContent(JsonNode input) {
         if (input == null || input.isNull()) return "";
         if (input.isTextual()) return input.asText();
         if (input.hasNonNull("prompt")) return input.path("prompt").asText();
         if (input.hasNonNull("query")) return input.path("query").asText();
+        if (input.size() == 1 && input.hasNonNull("input")) {
+            JsonNode value = input.path("input");
+            return value.isTextual() ? value.asText() : value.toString();
+        }
         return input.toString();
+    }
+
+    private static ObjectNode llmConfigSchema() {
+        Map<String, JsonNode> properties = new LinkedHashMap<>();
+        properties.put("prompt", nodePromptSchema());
+        properties.put("structuredOutputSchema", structuredOutputConfigSchema());
+        ObjectNode waitSeconds = integerSchema(1, 600);
+        waitSeconds.put("title", "最长等待时间（秒）");
+        waitSeconds.put("default", 300);
+        waitSeconds.put("description", "模型单次响应的最长等待时间，默认 300 秒");
+        properties.put("maxWaitSeconds", waitSeconds);
+        return objectSchema(properties);
+    }
+
+    private static ObjectNode nodePromptSchema() {
+        ObjectNode schema = stringSchema();
+        schema.put("title", "节点提示词");
+        schema.put("format", "textarea");
+        schema.put("rows", 7);
+        schema.put("maxLength", 12000);
+        schema.put("placeholder", "例如：将输入的 JSON 转换成清晰、自然的文本，只输出转换结果。\n或：总结输入内容，提取关键信息。");
+        schema.put("description", "描述当前节点要完成的任务；绑定了上游数据时，系统会将其作为“输入内容”附在提示词后。无需手工拼接 JSON。");
+        return schema;
+    }
+
+    private static ObjectNode promptInputSchema() {
+        ObjectNode schema = objectSchema(Map.of(
+                "prompt", stringSchema(),
+                "query", stringSchema()));
+        schema.put("additionalProperties", true);
+        return schema;
+    }
+
+    private static ObjectNode structuredOutputConfigSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        schema.put("title", "结构化输出 Schema");
+        schema.put("format", "json-schema");
+        schema.put("description", "可选；配置后模型必须返回匹配此 Schema 的 JSON 对象");
+        schema.put("placeholder", "{\n  \"type\": \"object\",\n  \"properties\": {}\n}");
+        schema.put("additionalProperties", true);
+        return schema;
+    }
+
+    private static JsonNode structuredOutputSchema(JsonNode config) {
+        if (config == null || !config.isObject()) return null;
+        JsonNode schema = config.get("structuredOutputSchema");
+        return schema != null && !schema.isNull() ? schema : null;
+    }
+
+    private static Map<String, String> structuredFieldSources(JsonNode schema) {
+        Map<String, String> result = new LinkedHashMap<>();
+        collectStructuredFieldSources(schema, "$", result);
+        return Map.copyOf(result);
+    }
+
+    private static void collectStructuredFieldSources(
+            JsonNode schema, String path, Map<String, String> result) {
+        JsonNode properties = schema.path("properties");
+        if (properties.isObject()) {
+            properties.fields().forEachRemaining(field -> {
+                String fieldPath = path + "." + field.getKey();
+                result.put(fieldPath, "LLM_STRUCTURED_OUTPUT");
+                collectStructuredFieldSources(field.getValue(), fieldPath, result);
+            });
+        }
+        JsonNode items = schema.path("items");
+        if (items.isObject()) collectStructuredFieldSources(items, path + "[]", result);
+    }
+
+    private static ObjectNode classifierOutputSchema() {
+        return requiredObjectSchema(Map.of(
+                "branch", stringSchema(),
+                "confidence", numberSchema(0, 1),
+                "summary", stringSchema()),
+                "branch", "confidence", "summary");
+    }
+
+    private static ObjectNode knowledgeOutputSchema() {
+        ObjectNode item = objectSchema(Map.of(
+                "score", numberSchema(0, 1),
+                "text", stringSchema(),
+                "documentId", stringSchema(),
+                "documentName", stringSchema()));
+        item.putArray("required").add("score").add("text");
+        ObjectNode matches = JsonNodeFactory.instance.objectNode();
+        matches.put("type", "array");
+        matches.set("items", item);
+        return requiredObjectSchema(Map.of("matches", matches), "matches");
     }
 
     private static ObjectNode objectSchema(Map<String, JsonNode> properties) {

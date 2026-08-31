@@ -16,6 +16,7 @@ public class WorkflowRuntimeState {
     private Map<String, Integer> loopCounts = new LinkedHashMap<>();
     private Map<String, Integer> arrivals = new LinkedHashMap<>();
     private Map<String, BigDecimal> usage = new LinkedHashMap<>();
+    private JsonNode approval;
     private Set<String> completedKeys = new LinkedHashSet<>();
     private List<CompensationCandidate> compensations = new ArrayList<>();
     private Set<String> compensatedKeys = new LinkedHashSet<>();

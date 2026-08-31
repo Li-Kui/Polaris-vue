@@ -12,6 +12,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="authType"       column="auth_type"       />
         <result property="authConfig"     column="auth_config"     />
         <result property="defaultHeaders" column="default_headers" />
+        <result property="responseSchema" column="response_schema" />
         <result property="timeoutMs"      column="timeout_ms"      />
         <result property="status"         column="status"          />
         <result property="createBy"       column="create_by"       />
@@ -21,7 +22,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </resultMap>
 
     <sql id="selectPlatformApiConnectorVo">
-        select id, tenant_id, connector_name, base_url, auth_type, auth_config, default_headers, timeout_ms, status, create_by, create_time, update_by, update_time
+        select id, tenant_id, connector_name, base_url, auth_type, auth_config, default_headers, response_schema, timeout_ms, status, create_by, create_time, update_by, update_time
         from platform_api_connector
     </sql>
 
@@ -90,6 +91,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="authType != null and authType != ''">auth_type,</if>
             <if test="authConfig != null">auth_config,</if>
             <if test="defaultHeaders != null">default_headers,</if>
+            <if test="responseSchema != null">response_schema,</if>
             <if test="timeoutMs != null">timeout_ms,</if>
             <if test="status != null and status != ''">status,</if>
             <if test="createBy != null and createBy != ''">create_by,</if>
@@ -101,6 +103,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="authType != null and authType != ''">#{authType},</if>
             <if test="authConfig != null">#{authConfig},</if>
             <if test="defaultHeaders != null">#{defaultHeaders},</if>
+            <if test="responseSchema != null">#{responseSchema},</if>
             <if test="timeoutMs != null">#{timeoutMs},</if>
             <if test="status != null and status != ''">#{status},</if>
             <if test="createBy != null and createBy != ''">#{createBy},</if>
@@ -117,6 +120,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <!-- 认证改为 NONE 时需要显式写入 NULL，不能保留历史凭证。 -->
             auth_config = #{authConfig},
             <if test="defaultHeaders != null">default_headers = #{defaultHeaders},</if>
+            response_schema = #{responseSchema},
             <if test="timeoutMs != null">timeout_ms = #{timeoutMs},</if>
             <if test="status != null and status != ''">status = #{status},</if>
             <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
