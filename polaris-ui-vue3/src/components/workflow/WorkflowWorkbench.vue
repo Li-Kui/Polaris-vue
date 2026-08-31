@@ -813,7 +813,7 @@
         </header>
         <el-alert
           v-if="nodeTestResult.errorMessage"
-          :title="`${nodeTestResult.errorCode || 'NODE_TEST_FAILED'}：${nodeTestResult.errorMessage}`"
+          :title="nodeTestResult.errorMessage"
           type="error"
           :closable="false"
           show-icon
@@ -825,6 +825,10 @@
           <span>副作用 <strong>{{ nodeTestResult.sideEffect }}</strong></span>
           <span>Schema <strong>{{ nodeTestSchemaLabel(nodeTestResult.schemaSource) }}</strong></span>
           <span v-if="nodeTestResult.schemaSourceVersion">版本 <code>{{ nodeTestResult.schemaSourceVersion }}</code></span>
+          <span v-if="nodeTestResult.errorCode">
+            错误类型 <strong>{{ nodeTestErrorCodeLabel(nodeTestResult.errorCode) }}</strong>
+            <code>{{ nodeTestResult.errorCode }}</code>
+          </span>
         </div>
         <div v-if="nodeTestResult.schemaDiagnostics?.length" class="node-test-diagnostics">
           <span v-for="item in nodeTestResult.schemaDiagnostics" :key="item">{{ item }}</span>
@@ -2852,6 +2856,20 @@ export default {
         FAILED: 'danger',
         CANCELLED: 'info'
       }[status] || 'info'
+    },
+    nodeTestErrorCodeLabel(code) {
+      const labels = {
+        INTERNAL_ERROR: '节点执行异常',
+        NODE_TIMEOUT: '节点运行超时',
+        OUTPUT_SCHEMA_MISMATCH: '输出结构不匹配',
+        DEFINITION_INVALID: '节点配置不完整',
+        PERMISSION_DENIED: '没有执行权限',
+        RESOURCE_NOT_FOUND: '资源不存在',
+        RESOURCE_DISABLED: '资源已停用',
+        RESOURCE_TEMPORARILY_UNAVAILABLE: '资源暂时不可用',
+        NODE_CANCELLED: '运行已取消'
+      }
+      return labels[code] || '节点运行失败'
     },
     nodeTestSchemaLabel(source) {
       const labels = {

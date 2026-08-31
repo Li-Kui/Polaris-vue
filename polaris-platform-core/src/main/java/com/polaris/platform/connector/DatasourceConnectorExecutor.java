@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.*;
+import java.time.temporal.TemporalAccessor;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -94,10 +95,88 @@ public class DatasourceConnectorExecutor {
         } catch (ServiceException e) {
             throw e;
         } catch (Exception e) {
-            log.warn("执行数据源只读查询失败: datasourceId={}, error={}",
-                    datasource.getId(), e.getClass().getSimpleName());
-            throw new ServiceException("数据库查询执行失败");
+            SQLException sqlError = findSqlException(e);
+            log.warn("执行数据源只读查询失败: datasourceId={}, error={}, sqlState={}, vendorCode={}",
+                    datasource.getId(), e.getClass().getSimpleName(),
+                    sqlError == null ? null : sqlError.getSQLState(),
+                    sqlError == null ? null : sqlError.getErrorCode());
+            int connectTimeout = datasource.getConnectTimeoutSeconds() == null
+                    ? 5 : datasource.getConnectTimeoutSeconds();
+            throw new ServiceException(queryFailureMessage(
+                    e, timeout, Math.max(1, Math.min(connectTimeout, 30))));
         }
+    }
+
+    /** 将 JDBC/连接池异常转换为可操作且不泄露连接凭据的提示。 */
+    static String queryFailureMessage(
+            Throwable error, int queryTimeoutSeconds, int connectTimeoutSeconds) {
+        SQLException sqlError = findSqlException(error);
+        if (sqlError == null) {
+            return error instanceof IllegalArgumentException
+                    ? "数据库返回了无法解析的数据，请检查日期时间等字段类型"
+                    : "数据库查询结果处理失败，请联系管理员并提供本次运行 ID";
+        }
+        String sqlState = sqlError.getSQLState();
+        if (sqlError instanceof SQLTimeoutException || "57014".equals(sqlState)) {
+            return "数据库查询超时（" + queryTimeoutSeconds
+                    + " 秒），请优化 SQL、减少返回数据或调大查询超时";
+        }
+        if (sqlError instanceof SQLInvalidAuthorizationSpecException
+                || startsWith(sqlState, "28")) {
+            return "数据库认证失败，请检查用户名、密码及只读账号权限";
+        }
+        if (sqlError instanceof SQLTransientConnectionException
+                || sqlError instanceof SQLNonTransientConnectionException
+                || startsWith(sqlState, "08")) {
+            return "无法连接数据库（等待 " + connectTimeoutSeconds
+                    + " 秒超时），请检查地址、端口、网络及数据库状态";
+        }
+        if (sqlError instanceof SQLSyntaxErrorException || startsWith(sqlState, "42")) {
+            return withDatabaseDetail("SQL 语法或对象访问错误", sqlError.getMessage());
+        }
+        if (sqlError instanceof SQLDataException || startsWith(sqlState, "22")) {
+            return withDatabaseDetail("数据库数据转换失败", sqlError.getMessage());
+        }
+        if (startsWith(sqlState, "40")) {
+            return "数据库发生并发冲突或死锁，请稍后重试";
+        }
+        if (sqlError instanceof SQLFeatureNotSupportedException) {
+            return "数据库驱动不支持当前查询能力，请调整 SQL 或升级驱动";
+        }
+        return sqlState == null || sqlState.isBlank()
+                ? "数据库查询执行失败，请联系管理员并提供本次运行 ID"
+                : "数据库查询执行失败（SQLState " + safeSqlState(sqlState)
+                        + "），请联系管理员并提供本次运行 ID";
+    }
+
+    private static SQLException findSqlException(Throwable error) {
+        Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
+        Throwable current = error;
+        while (current != null && visited.add(current)) {
+            if (current instanceof SQLException sqlException) return sqlException;
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static boolean startsWith(String value, String prefix) {
+        return value != null && value.startsWith(prefix);
+    }
+
+    private static String withDatabaseDetail(String summary, String detail) {
+        if (detail == null || detail.isBlank()) return summary;
+        String safe = detail.replaceAll(
+                        "(?i)(password|pwd|token|secret)\\s*[:=]\\s*[^,;\\s]+",
+                        "$1=[REDACTED]")
+                .replaceAll("[\\r\\n\\t]+", " ")
+                .trim();
+        if (safe.length() > 240) safe = safe.substring(0, 240) + "…";
+        return summary + "：" + safe;
+    }
+
+    private static String safeSqlState(String sqlState) {
+        String safe = sqlState.replaceAll("[^A-Za-z0-9]", "");
+        return safe.length() > 8 ? safe.substring(0, 8) : safe;
     }
 
     /**
@@ -181,7 +260,8 @@ public class DatasourceConnectorExecutor {
         while (resultSet.next()) {
             Map<String, Object> row = new LinkedHashMap<>();
             for (int index = 1; index <= columnCount; index++) {
-                Object value = resultSet.getObject(index);
+                Object value = normalizeJdbcValue(
+                        resultSet.getObject(index), metadata.getColumnType(index));
                 if (value instanceof Blob || value instanceof Clob || value instanceof byte[]) {
                     throw new ServiceException("查询结果不能包含 BLOB、CLOB 或二进制大字段");
                 }
@@ -199,6 +279,58 @@ public class DatasourceConnectorExecutor {
             rows.add(row);
         }
         return rows;
+    }
+
+    /**
+     * JDBC 驱动会为日期时间、数组等列返回驱动相关对象；在连接器边界统一转换为
+     * 稳定的 JSON 兼容值，确保实际输出与 JDBC 元数据生成的 Schema 一致。
+     */
+    static Object normalizeJdbcValue(Object value, int jdbcType) throws SQLException {
+        if (value == null) return null;
+        if (value instanceof java.sql.Date date) return date.toLocalDate().toString();
+        if (value instanceof java.sql.Time time) return time.toLocalTime().toString();
+        if (value instanceof java.sql.Timestamp timestamp) {
+            return timestamp.toLocalDateTime().toString();
+        }
+        if (value instanceof TemporalAccessor temporal) return temporal.toString();
+        if (value instanceof java.util.Date date) return date.toInstant().toString();
+        if (value instanceof Calendar calendar) return calendar.toInstant().toString();
+        if (value instanceof java.sql.Array sqlArray) {
+            try {
+                return normalizeJdbcArray(sqlArray.getArray());
+            } finally {
+                sqlArray.free();
+            }
+        }
+        if (value instanceof SQLXML sqlxml) {
+            try {
+                return sqlxml.getString();
+            } finally {
+                sqlxml.free();
+            }
+        }
+        if (value instanceof RowId || value instanceof UUID) return value.toString();
+        if (jdbcType == Types.DATE || jdbcType == Types.TIME
+                || jdbcType == Types.TIME_WITH_TIMEZONE
+                || jdbcType == Types.TIMESTAMP
+                || jdbcType == Types.TIMESTAMP_WITH_TIMEZONE) {
+            return value.toString();
+        }
+        return value;
+    }
+
+    private static List<Object> normalizeJdbcArray(Object array) throws SQLException {
+        if (array == null) return List.of();
+        if (!array.getClass().isArray()) {
+            return List.of(normalizeJdbcValue(array, Types.JAVA_OBJECT));
+        }
+        int length = java.lang.reflect.Array.getLength(array);
+        List<Object> values = new ArrayList<>(length);
+        for (int index = 0; index < length; index++) {
+            values.add(normalizeJdbcValue(
+                    java.lang.reflect.Array.get(array, index), Types.JAVA_OBJECT));
+        }
+        return values;
     }
 
     private DatasourceQueryMetadata readMetadata(ResultSetMetaData metadata) throws Exception {
