@@ -187,8 +187,21 @@
             <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
+                <WorkflowSemanticClassifierEditor
+                  v-if="isClassifierNode"
+                  :config="selectedNode.config"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :source-groups="classifierSourceGroups"
+                  :target-options="classifierTargetOptions"
+                  :branch-targets="classifierBranchTargets"
+                  :disabled="!canEdit"
+                  @update:config="classifierConfigChanged"
+                  @update:input-mapping="visualInputMappingChanged"
+                  @update:branch-target="classifierBranchTargetChanged"
+                  @test="openNodeTest"
+                />
                 <WorkflowTransformEditor
-                  v-if="isTransformNode"
+                  v-else-if="isTransformNode"
                   :config="selectedNode.config"
                   :input-mapping="selectedNode.inputMapping || {}"
                   :definition="definition"
@@ -523,7 +536,10 @@
           </div>
           <el-form label-position="top" size="small" class="edge-form">
             <el-form-item label="连线类型"><el-select v-model="selectedEdge.kind" :disabled="!canEdit" style="width: 100%" @change="edgeChanged"><el-option label="普通" value="NORMAL" /><el-option label="条件" value="CONDITION" /><el-option label="并行" value="PARALLEL" /><el-option label="循环" value="LOOP" /><el-option label="语义分类" value="SEMANTIC" /></el-select></el-form-item>
-            <el-form-item v-if="selectedEdge.kind === 'SEMANTIC'" label="分类分支标识"><el-input v-model="selectedEdge.sourcePort" :disabled="!canEdit" @input="edgeChanged" /></el-form-item>
+            <el-form-item v-if="selectedEdge.kind === 'SEMANTIC'" label="分类分支">
+              <el-input :model-value="semanticBranchLabel(selectedEdge)" disabled />
+              <small class="edge-field-help">分类与下一节点请在语义分类节点中调整，内部标识由系统自动维护。</small>
+            </el-form-item>
             <template v-if="selectedEdge.kind === 'CONDITION'">
               <el-form-item label="默认分支">
                 <el-switch v-model="selectedEdge.default" :disabled="!canEdit" @change="edgeChanged" />
@@ -799,8 +815,17 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
-          <el-input v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
+        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+          <el-input
+            v-if="nodeTestIsClassifier && nodeTestMode === 'NODE'"
+            v-model="classifierTestContent"
+            type="textarea"
+            :rows="7"
+            maxlength="12000"
+            show-word-limit
+            placeholder="输入一句用户问题、一段文本，或粘贴需要分类的 JSON 内容"
+          />
+          <el-input v-else v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
       </el-form>
       <section v-if="nodeTestResult" class="node-test-result">
@@ -940,7 +965,13 @@ import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
 import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
+import WorkflowSemanticClassifierEditor from './WorkflowSemanticClassifierEditor.vue'
 import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
+import {
+  classifierSchemaOptions as buildClassifierSchemaOptions,
+  classifierTargetOptions as buildClassifierTargetOptions,
+  isClassifierTargetAllowed
+} from './workflowClassifier'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -957,6 +988,7 @@ export default {
     WorkflowDisclosureCard,
     WorkflowInputMappingEditor,
     WorkflowExecutionInput,
+    WorkflowSemanticClassifierEditor,
     WorkflowTransformEditor,
     ChatDotRound,
     CircleCheck,
@@ -1089,6 +1121,7 @@ export default {
       workflowDraftTest: false,
       nodeTestTimeoutSeconds: 60,
       nodeTestInputJson: '{}',
+      classifierTestContent: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
       nodeTestGeneratingSchema: false,
@@ -1136,8 +1169,28 @@ export default {
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
     },
+    isClassifierNode() {
+      return this.selectedNode?.type === 'llm_classifier'
+    },
     isTransformNode() {
       return this.selectedNode?.type === 'transform'
+    },
+    classifierSourceGroups() {
+      return this.isClassifierNode && this.selectedNode
+        ? this.buildClassifierSourceGroups(this.selectedNode.id) : []
+    },
+    classifierTargetOptions() {
+      if (!this.isClassifierNode || !this.selectedNode) return []
+      return buildClassifierTargetOptions(this.definition, this.selectedNode.id)
+    },
+    classifierBranchTargets() {
+      if (!this.isClassifierNode || !this.selectedNode) return {}
+      return (this.definition.edges || [])
+        .filter(edge => edge.source === this.selectedNode.id && edge.kind === 'SEMANTIC')
+        .reduce((result, edge) => ({...result, [edge.sourcePort]: edge.target}), {})
+    },
+    nodeTestIsClassifier() {
+      return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'llm_classifier'
     },
     transformDownstreamImpacts() {
       if (!this.isTransformNode || !this.selectedNode) return []
@@ -1692,6 +1745,7 @@ export default {
         this.definition = this.createEmptyDefinition()
       }
       this.normalizeHttpNodeConfigs()
+      this.normalizeClassifierNodeConfigs()
       this.normalizeInferredOutputSchemas()
       this.buildCanvas()
       this.dirty = false
@@ -1701,6 +1755,19 @@ export default {
       const descriptor = this.descriptors.find(item =>
         item.type === node.type && item.handlerVersion === node.typeVersion)
       const reference = Array.isArray(node.resourceRefs) ? node.resourceRefs[0] : null
+      const classifierBranches = node.type === 'llm_classifier'
+        ? (Array.isArray(node.config?.branches) ? node.config.branches : []).map((branch, index) => {
+            const edge = (this.definition.edges || []).find(item => item.source === node.id
+              && item.kind === 'SEMANTIC' && item.sourcePort === branch.slug)
+            const target = edge?.target === '__end__' ? {name: '结束流程'}
+              : (this.definition.nodes || []).find(item => item.id === edge?.target)
+            return {
+              slug: branch.slug,
+              label: branch.label || branch.slug || `分类 ${index + 1}`,
+              targetName: target?.name || '未连接',
+              connected: !!edge
+            }
+          }) : []
       return {
         label: node.name,
         type: node.type,
@@ -1710,7 +1777,8 @@ export default {
         outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
         resourceName: reference ? this.selectedResource(reference)?.name : '',
         status: this.latestNodeStatus(node.id),
-        testable: this.canDebug && this.nodeSupportsTest(node)
+        testable: this.canDebug && this.nodeSupportsTest(node),
+        classifierBranches
       }
     },
     buildCanvas() {
@@ -1765,10 +1833,11 @@ export default {
       return {
         id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
         source: edge.source,
+        sourceHandle: edge.kind === 'SEMANTIC' ? edge.sourcePort : undefined,
         target: edge.target,
         label: edge.kind === 'CONDITION'
           ? (edge.default ? '默认' : edge.condition?.expression || '条件')
-          : edge.kind === 'SEMANTIC' ? edge.sourcePort || '分类分支' : '',
+          : edge.kind === 'SEMANTIC' ? this.semanticBranchLabel(edge) : '',
         animated: edge.kind === 'CONDITION' || edge.kind === 'LOOP',
         style: {stroke: '#6762e8', strokeWidth: 1.6},
         labelStyle: {fill: '#6f7890', fontSize: 10},
@@ -1804,7 +1873,7 @@ export default {
       })
       if (this.definition.nodes.length === 1 && this.definition.edges.length === 0) {
         this.addDefinitionEdge('__start__', node.id, 'NORMAL')
-        this.addDefinitionEdge(node.id, '__end__', 'NORMAL')
+        if (node.type !== 'llm_classifier') this.addDefinitionEdge(node.id, '__end__', 'NORMAL')
       }
       this.selectedNode = node
       this.selectedEdge = null
@@ -1825,6 +1894,20 @@ export default {
           rules: [],
           preserveUnmapped: false,
           maxItems: 1000
+        }
+      }
+      if (type === 'llm_classifier') {
+        return {
+          version: 2,
+          branches: [
+            {slug: 'branch_1', label: '分类 1', description: '', examples: []},
+            {slug: 'other', label: '其他', description: '不符合其他分类时使用', examples: []}
+          ],
+          minConfidence: 0.6,
+          fallbackSlug: 'other',
+          invalidResponseStrategy: 'FALLBACK',
+          instruction: '',
+          maxWaitSeconds: 300
         }
       }
       if (type === 'loop') return {maxIterations: 10}
@@ -1848,15 +1931,26 @@ export default {
     },
     onConnect(params) {
       if (!this.canEdit || !params.source || !params.target || params.source === params.target) return
-      if (this.definition.edges.some(edge => edge.source === params.source && edge.target === params.target)) return
       const sourceNode = this.definition.nodes.find(node => node.id === params.source)
       const kind = sourceNode?.type === 'condition' ? 'CONDITION'
         : sourceNode?.type === 'parallel' ? 'PARALLEL'
           : sourceNode?.type === 'llm_classifier' ? 'SEMANTIC' : 'NORMAL'
+      const sourcePort = kind === 'SEMANTIC' ? String(params.sourceHandle || '') : ''
+      if (kind === 'SEMANTIC') {
+        const valid = (sourceNode?.config?.branches || []).some(branch => branch.slug === sourcePort)
+        if (!valid) return
+        if (!isClassifierTargetAllowed(this.definition, sourceNode.id, params.target)) {
+          this.$message.warning('分类分支只能连接下游节点，不能连接自身、开始节点或任意上游节点')
+          return
+        }
+        this.classifierBranchTargetChanged({slug: sourcePort, target: params.target}, sourceNode)
+        return
+      }
+      if (this.definition.edges.some(edge => edge.source === params.source && edge.target === params.target)) return
       this.addDefinitionEdge(params.source, params.target, kind)
       this.markDirty()
     },
-    addDefinitionEdge(source, target, kind) {
+    addDefinitionEdge(source, target, kind, sourcePort = '') {
       const edge = {
         id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         source,
@@ -1867,7 +1961,7 @@ export default {
       if (kind === 'CONDITION') {
         edge.condition = { expression: '', priority: 100, onError: 'FAIL' }
       }
-      if (kind === 'SEMANTIC') edge.sourcePort = ''
+      if (kind === 'SEMANTIC') edge.sourcePort = sourcePort
       this.definition.edges.push(edge)
       this.canvasEdges.push(this.canvasEdge(edge, this.canvasEdges.length))
     },
@@ -1963,6 +2057,39 @@ export default {
       this.configError = ''
       this.markDirty()
     },
+    classifierConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'llm_classifier') return
+      const nodeId = this.selectedNode.id
+      const slugs = new Set((value?.branches || []).map(branch => branch.slug).filter(Boolean))
+      this.definition.edges = (this.definition.edges || []).filter(edge =>
+        edge.source !== nodeId || edge.kind !== 'SEMANTIC' || slugs.has(edge.sourcePort))
+      this.schemaConfigChanged(value)
+      this.buildCanvas()
+    },
+    classifierBranchTargetChanged({slug, target}, nodeOverride = null) {
+      const node = nodeOverride || this.selectedNode
+      if (!node || node.type !== 'llm_classifier' || !slug) return
+      if (target && !isClassifierTargetAllowed(this.definition, node.id, target)) {
+        this.$message.warning('分类分支只能选择下游节点，当前目标会形成循环')
+        return
+      }
+      const existing = (this.definition.edges || []).find(edge => edge.source === node.id
+        && edge.kind === 'SEMANTIC' && edge.sourcePort === slug)
+      if (!target) {
+        if (existing) this.definition.edges = this.definition.edges.filter(edge => edge !== existing)
+      } else if (existing) {
+        existing.target = target
+      } else {
+        this.addDefinitionEdge(node.id, target, 'SEMANTIC', slug)
+      }
+      this.buildCanvas()
+      this.markDirty()
+    },
+    semanticBranchLabel(edge) {
+      const source = (this.definition.nodes || []).find(node => node.id === edge?.source)
+      const branch = (source?.config?.branches || []).find(item => item.slug === edge?.sourcePort)
+      return branch?.label || edge?.sourcePort || '分类分支'
+    },
     nodePromptChanged(value) {
       const config = {...(this.selectedNode?.config || {})}
       const prompt = String(value || '')
@@ -1980,6 +2107,33 @@ export default {
         if (!node.config.method) {
           node.config.method = node.type === 'http_get' ? 'GET' : 'POST'
         }
+      })
+    },
+    normalizeClassifierNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'llm_classifier') return
+        const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
+          ? node.config : {}
+        const branches = Array.isArray(current.branches) ? current.branches : []
+        const normalized = branches.map((branch, index) => ({
+          ...branch,
+          slug: branch.slug || `branch_${index + 1}`,
+          label: branch.label || branch.slug || `分类 ${index + 1}`,
+          description: branch.description || '',
+          examples: Array.isArray(branch.examples) ? branch.examples : []
+        }))
+        node.config = {
+          ...current,
+          version: current.version || 2,
+          branches: normalized,
+          minConfidence: Number.isFinite(Number(current.minConfidence))
+            ? Number(current.minConfidence) : 0.6,
+          fallbackSlug: current.fallbackSlug || normalized[normalized.length - 1]?.slug || '',
+          invalidResponseStrategy: current.invalidResponseStrategy || 'FALLBACK',
+          instruction: current.instruction || current.systemPrompt || '',
+          maxWaitSeconds: Number(current.maxWaitSeconds || 300)
+        }
+        delete node.config.systemPrompt
       })
     },
     normalizeInferredOutputSchemas() {
@@ -2677,13 +2831,21 @@ export default {
     },
     async runNodeTest() {
       let input
-      try {
-        input = JSON.parse(this.nodeTestInputJson)
-      } catch (error) {
-        this.$message.error(this.workflowDraftTest
-          ? '流程输入必须是有效 JSON'
-          : '节点输入必须是有效 JSON')
-        return
+      if (this.nodeTestIsClassifier && this.nodeTestMode === 'NODE') {
+        if (!this.classifierTestContent.trim()) {
+          this.$message.warning('请输入要分类的内容')
+          return
+        }
+        input = {input: this.classifierTestContent}
+      } else {
+        try {
+          input = JSON.parse(this.nodeTestInputJson)
+        } catch (error) {
+          this.$message.error(this.workflowDraftTest
+            ? '流程输入必须是有效 JSON'
+            : '节点输入必须是有效 JSON')
+          return
+        }
       }
       if (!this.currentDefinition?.id || this.dirty) {
         const saved = await this.saveDraft({silent: true})
@@ -3209,6 +3371,36 @@ export default {
       const flow = this.$refs.workflowCanvas
       if (delta > 0) flow?.zoomIn?.({duration: 160})
       else flow?.zoomOut?.({duration: 160})
+    },
+    buildClassifierSourceGroups(nodeId) {
+      const upstreamIds = new Set()
+      const pending = [nodeId]
+      while (pending.length) {
+        const current = pending.shift()
+        ;(this.definition.edges || []).filter(edge => edge.target === current)
+          .forEach(edge => {
+            if (edge.source === '__start__' || edge.source === nodeId || upstreamIds.has(edge.source)) return
+            upstreamIds.add(edge.source)
+            pending.push(edge.source)
+          })
+      }
+      const groups = []
+      const inputOptions = this.classifierSchemaOptions(
+        this.definition.inputs || {type: 'object'}, '$.input', '完整流程输入')
+      if (inputOptions.length) groups.push({id: '__input__', label: '流程输入', options: inputOptions})
+      ;(this.definition.nodes || []).filter(node => upstreamIds.has(node.id)).forEach(node => {
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const schema = this.resolvedNodeSchemas[node.id]?.outputSchema
+          || descriptor?.outputSchema || {type: 'object'}
+        const options = this.classifierSchemaOptions(
+          schema, `$.nodes.${node.id}.output`, '完整输出')
+        if (options.length) groups.push({id: node.id, label: node.name, options})
+      })
+      return groups
+    },
+    classifierSchemaOptions(schema, baseExpression, rootLabel) {
+      return buildClassifierSchemaOptions(schema, baseExpression, rootLabel)
     },
     buildConditionFieldGroups(sourceNodeId) {
       const upstreamIds = new Set()

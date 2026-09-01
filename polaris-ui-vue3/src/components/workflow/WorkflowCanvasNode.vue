@@ -21,7 +21,20 @@
       <el-icon v-else-if="data.status === 'FAILED'" class="node-status node-status--failed"><CircleClose /></el-icon>
       <span v-else-if="!data.movable" class="node-status-dot" />
     </header>
-    <div v-if="!data.start && !data.end" class="node-content">
+    <div v-if="data.type === 'llm_classifier'" class="classifier-branches">
+      <small v-if="!data.classifierBranches?.length" class="classifier-empty">请先添加分类结果</small>
+      <div v-for="branch in data.classifierBranches" :key="branch.slug" class="classifier-branch-row">
+        <span>{{ branch.label }}</span>
+        <small :class="{missing: !branch.connected}">{{ branch.targetName }}</small>
+        <Handle
+          type="source"
+          :id="branch.slug"
+          :position="Position.Right"
+          class="workflow-node-handle classifier-branch-handle"
+        />
+      </div>
+    </div>
+    <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
       <div v-if="data.resourceName" class="node-resource">
@@ -39,7 +52,7 @@
     >
       <el-icon><VideoPlay /></el-icon><span>{{ data.testLabel || '试运行' }}</span>
     </button>
-    <Handle v-if="!data.end" type="source" :position="Position.Right" class="workflow-node-handle" />
+    <Handle v-if="!data.end && data.type !== 'llm_classifier'" type="source" :position="Position.Right" class="workflow-node-handle" />
   </article>
 </template>
 
@@ -262,6 +275,59 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.classifier-branches {
+  padding: 7px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.classifier-empty {
+  padding: 7px 11px;
+  color: var(--el-color-warning);
+  font-size: 10px;
+}
+
+.classifier-branch-row {
+  position: relative;
+  min-height: 32px;
+  padding: 5px 14px 5px 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px dashed var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.classifier-branch-row:last-child {
+  border-bottom: 0;
+}
+
+.classifier-branch-row span,
+.classifier-branch-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.classifier-branch-row span {
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-weight: 650;
+}
+
+.classifier-branch-row small {
+  color: var(--el-color-success);
+}
+
+.classifier-branch-row small.missing {
+  color: var(--el-color-warning);
+}
+
+.classifier-branch-handle {
+  right: -5px;
 }
 
 .node-content > div {

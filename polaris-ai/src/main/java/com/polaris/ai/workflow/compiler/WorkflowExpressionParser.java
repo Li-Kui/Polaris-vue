@@ -185,7 +185,8 @@ public class WorkflowExpressionParser {
                     index++;
                 }
                 String path = value.substring(start, index);
-                if (!path.matches("\\$\\.(input|env|execution|nodes|loop|approval)(\\.[A-Za-z0-9_-]+)+")) {
+                if (!path.matches("\\$\\.(input|env|execution|nodes|loop|approval)(?:\\[\\])*"
+                        + "(\\.[A-Za-z0-9_-]+(?:\\[\\])*)*")) {
                     throw new IllegalArgumentException("变量路径不在允许作用域或格式无效，位置 " + start);
                 }
                 return new Token(TokenType.PATH, path, start);
@@ -290,7 +291,8 @@ public class WorkflowExpressionParser {
         }
 
         private boolean isPathCharacter(char ch) {
-            return Character.isLetterOrDigit(ch) || ch == '.' || ch == '_' || ch == '-';
+            return Character.isLetterOrDigit(ch) || ch == '.' || ch == '_'
+                    || ch == '-' || ch == '[' || ch == ']';
         }
 
         private void skipWhitespace() {

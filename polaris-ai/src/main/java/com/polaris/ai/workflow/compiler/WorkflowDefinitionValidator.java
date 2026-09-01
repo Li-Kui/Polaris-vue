@@ -591,9 +591,33 @@ public class WorkflowDefinitionValidator {
         }
         if ("llm_classifier".equals(node.getType())) {
             Set<String> configured = new LinkedHashSet<>();
+            Set<String> labels = new LinkedHashSet<>();
+            boolean duplicateSlug = false;
+            boolean duplicateLabel = false;
             if (node.getConfig() != null) {
-                node.getConfig().path("branches").forEach(
-                        item -> configured.add(item.path("slug").asText()));
+                for (JsonNode item : node.getConfig().path("branches")) {
+                    String slug = item.path("slug").asText();
+                    String label = item.path("label").asText(slug).trim();
+                    if (!configured.add(slug)) duplicateSlug = true;
+                    if (!labels.add(label)) duplicateLabel = true;
+                }
+            }
+            if (duplicateSlug || duplicateLabel) {
+                diagnostics.add(error("CLASSIFIER_CATEGORY_DUPLICATE", node.getId(), path,
+                        duplicateSlug ? "分类内部标识重复，请删除后重新添加该分类"
+                                : "分类名称不能重复"));
+            }
+            String fallbackSlug = node.getConfig() == null ? ""
+                    : node.getConfig().path("fallbackSlug").asText();
+            if (fallbackSlug.isBlank() && !configured.isEmpty()) {
+                fallbackSlug = configured.stream().reduce((first, second) -> second).orElse("");
+            }
+            String strategy = node.getConfig() == null ? "FALLBACK"
+                    : node.getConfig().path("invalidResponseStrategy").asText("FALLBACK");
+            if (("FALLBACK".equals(strategy) || !fallbackSlug.isBlank())
+                    && !configured.contains(fallbackSlug)) {
+                diagnostics.add(error("CLASSIFIER_FALLBACK_INVALID", node.getId(), path,
+                        "兜底分类已失效，请重新选择"));
             }
             Set<String> ports = new LinkedHashSet<>();
             outgoing.forEach(item -> ports.add(item.getSourcePort()));
@@ -603,7 +627,7 @@ public class WorkflowDefinitionValidator {
                     || ports.size() != outgoing.size()
                     || !ports.equals(configured)) {
                 diagnostics.add(error("CLASSIFIER_BRANCH_INVALID", node.getId(), path,
-                        "语义分类节点必须为每个配置slug提供且仅提供一条SEMANTIC出口"));
+                        "每个分类结果都必须选择且只能选择一个下一节点"));
             }
             return;
         }

@@ -2,10 +2,7 @@ package com.polaris.ai.workflow.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.BooleanNode;
-import com.fasterxml.jackson.databind.node.MissingNode;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.*;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import org.springframework.stereotype.Component;
 
@@ -106,14 +103,36 @@ public class WorkflowExpressionEvaluator {
         if (context == null || path == null || !path.startsWith("$.")) {
             return MissingNode.getInstance();
         }
-        JsonNode current = context;
-        for (String part : path.substring(2).split("\\.")) {
-            current = current.path(part);
-            if (current.isMissingNode()) {
-                return current;
-            }
+        return resolvePath(context, path.substring(2).split("\\."), 0);
+    }
+
+    private JsonNode resolvePath(JsonNode current, String[] parts, int index) {
+        if (current == null || current.isMissingNode()) return MissingNode.getInstance();
+        if (index >= parts.length) return current;
+        String part = parts[index];
+        int projections = 0;
+        while (part.endsWith("[]")) {
+            projections++;
+            part = part.substring(0, part.length() - 2);
         }
-        return current;
+        String field = part;
+        JsonNode next = current.path(field);
+        if (next.isMissingNode()) return next;
+        if (projections == 0) return resolvePath(next, parts, index + 1);
+        return projectArrayPath(next, projections, parts, index + 1);
+    }
+
+    private JsonNode projectArrayPath(
+            JsonNode current, int projections, String[] parts, int nextIndex) {
+        if (!current.isArray()) return MissingNode.getInstance();
+        ArrayNode projected = objectMapper.createArrayNode();
+        for (JsonNode item : current) {
+            JsonNode value = projections == 1
+                    ? resolvePath(item, parts, nextIndex)
+                    : projectArrayPath(item, projections - 1, parts, nextIndex);
+            projected.add(value.isMissingNode() ? NullNode.instance : value.deepCopy());
+        }
+        return projected;
     }
 
     private boolean equalValues(JsonNode left, JsonNode right) {
