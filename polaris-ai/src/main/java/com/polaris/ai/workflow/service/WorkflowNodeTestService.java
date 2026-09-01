@@ -893,6 +893,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         snapshot.put("type", node.getType());
         snapshot.put("handlerVersion", node.getHandlerVersion());
         snapshot.set("config", node.getConfig());
+        snapshot.set("inputMapping", objectMapper.valueToTree(node.getInputMapping()));
         snapshot.set("resourceRefs", objectMapper.valueToTree(node.getResourceRefs()));
         return WorkflowStructuredOutput.fingerprint(snapshot);
     }

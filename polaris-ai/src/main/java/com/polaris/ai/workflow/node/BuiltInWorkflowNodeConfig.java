@@ -9,18 +9,28 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** 确定性内置节点配置；依赖连接器的节点单独注册。 */
 @Configuration
 public class BuiltInWorkflowNodeConfig {
 
     private static final String TRANSFORM_TARGET_PATH_PATTERN =
-            "^[A-Za-z_][A-Za-z0-9_]*(?:\\[\\])*(?:\\.[A-Za-z_][A-Za-z0-9_]*(?:\\[\\])*){0,9}$";
+            "^(?:\\$|[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*(?:\\[\\])*(?:\\.[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*(?:\\[\\])*){0,9})$";
     private static final String TRANSFORM_SOURCE_PATH_PATTERN =
-            "^$|^(?:[A-Za-z_][A-Za-z0-9_-]*|\\[\\])(?:\\[\\])*(?:\\.(?:[A-Za-z_][A-Za-z0-9_-]*|[0-9]+)(?:\\[\\])*)*$";
+            "^$|^(?:[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*|\\[\\])(?:\\[\\])*(?:\\.(?:[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*|[0-9]+)(?:\\[\\])*)*$";
+    private static final String TRANSFORM_SIMPLE_PATH_PATTERN =
+            "^$|^[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*(?:\\.(?:[A-Za-z_\\u0080-\\uFFFF][A-Za-z0-9_\\-\\u0080-\\uFFFF]*|[0-9]+))*$";
+    private static final Pattern TRANSFORM_TEMPLATE_PATTERN = Pattern.compile(
+            "\\$\\{([\\p{L}_][\\p{L}\\p{N}_-]*(?:\\.[\\p{L}\\p{N}_-]+)*)}");
 
     @Bean
     public WorkflowNodeHandler transformWorkflowNodeHandler() {
@@ -44,6 +54,13 @@ public class BuiltInWorkflowNodeConfig {
                 JsonNode input = context.input() == null ? NullNode.instance : context.input();
                 JsonNode source = input.isObject() && input.has("source")
                         ? input.get("source") : input;
+                ObjectNode sources = JsonNodeFactory.instance.objectNode();
+                if (input.isObject() && input.has("source")) {
+                    input.properties().forEach(entry ->
+                            sources.set(entry.getKey(), entry.getValue().deepCopy()));
+                } else {
+                    sources.set("source", source.deepCopy());
+                }
                 JsonNode config = context.config() == null
                         ? JsonNodeFactory.instance.objectNode() : context.config();
                 if (!config.has("mode") && !config.has("rules")) {
@@ -51,22 +68,30 @@ public class BuiltInWorkflowNodeConfig {
                 }
                 String mode = config.path("mode").asText("OBJECT_MAP");
                 JsonNode rules = config.path("rules");
-                validateTransformRules(rules);
+                validateTransformRules(rules, mode);
                 boolean preserveUnmapped = config.path("preserveUnmapped").asBoolean(false);
                 int maximum = config.path("maxItems").asInt(1000);
+                String arrayAlignment = config.path("arrayAlignment").asText("PRIMARY");
+                String alignmentPath = config.path("alignmentPath").asText("");
+                if ("VALUE".equals(mode)) {
+                    return WorkflowNodeResult.success(transformRootValue(
+                            source, sources, rules, maximum));
+                }
                 if ("ARRAY_MAP".equals(mode)) {
+                    validateArrayAlignment(arrayAlignment, alignmentPath);
                     if (!source.isArray()) {
                         throw new IllegalArgumentException("数组逐项整理要求数据来源是数组");
                     }
-                    if (source.size() > maximum) {
-                        throw new IllegalArgumentException(
-                                "数组元素数量超过当前节点上限 " + maximum);
-                    }
+                    int outputSize = alignedArrayLength(
+                            sources, source, arrayAlignment, maximum);
                     ArrayNode output = JsonNodeFactory.instance.arrayNode();
-                    for (int index = 0; index < source.size(); index++) {
+                    for (int index = 0; index < outputSize; index++) {
                         context.cancellation().throwIfCancellationRequested();
+                        JsonNode primaryItem = index < source.size()
+                                ? source.get(index) : MissingNode.getInstance();
                         output.add(transformObject(
-                                source.get(index), rules, preserveUnmapped, index, maximum));
+                                primaryItem, sources, rules, preserveUnmapped,
+                                index, maximum, arrayAlignment, alignmentPath));
                     }
                     return WorkflowNodeResult.success(output);
                 }
@@ -74,7 +99,9 @@ public class BuiltInWorkflowNodeConfig {
                     throw new IllegalArgumentException("不支持的数据转换模式: " + mode);
                 }
                 return WorkflowNodeResult.success(
-                        transformObject(source, rules, preserveUnmapped, null, maximum));
+                        transformObject(source, sources, rules,
+                                preserveUnmapped, null, maximum,
+                                "PRIMARY", ""));
             }
         };
     }
@@ -97,6 +124,21 @@ public class BuiltInWorkflowNodeConfig {
                     return new ResolvedNodeSchema(
                             context.declaredInputSchema(), context.declaredOutputSchema(),
                             "NODE_CONTRACT", context.handlerVersion(), Map.of(), List.of());
+                }
+                if ("VALUE".equals(config.path("mode").asText())) {
+                    JsonNode rules = config.path("rules");
+                    ObjectNode outputSchema = JsonNodeFactory.instance.objectNode();
+                    try {
+                        validateTransformRules(rules, "VALUE");
+                        outputSchema = operationResultSchema(rules.get(0));
+                        fieldSources.put("$", "TRANSFORM_RULE");
+                    } catch (IllegalArgumentException exception) {
+                        diagnostics.add(exception.getMessage());
+                    }
+                    return new ResolvedNodeSchema(
+                            context.declaredInputSchema(), outputSchema,
+                            "TRANSFORM_RULES", transformFingerprint(config),
+                            fieldSources, diagnostics);
                 }
                 ObjectNode itemSchema = transformOutputItemSchema(
                         config, diagnostics, fieldSources);
@@ -125,12 +167,19 @@ public class BuiltInWorkflowNodeConfig {
                 .put("minimum", 1).put("maximum", 1).put("default", 1);
         properties.putObject("mode").put("type", "string")
                 .put("title", "整理方式").put("default", "OBJECT_MAP")
-                .putArray("enum").add("OBJECT_MAP").add("ARRAY_MAP");
+                .putArray("enum").add("OBJECT_MAP").add("ARRAY_MAP").add("VALUE");
         properties.putObject("preserveUnmapped").put("type", "boolean")
                 .put("title", "保留未配置字段").put("default", false);
         properties.putObject("maxItems").put("type", "integer")
                 .put("title", "数组最大处理条数")
                 .put("minimum", 1).put("maximum", 10000).put("default", 1000);
+        properties.putObject("arrayAlignment").put("type", "string")
+                .put("title", "多个数组的对齐方式").put("default", "PRIMARY")
+                .putArray("enum").add("PRIMARY").add("STRICT").add("SHORTEST")
+                .add("LONGEST").add("KEYED");
+        properties.putObject("alignmentPath").put("type", "string")
+                .put("title", "数组关联字段")
+                .put("pattern", TRANSFORM_SIMPLE_PATH_PATTERN);
 
         ObjectNode rules = properties.putObject("rules");
         rules.put("type", "array");
@@ -152,11 +201,21 @@ public class BuiltInWorkflowNodeConfig {
                 .add("COPY").add("CONSTANT")
                 .add("TO_STRING").add("TO_INTEGER").add("TO_NUMBER").add("TO_BOOLEAN")
                 .add("TRIM").add("UPPERCASE").add("LOWERCASE")
-                .add("ARRAY_JOIN").add("ARRAY_LENGTH");
+                .add("ARRAY_JOIN").add("ARRAY_LENGTH")
+                .add("CONCAT").add("DATE_FORMAT")
+                .add("ARRAY_FILTER").add("ARRAY_FLATTEN").add("ARRAY_SORT")
+                .add("ARRAY_DISTINCT").add("ARRAY_GROUP").add("ARRAY_AGGREGATE")
+                .add("TEMPLATE").add("EXPRESSION");
+        ruleProperties.putObject("sourceKey").put("type", "string")
+                .put("pattern", "^[A-Za-z_][A-Za-z0-9_]{0,39}$")
+                .put("default", "source");
         ruleProperties.putObject("resultType").put("type", "string")
                 .put("title", "输出类型").putArray("enum")
                 .add("object").add("array").add("string").add("integer")
                 .add("number").add("boolean").add("null");
+        ruleProperties.putObject("sourceType").put("type", "string")
+                .putArray("enum").add("object").add("array").add("string")
+                .add("integer").add("number").add("boolean").add("null");
         ruleProperties.putObject("resultSchema").put("type", "object")
                 .put("title", "来源字段结构");
         ruleProperties.set("value", JsonNodeFactory.instance.objectNode());
@@ -171,6 +230,47 @@ public class BuiltInWorkflowNodeConfig {
         ruleProperties.putObject("required").put("type", "boolean").put("default", false);
         ruleProperties.putObject("separator").put("type", "string")
                 .put("maxLength", 128).put("default", ",");
+        ruleProperties.putObject("prefix").put("type", "string").put("maxLength", 2000);
+        ruleProperties.putObject("suffix").put("type", "string").put("maxLength", 2000);
+        ObjectNode sourcePaths = ruleProperties.putObject("sourcePaths");
+        sourcePaths.put("type", "array").put("maxItems", 50);
+        sourcePaths.putObject("items").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("inputFormat").put("type", "string").put("maxLength", 128);
+        ruleProperties.putObject("outputFormat").put("type", "string")
+                .put("maxLength", 128).put("default", "yyyy-MM-dd HH:mm:ss");
+        ruleProperties.putObject("timezone").put("type", "string")
+                .put("maxLength", 80).put("default", "Asia/Shanghai");
+        ruleProperties.putObject("filterPath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("filterOperator").put("type", "string")
+                .putArray("enum").add("EQ").add("NE").add("GT").add("GTE")
+                .add("LT").add("LTE").add("CONTAINS").add("STARTS_WITH")
+                .add("ENDS_WITH").add("IS_NULL").add("NOT_NULL");
+        ruleProperties.set("filterValue", JsonNodeFactory.instance.objectNode());
+        ruleProperties.putObject("depth").put("type", "integer")
+                .put("minimum", 1).put("maximum", 10).put("default", 1);
+        ruleProperties.putObject("sortPath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("sortDirection").put("type", "string")
+                .putArray("enum").add("ASC").add("DESC");
+        ruleProperties.putObject("nulls").put("type", "string")
+                .putArray("enum").add("FIRST").add("LAST");
+        ruleProperties.putObject("distinctPath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("groupPath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("groupAggregate").put("type", "string")
+                .putArray("enum").add("NONE").add("COUNT").add("SUM")
+                .add("AVG").add("MIN").add("MAX");
+        ruleProperties.putObject("groupAggregatePath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("aggregatePath").put("type", "string")
+                .put("pattern", TRANSFORM_SOURCE_PATH_PATTERN);
+        ruleProperties.putObject("aggregate").put("type", "string")
+                .putArray("enum").add("COUNT").add("SUM").add("AVG").add("MIN").add("MAX");
+        ruleProperties.putObject("template").put("type", "string").put("maxLength", 12000);
+        ruleProperties.putObject("expression").put("type", "string").put("maxLength", 2000);
         schema.put("additionalProperties", false);
         return schema;
     }
@@ -183,8 +283,11 @@ public class BuiltInWorkflowNodeConfig {
     }
 
     private JsonNode transformObject(
-            JsonNode source, JsonNode rules, boolean preserveUnmapped,
-            Integer arrayIndex, int maximumArrayItems) {
+            JsonNode source, ObjectNode sources, JsonNode rules, boolean preserveUnmapped,
+            Integer arrayIndex, int maximumArrayItems,
+            String arrayAlignment, String alignmentPath) {
+        ObjectNode contextualSources = transformSourcesForIndex(
+                sources, source, arrayIndex, arrayAlignment, alignmentPath);
         ObjectNode output = preserveUnmapped && source != null && source.isObject()
                 ? ((ObjectNode) source).deepCopy()
                 : JsonNodeFactory.instance.objectNode();
@@ -200,22 +303,131 @@ public class BuiltInWorkflowNodeConfig {
                 writeTransformLeaf(output, targetTokens, List.of(), rule.path("value"));
                 continue;
             }
+            JsonNode ruleSource = transformRuleSource(source, contextualSources, rule);
             List<TransformPathToken> sourceTokens = parseTransformPath(
                     rule.path("sourcePath").asText(""));
-            walkTransformSource(source, sourceTokens, 0, new ArrayList<>(), 0,
-                    output, targetTokens, rule, arrayIndex, maximumArrayItems);
+            walkTransformSource(ruleSource, sourceTokens, 0, new ArrayList<>(), 0,
+                    output, targetTokens, rule, arrayIndex, maximumArrayItems,
+                    ruleSource, contextualSources);
         }
         return output;
+    }
+
+    private ObjectNode transformSourcesForIndex(
+            ObjectNode sources, JsonNode primarySource, Integer arrayIndex,
+            String arrayAlignment, String alignmentPath) {
+        ObjectNode contextual = JsonNodeFactory.instance.objectNode();
+        JsonNode primaryKey = "KEYED".equals(arrayAlignment)
+                ? readTransformPath(primarySource, alignmentPath)
+                : MissingNode.getInstance();
+        sources.properties().forEach(entry -> {
+            JsonNode candidate = entry.getValue();
+            if (arrayIndex != null && candidate.isArray()) {
+                candidate = "KEYED".equals(arrayAlignment) && !"source".equals(entry.getKey())
+                        ? keyedArrayItem(candidate, primaryKey, alignmentPath, entry.getKey())
+                        : arrayIndex < candidate.size()
+                                ? candidate.path(arrayIndex) : MissingNode.getInstance();
+            }
+            contextual.set(entry.getKey(), candidate.deepCopy());
+        });
+        contextual.set("source", primarySource == null
+                ? NullNode.instance : primarySource.deepCopy());
+        return contextual;
+    }
+
+    private int alignedArrayLength(
+            ObjectNode sources, JsonNode primarySource,
+            String arrayAlignment, int maximumArrayItems) {
+        List<Integer> lengths = new ArrayList<>();
+        sources.properties().forEach(entry -> {
+            if (!entry.getValue().isArray()) return;
+            int size = entry.getValue().size();
+            if (size > maximumArrayItems) {
+                throw new IllegalArgumentException(
+                        "数据来源 " + entry.getKey() + " 的数组元素数量超过上限 "
+                                + maximumArrayItems);
+            }
+            lengths.add(size);
+        });
+        if (lengths.isEmpty()) return primarySource.size();
+        if ("STRICT".equals(arrayAlignment)
+                && lengths.stream().anyMatch(length -> length != primarySource.size())) {
+            throw new IllegalArgumentException("多个数组长度不一致，请调整对齐方式或补齐数据");
+        }
+        return switch (arrayAlignment) {
+            case "SHORTEST" -> lengths.stream().min(Integer::compareTo).orElse(0);
+            case "LONGEST" -> lengths.stream().max(Integer::compareTo).orElse(primarySource.size());
+            default -> primarySource.size();
+        };
+    }
+
+    private JsonNode keyedArrayItem(
+            JsonNode array, JsonNode primaryKey, String alignmentPath, String sourceKey) {
+        if (transformNull(primaryKey)) {
+            throw new IllegalArgumentException("主要数组缺少关联字段 " + alignmentPath);
+        }
+        JsonNode match = MissingNode.getInstance();
+        for (JsonNode item : array) {
+            if (!transformValuesEqual(
+                    readTransformPath(item, alignmentPath), primaryKey)) continue;
+            if (!match.isMissingNode()) {
+                throw new IllegalArgumentException(
+                        "数据来源 " + sourceKey + " 的关联字段存在重复值: "
+                                + transformText(primaryKey));
+            }
+            match = item;
+        }
+        return match;
+    }
+
+    private JsonNode transformRootValue(
+            JsonNode source, ObjectNode sources, JsonNode rules, int maximumArrayItems) {
+        JsonNode rule = rules.get(0);
+        String operation = rule.path("operation").asText("COPY");
+        JsonNode original;
+        ObjectNode contextualSources = transformSourcesForIndex(
+                sources, source, null, "PRIMARY", "");
+        JsonNode ruleSource = transformRuleSource(source, contextualSources, rule);
+        if ("CONSTANT".equals(operation)) {
+            original = rule.path("value");
+        } else {
+            original = readTransformPath(ruleSource, rule.path("sourcePath").asText(""));
+        }
+        JsonNode value = applyDefault(rule, original);
+        if (value == null || value.isMissingNode()) {
+            if (rule.path("required").asBoolean(false)) {
+                throw transformFailure("$", null, List.of(), "来源字段不存在", null);
+            }
+            return NullNode.instance;
+        }
+        try {
+            return applyOperation(operation, value, rule,
+                    ruleSource, contextualSources, maximumArrayItems);
+        } catch (RuntimeException exception) {
+            JsonNode fallback = recoverTransformError(rule, original, exception);
+            if (fallback == null) {
+                throw transformFailure("$", null, List.of(), exception.getMessage(), exception);
+            }
+            return fallback;
+        }
+    }
+
+    private JsonNode transformRuleSource(
+            JsonNode primarySource, ObjectNode sources, JsonNode rule) {
+        String sourceKey = rule.path("sourceKey").asText("source");
+        if (sourceKey.isBlank() || "source".equals(sourceKey)) return primarySource;
+        return sources.path(sourceKey);
     }
 
     private void walkTransformSource(
             JsonNode current, List<TransformPathToken> sourceTokens, int tokenIndex,
             List<Integer> indexes, int wildcardDepth, ObjectNode output,
             List<TransformPathToken> targetTokens, JsonNode rule, Integer outerArrayIndex,
-            int maximumArrayItems) {
+            int maximumArrayItems, JsonNode ruleSource, ObjectNode sources) {
         if (tokenIndex >= sourceTokens.size()) {
             applyTransformLeaf(output, targetTokens, indexes, rule,
-                    current == null ? MissingNode.getInstance() : current, outerArrayIndex);
+                    current == null ? MissingNode.getInstance() : current,
+                    outerArrayIndex, ruleSource, sources, maximumArrayItems);
             return;
         }
         TransformPathToken token = sourceTokens.get(tokenIndex);
@@ -241,7 +453,7 @@ public class BuiltInWorkflowNodeConfig {
                 ensureTransformTargetItem(output, targetTokens, indexes, wildcardDepth);
                 walkTransformSource(current.get(index), sourceTokens, tokenIndex + 1,
                         indexes, wildcardDepth + 1, output, targetTokens, rule,
-                        outerArrayIndex, maximumArrayItems);
+                        outerArrayIndex, maximumArrayItems, ruleSource, sources);
                 indexes.remove(indexes.size() - 1);
             }
             return;
@@ -249,7 +461,7 @@ public class BuiltInWorkflowNodeConfig {
         JsonNode next = readTransformField(current, token.field());
         walkTransformSource(next, sourceTokens, tokenIndex + 1, indexes,
                 wildcardDepth, output, targetTokens, rule, outerArrayIndex,
-                maximumArrayItems);
+                maximumArrayItems, ruleSource, sources);
     }
 
     private JsonNode readTransformField(JsonNode source, String field) {
@@ -268,7 +480,8 @@ public class BuiltInWorkflowNodeConfig {
 
     private void applyTransformLeaf(
             ObjectNode output, List<TransformPathToken> targetTokens, List<Integer> indexes,
-            JsonNode rule, JsonNode original, Integer outerArrayIndex) {
+            JsonNode rule, JsonNode original, Integer outerArrayIndex,
+            JsonNode ruleSource, ObjectNode sources, int maximumArrayItems) {
         String targetPath = rule.path("targetPath").asText();
         JsonNode value = applyDefault(rule, original);
         if (value == null || value.isMissingNode()) {
@@ -280,7 +493,8 @@ public class BuiltInWorkflowNodeConfig {
         }
         try {
             JsonNode converted = applyOperation(
-                    rule.path("operation").asText("COPY"), value, rule);
+                    rule.path("operation").asText("COPY"), value, rule,
+                    ruleSource, sources, maximumArrayItems);
             writeTransformLeaf(output, targetTokens, indexes, converted);
         } catch (RuntimeException exception) {
             JsonNode fallback = recoverTransformError(rule, original, exception);
@@ -463,7 +677,9 @@ public class BuiltInWorkflowNodeConfig {
                 ? rule.get("defaultValue").deepCopy() : NullNode.instance;
     }
 
-    private JsonNode applyOperation(String operation, JsonNode value, JsonNode rule) {
+    private JsonNode applyOperation(
+            String operation, JsonNode value, JsonNode rule,
+            JsonNode ruleSource, ObjectNode sources, int maximumArrayItems) {
         return switch (operation) {
             case "COPY", "CONSTANT" -> value.deepCopy();
             case "TO_STRING" -> JsonNodeFactory.instance.textNode(
@@ -478,8 +694,348 @@ public class BuiltInWorkflowNodeConfig {
                     value.asText().toLowerCase(Locale.ROOT));
             case "ARRAY_JOIN" -> joinArray(value, rule.path("separator").asText(","));
             case "ARRAY_LENGTH" -> JsonNodeFactory.instance.numberNode(containerLength(value));
+            case "CONCAT" -> concatenateFields(ruleSource, value, rule);
+            case "DATE_FORMAT" -> formatDate(value, rule);
+            case "ARRAY_FILTER" -> filterArray(value, rule, maximumArrayItems);
+            case "ARRAY_FLATTEN" -> flattenArray(
+                    value, rule.path("depth").asInt(1), maximumArrayItems);
+            case "ARRAY_SORT" -> sortArray(value, rule, maximumArrayItems);
+            case "ARRAY_DISTINCT" -> distinctArray(
+                    value, rule.path("distinctPath").asText(""), maximumArrayItems);
+            case "ARRAY_GROUP" -> groupArray(value, rule, maximumArrayItems);
+            case "ARRAY_AGGREGATE" -> aggregateArray(value, rule, maximumArrayItems);
+            case "TEMPLATE" -> renderTemplate(rule.path("template").asText(""),
+                    value, ruleSource, sources);
+            case "EXPRESSION" -> coerceExpressionResult(
+                    WorkflowTransformExpressionEvaluator.evaluate(
+                            rule.path("expression").asText(""), value, ruleSource, sources),
+                    rule.path("resultType").asText("string"));
             default -> throw new IllegalArgumentException("不支持的处理方式: " + operation);
         };
+    }
+
+    private JsonNode concatenateFields(JsonNode source, JsonNode value, JsonNode rule) {
+        List<String> values = new ArrayList<>();
+        JsonNode sourcePaths = rule.path("sourcePaths");
+        if (sourcePaths.isArray() && !sourcePaths.isEmpty()) {
+            sourcePaths.forEach(path -> values.add(transformText(
+                    readTransformPath(source, path.asText("")))));
+        } else {
+            values.add(transformText(value));
+        }
+        return JsonNodeFactory.instance.textNode(
+                rule.path("prefix").asText("")
+                        + String.join(rule.path("separator").asText(""), values)
+                        + rule.path("suffix").asText(""));
+    }
+
+    private String transformText(JsonNode value) {
+        if (value == null || value.isMissingNode() || value.isNull()) return "";
+        return value.isContainerNode() ? value.toString() : value.asText();
+    }
+
+    private JsonNode coerceExpressionResult(JsonNode value, String resultType) {
+        return switch (resultType) {
+            case "string" -> JsonNodeFactory.instance.textNode(transformText(value));
+            case "integer" -> JsonNodeFactory.instance.numberNode(toLongExact(value));
+            case "number" -> JsonNodeFactory.instance.numberNode(toDecimal(value));
+            case "boolean" -> JsonNodeFactory.instance.booleanNode(toBoolean(value));
+            case "object" -> {
+                if (!value.isObject()) throw new IllegalArgumentException("表达式结果不是对象");
+                yield value.deepCopy();
+            }
+            case "array" -> {
+                if (!value.isArray()) throw new IllegalArgumentException("表达式结果不是数组");
+                yield value.deepCopy();
+            }
+            case "null" -> {
+                if (!value.isNull()) throw new IllegalArgumentException("表达式结果不是空值");
+                yield NullNode.instance;
+            }
+            default -> throw new IllegalArgumentException("表达式结果类型无效: " + resultType);
+        };
+    }
+
+    private JsonNode formatDate(JsonNode value, JsonNode rule) {
+        ZoneId zone;
+        try {
+            zone = ZoneId.of(rule.path("timezone").asText("Asia/Shanghai"));
+        } catch (DateTimeException exception) {
+            throw new IllegalArgumentException("时区无效", exception);
+        }
+        ZonedDateTime dateTime = parseTransformDate(
+                value, rule.path("inputFormat").asText(""), zone);
+        try {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern(
+                    rule.path("outputFormat").asText("yyyy-MM-dd HH:mm:ss"), Locale.ROOT);
+            return JsonNodeFactory.instance.textNode(formatter.format(dateTime));
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("输出日期格式无效", exception);
+        }
+    }
+
+    private ZonedDateTime parseTransformDate(JsonNode value, String inputFormat, ZoneId zone) {
+        if (value.isNumber()) {
+            long timestamp = value.longValue();
+            Instant instant = Math.abs(timestamp) < 100_000_000_000L
+                    ? Instant.ofEpochSecond(timestamp) : Instant.ofEpochMilli(timestamp);
+            return instant.atZone(zone);
+        }
+        String text = value.asText().trim();
+        try {
+            if (!inputFormat.isBlank()) {
+                DateTimeFormatter formatter = DateTimeFormatter.ofPattern(inputFormat, Locale.ROOT);
+                try {
+                    return ZonedDateTime.parse(text, formatter).withZoneSameInstant(zone);
+                } catch (DateTimeParseException ignored) {
+                    try {
+                        return OffsetDateTime.parse(text, formatter).atZoneSameInstant(zone);
+                    } catch (DateTimeParseException ignoredOffset) {
+                        try {
+                            return LocalDateTime.parse(text, formatter).atZone(zone);
+                        } catch (DateTimeParseException ignoredDateTime) {
+                            return LocalDate.parse(text, formatter).atStartOfDay(zone);
+                        }
+                    }
+                }
+            }
+            try {
+                return Instant.parse(text).atZone(zone);
+            } catch (DateTimeParseException ignored) {
+                try {
+                    return OffsetDateTime.parse(text).atZoneSameInstant(zone);
+                } catch (DateTimeParseException ignoredOffset) {
+                    try {
+                        return LocalDateTime.parse(text).atZone(zone);
+                    } catch (DateTimeParseException ignoredDateTime) {
+                        return LocalDate.parse(text).atStartOfDay(zone);
+                    }
+                }
+            }
+        } catch (DateTimeException exception) {
+            throw new IllegalArgumentException("无法识别日期时间", exception);
+        }
+    }
+
+    private JsonNode filterArray(JsonNode value, JsonNode rule, int maximumArrayItems) {
+        requireArray(value, "数组筛选", maximumArrayItems);
+        ArrayNode output = JsonNodeFactory.instance.arrayNode();
+        String path = rule.path("filterPath").asText("");
+        String operator = rule.path("filterOperator").asText("EQ");
+        JsonNode expected = rule.has("filterValue") ? rule.get("filterValue") : NullNode.instance;
+        value.forEach(item -> {
+            JsonNode actual = readTransformPath(item, path);
+            if (matchesFilter(actual, operator, expected)) output.add(item.deepCopy());
+        });
+        return output;
+    }
+
+    private boolean matchesFilter(JsonNode actual, String operator, JsonNode expected) {
+        boolean empty = actual == null || actual.isMissingNode() || actual.isNull();
+        return switch (operator) {
+            case "IS_NULL" -> empty;
+            case "NOT_NULL" -> !empty;
+            case "EQ" -> transformValuesEqual(actual, expected);
+            case "NE" -> !transformValuesEqual(actual, expected);
+            case "GT" -> compareTransformValues(actual, expected) > 0;
+            case "GTE" -> compareTransformValues(actual, expected) >= 0;
+            case "LT" -> compareTransformValues(actual, expected) < 0;
+            case "LTE" -> compareTransformValues(actual, expected) <= 0;
+            case "CONTAINS" -> transformText(actual).contains(transformText(expected));
+            case "STARTS_WITH" -> transformText(actual).startsWith(transformText(expected));
+            case "ENDS_WITH" -> transformText(actual).endsWith(transformText(expected));
+            default -> throw new IllegalArgumentException("不支持的筛选条件: " + operator);
+        };
+    }
+
+    private JsonNode flattenArray(JsonNode value, int depth, int maximumArrayItems) {
+        requireArray(value, "数组展开", maximumArrayItems);
+        ArrayNode output = JsonNodeFactory.instance.arrayNode();
+        flattenArrayItems(value, Math.max(1, Math.min(10, depth)), output, maximumArrayItems);
+        return output;
+    }
+
+    private void flattenArrayItems(
+            JsonNode value, int depth, ArrayNode output, int maximumArrayItems) {
+        value.forEach(item -> {
+            if (depth > 0 && item.isArray()) {
+                flattenArrayItems(item, depth - 1, output, maximumArrayItems);
+            } else {
+                if (output.size() >= maximumArrayItems) {
+                    throw new IllegalArgumentException(
+                            "数组展开后的元素数量超过上限 " + maximumArrayItems);
+                }
+                output.add(item.deepCopy());
+            }
+        });
+    }
+
+    private JsonNode sortArray(JsonNode value, JsonNode rule, int maximumArrayItems) {
+        requireArray(value, "数组排序", maximumArrayItems);
+        String path = rule.path("sortPath").asText("");
+        boolean descending = "DESC".equals(rule.path("sortDirection").asText("ASC"));
+        boolean nullsFirst = "FIRST".equals(rule.path("nulls").asText("LAST"));
+        List<JsonNode> items = new ArrayList<>();
+        value.forEach(item -> items.add(item.deepCopy()));
+        Comparator<JsonNode> comparator = (left, right) -> {
+            JsonNode leftValue = readTransformPath(left, path);
+            JsonNode rightValue = readTransformPath(right, path);
+            boolean leftNull = transformNull(leftValue);
+            boolean rightNull = transformNull(rightValue);
+            if (leftNull || rightNull) {
+                if (leftNull && rightNull) return 0;
+                return (leftNull == nullsFirst) ? -1 : 1;
+            }
+            int compared = compareTransformValues(leftValue, rightValue);
+            return descending ? -compared : compared;
+        };
+        items.sort(comparator);
+        ArrayNode output = JsonNodeFactory.instance.arrayNode();
+        items.forEach(output::add);
+        return output;
+    }
+
+    private JsonNode distinctArray(JsonNode value, String path, int maximumArrayItems) {
+        requireArray(value, "数组去重", maximumArrayItems);
+        Set<JsonNode> seen = new LinkedHashSet<>();
+        ArrayNode output = JsonNodeFactory.instance.arrayNode();
+        value.forEach(item -> {
+            JsonNode key = readTransformPath(item, path);
+            if (seen.add(key.deepCopy())) output.add(item.deepCopy());
+        });
+        return output;
+    }
+
+    private JsonNode groupArray(JsonNode value, JsonNode rule, int maximumArrayItems) {
+        requireArray(value, "数组分组", maximumArrayItems);
+        String path = rule.path("groupPath").asText("");
+        Map<JsonNode, ArrayNode> groups = new LinkedHashMap<>();
+        value.forEach(item -> {
+            JsonNode key = readTransformPath(item, path);
+            groups.computeIfAbsent(key.deepCopy(), ignored -> JsonNodeFactory.instance.arrayNode())
+                    .add(item.deepCopy());
+        });
+        ArrayNode output = JsonNodeFactory.instance.arrayNode();
+        groups.forEach((key, items) -> {
+            ObjectNode group = output.addObject();
+            group.set("key", key.deepCopy());
+            group.set("items", items);
+            String aggregate = rule.path("groupAggregate").asText("NONE");
+            if (!"NONE".equals(aggregate)) {
+                group.set("value", aggregateArray(items, aggregate,
+                        rule.path("groupAggregatePath").asText(""), maximumArrayItems));
+            }
+        });
+        return output;
+    }
+
+    private JsonNode aggregateArray(JsonNode value, JsonNode rule, int maximumArrayItems) {
+        return aggregateArray(value, rule.path("aggregate").asText("COUNT"),
+                rule.path("aggregatePath").asText(""), maximumArrayItems);
+    }
+
+    private JsonNode aggregateArray(
+            JsonNode value, String aggregate, String path, int maximumArrayItems) {
+        requireArray(value, "数组聚合", maximumArrayItems);
+        if ("COUNT".equals(aggregate)) {
+            return JsonNodeFactory.instance.numberNode(value.size());
+        }
+        List<BigDecimal> numbers = new ArrayList<>();
+        value.forEach(item -> {
+            JsonNode current = readTransformPath(item, path);
+            if (!transformNull(current)) numbers.add(toDecimal(current));
+        });
+        if (numbers.isEmpty()) return NullNode.instance;
+        BigDecimal result = switch (aggregate) {
+            case "SUM" -> numbers.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+            case "AVG" -> numbers.stream().reduce(BigDecimal.ZERO, BigDecimal::add)
+                    .divide(BigDecimal.valueOf(numbers.size()), MathContext.DECIMAL128);
+            case "MIN" -> numbers.stream().min(BigDecimal::compareTo).orElseThrow();
+            case "MAX" -> numbers.stream().max(BigDecimal::compareTo).orElseThrow();
+            default -> throw new IllegalArgumentException("不支持的聚合方式: " + aggregate);
+        };
+        return JsonNodeFactory.instance.numberNode(result.stripTrailingZeros());
+    }
+
+    private JsonNode renderTemplate(
+            String template, JsonNode value, JsonNode source, ObjectNode sources) {
+        Matcher matcher = TRANSFORM_TEMPLATE_PATTERN.matcher(template);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String path = matcher.group(1);
+            JsonNode replacement;
+            if ("value".equals(path) || path.startsWith("value.")) {
+                replacement = readTransformPath(value,
+                        path.length() == 5 ? "" : path.substring(6));
+            } else if ("source".equals(path) || path.startsWith("source.")) {
+                replacement = readTransformPath(source,
+                        path.length() == 6 ? "" : path.substring(7));
+            } else {
+                int dot = path.indexOf('.');
+                String possibleSource = dot < 0 ? path : path.substring(0, dot);
+                if (sources.has(possibleSource)) {
+                    replacement = readTransformPath(sources.path(possibleSource),
+                            dot < 0 ? "" : path.substring(dot + 1));
+                } else {
+                    replacement = readTransformPath(source, path);
+                }
+            }
+            matcher.appendReplacement(result, Matcher.quoteReplacement(transformText(replacement)));
+        }
+        matcher.appendTail(result);
+        return JsonNodeFactory.instance.textNode(result.toString());
+    }
+
+    private JsonNode readTransformPath(JsonNode source, String path) {
+        JsonNode current = source == null ? MissingNode.getInstance() : source;
+        if (path == null || path.isBlank()) return current;
+        for (String part : path.split("\\.")) {
+            if (current.isArray() && part.chars().allMatch(Character::isDigit)) {
+                current = current.path(Integer.parseInt(part));
+            } else {
+                current = current.path(part);
+            }
+            if (current.isMissingNode()) return current;
+        }
+        return current;
+    }
+
+    private void requireArray(JsonNode value, String operation, int maximumArrayItems) {
+        if (!value.isArray()) throw new IllegalArgumentException(operation + "要求来源字段是数组");
+        if (value.size() > maximumArrayItems) {
+            throw new IllegalArgumentException(
+                    operation + "的数组元素数量超过上限 " + maximumArrayItems);
+        }
+    }
+
+    private boolean transformNull(JsonNode value) {
+        return value == null || value.isMissingNode() || value.isNull();
+    }
+
+    private boolean transformValuesEqual(JsonNode left, JsonNode right) {
+        if (transformNull(left) || transformNull(right)) {
+            return transformNull(left) && transformNull(right);
+        }
+        if (left.isNumber() && right.isNumber()) {
+            return left.decimalValue().compareTo(right.decimalValue()) == 0;
+        }
+        return left.equals(right);
+    }
+
+    private int compareTransformValues(JsonNode left, JsonNode right) {
+        if (transformNull(left) || transformNull(right)) {
+            throw new IllegalArgumentException("不能比较空值");
+        }
+        if (left.isNumber() && right.isNumber()) {
+            return left.decimalValue().compareTo(right.decimalValue());
+        }
+        if (left.isTextual() && right.isTextual()) {
+            return left.asText().compareTo(right.asText());
+        }
+        if (left.isBoolean() && right.isBoolean()) {
+            return Boolean.compare(left.asBoolean(), right.asBoolean());
+        }
+        throw new IllegalArgumentException("排序和比较只支持数字、文本或是/否值");
     }
 
     private long toLongExact(JsonNode value) {
@@ -561,7 +1117,12 @@ public class BuiltInWorkflowNodeConfig {
     }
 
     private void validateTargetPath(String path) {
-        if (path == null || !path.matches(TRANSFORM_TARGET_PATH_PATTERN)) {
+        validateTargetPath(path, false);
+    }
+
+    private void validateTargetPath(String path, boolean allowRoot) {
+        if (path == null || !path.matches(TRANSFORM_TARGET_PATH_PATTERN)
+                || (!allowRoot && "$".equals(path))) {
             throw new IllegalArgumentException("输出字段路径无效: " + path);
         }
     }
@@ -572,25 +1133,41 @@ public class BuiltInWorkflowNodeConfig {
         }
     }
 
-    private void validateTransformRules(JsonNode rules) {
-        if (rules == null || !rules.isArray()) return;
+    private void validateTransformRules(JsonNode rules, String mode) {
+        boolean rootMode = "VALUE".equals(mode);
+        if (rules == null || !rules.isArray()) {
+            if (rootMode) {
+                throw new IllegalArgumentException("直接转换整份数据时必须配置一条规则");
+            }
+            return;
+        }
+        if (rootMode && rules.size() != 1) {
+            throw new IllegalArgumentException("直接转换整份数据时必须且只能配置一条规则");
+        }
         List<String> paths = new ArrayList<>();
         for (JsonNode rule : rules) {
             String path = rule.path("targetPath").asText("").trim();
-            validateTargetPath(path);
+            validateTargetPath(path, rootMode);
+            if (rootMode && !"$".equals(path)) {
+                throw new IllegalArgumentException("直接转换整份数据的输出位置必须为 $");
+            }
             String operation = rule.path("operation").asText("COPY");
             String sourcePath = rule.path("sourcePath").asText("");
             if (!"CONSTANT".equals(operation)) {
                 validateSourcePath(sourcePath);
+                if (rootMode && sourcePath.contains("[]")) {
+                    throw new IllegalArgumentException("根级转换不支持数组通配路径，请直接选择整个数组");
+                }
                 int sourceWildcards = countWildcards(parseTransformPath(sourcePath));
                 int targetWildcards = countWildcards(parseTransformPath(path));
-                if (sourceWildcards != targetWildcards) {
+                if (!rootMode && sourceWildcards != targetWildcards) {
                     throw new IllegalArgumentException(
                             "来源和输出路径的数组层级必须一致: " + sourcePath + " → " + path);
                 }
             } else if (path.contains("[]")) {
                 throw new IllegalArgumentException("固定值不能直接写入数组通配路径: " + path);
             }
+            validateAdvancedTransformRule(rule);
             for (String existing : paths) {
                 if (transformPathsConflict(existing, path)) {
                     throw new IllegalArgumentException(
@@ -598,6 +1175,118 @@ public class BuiltInWorkflowNodeConfig {
                 }
             }
             paths.add(path);
+        }
+    }
+
+    private void validateArrayAlignment(String alignment, String alignmentPath) {
+        if (!Set.of("PRIMARY", "STRICT", "SHORTEST", "LONGEST", "KEYED")
+                .contains(alignment)) {
+            throw new IllegalArgumentException("多个数组的对齐方式无效");
+        }
+        if ("KEYED".equals(alignment)) {
+            validateSimpleTransformPath(alignmentPath, "数组关联字段");
+            if (alignmentPath.isBlank()) {
+                throw new IllegalArgumentException("按字段关联数组时必须选择关联字段");
+            }
+        }
+    }
+
+    private void validateAdvancedTransformRule(JsonNode rule) {
+        String operation = rule.path("operation").asText("COPY");
+        Set<String> operations = Set.of(
+                "COPY", "CONSTANT", "TO_STRING", "TO_INTEGER", "TO_NUMBER",
+                "TO_BOOLEAN", "TRIM", "UPPERCASE", "LOWERCASE", "ARRAY_JOIN",
+                "ARRAY_LENGTH", "CONCAT", "DATE_FORMAT", "ARRAY_FILTER",
+                "ARRAY_FLATTEN", "ARRAY_SORT", "ARRAY_DISTINCT", "ARRAY_GROUP",
+                "ARRAY_AGGREGATE", "TEMPLATE", "EXPRESSION");
+        if (!operations.contains(operation)) {
+            throw new IllegalArgumentException("不支持的处理方式: " + operation);
+        }
+        String sourceKey = rule.path("sourceKey").asText("source");
+        if (!sourceKey.matches("^[A-Za-z_][A-Za-z0-9_]{0,39}$")) {
+            throw new IllegalArgumentException("数据来源标识无效: " + sourceKey);
+        }
+        if ("CONCAT".equals(operation) && rule.path("sourcePaths").isArray()) {
+            rule.path("sourcePaths").forEach(path -> validateSimpleTransformPath(
+                    path.asText(""), "拼接字段"));
+        }
+        if ("DATE_FORMAT".equals(operation)
+                && rule.path("outputFormat").asText("").isBlank()) {
+            throw new IllegalArgumentException("日期格式化必须填写输出格式");
+        }
+        if ("ARRAY_FILTER".equals(operation)) {
+            validateSimpleTransformPath(rule.path("filterPath").asText(""), "筛选字段");
+            Set<String> filters = Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE",
+                    "CONTAINS", "STARTS_WITH", "ENDS_WITH", "IS_NULL", "NOT_NULL");
+            if (!filters.contains(rule.path("filterOperator").asText("EQ"))) {
+                throw new IllegalArgumentException("数组筛选方式无效");
+            }
+        }
+        if ("ARRAY_FLATTEN".equals(operation)
+                && (rule.path("depth").asInt(1) < 1 || rule.path("depth").asInt(1) > 10)) {
+            throw new IllegalArgumentException("数组展开层数必须在 1 到 10 之间");
+        }
+        if ("ARRAY_SORT".equals(operation)) {
+            validateSimpleTransformPath(rule.path("sortPath").asText(""), "排序字段");
+        }
+        if ("ARRAY_DISTINCT".equals(operation)) {
+            validateSimpleTransformPath(rule.path("distinctPath").asText(""), "去重字段");
+        }
+        if ("ARRAY_GROUP".equals(operation)) {
+            validateSimpleTransformPath(rule.path("groupPath").asText(""), "分组字段");
+            String groupAggregate = rule.path("groupAggregate").asText("NONE");
+            if (!Set.of("NONE", "COUNT", "SUM", "AVG", "MIN", "MAX")
+                    .contains(groupAggregate)) {
+                throw new IllegalArgumentException("分组聚合方式无效");
+            }
+            if (!Set.of("NONE", "COUNT").contains(groupAggregate)) {
+                validateSimpleTransformPath(rule.path("groupAggregatePath").asText(""),
+                        "分组聚合字段");
+            }
+        }
+        if ("ARRAY_AGGREGATE".equals(operation)) {
+            String aggregate = rule.path("aggregate").asText("COUNT");
+            if (!Set.of("COUNT", "SUM", "AVG", "MIN", "MAX").contains(aggregate)) {
+                throw new IllegalArgumentException("数组聚合方式无效");
+            }
+            if (!"COUNT".equals(aggregate)) {
+                validateSimpleTransformPath(
+                        rule.path("aggregatePath").asText(""), "聚合字段");
+            }
+        }
+        if ("TEMPLATE".equals(operation) && rule.path("template").asText("").isBlank()) {
+            throw new IllegalArgumentException("文本模板不能为空");
+        }
+        if ("EXPRESSION".equals(operation)
+                && rule.path("expression").asText("").isBlank()) {
+            throw new IllegalArgumentException("受限表达式不能为空");
+        }
+        String onError = rule.path("onError").asText("FAIL");
+        if ("DEFAULT".equals(onError) && rule.has("defaultValue")
+                && !rule.path("defaultValue").isNull()) {
+            validateFallbackType(rule, rule.get("defaultValue"), "转换失败默认值");
+        }
+        String defaultWhen = rule.path("defaultWhen").asText("NEVER");
+        if (!"NEVER".equals(defaultWhen) && rule.has("defaultValue")
+                && !rule.path("defaultValue").isNull()) {
+            validateFallbackType(rule, rule.get("defaultValue"), "字段默认值");
+        }
+    }
+
+    private void validateFallbackType(JsonNode rule, JsonNode value, String label) {
+        String expected = operationResultType(rule);
+        String actual = jsonType(value);
+        boolean compatible = expected.equals(actual)
+                || "number".equals(expected) && "integer".equals(actual);
+        if (!compatible) {
+            throw new IllegalArgumentException(
+                    label + "类型应为 " + expected + "，当前为 " + actual);
+        }
+    }
+
+    private void validateSimpleTransformPath(String path, String label) {
+        if (path == null || !path.matches(TRANSFORM_SIMPLE_PATH_PATTERN)) {
+            throw new IllegalArgumentException(label + "路径无效: " + path);
         }
     }
 
@@ -664,6 +1353,7 @@ public class BuiltInWorkflowNodeConfig {
                 } else if (path.contains("[]")) {
                     throw new IllegalArgumentException("固定值不能直接写入数组通配路径: " + path);
                 }
+                validateAdvancedTransformRule(rule);
                 if (targetPaths.stream().anyMatch(existing -> transformPathsConflict(existing, path))) {
                     throw new IllegalArgumentException("输出字段路径冲突: " + path);
                 }
@@ -686,31 +1376,86 @@ public class BuiltInWorkflowNodeConfig {
     private String operationResultType(JsonNode rule) {
         String operation = rule.path("operation").asText("COPY");
         return switch (operation) {
-            case "TO_STRING", "TRIM", "UPPERCASE", "LOWERCASE", "ARRAY_JOIN" -> "string";
+            case "TO_STRING", "TRIM", "UPPERCASE", "LOWERCASE", "ARRAY_JOIN",
+                    "CONCAT", "DATE_FORMAT", "TEMPLATE" -> "string";
             case "TO_INTEGER", "ARRAY_LENGTH" -> "integer";
             case "TO_NUMBER" -> "number";
+            case "ARRAY_AGGREGATE" -> "COUNT".equals(rule.path("aggregate").asText("COUNT"))
+                    ? "integer" : "number";
             case "TO_BOOLEAN" -> "boolean";
+            case "ARRAY_FILTER", "ARRAY_FLATTEN", "ARRAY_SORT", "ARRAY_DISTINCT",
+                    "ARRAY_GROUP" -> "array";
+            case "EXPRESSION" -> rule.path("resultType").asText("string");
             case "CONSTANT" -> rule.hasNonNull("resultType")
                     ? rule.path("resultType").asText() : jsonType(rule.get("value"));
-            default -> rule.path("resultType").asText("object");
+            default -> rule.hasNonNull("resultType")
+                    ? rule.path("resultType").asText("object")
+                    : rule.path("sourceType").asText("object");
         };
     }
 
     private ObjectNode operationResultSchema(JsonNode rule) {
         String operation = rule.path("operation").asText("COPY");
-        if ("COPY".equals(operation) && rule.path("resultSchema").isObject()
+        ObjectNode schema;
+        if (rule.path("resultSchema").isObject()
                 && rule.path("resultSchema").has("type")) {
-            return ((ObjectNode) rule.path("resultSchema")).deepCopy();
+            schema = ((ObjectNode) rule.path("resultSchema")).deepCopy();
+        } else if ("CONSTANT".equals(operation) && rule.has("value")) {
+            schema = inferTransformValueSchema(rule.get("value"), 0);
+        } else {
+            schema = JsonNodeFactory.instance.objectNode();
+            String type = operationResultType(rule);
+            schema.put("type", type);
+            if ("object".equals(type)) schema.put("additionalProperties", true);
+            if ("array".equals(type)) schema.putObject("items");
         }
-        if ("CONSTANT".equals(operation) && rule.has("value")) {
-            return inferTransformValueSchema(rule.get("value"), 0);
+        if ("ARRAY_AGGREGATE".equals(operation)
+                && !"COUNT".equals(rule.path("aggregate").asText("COUNT"))) {
+            appendSchemaType(schema, "null");
         }
-        ObjectNode schema = JsonNodeFactory.instance.objectNode();
-        String type = operationResultType(rule);
-        schema.put("type", type);
-        if ("object".equals(type)) schema.put("additionalProperties", true);
-        if ("array".equals(type)) schema.putObject("items");
+        if ("ARRAY_GROUP".equals(operation)
+                && !Set.of("NONE", "COUNT")
+                        .contains(rule.path("groupAggregate").asText("NONE"))) {
+            JsonNode valueSchema = schema.path("items").path("properties").path("value");
+            if (valueSchema.isObject()) appendSchemaType((ObjectNode) valueSchema, "null");
+        }
+        boolean nullableFallback = "NULL".equals(rule.path("onError").asText("FAIL"))
+                || ("DEFAULT".equals(rule.path("onError").asText("FAIL"))
+                    && rule.path("defaultValue").isNull())
+                || (!"NEVER".equals(rule.path("defaultWhen").asText("NEVER"))
+                    && rule.path("defaultValue").isNull());
+        if ("$".equals(rule.path("targetPath").asText())
+                && !rule.path("required").asBoolean(false)
+                && !"MISSING".equals(rule.path("defaultWhen").asText("NEVER"))) {
+            nullableFallback = true;
+        }
+        if (nullableFallback) appendSchemaType(schema, "null");
+        if ("KEEP".equals(rule.path("onError").asText("FAIL"))) {
+            appendSchemaType(schema, rule.path("sourceType").asText("object"));
+            if (schema.path("type").isArray()) {
+                schema.remove(List.of("properties", "required", "items", "additionalProperties"));
+            }
+        }
         return schema;
+    }
+
+    private void appendSchemaType(ObjectNode schema, String type) {
+        JsonNode current = schema.get("type");
+        if (current == null || current.isMissingNode()) {
+            schema.put("type", type);
+            return;
+        }
+        if (current.isTextual()) {
+            if (type.equals(current.asText())) return;
+            ArrayNode types = JsonNodeFactory.instance.arrayNode();
+            types.add(current.asText()).add(type);
+            schema.set("type", types);
+            return;
+        }
+        if (current.isArray()) {
+            for (JsonNode item : current) if (type.equals(item.asText())) return;
+            ((ArrayNode) current).add(type);
+        }
     }
 
     private ObjectNode inferTransformValueSchema(JsonNode value, int depth) {
@@ -789,11 +1534,13 @@ public class BuiltInWorkflowNodeConfig {
 
     private void configureTransformLeafSchema(
             ObjectNode schema, ObjectNode resultSchema, String path) {
-        String type = resultSchema.path("type").asText("object");
-        ensureSchemaType(schema, type, path);
+        JsonNode typeNode = resultSchema.get("type");
+        String type = typeNode != null && typeNode.isTextual()
+                ? typeNode.asText() : "";
+        if (!type.isBlank()) ensureSchemaType(schema, type, path);
         schema.removeAll();
         schema.setAll(resultSchema.deepCopy());
-        if (!schema.has("type")) schema.put("type", type);
+        if (!schema.has("type")) schema.put("type", type.isBlank() ? "object" : type);
         if ("object".equals(type) && !schema.has("additionalProperties")) {
             schema.put("additionalProperties", true);
         }

@@ -195,6 +195,7 @@
                   :selected-node="selectedNode"
                   :descriptors="descriptors"
                   :resolved-node-schemas="resolvedNodeSchemas"
+                  :downstream-impacts="transformDownstreamImpacts"
                   :disabled="!canEdit"
                   @update:config="schemaConfigChanged"
                   @update:input-mapping="visualInputMappingChanged"
@@ -1138,6 +1139,13 @@ export default {
     isTransformNode() {
       return this.selectedNode?.type === 'transform'
     },
+    transformDownstreamImpacts() {
+      if (!this.isTransformNode || !this.selectedNode) return []
+      return this.outputSchemaImpacts(
+        this.selectedNode.id,
+        this.transformEditorOutputSchema(this.selectedNode)
+      )
+    },
     nodePromptValue() {
       return this.isLlmNode ? String(this.selectedNode?.config?.prompt || '') : ''
     },
@@ -2001,10 +2009,30 @@ export default {
       if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
     },
     invalidateSelectedInferredSchema() {
-      const inferred = this.selectedNode?.ui?.inferredOutputSchema
-      if (!inferred || inferred.stale) return
-      inferred.stale = true
-      inferred.staleAt = new Date().toISOString()
+      if (!this.selectedNode?.id) return
+      this.invalidateNodeAndDownstreamInferredSchemas(this.selectedNode.id)
+    },
+    invalidateNodeAndDownstreamInferredSchemas(nodeId) {
+      const children = new Map()
+      ;(this.definition.edges || []).forEach(edge => {
+        if (!children.has(edge.source)) children.set(edge.source, [])
+        children.get(edge.source).push(edge.target)
+      })
+      const visited = new Set()
+      const stack = [nodeId]
+      const staleAt = new Date().toISOString()
+      while (stack.length) {
+        const current = stack.pop()
+        if (!current || visited.has(current)) continue
+        visited.add(current)
+        const node = (this.definition.nodes || []).find(item => item.id === current)
+        const inferred = node?.ui?.inferredOutputSchema
+        if (inferred && !inferred.stale) {
+          inferred.stale = true
+          inferred.staleAt = staleAt
+        }
+        ;(children.get(current) || []).forEach(child => stack.push(child))
+      }
     },
     mergeEditorSchema(formalSchema, sampleSchema) {
       if (!this.isUsableEditorSchema(formalSchema)) {
@@ -2046,7 +2074,7 @@ export default {
         .some(key => Object.prototype.hasOwnProperty.call(schema, key))
     },
     inferEditorSchema(value, depth = 0) {
-      if (value === null) return {type: ['object', 'null']}
+      if (value === null) return {type: 'null'}
       if (Array.isArray(value)) {
         const sample = value.find(item => item !== null && item !== undefined)
         return {
@@ -2074,6 +2102,10 @@ export default {
     },
     transformEditorOutputSchema(node) {
       const config = node?.config || {}
+      if (config.mode === 'VALUE') {
+        const rule = Array.isArray(config.rules) ? config.rules[0] : null
+        return rule ? this.transformRuleResultSchema(rule) : {}
+      }
       const item = {
         type: 'object',
         properties: {},
@@ -2104,7 +2136,7 @@ export default {
       return tokens
     },
     validTransformTargetPath(path) {
-      return /^[A-Za-z_][A-Za-z0-9_]*(?:\[\])*(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])*){0,9}$/.test(path || '')
+      return /^(?:\$|[\p{L}_][\p{L}\p{N}_-]*(?:\[\])*(?:\.[\p{L}_][\p{L}\p{N}_-]*(?:\[\])*){0,9})$/u.test(path || '')
     },
     addTransformEditorSchemaPath(root, path, resultSchema, guaranteed) {
       const tokens = this.transformPathTokens(path)
@@ -2146,19 +2178,50 @@ export default {
     },
     transformRuleResultType(rule) {
       const operation = rule?.operation || 'COPY'
-      if (['TO_STRING', 'TRIM', 'UPPERCASE', 'LOWERCASE', 'ARRAY_JOIN'].includes(operation)) return 'string'
+      if (['TO_STRING', 'TRIM', 'UPPERCASE', 'LOWERCASE', 'ARRAY_JOIN', 'CONCAT',
+        'DATE_FORMAT', 'TEMPLATE'].includes(operation)) return 'string'
       if (['TO_INTEGER', 'ARRAY_LENGTH'].includes(operation)) return 'integer'
       if (operation === 'TO_NUMBER') return 'number'
+      if (operation === 'ARRAY_AGGREGATE') return rule?.aggregate === 'COUNT' ? 'integer' : 'number'
       if (operation === 'TO_BOOLEAN') return 'boolean'
+      if (['ARRAY_FILTER', 'ARRAY_FLATTEN', 'ARRAY_SORT', 'ARRAY_DISTINCT',
+        'ARRAY_GROUP'].includes(operation)) return 'array'
       return ['object', 'array', 'string', 'integer', 'number', 'boolean', 'null']
         .includes(rule?.resultType) ? rule.resultType : 'object'
     },
     transformRuleResultSchema(rule) {
-      if (rule?.operation === 'COPY' && rule?.resultSchema?.type) {
-        return JSON.parse(JSON.stringify(rule.resultSchema))
+      let schema
+      if (rule?.resultSchema?.type) schema = JSON.parse(JSON.stringify(rule.resultSchema))
+      else if (rule?.operation === 'CONSTANT') schema = this.inferEditorSchema(rule.value)
+      else schema = {type: this.transformRuleResultType(rule)}
+      const operation = rule?.operation || 'COPY'
+      if (operation === 'ARRAY_AGGREGATE' && rule?.aggregate !== 'COUNT') {
+        this.appendTransformSchemaType(schema, 'null')
       }
-      if (rule?.operation === 'CONSTANT') return this.inferEditorSchema(rule.value)
-      return {type: this.transformRuleResultType(rule)}
+      if (operation === 'ARRAY_GROUP' && !['NONE', 'COUNT'].includes(rule?.groupAggregate || 'NONE')) {
+        const valueSchema = schema?.items?.properties?.value
+        if (valueSchema) this.appendTransformSchemaType(valueSchema, 'null')
+      }
+      const nullable = rule?.onError === 'NULL'
+        || (rule?.onError === 'DEFAULT' && rule?.defaultValue == null)
+        || ((rule?.defaultWhen || 'NEVER') !== 'NEVER' && rule?.defaultValue == null)
+        || (rule?.targetPath === '$' && !rule?.required && rule?.defaultWhen !== 'MISSING')
+      if (nullable) this.appendTransformSchemaType(schema, 'null')
+      if (rule?.onError === 'KEEP') {
+        this.appendTransformSchemaType(schema, rule?.sourceType || 'object')
+        if (Array.isArray(schema.type)) {
+          delete schema.properties
+          delete schema.required
+          delete schema.items
+          delete schema.additionalProperties
+        }
+      }
+      return schema
+    },
+    appendTransformSchemaType(schema, type) {
+      const values = Array.isArray(schema?.type) ? [...schema.type] : [schema?.type || type]
+      if (!values.includes(type)) values.push(type)
+      schema.type = values.length === 1 ? values[0] : values
     },
     transformEditorDiagnostics(node) {
       const rules = Array.isArray(node?.config?.rules) ? node.config.rules : []
@@ -2166,20 +2229,41 @@ export default {
       const diagnostics = []
       rules.forEach(rule => {
         const path = String(rule?.targetPath || '')
-        if (!this.validTransformTargetPath(path)) {
+        const sourceKey = rule?.sourceKey || 'source'
+        if (!this.validTransformTargetPath(path)
+          || (node?.config?.mode === 'VALUE' ? path !== '$' : path === '$')) {
           diagnostics.push(`输出字段路径无效：${path || '未填写'}`)
         } else if (targets.some(existing => this.transformPathsConflict(existing, path))) {
           diagnostics.push(`输出字段路径冲突：${path}`)
         }
         const sourceArrays = (String(rule?.sourcePath || '').match(/\[\]/g) || []).length
         const targetArrays = (path.match(/\[\]/g) || []).length
-        if (rule?.operation === 'CONSTANT' && targetArrays) {
+        if (node?.config?.mode !== 'VALUE' && rule?.operation === 'CONSTANT' && targetArrays) {
           diagnostics.push(`固定值不能写入数组通配路径：${path}`)
-        } else if (rule?.operation !== 'CONSTANT' && sourceArrays !== targetArrays) {
+        } else if (node?.config?.mode !== 'VALUE' && rule?.operation !== 'CONSTANT' && sourceArrays !== targetArrays) {
           diagnostics.push(`来源与输出数组层级不一致：${rule?.sourcePath || '当前数据'} → ${path}`)
+        }
+        if (rule?.operation !== 'CONSTANT' && !node?.inputMapping?.[sourceKey]) {
+          diagnostics.push(`输出字段 ${path || '未填写'} 的数据来源已失效`)
+        }
+        if (rule?.operation === 'DATE_FORMAT' && !rule?.outputFormat) {
+          diagnostics.push(`输出字段 ${path || '未填写'} 缺少日期输出格式`)
+        }
+        if (rule?.operation === 'TEMPLATE' && !rule?.template) {
+          diagnostics.push(`输出字段 ${path || '未填写'} 缺少文本模板`)
+        }
+        if (rule?.operation === 'EXPRESSION' && !rule?.expression) {
+          diagnostics.push(`输出字段 ${path || '未填写'} 缺少受限表达式`)
         }
         targets.push(path)
       })
+      if (node?.config?.mode === 'VALUE' && rules.length !== 1) {
+        diagnostics.push('直接转换整份数据时必须且只能配置一条规则')
+      }
+      if (node?.config?.mode === 'ARRAY_MAP' && node?.config?.arrayAlignment === 'KEYED'
+        && !node?.config?.alignmentPath) {
+        diagnostics.push('按字段关联多个数组时必须选择关联字段')
+      }
       return diagnostics
     },
     transformPathsConflict(left, right) {
@@ -2201,6 +2285,7 @@ export default {
           throw new Error('输入映射必须是 JSON 对象')
         }
         this.selectedNode.inputMapping = value
+        this.invalidateSelectedInferredSchema()
         this.mappingError = ''
         this.markDirty()
       } catch (error) {
@@ -2209,6 +2294,7 @@ export default {
     },
     visualInputMappingChanged(value) {
       this.selectedNode.inputMapping = value
+      this.invalidateSelectedInferredSchema()
       this.selectedNodeInputMapping = JSON.stringify(value, null, 2)
       this.mappingError = ''
       const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
@@ -2817,7 +2903,53 @@ export default {
           if (!path || this.schemaContainsPath(schema, path.split('.'))) return []
           return [{nodeId: '__end__', target, expression}]
         })
-      return [...nodeImpacts, ...outputImpacts]
+      const edgeImpacts = (this.definition.edges || []).flatMap(edge => {
+        const expression = edge?.condition?.expression
+        return this.expressionSchemaImpacts(expression, prefix, schema)
+          .map(reference => ({
+            nodeId: edge.target,
+            target: `连线条件 ${edge.source} → ${edge.target}`,
+            expression: reference
+          }))
+      })
+      const configImpacts = (this.definition.nodes || []).flatMap(node => {
+        const strings = []
+        const visit = (value, path = 'config') => {
+          if (typeof value === 'string') {
+            if (value.includes(prefix)) strings.push({value, path})
+            return
+          }
+          if (Array.isArray(value)) {
+            value.forEach((item, index) => visit(item, `${path}[${index}]`))
+            return
+          }
+          if (value && typeof value === 'object') {
+            Object.entries(value).forEach(([key, child]) => visit(child, `${path}.${key}`))
+          }
+        }
+        visit(node.config || {})
+        return strings.flatMap(item => this.expressionSchemaImpacts(item.value, prefix, schema)
+          .map(reference => ({nodeId: node.id, target: item.path, expression: reference})))
+      })
+      return [...nodeImpacts, ...outputImpacts, ...edgeImpacts, ...configImpacts]
+    },
+    expressionSchemaImpacts(expression, prefix, schema) {
+      if (typeof expression !== 'string' || !expression.includes(prefix)) return []
+      const impacts = []
+      let cursor = 0
+      while (cursor < expression.length) {
+        const start = expression.indexOf(prefix, cursor)
+        if (start < 0) break
+        const suffix = expression.slice(start + prefix.length)
+        const match = suffix.match(/^(?:\.[\p{L}\p{N}_-]+(?:\[[0-9]+\])?)*/u)
+        const pathText = match?.[0] || ''
+        const path = pathText.replace(/^\./, '')
+        if (path && !this.schemaContainsPath(schema, path.split('.'))) {
+          impacts.push(`${prefix}${pathText}`)
+        }
+        cursor = start + prefix.length + Math.max(pathText.length, 1)
+      }
+      return impacts
     },
     schemaContainsPath(schema, segments) {
       let current = schema
