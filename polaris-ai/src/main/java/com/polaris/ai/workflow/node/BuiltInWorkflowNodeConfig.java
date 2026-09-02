@@ -1582,7 +1582,8 @@ public class BuiltInWorkflowNodeConfig {
 
     @Bean
     public WorkflowNodeHandler loopWorkflowNodeHandler() {
-        return passThrough("loop", "受控循环", "control", loopConfigSchema());
+        return passThrough("loop", "受控循环", "control",
+                loopConfigSchema(), loopOutputSchema());
     }
 
     @Bean
@@ -1687,6 +1688,13 @@ public class BuiltInWorkflowNodeConfig {
 
     private WorkflowNodeHandler passThrough(
             String type, String name, String category, ObjectNode configSchema) {
+        return passThrough(type, name, category, configSchema,
+                JsonNodeFactory.instance.objectNode());
+    }
+
+    private WorkflowNodeHandler passThrough(
+            String type, String name, String category,
+            ObjectNode configSchema, ObjectNode outputSchema) {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 type,
                 "1.0",
@@ -1694,7 +1702,7 @@ public class BuiltInWorkflowNodeConfig {
                 category,
                 configSchema,
                 JsonNodeFactory.instance.objectNode(),
-                JsonNodeFactory.instance.objectNode(),
+                outputSchema,
                 WorkflowSideEffect.NONE,
                 Set.of(),
                 Set.of(
@@ -1740,9 +1748,54 @@ public class BuiltInWorkflowNodeConfig {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
         schema.putArray("required").add("maxIterations");
-        schema.putObject("properties").putObject("maxIterations")
-                .put("type", "integer").put("minimum", 1).put("maximum", 1000);
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("version").put("type", "integer")
+                .put("minimum", 1).put("maximum", 2);
+        properties.putObject("mode").put("type", "string")
+                .putArray("enum").add("FOR_EACH").add("REPEAT");
+        properties.putObject("repeatMode").put("type", "string")
+                .putArray("enum").add("COUNT").add("UNTIL");
+        properties.putObject("count").put("type", "integer")
+                .put("minimum", 1).put("maximum", 1000);
+        properties.putObject("stopCondition").put("type", "string")
+                .put("maxLength", 2000);
+        properties.putObject("conditionField").put("type", "string")
+                .put("maxLength", 500);
+        properties.putObject("conditionOperator").put("type", "string")
+                .putArray("enum").add("==").add("!=").add(">").add(">=").add("<").add("<=");
+        properties.putObject("conditionValueType").put("type", "string")
+                .putArray("enum").add("string").add("number").add("boolean").add("null");
+        properties.putObject("conditionValue");
+        properties.putObject("checkBeforeFirst").put("type", "boolean");
+        properties.putObject("maxIterations").put("type", "integer")
+                .put("minimum", 1).put("maximum", 1000);
+        properties.putObject("resultMode").put("type", "string")
+                .putArray("enum").add("COLLECT").add("LAST").add("NONE");
+        properties.putObject("resultNodeId").put("type", "string")
+                .put("maxLength", 128);
+        properties.putObject("maxResults").put("type", "integer")
+                .put("minimum", 1).put("maximum", 1000);
+        properties.putObject("itemErrorPolicy").put("type", "string")
+                .putArray("enum").add("FAIL").add("SKIP").add("COLLECT");
+        properties.putObject("emptyPolicy").put("type", "string")
+                .putArray("enum").add("COMPLETE").add("FAIL");
         schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private ObjectNode loopOutputSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("completed").put("type", "boolean");
+        properties.putObject("iterations").put("type", "integer");
+        properties.putObject("successCount").put("type", "integer");
+        properties.putObject("failureCount").put("type", "integer");
+        properties.putObject("stopReason").put("type", "string");
+        properties.putObject("lastResult");
+        properties.putObject("results").put("type", "array");
+        properties.putObject("errors").put("type", "array");
+        schema.put("additionalProperties", true);
         return schema;
     }
 

@@ -278,6 +278,7 @@
 </template>
 
 <script>
+import {workflowUpstreamNodeIds} from './workflowClassifier'
 import {
   ArrowDown,
   ArrowRight,
@@ -386,24 +387,12 @@ export default {
   },
   computed: {
     upstreamNodeIds() {
-      const parents = new Map()
-      ;(this.definition.edges || []).forEach(edge => {
-        if (!parents.has(edge.target)) parents.set(edge.target, [])
-        parents.get(edge.target).push(edge.source)
-      })
-      const visited = new Set()
-      const stack = [...(parents.get(this.selectedNode.id) || [])]
-      while (stack.length) {
-        const nodeId = stack.pop()
-        if (!nodeId || visited.has(nodeId)) continue
-        visited.add(nodeId)
-        ;(parents.get(nodeId) || []).forEach(parentId => stack.push(parentId))
-      }
-      return visited
+      return workflowUpstreamNodeIds(this.definition, this.selectedNode.id)
     },
     directUpstreamNodeIds() {
       return new Set((this.definition.edges || [])
-        .filter(edge => edge.target === this.selectedNode.id)
+        .filter(edge => edge.target === this.selectedNode.id
+          && edge.targetPort !== 'loop-return')
         .map(edge => edge.source))
     },
     isHttpNode() {
@@ -644,6 +633,16 @@ export default {
       if (loops.length) {
         fields.push(this.sourceField(
           '当前分支路径', 'branchPath', '$.loop.branchPath', 'string', '系统上下文'))
+        fields.push(
+          this.sourceField('当前循环数据', 'current.item', '$.loop.current.item', 'any', '循环上下文'),
+          this.sourceField('当前序号（从 1 开始）', 'current.number', '$.loop.current.number', 'integer', '循环上下文'),
+          this.sourceField('数组下标（从 0 开始）', 'current.index', '$.loop.current.index', 'integer', '循环上下文'),
+          this.sourceField('数据总数', 'current.total', '$.loop.current.total', 'integer', '循环上下文'),
+          this.sourceField('是否第一项', 'current.first', '$.loop.current.first', 'boolean', '循环上下文'),
+          this.sourceField('是否最后一项', 'current.last', '$.loop.current.last', 'boolean', '循环上下文'),
+          this.sourceField('上一次执行结果', 'current.lastOutput', '$.loop.current.lastOutput', 'any', '循环上下文'),
+          this.sourceField('已收集结果', 'current.results', '$.loop.current.results', 'array', '循环上下文')
+        )
         loops.forEach(node => fields.push(this.sourceField(
           `${node.name}迭代次数`, node.id, `$.loop.${node.id}`, 'integer', '系统上下文')))
       }
@@ -731,12 +730,12 @@ export default {
       const schemaType = Array.isArray(type)
         ? type.find(item => item !== 'null')
         : type
-      return ['object', 'array', 'string', 'number', 'integer', 'boolean'].includes(schemaType)
+      return ['any', 'object', 'array', 'string', 'number', 'integer', 'boolean'].includes(schemaType)
         ? schemaType : 'object'
     },
     typeLabel(type) {
       const labels = {
-        object: 'Object', array: 'Array', string: 'String', number: 'Number',
+        any: '任意类型', object: 'Object', array: 'Array', string: 'String', number: 'Number',
         integer: 'Integer', boolean: 'Boolean'
       }
       return labels[this.normalizedType(type)] || 'Object'
@@ -867,7 +866,8 @@ export default {
       return this.normalizedType(typeof value)
     },
     typesCompatible(sourceType, targetType) {
-      if (!sourceType || !targetType || sourceType === targetType) return true
+      if (!sourceType || !targetType || sourceType === 'any' || targetType === 'any'
+        || sourceType === targetType) return true
       return ['number', 'integer'].includes(sourceType)
         && ['number', 'integer'].includes(targetType)
     },

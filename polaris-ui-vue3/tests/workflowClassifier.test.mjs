@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  classifierSchemaOptions,
-  classifierTargetOptions,
-  isClassifierTargetAllowed,
-  workflowUpstreamNodeIds
+    classifierSchemaOptions,
+    classifierTargetOptions,
+    isClassifierTargetAllowed,
+    workflowUpstreamNodeIds
 } from '../src/components/workflow/workflowClassifier.js'
 
 const definition = {
@@ -30,6 +30,25 @@ test('分类目标排除自身、开始节点与全部上游节点', () => {
     {id: 'downstream', name: '下游'},
     {id: '__end__', name: '结束流程'}
   ])
+})
+
+test('上游字段遍历忽略循环回边，避免把当前节点和循环体误判为上游', () => {
+  const loopDefinition = {
+    nodes: [
+      {id: 'source', name: '来源'},
+      {id: 'loop', name: '受控循环'},
+      {id: 'body', name: '循环体'}
+    ],
+    edges: [
+      {source: '__start__', target: 'source'},
+      {source: 'source', target: 'loop'},
+      {source: 'loop', target: 'body', sourcePort: 'body'},
+      {source: 'body', target: 'loop', targetPort: 'loop-return'}
+    ]
+  }
+
+  assert.deepEqual([...workflowUpstreamNodeIds(loopDefinition, 'body')], ['loop', 'source'])
+  assert.deepEqual([...workflowUpstreamNodeIds(loopDefinition, 'loop')], ['source'])
 })
 
 test('字段选择可展开对象、数组、数组对象与嵌套数组', () => {

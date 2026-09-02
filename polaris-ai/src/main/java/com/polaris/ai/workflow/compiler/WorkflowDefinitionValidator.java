@@ -162,7 +162,7 @@ public class WorkflowDefinitionValidator {
                         path + ".onError", "写节点不能使用SKIP错误策略"));
             }
             validateRetry(node, path, diagnostics);
-            validateLoop(node, path, diagnostics);
+            validateLoop(node, definition.getPolicies(), path, diagnostics);
             validateJoin(node, path, diagnostics);
             validateDurableControlNode(node, definition.getPolicies(), path, diagnostics);
             if ("sub_workflow".equals(node.getType()) && node.getConfig() != null
@@ -265,7 +265,7 @@ public class WorkflowDefinitionValidator {
     }
 
     private void validateLoop(
-            WorkflowDefinitionSpec.Node node, String path,
+            WorkflowDefinitionSpec.Node node, WorkflowDefinitionSpec.Policies policies, String path,
             List<WorkflowDiagnostic> diagnostics) {
         if (!"loop".equals(node.getType())) {
             return;
@@ -276,6 +276,69 @@ public class WorkflowDefinitionValidator {
                 || maxIterations.intValue() < 1 || maxIterations.intValue() > 1000) {
             diagnostics.add(error("LOOP_MAX_ITERATIONS_INVALID", node.getId(),
                     path + ".config.maxIterations", "循环节点必须配置1到1000之间的最大迭代次数"));
+        }
+        if (node.getConfig() == null || node.getConfig().path("version").asInt(1) < 2) {
+            return;
+        }
+        String mode = node.getConfig().path("mode").asText();
+        if (!Set.of("FOR_EACH", "REPEAT").contains(mode)) {
+            diagnostics.add(error("LOOP_MODE_INVALID", node.getId(), path + ".config.mode",
+                    "请选择逐项处理数据或重复执行任务"));
+        }
+        if ("FOR_EACH".equals(mode)) {
+            WorkflowDefinitionSpec.ValueBinding items = node.getInputMapping() == null
+                    ? null : node.getInputMapping().get("items");
+            if (items == null || isBlank(items.getExpression())) {
+                diagnostics.add(error("LOOP_SOURCE_REQUIRED", node.getId(),
+                        path + ".inputMapping.items", "逐项处理需要选择一个数组数据来源"));
+            }
+        }
+        if ("REPEAT".equals(mode)) {
+            String repeatMode = node.getConfig().path("repeatMode").asText();
+            if (!Set.of("COUNT", "UNTIL").contains(repeatMode)) {
+                diagnostics.add(error("LOOP_REPEAT_MODE_INVALID", node.getId(),
+                        path + ".config.repeatMode", "请选择按次数或满足条件时停止"));
+            } else if ("COUNT".equals(repeatMode)) {
+                int count = node.getConfig().path("count").asInt(0);
+                int maximum = maxIterations != null && maxIterations.canConvertToInt()
+                        ? maxIterations.intValue() : 0;
+                if (count < 1 || maximum < 1 || count > maximum) {
+                    diagnostics.add(error("LOOP_COUNT_INVALID", node.getId(),
+                            path + ".config.count", "执行次数必须大于0且不能超过安全上限"));
+                }
+            } else {
+                String expression = node.getConfig().path("stopCondition").asText();
+                if (isBlank(expression)) {
+                    diagnostics.add(error("LOOP_STOP_CONDITION_REQUIRED", node.getId(),
+                            path + ".config.stopCondition", "请设置循环停止条件"));
+                } else {
+                    try {
+                        expressionParser.parse(expression);
+                    } catch (IllegalArgumentException exception) {
+                        diagnostics.add(error("LOOP_STOP_CONDITION_INVALID", node.getId(),
+                                path + ".config.stopCondition", exception.getMessage()));
+                    }
+                }
+            }
+        }
+        String resultMode = node.getConfig().path("resultMode").asText("LAST");
+        if (!Set.of("COLLECT", "LAST", "NONE").contains(resultMode)) {
+            diagnostics.add(error("LOOP_RESULT_MODE_INVALID", node.getId(),
+                    path + ".config.resultMode", "循环结果处理方式无效"));
+        }
+        if (isBlank(node.getConfig().path("resultNodeId").asText())) {
+            diagnostics.add(error("LOOP_RESULT_NODE_REQUIRED", node.getId(),
+                    path + ".config.resultNodeId", "请选择代表本轮完成的循环体节点"));
+        }
+        String itemErrorPolicy = node.getConfig().path("itemErrorPolicy").asText("FAIL");
+        if (!Set.of("FAIL", "SKIP", "COLLECT").contains(itemErrorPolicy)) {
+            diagnostics.add(error("LOOP_ERROR_POLICY_INVALID", node.getId(),
+                    path + ".config.itemErrorPolicy", "循环项失败处理方式无效"));
+        }
+        String emptyPolicy = node.getConfig().path("emptyPolicy").asText("COMPLETE");
+        if (!Set.of("COMPLETE", "FAIL").contains(emptyPolicy)) {
+            diagnostics.add(error("LOOP_EMPTY_POLICY_INVALID", node.getId(),
+                    path + ".config.emptyPolicy", "空数据处理方式无效"));
         }
     }
 
@@ -486,8 +549,152 @@ public class WorkflowDefinitionValidator {
             validateJoinIncoming(entry.getValue(),
                     reverse.getOrDefault(entry.getKey(), List.of()).size(), diagnostics);
         }
+        validateLoopScopes(definition, nodes, diagnostics);
         validateReachability(nodes.keySet(), compensationTargets, adjacency, reverse, diagnostics);
         validateAcyclicWithoutLoopEdges(edges, validIds, diagnostics);
+    }
+
+    private void validateLoopScopes(
+            WorkflowDefinitionSpec definition,
+            Map<String, WorkflowDefinitionSpec.Node> nodes,
+            List<WorkflowDiagnostic> diagnostics) {
+        for (WorkflowDefinitionSpec.Node loop : nodes.values()) {
+            if (!"loop".equals(loop.getType()) || loop.getConfig() == null
+                    || loop.getConfig().path("version").asInt(1) < 2) {
+                continue;
+            }
+            List<WorkflowDefinitionSpec.Edge> outgoing = definition.getEdges().stream()
+                    .filter(edge -> loop.getId().equals(edge.getSource())).toList();
+            WorkflowDefinitionSpec.Edge body = outgoing.stream()
+                    .filter(edge -> "LOOP".equals(edge.getKind())).findFirst().orElse(null);
+            WorkflowDefinitionSpec.Edge done = outgoing.stream()
+                    .filter(edge -> Boolean.TRUE.equals(edge.getDefaultEdge())).findFirst().orElse(null);
+            if (body != null && done != null && Objects.equals(body.getTarget(), done.getTarget())) {
+                diagnostics.add(error("LOOP_TARGETS_DUPLICATE", loop.getId(),
+                        "$.nodes[" + loop.getId() + "]",
+                        "“每次执行”和“全部完成”不能进入同一个节点"));
+            }
+            String resultNodeId = loop.getConfig().path("resultNodeId").asText();
+            if (resultNodeId.isBlank()) continue;
+            if (!nodes.containsKey(resultNodeId) || loop.getId().equals(resultNodeId)) {
+                diagnostics.add(error("LOOP_RESULT_NODE_INVALID", loop.getId(),
+                        "$.nodes[" + loop.getId() + "].config.resultNodeId",
+                        "本轮结果节点不存在或不能选择循环节点自身"));
+                continue;
+            }
+            long returns = definition.getEdges().stream().filter(edge ->
+                    resultNodeId.equals(edge.getSource()) && loop.getId().equals(edge.getTarget())
+                            && "NORMAL".equals(edge.getKind())
+                            && "loop-return".equals(edge.getTargetPort())).count();
+            if (returns != 1) {
+                diagnostics.add(error("LOOP_RETURN_INVALID", loop.getId(), "$.edges",
+                        "本轮结果节点必须且只能通过系统维护的返回路径进入下一轮"));
+            }
+            if (body != null && !reachableWithinLoop(
+                    body.getTarget(), resultNodeId, loop.getId(), definition.getEdges())) {
+                diagnostics.add(error("LOOP_RESULT_UNREACHABLE", loop.getId(),
+                        "$.nodes[" + loop.getId() + "].config.resultNodeId",
+                        "本轮结果节点必须位于“每次执行”路径中"));
+            }
+            Set<String> scope = body == null ? Set.of() : loopScopeNodeIds(
+                    body.getTarget(), resultNodeId, loop.getId(), definition.getEdges());
+            for (String scopeNodeId : scope) {
+                if (resultNodeId.equals(scopeNodeId)) continue;
+                WorkflowDefinitionSpec.Node scopeNode = nodes.get(scopeNodeId);
+                if (scopeNode == null) continue;
+                List<WorkflowDefinitionSpec.Edge> forwardEdges = definition.getEdges().stream()
+                        .filter(edge -> scopeNodeId.equals(edge.getSource())
+                                && !loop.getId().equals(edge.getTarget())
+                                && !"LOOP".equals(edge.getKind()))
+                        .toList();
+                if (forwardEdges.isEmpty()) {
+                    diagnostics.add(error("LOOP_BODY_DEAD_END", loop.getId(), "$.edges",
+                            "循环范围中的节点“" + scopeNode.getName()
+                                    + "”没有进入本轮结束节点"));
+                    continue;
+                }
+                boolean unsafeFanOut = forwardEdges.size() > 1
+                        && !Set.of("condition", "llm_classifier").contains(
+                        scopeNode.getType());
+                boolean escapingBranch = forwardEdges.stream().anyMatch(edge ->
+                        !resultNodeId.equals(edge.getTarget())
+                                && !reachableWithinLoop(edge.getTarget(), resultNodeId,
+                                loop.getId(), definition.getEdges()));
+                if (unsafeFanOut || escapingBranch) {
+                    diagnostics.add(error("LOOP_BODY_BRANCH_INVALID", loop.getId(), "$.edges",
+                            "循环范围内的每条分支都必须汇入同一个本轮结束节点"));
+                }
+            }
+            boolean resultHasExtraExit = definition.getEdges().stream().anyMatch(edge ->
+                    resultNodeId.equals(edge.getSource())
+                            && !(loop.getId().equals(edge.getTarget())
+                            && "loop-return".equals(edge.getTargetPort())));
+            if (resultHasExtraExit) {
+                diagnostics.add(error("LOOP_RESULT_EXTRA_EXIT", loop.getId(), "$.edges",
+                        "本轮结束节点只能由系统返回循环，不能再连接其他节点"));
+            }
+            boolean containsWrite = scope.stream().map(nodes::get).filter(Objects::nonNull)
+                    .map(node -> descriptors.find(node.getType(), node.getTypeVersion()).orElse(null))
+                    .filter(Objects::nonNull)
+                    .anyMatch(descriptor -> "WRITE".equals(descriptor.sideEffect().name()));
+            if (containsWrite && !"FAIL".equals(loop.getConfig().path("itemErrorPolicy").asText("FAIL"))) {
+                diagnostics.add(error("LOOP_WRITE_CONTINUE_UNSAFE", loop.getId(),
+                        "$.nodes[" + loop.getId() + "].config.itemErrorPolicy",
+                        "循环体包含写操作时必须在单项失败后停止，避免产生部分写入"));
+            }
+            Integer maxNodeRuns = definition.getPolicies() == null
+                    ? null : definition.getPolicies().getMaxNodeRuns();
+            int iterations = loop.getConfig().path("maxIterations").asInt(0);
+            long estimatedRuns = (long) iterations * Math.max(1, scope.size() + 1L);
+            if (maxNodeRuns != null && iterations > 0 && estimatedRuns > maxNodeRuns) {
+                diagnostics.add(WorkflowDiagnostic.warning(
+                        "LOOP_RUN_BUDGET_RISK", loop.getId(),
+                        "$.nodes[" + loop.getId() + "].config.maxIterations",
+                        "按当前循环范围估算最多执行 " + estimatedRuns
+                                + " 个节点，已超过工作流节点运行总上限 " + maxNodeRuns));
+            }
+        }
+    }
+
+    private Set<String> loopScopeNodeIds(
+            String start, String target, String loopNodeId,
+            List<WorkflowDefinitionSpec.Edge> edges) {
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<String> pending = new ArrayDeque<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (current == null || "__end__".equals(current)
+                    || loopNodeId.equals(current) || !visited.add(current)) continue;
+            if (target.equals(current)) continue;
+            for (WorkflowDefinitionSpec.Edge edge : edges) {
+                if (current.equals(edge.getSource()) && !"LOOP".equals(edge.getKind())
+                        && !loopNodeId.equals(edge.getTarget())) {
+                    pending.addLast(edge.getTarget());
+                }
+            }
+        }
+        return visited;
+    }
+
+    private boolean reachableWithinLoop(
+            String start, String target, String loopNodeId,
+            List<WorkflowDefinitionSpec.Edge> edges) {
+        if (Objects.equals(start, target)) return true;
+        Set<String> visited = new HashSet<>();
+        Deque<String> pending = new ArrayDeque<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (!visited.add(current) || loopNodeId.equals(current)) continue;
+            for (WorkflowDefinitionSpec.Edge edge : edges) {
+                if (!current.equals(edge.getSource()) || "LOOP".equals(edge.getKind())
+                        || loopNodeId.equals(edge.getTarget())) continue;
+                if (target.equals(edge.getTarget())) return true;
+                pending.addLast(edge.getTarget());
+            }
+        }
+        return false;
     }
 
     private void validateJoinIncoming(
@@ -638,6 +845,11 @@ public class WorkflowDefinitionValidator {
             if (loopEdges != 1 || exitEdges != 1 || outgoing.size() != 2) {
                 diagnostics.add(error("LOOP_BRANCH_INVALID", node.getId(), path,
                         "循环节点必须包含一条LOOP回边和一条默认退出边"));
+            } else if (node.getConfig() != null && node.getConfig().path("version").asInt(1) >= 2
+                    && outgoing.stream().anyMatch(item -> "LOOP".equals(item.getKind())
+                    && !"body".equals(item.getSourcePort()))) {
+                diagnostics.add(error("LOOP_BODY_PORT_INVALID", node.getId(), path,
+                        "循环体必须从“每次执行”出口连接"));
             }
             return;
         }

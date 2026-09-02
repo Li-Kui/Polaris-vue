@@ -11,7 +11,8 @@ export function workflowUpstreamNodeIds(definition, nodeId) {
   const pending = [nodeId]
   while (pending.length) {
     const current = pending.shift()
-    ;(definition?.edges || []).filter(edge => edge.target === current).forEach(edge => {
+    ;(definition?.edges || []).filter(edge => edge.target === current
+      && edge.targetPort !== 'loop-return').forEach(edge => {
       if (edge.source === '__start__' || edge.source === nodeId || result.has(edge.source)) return
       result.add(edge.source)
       pending.push(edge.source)

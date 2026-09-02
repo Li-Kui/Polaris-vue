@@ -34,6 +34,19 @@
         />
       </div>
     </div>
+    <div v-else-if="data.type === 'loop'" class="loop-content">
+      <small class="loop-mode-summary">{{ data.loopModeSummary }}</small>
+      <div v-for="branch in data.loopBranches" :key="branch.port" class="loop-branch-row">
+        <span>{{ branch.label }}</span>
+        <small :class="{missing: !branch.connected}">{{ branch.targetName }}</small>
+        <Handle
+          type="source"
+          :id="branch.port"
+          :position="Position.Right"
+          class="workflow-node-handle loop-branch-handle"
+        />
+      </div>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
@@ -52,7 +65,7 @@
     >
       <el-icon><VideoPlay /></el-icon><span>{{ data.testLabel || '试运行' }}</span>
     </button>
-    <Handle v-if="!data.end && data.type !== 'llm_classifier'" type="source" :position="Position.Right" class="workflow-node-handle" />
+    <Handle v-if="!data.end && !['llm_classifier', 'loop'].includes(data.type)" type="source" :position="Position.Right" class="workflow-node-handle" />
   </article>
 </template>
 
@@ -190,6 +203,52 @@ export default {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.loop-content {
+  padding: 8px 0;
+}
+
+.loop-mode-summary {
+  display: block;
+  padding: 0 11px 7px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loop-branch-row {
+  position: relative;
+  min-height: 30px;
+  padding: 5px 13px 5px 11px;
+  display: grid;
+  grid-template-columns: 65px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  border-top: 1px dashed var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.loop-branch-row > span {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.loop-branch-row > small {
+  overflow: hidden;
+  color: var(--el-color-success);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loop-branch-row > small.missing {
+  color: var(--el-color-warning);
+}
+
+.loop-branch-handle {
+  top: 50%;
+  transform: translate(50%, -50%);
 }
 
 .node-icon {

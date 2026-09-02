@@ -18,6 +18,9 @@
           <el-button :disabled="!canUndo" title="撤销" aria-label="撤销" @click="undo"><el-icon><RefreshLeft /></el-icon></el-button>
           <el-button :disabled="!canRedo" title="重做" aria-label="重做" @click="redo"><el-icon><RefreshRight /></el-icon></el-button>
         </el-button-group>
+        <el-button v-if="canEdit" title="载入优化节点示例" @click="loadOptimizedNodesExample">
+          <el-icon><MagicStick /></el-icon><span>载入示例</span>
+        </el-button>
         <span :class="['validation-state', {passed: validationPassed}]">
           <el-icon><CircleCheck /></el-icon>{{ validationPassed ? '已通过校验' : '等待校验' }}
         </span>
@@ -116,6 +119,9 @@
               @test="nodeProps.id === '__start__' ? openTestRun() : openCanvasNodeTest(nodeProps.id)"
             />
           </template>
+          <template #node-loopScope="nodeProps">
+            <WorkflowLoopScope :data="nodeProps.data" />
+          </template>
         </VueFlow>
       </main>
 
@@ -212,6 +218,25 @@
                   :disabled="!canEdit"
                   @update:config="schemaConfigChanged"
                   @update:input-mapping="visualInputMappingChanged"
+                />
+                <WorkflowLoopEditor
+                  v-else-if="isLoopNode"
+                  :config="selectedNode.config"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :source-groups="loopSourceGroups"
+                  :condition-options="loopConditionOptions"
+                  :body-options="loopBodyOptions"
+                  :result-options="loopResultOptions"
+                  :exit-options="loopExitOptions"
+                  :body-target="loopBodyTarget"
+                  :exit-target="loopExitTarget"
+                  :allow-continue-on-error="!loopBodyHasWriteSideEffects"
+                  :continue-on-error-reason="loopBodyHasWriteSideEffects ? '循环范围内包含会写入外部数据的节点，失败后继续可能留下部分写入。' : ''"
+                  :disabled="!canEdit"
+                  @update:config="loopConfigChanged"
+                  @update:input-mapping="visualInputMappingChanged"
+                  @update:body-target="loopBodyTargetChanged"
+                  @update:exit-target="loopExitTargetChanged"
                 />
                 <WorkflowDatabaseQueryStep
                   v-else-if="isDatabaseNode"
@@ -520,7 +545,9 @@
                   class="node-test-trigger"
                   :disabled="!nodeTestAvailability.available"
                   @click="openNodeTest"
-                ><el-icon><VideoPlay /></el-icon><span>{{ nodeTestRunning ? '查看试运行' : '试运行当前节点' }}</span></el-button>
+                ><el-icon><VideoPlay /></el-icon><span>{{ selectedNode?.type === 'loop'
+                    ? '测试完整流程'
+                    : (nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
               </span>
             </el-tooltip>
             <el-button v-if="canEdit" class="node-delete-button" type="danger" text @click="removeSelectedNode">
@@ -967,11 +994,15 @@ import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
 import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
 import WorkflowSemanticClassifierEditor from './WorkflowSemanticClassifierEditor.vue'
 import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
+import WorkflowLoopEditor from './WorkflowLoopEditor.vue'
+import WorkflowLoopScope from './WorkflowLoopScope.vue'
 import {
   classifierSchemaOptions as buildClassifierSchemaOptions,
   classifierTargetOptions as buildClassifierTargetOptions,
   isClassifierTargetAllowed
 } from './workflowClassifier'
+import {loopResultNodeOptions, withSynchronizedLoopReturn} from './workflowLoop'
+import {createOptimizedNodesExample} from './workflowExamples'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -990,6 +1021,8 @@ export default {
     WorkflowExecutionInput,
     WorkflowSemanticClassifierEditor,
     WorkflowTransformEditor,
+    WorkflowLoopEditor,
+    WorkflowLoopScope,
     ChatDotRound,
     CircleCheck,
     CircleClose,
@@ -1175,6 +1208,56 @@ export default {
     isTransformNode() {
       return this.selectedNode?.type === 'transform'
     },
+    isLoopNode() {
+      return this.selectedNode?.type === 'loop'
+    },
+    loopSourceGroups() {
+      return this.isLoopNode && this.selectedNode
+        ? this.buildLoopSourceGroups(this.selectedNode.id) : []
+    },
+    loopBodyOptions() {
+      return this.isLoopNode ? this.buildLoopTargetOptions(this.selectedNode.id, false) : []
+    },
+    loopResultOptions() {
+      if (!this.isLoopNode) return []
+      return loopResultNodeOptions(
+        this.definition, this.selectedNode.id, this.loopBodyTarget, this.loopExitTarget)
+    },
+    loopExitOptions() {
+      return this.isLoopNode ? this.buildLoopTargetOptions(this.selectedNode.id, true) : []
+    },
+    loopBodyTarget() {
+      if (!this.isLoopNode) return ''
+      return (this.definition.edges || []).find(edge => edge.source === this.selectedNode.id
+        && edge.kind === 'LOOP')?.target || ''
+    },
+    loopExitTarget() {
+      if (!this.isLoopNode) return ''
+      return (this.definition.edges || []).find(edge => edge.source === this.selectedNode.id
+        && edge.kind === 'CONDITION' && edge.default)?.target || ''
+    },
+    loopBodyHasWriteSideEffects() {
+      if (!this.isLoopNode || !this.loopBodyTarget || !this.selectedNode?.config?.resultNodeId) return false
+      const ids = this.loopScopeNodeIds(
+        this.selectedNode.id, this.loopBodyTarget, this.selectedNode.config.resultNodeId)
+      return [...ids].some(id => {
+        const node = this.definition.nodes.find(item => item.id === id)
+        if (!node) return false
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        return descriptor?.sideEffect === 'WRITE'
+      })
+    },
+    loopConditionOptions() {
+      if (!this.isLoopNode || !this.selectedNode?.config?.resultNodeId) return []
+      const resultNode = this.definition.nodes.find(node => node.id === this.selectedNode.config.resultNodeId)
+      if (!resultNode) return []
+      const descriptor = this.descriptors.find(item => item.type === resultNode.type
+        && item.handlerVersion === resultNode.typeVersion)
+      const schema = this.resolvedNodeSchemas[resultNode.id]?.outputSchema
+        || descriptor?.outputSchema || {type: 'object'}
+      return this.classifierSchemaOptions(schema, '$.loop.current.lastOutput', '完整结果')
+    },
     classifierSourceGroups() {
       return this.isClassifierNode && this.selectedNode
         ? this.buildClassifierSourceGroups(this.selectedNode.id) : []
@@ -1232,6 +1315,11 @@ export default {
     nodeTestAvailability() {
       if (this.nodeTestRunning) return {available: true, reason: ''}
       if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
+      if (this.selectedNode.type === 'loop') {
+        return this.currentDefinition?.currentPublishedVersionId
+          ? {available: true, reason: ''}
+          : {available: false, reason: '受控循环需要在完整流程中运行，请先发布工作流后再测试'}
+      }
       if ((!this.currentDefinition?.id || this.dirty) && !this.canEdit) {
         return {available: false, reason: '当前修改尚未保存，暂无权限同步草稿'}
       }
@@ -1600,6 +1688,42 @@ export default {
           title: '节点无法走到结束',
           suggestion: '从该节点补充后续连线，确保最终能够连接到结束节点。'
         },
+        LOOP_SOURCE_REQUIRED: {
+          title: '尚未选择循环数据',
+          suggestion: '打开循环节点，在“逐项处理数据”中选择一个数组字段；没有字段时可先试运行上游节点。'
+        },
+        LOOP_STOP_CONDITION_REQUIRED: {
+          title: '尚未设置停止条件',
+          suggestion: '选择本轮结果字段、比较方式和目标值，系统会自动生成安全条件。'
+        },
+        LOOP_RESULT_NODE_REQUIRED: {
+          title: '尚未指定本轮结束节点',
+          suggestion: '选择循环范围中最后执行的节点，返回下一轮的路径会由系统自动维护。'
+        },
+        LOOP_RETURN_INVALID: {
+          title: '循环返回路径不完整',
+          suggestion: '重新选择“本轮结束节点”，系统会自动修复隐藏的返回路径。'
+        },
+        LOOP_BODY_DEAD_END: {
+          title: '循环范围存在断点',
+          suggestion: '将循环范围内未连接的节点接到“本轮结束节点”，确保每一轮都能完整结束。'
+        },
+        LOOP_BODY_BRANCH_INVALID: {
+          title: '循环分支没有统一汇合',
+          suggestion: '让循环范围内的所有条件分支最终汇入同一个“本轮结束节点”。'
+        },
+        LOOP_RESULT_EXTRA_EXIT: {
+          title: '本轮结束节点存在多余连线',
+          suggestion: '删除该节点到其他节点的连线；下一轮返回路径由系统自动维护。'
+        },
+        LOOP_WRITE_CONTINUE_UNSAFE: {
+          title: '写操作不能失败后继续',
+          suggestion: '将“某一项失败时”改为“停止整个工作流”，避免留下无法回滚的部分写入。'
+        },
+        LOOP_RUN_BUDGET_RISK: {
+          title: '循环可能超过运行预算',
+          suggestion: '降低最大循环次数，或在工作流设置中提高节点运行总上限。'
+        },
         PUBLISH_CONTENT_UNCHANGED: {
           title: '当前内容已经发布',
           suggestion: '无需重复发布；如需生成新版本，请先修改并保存草稿。'
@@ -1732,6 +1856,49 @@ export default {
         }
       }
     },
+    async loadOptimizedNodesExample() {
+      if (!this.canEdit) return
+      const hasContent = (this.definition.nodes || []).length || (this.definition.edges || []).length
+      if (hasContent) {
+        try {
+          await this.$confirm(
+            '载入示例会替换当前画布中的节点和连线；载入后仍需点击“保存”才会写入草稿。是否继续？',
+            '载入优化节点示例',
+            {type: 'warning', confirmButtonText: '替换并载入', cancelButtonText: '取消'}
+          )
+        } catch (error) {
+          return
+        }
+      }
+      const descriptorFor = type => this.descriptors.find(item => item.type === type)
+      const example = createOptimizedNodesExample({
+        versionFor: type => descriptorFor(type)?.handlerVersion || '1.0',
+        resourceRefsFor: (type, nodeId) => {
+          const descriptor = descriptorFor(type)
+          const references = descriptor ? this.defaultResourceReferences(descriptor, nodeId) : []
+          if (references.length || type !== 'llm_classifier') return references
+          return [{kind: 'MODEL', key: 'primary_model', required: true}]
+        }
+      })
+      if (this.currentDefinition?.id) {
+        const metadata = this.definition.metadata || {}
+        example.metadata = {
+          ...example.metadata,
+          ...metadata,
+          tags: [...new Set([...(metadata.tags || []), ...example.metadata.tags])]
+        }
+      }
+      this.definition = example
+      this.pendingResourceBindings = []
+      this.backendResolvedNodeSchemas = {}
+      this.selectedNode = null
+      this.selectedEdge = null
+      this.inspectorCollapsed = true
+      this.buildCanvas()
+      this.markDirty()
+      this.$nextTick(() => this.fitCanvas())
+      this.$message.success('示例已载入；请为“识别反馈类型”选择一个可用模型，然后保存并校验。')
+    },
     loadDefinition(record) {
       this.currentDefinition = record
       if (record?.draftJson) {
@@ -1746,6 +1913,7 @@ export default {
       }
       this.normalizeHttpNodeConfigs()
       this.normalizeClassifierNodeConfigs()
+      this.normalizeLoopNodeConfigs()
       this.normalizeInferredOutputSchemas()
       this.buildCanvas()
       this.dirty = false
@@ -1768,6 +1936,25 @@ export default {
               connected: !!edge
             }
           }) : []
+      const loopBranches = node.type === 'loop'
+        ? [
+            {port: 'body', label: '每次执行', kind: 'LOOP'},
+            {port: 'done', label: '全部完成', kind: 'CONDITION'}
+          ].map(branch => {
+            const edge = (this.definition.edges || []).find(item => item.source === node.id
+              && item.kind === branch.kind
+              && (branch.kind !== 'CONDITION' || item.default))
+            const target = edge?.target === '__end__' ? {name: '结束流程'}
+              : (this.definition.nodes || []).find(item => item.id === edge?.target)
+            return {...branch, targetName: target?.name || '未连接', connected: !!edge}
+          }) : []
+      const loopModeSummary = node.type === 'loop'
+        ? node.config?.mode === 'FOR_EACH'
+          ? '逐项处理数据'
+          : node.config?.repeatMode === 'UNTIL'
+            ? `满足条件时停止 · 最多 ${node.config?.maxIterations || 10} 次`
+            : `重复 ${node.config?.count || node.config?.maxIterations || 1} 次`
+        : ''
       return {
         label: node.name,
         type: node.type,
@@ -1777,8 +1964,14 @@ export default {
         outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
         resourceName: reference ? this.selectedResource(reference)?.name : '',
         status: this.latestNodeStatus(node.id),
-        testable: this.canDebug && this.nodeSupportsTest(node),
-        classifierBranches
+        testable: node.type === 'loop'
+          ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
+          : this.canDebug && this.nodeSupportsTest(node),
+        testLabel: node.type === 'loop' ? '测试完整流程' : '',
+        testTitle: node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : '',
+        classifierBranches,
+        loopBranches,
+        loopModeSummary
       }
     },
     buildCanvas() {
@@ -1807,7 +2000,8 @@ export default {
           testTitle: '直接试运行当前草稿'
         },
         draggable: this.canEdit,
-        deletable: false
+        deletable: false,
+        zIndex: 2
       }
       const end = {
         id: '__end__',
@@ -1818,22 +2012,68 @@ export default {
         },
         data: {label: '结束', end: true, movable: true},
         draggable: this.canEdit,
-        deletable: false
+        deletable: false,
+        zIndex: 2
       }
-      this.canvasNodes = [start, ...positionedNodes.map(({node, position}) => ({
+      const loopScopes = this.loopScopeCanvasNodes(positionedNodes)
+      this.canvasNodes = [start, ...loopScopes, ...positionedNodes.map(({node, position}) => ({
         id: node.id,
         type: 'workflow',
         position,
         data: this.canvasNodeData(node),
-        class: compensationTargets.has(node.id) ? 'compensation-node' : ''
+        class: compensationTargets.has(node.id) ? 'compensation-node' : '',
+        zIndex: 2
       })), end]
       this.canvasEdges = (this.definition.edges || []).map((edge, index) => this.canvasEdge(edge, index))
+    },
+    loopScopeCanvasNodes(positionedNodes) {
+      const positions = new Map(positionedNodes.map(item => [item.node.id, item.position]))
+      return (this.definition.nodes || []).filter(node => node.type === 'loop').flatMap(loop => {
+        const bodyEdge = (this.definition.edges || []).find(edge => edge.source === loop.id
+          && edge.kind === 'LOOP')
+        const resultNodeId = loop.config?.resultNodeId
+        if (!bodyEdge || !resultNodeId) return []
+        const ids = this.loopScopeNodeIds(loop.id, bodyEdge.target, resultNodeId)
+        const points = [...ids].map(id => positions.get(id)).filter(Boolean)
+        if (!points.length) return []
+        const minX = Math.min(...points.map(item => Number(item.x || 0))) - 28
+        const minY = Math.min(...points.map(item => Number(item.y || 0))) - 52
+        const maxX = Math.max(...points.map(item => Number(item.x || 0))) + 218
+        const maxY = Math.max(...points.map(item => Number(item.y || 0))) + 142
+        return [{
+          id: `__loop_scope__${loop.id}`,
+          type: 'loopScope',
+          position: {x: minX, y: minY},
+          data: {label: loop.name},
+          style: {width: `${Math.max(260, maxX - minX)}px`, height: `${Math.max(150, maxY - minY)}px`},
+          draggable: false,
+          selectable: false,
+          connectable: false,
+          deletable: false,
+          zIndex: 0
+        }]
+      })
+    },
+    loopScopeNodeIds(loopId, startId, resultNodeId) {
+      const result = new Set()
+      const pending = [startId]
+      while (pending.length) {
+        const current = pending.shift()
+        if (!current || current === loopId || result.has(current)) continue
+        result.add(current)
+        if (current === resultNodeId) continue
+        ;(this.definition.edges || []).filter(edge => edge.source === current
+          && edge.target !== loopId && edge.kind !== 'LOOP').forEach(edge => pending.push(edge.target))
+      }
+      return result
     },
     canvasEdge(edge, index) {
       return {
         id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
         source: edge.source,
-        sourceHandle: edge.kind === 'SEMANTIC' ? edge.sourcePort : undefined,
+        sourceHandle: ['SEMANTIC', 'LOOP'].includes(edge.kind)
+          || (edge.kind === 'CONDITION' && edge.default && edge.sourcePort === 'done')
+          ? edge.sourcePort : undefined,
         target: edge.target,
         label: edge.kind === 'CONDITION'
           ? (edge.default ? '默认' : edge.condition?.expression || '条件')
@@ -1841,6 +2081,7 @@ export default {
         animated: edge.kind === 'CONDITION' || edge.kind === 'LOOP',
         style: {stroke: '#6762e8', strokeWidth: 1.6},
         labelStyle: {fill: '#6f7890', fontSize: 10},
+        hidden: edge.targetPort === 'loop-return',
         data: { definitionEdge: edge }
       }
     },
@@ -1873,7 +2114,9 @@ export default {
       })
       if (this.definition.nodes.length === 1 && this.definition.edges.length === 0) {
         this.addDefinitionEdge('__start__', node.id, 'NORMAL')
-        if (node.type !== 'llm_classifier') this.addDefinitionEdge(node.id, '__end__', 'NORMAL')
+        if (!['llm_classifier', 'loop'].includes(node.type)) {
+          this.addDefinitionEdge(node.id, '__end__', 'NORMAL')
+        }
       }
       this.selectedNode = node
       this.selectedEdge = null
@@ -1910,7 +2153,21 @@ export default {
           maxWaitSeconds: 300
         }
       }
-      if (type === 'loop') return {maxIterations: 10}
+      if (type === 'loop') {
+        return {
+          version: 2,
+          mode: 'FOR_EACH',
+          repeatMode: 'COUNT',
+          count: 3,
+          maxIterations: 100,
+          resultMode: 'COLLECT',
+          resultNodeId: '',
+          maxResults: 1000,
+          itemErrorPolicy: 'FAIL',
+          emptyPolicy: 'COMPLETE',
+          checkBeforeFirst: false
+        }
+      }
       if (type === 'join') return {mode: 'ALL'}
       if (type === 'wait') return {delaySeconds: 60}
       if (type === 'database_query') return {sql: '', maxRows: 100, queryTimeoutSeconds: 10}
@@ -1932,6 +2189,17 @@ export default {
     onConnect(params) {
       if (!this.canEdit || !params.source || !params.target || params.source === params.target) return
       const sourceNode = this.definition.nodes.find(node => node.id === params.source)
+      if (sourceNode?.type === 'loop') {
+        const port = String(params.sourceHandle || '')
+        if (port === 'body') {
+          this.selectedNode = sourceNode
+          this.loopBodyTargetChanged(params.target)
+        } else if (port === 'done') {
+          this.selectedNode = sourceNode
+          this.loopExitTargetChanged(params.target)
+        }
+        return
+      }
       const kind = sourceNode?.type === 'condition' ? 'CONDITION'
         : sourceNode?.type === 'parallel' ? 'PARALLEL'
           : sourceNode?.type === 'llm_classifier' ? 'SEMANTIC' : 'NORMAL'
@@ -1961,7 +2229,7 @@ export default {
       if (kind === 'CONDITION') {
         edge.condition = { expression: '', priority: 100, onError: 'FAIL' }
       }
-      if (kind === 'SEMANTIC') edge.sourcePort = sourcePort
+      if (sourcePort) edge.sourcePort = sourcePort
       this.definition.edges.push(edge)
       this.canvasEdges.push(this.canvasEdge(edge, this.canvasEdges.length))
     },
@@ -2009,10 +2277,24 @@ export default {
         definitionNode.ui = {...(definitionNode.ui || {}), ...node.position}
       }
       this.markDirty()
+      if ((this.definition.nodes || []).some(item => item.type === 'loop'
+        && item.config?.resultNodeId)) this.buildCanvas()
     },
     selectEdge({edge}) {
-      this.selectedEdge = this.definition.edges.find(item => item.id === edge.id)
+      const definitionEdge = this.definition.edges.find(item => item.id === edge.id)
         || edge.data?.definitionEdge || null
+      const sourceNode = this.definition.nodes.find(item => item.id === definitionEdge?.source)
+      if (sourceNode?.type === 'loop') {
+        this.selectedNode = sourceNode
+        this.selectedEdge = null
+        this.selectedNodeConfig = JSON.stringify(sourceNode.config || {}, null, 2)
+        this.selectedNodeInputMapping = JSON.stringify(sourceNode.inputMapping || {}, null, 2)
+        this.selectedInspectorTab = 'config'
+        this.inspectorCollapsed = false
+        this.refreshCanvasLayout()
+        return
+      }
+      this.selectedEdge = definitionEdge
       this.conditionFieldSelection = ''
       if (this.selectedEdge?.kind === 'CONDITION' && !this.selectedEdge.condition && !this.selectedEdge.default) {
         this.selectedEdge.condition = { expression: '', priority: 100, onError: 'FAIL' }
@@ -2065,6 +2347,67 @@ export default {
         edge.source !== nodeId || edge.kind !== 'SEMANTIC' || slugs.has(edge.sourcePort))
       this.schemaConfigChanged(value)
       this.buildCanvas()
+    },
+    loopConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'loop') return
+      const previousResultNodeId = this.selectedNode.config?.resultNodeId || ''
+      this.schemaConfigChanged(value)
+      const hasReturn = (this.definition.edges || []).some(edge => edge.target === this.selectedNode.id
+        && edge.targetPort === 'loop-return' && edge.source === value?.resultNodeId)
+      if (previousResultNodeId !== (value?.resultNodeId || '') || !hasReturn) {
+        this.syncLoopReturnEdge(this.selectedNode)
+      }
+      this.buildCanvas()
+    },
+    loopBodyTargetChanged(target) {
+      if (!this.selectedNode || this.selectedNode.type !== 'loop') return
+      this.upsertLoopBranch(this.selectedNode.id, 'body', target, 'LOOP', false)
+      const candidates = loopResultNodeOptions(
+        this.definition, this.selectedNode.id, target, this.loopExitTarget)
+      const currentResultNodeId = this.selectedNode.config?.resultNodeId || ''
+      const currentStillValid = candidates.some(node => node.id === currentResultNodeId)
+      if (!target || !currentStillValid) {
+        const suggested = target
+          ? (candidates.find(node => node.id === target)?.id
+            || (candidates.length === 1 ? candidates[0].id : ''))
+          : ''
+        this.selectedNode.config = {...this.selectedNode.config, resultNodeId: suggested}
+        this.syncLoopReturnEdge(this.selectedNode)
+      }
+      this.buildCanvas()
+      this.markDirty()
+    },
+    loopExitTargetChanged(target) {
+      if (!this.selectedNode || this.selectedNode.type !== 'loop') return
+      this.upsertLoopBranch(this.selectedNode.id, 'done', target, 'CONDITION', true)
+      if (this.selectedNode.config?.resultNodeId) this.syncLoopReturnEdge(this.selectedNode)
+      this.buildCanvas()
+      this.markDirty()
+    },
+    upsertLoopBranch(nodeId, sourcePort, target, kind, defaultEdge) {
+      this.definition.edges = (this.definition.edges || []).filter(edge =>
+        !(edge.source === nodeId && edge.kind === kind
+          && (kind !== 'CONDITION' || edge.default)))
+      if (!target) return
+      const edge = {
+        id: `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        source: nodeId,
+        sourcePort,
+        target,
+        kind,
+        default: !!defaultEdge
+      }
+      this.definition.edges.push(edge)
+    },
+    syncLoopReturnEdge(node) {
+      const resultNodeId = node.config?.resultNodeId || ''
+      this.definition.edges = withSynchronizedLoopReturn(
+        this.definition,
+        node.id,
+        resultNodeId,
+        this.loopExitTarget,
+        () => `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      )
     },
     classifierBranchTargetChanged({slug, target}, nodeOverride = null) {
       const node = nodeOverride || this.selectedNode
@@ -2122,6 +2465,8 @@ export default {
           description: branch.description || '',
           examples: Array.isArray(branch.examples) ? branch.examples : []
         }))
+        const returnEdge = (this.definition.edges || []).find(edge => edge.target === node.id
+          && edge.kind === 'NORMAL' && edge.source !== '__start__')
         node.config = {
           ...current,
           version: current.version || 2,
@@ -2134,6 +2479,39 @@ export default {
           maxWaitSeconds: Number(current.maxWaitSeconds || 300)
         }
         delete node.config.systemPrompt
+      })
+    },
+    normalizeLoopNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'loop') return
+        const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
+          ? node.config : {}
+        const legacy = Number(current.version || 1) < 2
+        const legacyMaximum = Number(current.maxIterations || 10)
+        const returnEdge = (this.definition.edges || []).find(edge => edge.target === node.id
+          && edge.kind === 'NORMAL' && edge.source !== '__start__'
+          && (!edge.targetPort || edge.targetPort === 'loop-return'))
+        node.config = {
+          ...current,
+          version: 2,
+          mode: legacy ? 'REPEAT' : (current.mode || 'FOR_EACH'),
+          repeatMode: legacy ? 'COUNT' : (current.repeatMode || 'COUNT'),
+          count: legacy ? legacyMaximum : Number(current.count || 3),
+          maxIterations: Number(current.maxIterations || (legacy ? legacyMaximum : 100)),
+          resultMode: current.resultMode || (legacy ? 'LAST' : 'COLLECT'),
+          resultNodeId: current.resultNodeId || returnEdge?.source || '',
+          maxResults: Number(current.maxResults || Math.min(legacyMaximum, 1000) || 1000),
+          itemErrorPolicy: current.itemErrorPolicy || 'FAIL',
+          emptyPolicy: current.emptyPolicy || 'COMPLETE',
+          checkBeforeFirst: !!current.checkBeforeFirst
+        }
+        const bodyEdge = (this.definition.edges || []).find(edge => edge.source === node.id
+          && edge.kind === 'LOOP')
+        if (bodyEdge) bodyEdge.sourcePort = 'body'
+        const doneEdge = (this.definition.edges || []).find(edge => edge.source === node.id
+          && edge.kind === 'CONDITION' && edge.default)
+        if (doneEdge) doneEdge.sourcePort = 'done'
+        if (returnEdge) returnEdge.targetPort = 'loop-return'
       })
     },
     normalizeInferredOutputSchemas() {
@@ -2742,6 +3120,9 @@ export default {
         .sort((left, right) => (right.attemptNo || 0) - (left.attemptNo || 0))[0]?.status || ''
     },
     nodeSupportsTest(node) {
+      if (node?.type === 'loop') {
+        return !!this.currentDefinition?.currentPublishedVersionId
+      }
       if (!node || ((!this.currentDefinition?.id || this.dirty) && !this.canEdit)) return false
       const descriptor = this.descriptors.find(item => item.type === node.type
         && item.handlerVersion === node.typeVersion)
@@ -2803,6 +3184,10 @@ export default {
       this.openNodeTest()
     },
     openNodeTest() {
+      if (this.selectedNode?.type === 'loop') {
+        this.openTestRun()
+        return
+      }
       if (this.nodeTestRunning) {
         this.nodeTestDialogOpen = true
         return
@@ -3398,6 +3783,45 @@ export default {
         if (options.length) groups.push({id: node.id, label: node.name, options})
       })
       return groups
+    },
+    loopPredecessorIds(nodeId) {
+      const result = new Set()
+      const pending = [nodeId]
+      while (pending.length) {
+        const current = pending.shift()
+        ;(this.definition.edges || []).filter(edge => edge.target === current
+          && edge.targetPort !== 'loop-return').forEach(edge => {
+          if (edge.source === '__start__' || edge.source === nodeId || result.has(edge.source)) return
+          result.add(edge.source)
+          pending.push(edge.source)
+        })
+      }
+      return result
+    },
+    buildLoopSourceGroups(nodeId) {
+      const upstreamIds = this.loopPredecessorIds(nodeId)
+      const groups = []
+      const inputOptions = this.classifierSchemaOptions(
+        this.definition.inputs || {type: 'object'}, '$.input', '完整流程输入')
+      if (inputOptions.length) groups.push({id: '__input__', label: '流程输入', options: inputOptions})
+      ;(this.definition.nodes || []).filter(node => upstreamIds.has(node.id)).forEach(node => {
+        const descriptor = this.descriptors.find(item => item.type === node.type
+          && item.handlerVersion === node.typeVersion)
+        const schema = this.resolvedNodeSchemas[node.id]?.outputSchema
+          || descriptor?.outputSchema || {type: 'object'}
+        const options = this.classifierSchemaOptions(
+          schema, `$.nodes.${node.id}.output`, '完整输出')
+        if (options.length) groups.push({id: node.id, label: node.name, options})
+      })
+      return groups
+    },
+    buildLoopTargetOptions(nodeId, includeEnd) {
+      const upstreamIds = this.loopPredecessorIds(nodeId)
+      const result = (this.definition.nodes || [])
+        .filter(node => node.id !== nodeId && !upstreamIds.has(node.id))
+        .map(node => ({id: node.id, name: node.name}))
+      if (includeEnd) result.push({id: '__end__', name: '结束流程'})
+      return result
     },
     classifierSchemaOptions(schema, baseExpression, rootLabel) {
       return buildClassifierSchemaOptions(schema, baseExpression, rootLabel)

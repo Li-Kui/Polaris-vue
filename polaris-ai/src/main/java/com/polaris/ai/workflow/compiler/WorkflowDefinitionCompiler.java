@@ -135,7 +135,15 @@ public class WorkflowDefinitionCompiler {
         result.setType(node.getType());
         result.setHandlerVersion(descriptor.handlerVersion());
         result.setInputMapping(compileBindings(node.getInputMapping()));
-        result.setConfig(node.getConfig());
+        JsonNode compiledConfig = node.getConfig() == null
+                ? objectMapper.createObjectNode() : node.getConfig().deepCopy();
+        if ("loop".equals(node.getType())
+                && "UNTIL".equals(compiledConfig.path("repeatMode").asText())
+                && compiledConfig.hasNonNull("stopCondition")) {
+            ((ObjectNode) compiledConfig).set("_stopConditionAst",
+                    expressionParser.parse(compiledConfig.path("stopCondition").asText()));
+        }
+        result.setConfig(compiledConfig);
         result.setSideEffect(descriptor.sideEffect().name());
         JsonNode baseOutputSchema;
         if (resolvedSchema != null) {

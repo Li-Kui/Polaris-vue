@@ -41,7 +41,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private static final int MAX_TIMEOUT_SECONDS = 120;
     private static final int MAX_SCHEMA_SAMPLES = 20;
     private static final Set<String> ENGINE_CONTROL_NODES = Set.of(
-            "approval", "wait", "sub_workflow");
+            "approval", "wait", "sub_workflow", "loop");
     private static final Set<String> CHAIN_CONTROL_NODES = Set.of(
             "approval", "wait", "sub_workflow", "condition", "parallel",
             "join", "loop", "llm_classifier");
@@ -601,6 +601,9 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             WorkflowExecutionPlan.PlanNode node, WorkflowNodeHandler handler) {
         if ("WRITE".equals(node.getSideEffect())) {
             throw new ServiceException("写节点暂不允许单节点真实试运行");
+        }
+        if ("loop".equals(node.getType())) {
+            throw new ServiceException("受控循环需要使用真实执行引擎测试完整流程");
         }
         if (ENGINE_CONTROL_NODES.contains(node.getType())) {
             throw new ServiceException("持久化控制节点暂不支持隔离试运行");
