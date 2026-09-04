@@ -4,10 +4,9 @@ import java.util.Date;
 
 /** 管理端和租户控制台共用的不含密钥审批任务视图。 */
 public record WorkflowApprovalTaskView(
-        String approvalTaskId,
+        String approvalInstanceId,
         String executionId,
         String nodeRunId,
-        String assigneeType,
         String approvalMode,
         Integer requiredApprovals,
         Boolean allowSelfApproval,
@@ -16,5 +15,9 @@ public record WorkflowApprovalTaskView(
         Date deadline,
         Integer lockVersion,
         Date createTime,
-        Date finishTime) {
+        Date finishTime,
+        String contentSnapshot,
+        String currentStageName,
+        Integer currentStageSequence,
+        Integer totalStageCount) {
 }

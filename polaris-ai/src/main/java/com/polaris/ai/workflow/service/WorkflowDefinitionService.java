@@ -14,6 +14,8 @@ import com.polaris.ai.workflow.domain.WorkflowDefinition;
 import com.polaris.ai.workflow.domain.WorkflowVersion;
 import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowVersionMapper;
+import com.polaris.ai.workflow.runtime.WorkflowApprovalDirectoryResolver;
+import com.polaris.ai.workflow.spi.WorkflowApprovalTarget;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 import com.polaris.common.exception.ServiceException;
@@ -35,6 +37,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     private final WorkflowProperties properties;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider;
+    private final ObjectProvider<WorkflowApprovalDirectoryResolver> approvalDirectoryProvider;
 
     @Autowired
     public WorkflowDefinitionService(
@@ -44,7 +47,8 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
             WorkflowNodeDescriptorResolver descriptors,
             WorkflowProperties properties,
             ObjectMapper objectMapper,
-            ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider) {
+            ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider,
+            ObjectProvider<WorkflowApprovalDirectoryResolver> approvalDirectoryProvider) {
         this.definitionMapper = definitionMapper;
         this.versionMapper = versionMapper;
         this.compiler = compiler;
@@ -52,6 +56,19 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.nodeSchemaProvider = nodeSchemaProvider;
+        this.approvalDirectoryProvider = approvalDirectoryProvider;
+    }
+
+    WorkflowDefinitionService(
+            WorkflowDefinitionMapper definitionMapper,
+            WorkflowVersionMapper versionMapper,
+            WorkflowDefinitionCompiler compiler,
+            WorkflowNodeDescriptorResolver descriptors,
+            WorkflowProperties properties,
+            ObjectMapper objectMapper,
+            ObjectProvider<WorkflowNodeSchemaApplicationFacade> nodeSchemaProvider) {
+        this(definitionMapper, versionMapper, compiler, descriptors,
+                properties, objectMapper, nodeSchemaProvider, null);
     }
 
     WorkflowDefinitionService(
@@ -62,7 +79,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
             WorkflowProperties properties,
             ObjectMapper objectMapper) {
         this(definitionMapper, versionMapper, compiler, descriptors,
-                properties, objectMapper, null);
+                properties, objectMapper, null, null);
     }
 
     @Override
@@ -193,6 +210,11 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         compilation = compiler.compile(definition.getDraftJson(), versionId, schemaSnapshots);
         if (!compilation.isValid()) {
             return new WorkflowPublishResult(false, null, compilation.diagnostics());
+        }
+        List<WorkflowDiagnostic> approvalDirectoryDiagnostics = validateApprovalTargets(
+                definition.getDraftJson(), definition.getTenantId());
+        if (!approvalDirectoryDiagnostics.isEmpty()) {
+            return new WorkflowPublishResult(false, null, approvalDirectoryDiagnostics);
         }
         List<WorkflowDiagnostic> publishDiagnostics = publishDiagnostics(
                 compilation.diagnostics(), schemaSnapshots);
@@ -338,6 +360,71 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
             }
         }
         return List.copyOf(result);
+    }
+
+    private List<WorkflowDiagnostic> validateApprovalTargets(String definitionJson, Long tenantId) {
+        if (approvalDirectoryProvider == null) return List.of();
+        WorkflowApprovalDirectoryResolver resolver = approvalDirectoryProvider.getIfAvailable();
+        if (resolver == null) return List.of();
+        List<WorkflowDiagnostic> diagnostics = new ArrayList<>();
+        try {
+            JsonNode nodes = objectMapper.readTree(definitionJson).path("nodes");
+            for (JsonNode node : nodes) {
+                if (!"approval".equals(node.path("type").asText())) continue;
+                String nodeId = node.path("id").asText();
+                JsonNode config = node.path("config");
+                int stageIndex = 0;
+                for (JsonNode stage : config.path("stages")) {
+                    validateTargetSet(resolver, tenantId, nodeId,
+                            "$.nodes." + nodeId + ".config.stages[" + stageIndex + "].targets",
+                            stage.path("targets"), true, diagnostics);
+                    validateTargetSet(resolver, tenantId, nodeId,
+                            "$.nodes." + nodeId + ".config.stages[" + stageIndex + "].fallbackTargets",
+                            stage.path("fallbackTargets"), false, diagnostics);
+                    stageIndex++;
+                }
+                if ("REASSIGN".equals(config.path("expirationPolicy").path("action").asText())) {
+                    validateTargetSet(resolver, tenantId, nodeId,
+                            "$.nodes." + nodeId + ".config.expirationPolicy.targets",
+                            config.path("expirationPolicy").path("targets"), true, diagnostics);
+                }
+            }
+        } catch (Exception exception) {
+            diagnostics.add(WorkflowDiagnostic.error("APPROVAL_DIRECTORY_VALIDATION_FAILED",
+                    null, "$.nodes", "发布时无法校验审批人员目录，请刷新后重试"));
+        }
+        return diagnostics;
+    }
+
+    private void validateTargetSet(
+            WorkflowApprovalDirectoryResolver resolver,
+            Long tenantId,
+            String nodeId,
+            String path,
+            JsonNode targets,
+            boolean required,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!targets.isArray() || targets.isEmpty()) {
+            if (required) diagnostics.add(WorkflowDiagnostic.error(
+                    "APPROVAL_TARGET_UNAVAILABLE", nodeId, path, "请选择可用的审批对象"));
+            return;
+        }
+        for (JsonNode target : targets) {
+            List<String> ids = new ArrayList<>();
+            target.path("ids").forEach(id -> ids.add(id.asText()));
+            WorkflowApprovalTarget value = new WorkflowApprovalTarget(
+                    target.path("type").asText(), ids,
+                    target.path("includeChildren").asBoolean(false));
+            try {
+                if (resolver.resolve(tenantId, List.of(value)).isEmpty()) {
+                    diagnostics.add(WorkflowDiagnostic.error("APPROVAL_TARGET_UNAVAILABLE",
+                            nodeId, path, "审批对象已停用、已删除或当前没有有效成员"));
+                }
+            } catch (RuntimeException exception) {
+                diagnostics.add(WorkflowDiagnostic.error("APPROVAL_TARGET_UNAVAILABLE",
+                        nodeId, path, "审批对象不可用：" + exception.getMessage()));
+            }
+        }
     }
 
     private WorkflowDefinition requireDefinition(Long definitionId) {

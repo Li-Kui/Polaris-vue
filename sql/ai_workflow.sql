@@ -13,7 +13,10 @@ DROP TABLE IF EXISTS `ai_workflow_approval`;
 DROP TABLE IF EXISTS `ai_workflow_outbox`;
 DROP TABLE IF EXISTS `ai_workflow_trigger`;
 DROP TABLE IF EXISTS `ai_workflow_artifact`;
-DROP TABLE IF EXISTS `ai_workflow_approval_task`;
+DROP TABLE IF EXISTS `ai_workflow_approval_decision`;
+DROP TABLE IF EXISTS `ai_workflow_approval_assignment`;
+DROP TABLE IF EXISTS `ai_workflow_approval_stage`;
+DROP TABLE IF EXISTS `ai_workflow_approval_instance`;
 DROP TABLE IF EXISTS `ai_workflow_event`;
 DROP TABLE IF EXISTS `ai_workflow_checkpoint`;
 DROP TABLE IF EXISTS `ai_workflow_node_run`;
@@ -390,34 +393,130 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_event` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流持久化事件';
 
 -- ----------------------------
--- 9. Table structure for ai_workflow_approval_task (工作流审批任务)
+-- 9. Table structure for ai_workflow_approval_instance (工作流审批实例)
 -- ----------------------------
-CREATE TABLE IF NOT EXISTS `ai_workflow_approval_task` (
-  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批任务主键',
+CREATE TABLE IF NOT EXISTS `ai_workflow_approval_instance` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批实例主键',
   `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
-  `approval_task_id` varchar(64) NOT NULL COMMENT '公开的一次性审批任务ID',
+  `approval_instance_id` varchar(64) NOT NULL COMMENT '公开审批实例ID',
   `execution_id` varchar(64) NOT NULL COMMENT '执行ID',
-  `node_run_id` varchar(64) NOT NULL COMMENT '受保护的逻辑节点运行ID',
-  `assignee_type` varchar(32) NOT NULL COMMENT '审批人类型：USER用户、ROLE角色、DEPARTMENT部门、EXPRESSION表达式',
-  `assignee_snapshot` longtext NOT NULL COMMENT '不可变审批人策略快照JSON',
-  `approval_mode` varchar(32) NOT NULL COMMENT '审批模式：ANY任一、ALL全部、SEQUENTIAL依次、N_OF_M多人中指定数量',
-  `required_approvals` int(11) NOT NULL DEFAULT '1' COMMENT '多人中指定数量模式所需通过数',
-  `allow_self_approval` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否允许发起人自行审批',
-  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING待审批、APPROVED已通过、REJECTED已拒绝、EXPIRED已过期、CANCELLED已取消',
-  `decision_summary` text DEFAULT NULL COMMENT '脱敏审批决定摘要JSON',
-  `deadline` datetime DEFAULT NULL COMMENT '审批截止时间',
+  `node_run_id` varchar(64) NOT NULL COMMENT '审批节点运行ID',
+  `config_version` varchar(16) NOT NULL DEFAULT '2.0' COMMENT '审批配置版本',
+  `config_snapshot` longtext NOT NULL COMMENT '不可变审批配置快照JSON',
+  `content_snapshot` longtext DEFAULT NULL COMMENT '提交审批的脱敏内容快照JSON',
+  `result_mode` varchar(16) NOT NULL DEFAULT 'SIMPLE' COMMENT '结果模式：SIMPLE直接终止、BRANCH按结果分支',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT '审批实例状态',
+  `current_stage_id` varchar(64) DEFAULT NULL COMMENT '当前审批级别实例ID',
+  `current_stage_sequence` int(11) DEFAULT NULL COMMENT '当前审批级别序号',
+  `deadline` datetime DEFAULT NULL COMMENT '整个审批实例截止时间',
+  `reminder_time` datetime DEFAULT NULL COMMENT '下一次自动提醒时间',
+  `reminder_sent_time` datetime DEFAULT NULL COMMENT '最近自动提醒发送时间',
+  `escalation_count` int(11) NOT NULL DEFAULT '0' COMMENT '超时升级次数',
   `lock_version` int(11) NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
   `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `finish_time` datetime DEFAULT NULL COMMENT '结束时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_wf_approval_task_id` (`approval_task_id`),
-  KEY `idx_wf_approval_pending` (`tenant_id`, `status`, `deadline`),
-  KEY `idx_wf_approval_execution` (`tenant_id`, `execution_id`, `status`),
-  CONSTRAINT `fk_wf_approval_execution` FOREIGN KEY (`execution_id`)
+  UNIQUE KEY `uk_wf_approval_instance_id` (`approval_instance_id`),
+  UNIQUE KEY `uk_wf_approval_instance_run` (`execution_id`, `node_run_id`),
+  KEY `idx_wf_approval_instance_pending` (`tenant_id`, `status`, `deadline`),
+  KEY `idx_wf_approval_instance_reminder` (`tenant_id`, `status`, `reminder_time`),
+  CONSTRAINT `fk_wf_approval_instance_execution` FOREIGN KEY (`execution_id`)
     REFERENCES `ai_workflow_execution` (`execution_id`) ON DELETE CASCADE,
-  CONSTRAINT `chk_wf_approval_status` CHECK (`status` IN ('PENDING','APPROVED','REJECTED','EXPIRED','CANCELLED'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批任务';
+  CONSTRAINT `chk_wf_approval_instance_result` CHECK (`result_mode` IN ('SIMPLE','BRANCH')),
+  CONSTRAINT `chk_wf_approval_instance_status` CHECK (`status` IN ('CREATED','PENDING','APPROVED','REJECTED','EXPIRED','CONFIG_ERROR','CANCELLED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批实例';
+
+-- ----------------------------
+-- 9.1 Table structure for ai_workflow_approval_stage (工作流审批级别)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `ai_workflow_approval_stage` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批级别主键',
+  `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
+  `stage_instance_id` varchar(64) NOT NULL COMMENT '公开审批级别实例ID',
+  `approval_instance_id` varchar(64) NOT NULL COMMENT '审批实例ID',
+  `stage_key` varchar(64) NOT NULL COMMENT '发布配置中的稳定级别标识',
+  `sequence_no` int(11) NOT NULL COMMENT '级别执行序号，从1开始',
+  `stage_name` varchar(128) NOT NULL COMMENT '审批级别名称快照',
+  `policy_snapshot` longtext NOT NULL COMMENT '多人决策策略快照JSON',
+  `status` varchar(32) NOT NULL DEFAULT 'NOT_STARTED' COMMENT '审批级别状态',
+  `required_approvals` int(11) NOT NULL DEFAULT '1' COMMENT '本级所需通过数',
+  `approved_count` int(11) NOT NULL DEFAULT '0' COMMENT '已通过人数',
+  `rejected_count` int(11) NOT NULL DEFAULT '0' COMMENT '已拒绝人数',
+  `pending_count` int(11) NOT NULL DEFAULT '0' COMMENT '待决定人数',
+  `deadline` datetime DEFAULT NULL COMMENT '本级截止时间',
+  `lock_version` int(11) NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `finish_time` datetime DEFAULT NULL COMMENT '结束时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_wf_approval_stage_id` (`stage_instance_id`),
+  UNIQUE KEY `uk_wf_approval_stage_key` (`approval_instance_id`, `stage_key`),
+  KEY `idx_wf_approval_stage_sequence` (`approval_instance_id`, `sequence_no`),
+  KEY `idx_wf_approval_stage_pending` (`tenant_id`, `status`, `deadline`),
+  CONSTRAINT `fk_wf_approval_stage_instance` FOREIGN KEY (`approval_instance_id`)
+    REFERENCES `ai_workflow_approval_instance` (`approval_instance_id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_wf_approval_stage_status` CHECK (`status` IN ('NOT_STARTED','ACTIVE','APPROVED','REJECTED','EXPIRED','CONFIG_ERROR','CANCELLED','SUPERSEDED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批级别';
+
+-- ----------------------------
+-- 9.2 Table structure for ai_workflow_approval_assignment (审批资格快照)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `ai_workflow_approval_assignment` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批资格主键',
+  `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
+  `assignment_id` varchar(64) NOT NULL COMMENT '公开审批资格ID',
+  `approval_instance_id` varchar(64) NOT NULL COMMENT '审批实例ID',
+  `stage_instance_id` varchar(64) NOT NULL COMMENT '审批级别实例ID',
+  `user_id` varchar(64) NOT NULL COMMENT '审批用户ID快照',
+  `username` varchar(128) DEFAULT NULL COMMENT '审批用户名快照',
+  `display_name` varchar(128) DEFAULT NULL COMMENT '审批人显示名快照',
+  `department_id` varchar(64) DEFAULT NULL COMMENT '部门ID快照',
+  `department_name` varchar(128) DEFAULT NULL COMMENT '部门名称快照',
+  `source_snapshot` longtext NOT NULL COMMENT '命中的用户/角色/部门来源快照JSON',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT '审批资格状态',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_wf_approval_assignment_id` (`assignment_id`),
+  UNIQUE KEY `uk_wf_approval_assignment_user` (`stage_instance_id`, `user_id`),
+  KEY `idx_wf_approval_assignment_user` (`tenant_id`, `user_id`, `status`),
+  CONSTRAINT `fk_wf_approval_assignment_instance` FOREIGN KEY (`approval_instance_id`)
+    REFERENCES `ai_workflow_approval_instance` (`approval_instance_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_wf_approval_assignment_stage` FOREIGN KEY (`stage_instance_id`)
+    REFERENCES `ai_workflow_approval_stage` (`stage_instance_id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_wf_approval_assignment_status` CHECK (`status` IN ('PENDING','APPROVED','REJECTED','REASSIGNED','REVOKED','UNAVAILABLE','EXPIRED','CANCELLED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批资格快照';
+
+-- ----------------------------
+-- 9.3 Table structure for ai_workflow_approval_decision (审批决定)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `ai_workflow_approval_decision` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '审批决定主键',
+  `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID',
+  `decision_id` varchar(64) NOT NULL COMMENT '公开审批决定ID',
+  `request_id` varchar(64) NOT NULL COMMENT '客户端幂等请求ID',
+  `approval_instance_id` varchar(64) NOT NULL COMMENT '审批实例ID',
+  `stage_instance_id` varchar(64) NOT NULL COMMENT '审批级别实例ID',
+  `assignment_id` varchar(64) NOT NULL COMMENT '审批资格ID',
+  `actor_id` varchar(64) NOT NULL COMMENT '实际审批用户ID',
+  `actor_name` varchar(128) DEFAULT NULL COMMENT '实际审批人显示名快照',
+  `decision` varchar(16) NOT NULL COMMENT '决定：APPROVE通过、REJECT拒绝',
+  `comment` varchar(2000) DEFAULT NULL COMMENT '审批意见',
+  `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '决定时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_wf_approval_decision_id` (`decision_id`),
+  UNIQUE KEY `uk_wf_approval_decision_request` (`request_id`),
+  UNIQUE KEY `uk_wf_approval_decision_actor` (`stage_instance_id`, `actor_id`),
+  KEY `idx_wf_approval_decision_instance` (`approval_instance_id`, `stage_instance_id`),
+  CONSTRAINT `fk_wf_approval_decision_instance` FOREIGN KEY (`approval_instance_id`)
+    REFERENCES `ai_workflow_approval_instance` (`approval_instance_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_wf_approval_decision_stage` FOREIGN KEY (`stage_instance_id`)
+    REFERENCES `ai_workflow_approval_stage` (`stage_instance_id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_wf_approval_decision_assignment` FOREIGN KEY (`assignment_id`)
+    REFERENCES `ai_workflow_approval_assignment` (`assignment_id`) ON DELETE CASCADE,
+  CONSTRAINT `chk_wf_approval_decision_value` CHECK (`decision` IN ('APPROVE','REJECT'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流审批决定';
 
 -- ----------------------------
 -- 10. Table structure for ai_workflow_artifact (工作流大体量输出产物)

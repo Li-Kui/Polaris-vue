@@ -238,6 +238,16 @@
                   @update:body-target="loopBodyTargetChanged"
                   @update:exit-target="loopExitTargetChanged"
                 />
+                <WorkflowApprovalEditor
+                  v-else-if="isApprovalNode"
+                  :config="selectedNode.config"
+                  :source-groups="approvalSourceGroups"
+                  :target-options="approvalTargetOptions"
+                  :branch-targets="approvalBranchTargets"
+                  :disabled="!canEdit"
+                  @update:config="approvalConfigChanged"
+                  @update:branch-target="approvalBranchTargetChanged"
+                />
                 <WorkflowDatabaseQueryStep
                   v-else-if="isDatabaseNode"
                   :config="selectedNode.config"
@@ -790,6 +800,36 @@
         :loading="testInputSchemaLoading"
         @validation="testInputValidation = $event"
       />
+      <section v-if="testApprovalNodes.length" class="approval-simulation-panel">
+        <div class="approval-simulation-heading">
+          <div>
+            <strong>审批结果模拟</strong>
+            <span>测试时直接选择结果，不会创建真实待办</span>
+          </div>
+          <el-tag type="warning" effect="plain">仅 TEST 环境</el-tag>
+        </div>
+        <div
+          v-for="node in testApprovalNodes"
+          :key="node.id"
+          class="approval-simulation-row"
+        >
+          <span>{{ node.name }}</span>
+          <el-select v-model="testApprovalSimulation[node.id]" style="width: 180px">
+            <el-option label="模拟通过" value="APPROVED" />
+            <el-option
+              label="模拟拒绝"
+              value="REJECTED"
+              :disabled="!node.branched"
+            />
+            <el-option
+              label="模拟超时"
+              value="EXPIRED"
+              :disabled="!node.branched"
+            />
+          </el-select>
+        </div>
+        <small>“等待通过”型节点只能模拟通过；需要测试拒绝或超时分支时，请将节点结果处理设为“按结果分支”。</small>
+      </section>
       <template #footer>
         <el-button @click="testDialogOpen = false">取消</el-button>
         <el-button
@@ -996,6 +1036,7 @@ import WorkflowSemanticClassifierEditor from './WorkflowSemanticClassifierEditor
 import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
 import WorkflowLoopEditor from './WorkflowLoopEditor.vue'
 import WorkflowLoopScope from './WorkflowLoopScope.vue'
+import WorkflowApprovalEditor from './WorkflowApprovalEditor.vue'
 import {
   classifierSchemaOptions as buildClassifierSchemaOptions,
   classifierTargetOptions as buildClassifierTargetOptions,
@@ -1023,6 +1064,7 @@ export default {
     WorkflowTransformEditor,
     WorkflowLoopEditor,
     WorkflowLoopScope,
+    WorkflowApprovalEditor,
     ChatDotRound,
     CircleCheck,
     CircleClose,
@@ -1146,6 +1188,8 @@ export default {
       testInputSchemaLoading: false,
       testInputSchemaError: '',
       testInputValidation: {valid: false, message: '', errors: []},
+      testApprovalNodes: [],
+      testApprovalSimulation: {},
       nodeTestDialogOpen: false,
       nodeTestRunning: false,
       nodeTestNodeId: '',
@@ -1210,6 +1254,24 @@ export default {
     },
     isLoopNode() {
       return this.selectedNode?.type === 'loop'
+    },
+    isApprovalNode() {
+      return this.selectedNode?.type === 'approval'
+    },
+    approvalSourceGroups() {
+      return this.isApprovalNode && this.selectedNode
+        ? this.buildClassifierSourceGroups(this.selectedNode.id) : []
+    },
+    approvalTargetOptions() {
+      return this.isApprovalNode && this.selectedNode
+        ? buildClassifierTargetOptions(this.definition, this.selectedNode.id) : []
+    },
+    approvalBranchTargets() {
+      if (!this.isApprovalNode || !this.selectedNode) return {}
+      return (this.definition.edges || [])
+        .filter(edge => edge.source === this.selectedNode.id
+          && ['approved', 'rejected', 'expired'].includes(edge.sourcePort))
+        .reduce((result, edge) => ({...result, [edge.sourcePort]: edge.target}), {})
     },
     loopSourceGroups() {
       return this.isLoopNode && this.selectedNode
@@ -1955,6 +2017,33 @@ export default {
             ? `满足条件时停止 · 最多 ${node.config?.maxIterations || 10} 次`
             : `重复 ${node.config?.count || node.config?.maxIterations || 1} 次`
         : ''
+      const approvalBranches = node.type === 'approval'
+        && node.config?.resultPolicy?.mode === 'BRANCH'
+        ? [
+            {port: 'approved', label: '通过'},
+            {port: 'rejected', label: '拒绝'},
+            {port: 'expired', label: '超时'}
+          ].map(branch => {
+            const edge = (this.definition.edges || []).find(item => item.source === node.id
+              && item.sourcePort === branch.port)
+            const target = edge?.target === '__end__' ? {name: '结束流程'}
+              : (this.definition.nodes || []).find(item => item.id === edge?.target)
+            return {...branch, targetName: target?.name || '未连接', connected: !!edge}
+          }) : []
+      const approvalSummary = node.type === 'approval'
+        ? (() => {
+            const config = node.config || {}
+            const stages = Array.isArray(config.stages) ? config.stages : []
+            const mode = stages[0]?.decisionPolicy?.mode || 'ANY'
+            const rule = mode === 'ALL' ? '全部通过'
+              : mode === 'N_OF_M' ? `至少 ${stages[0]?.decisionPolicy?.requiredApprovals || 1} 人通过`
+                : '任一人通过'
+            const deadline = config.deadline
+            const unit = {MINUTE: '分钟', HOUR: '小时', DAY: '天'}[deadline?.unit] || ''
+            const wait = deadline?.duration ? ` · ${deadline.duration}${unit}内` : ''
+            return `${Math.max(1, stages.length)} 级 · ${rule}${wait}`
+          })()
+        : ''
       return {
         label: node.name,
         type: node.type,
@@ -1971,7 +2060,9 @@ export default {
         testTitle: node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : '',
         classifierBranches,
         loopBranches,
-        loopModeSummary
+        loopModeSummary,
+        approvalBranches,
+        approvalSummary
       }
     },
     buildCanvas() {
@@ -2072,12 +2163,14 @@ export default {
         id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
         source: edge.source,
         sourceHandle: ['SEMANTIC', 'LOOP'].includes(edge.kind)
+          || ['approved', 'rejected', 'expired'].includes(edge.sourcePort)
           || (edge.kind === 'CONDITION' && edge.default && edge.sourcePort === 'done')
           ? edge.sourcePort : undefined,
         target: edge.target,
         label: edge.kind === 'CONDITION'
           ? (edge.default ? '默认' : edge.condition?.expression || '条件')
-          : edge.kind === 'SEMANTIC' ? this.semanticBranchLabel(edge) : '',
+          : edge.kind === 'SEMANTIC' ? this.semanticBranchLabel(edge)
+            : ({approved: '通过', rejected: '拒绝', expired: '超时'}[edge.sourcePort] || ''),
         animated: edge.kind === 'CONDITION' || edge.kind === 'LOOP',
         style: {stroke: '#6762e8', strokeWidth: 1.6},
         labelStyle: {fill: '#6f7890', fontSize: 10},
@@ -2176,12 +2269,24 @@ export default {
       }
       if (type === 'approval') {
         return {
-          assigneeType: 'USER',
-          assigneeIds: [],
-          approvalMode: 'ANY',
-          requiredApprovals: 1,
-          allowSelfApproval: false,
-          timeoutSeconds: 900
+          configVersion: '2.0',
+          content: {
+            titleTemplate: '请审批当前工作流任务',
+            descriptionTemplate: '',
+            fields: []
+          },
+          stages: [{
+            id: `stage_${Date.now()}`,
+            name: '第 1 级审批',
+            targets: [],
+            decisionPolicy: {mode: 'ANY', requiredApprovals: 1, rejectOnAny: false},
+            deadline: null
+          }],
+          resultPolicy: {mode: 'SIMPLE', rejectAction: 'END', expireAction: 'END'},
+          deadline: {duration: 24, unit: 'HOUR', calendar: 'CALENDAR_DAY', timezone: 'TENANT'},
+          reminder: {enabled: false, beforeDuration: 1, beforeUnit: 'HOUR'},
+          expirationPolicy: {action: 'EXPIRE', targets: [], maxEscalations: 1},
+          options: {allowSelfApproval: false, requireApproveComment: false, requireRejectComment: true}
         }
       }
       return {}
@@ -2198,6 +2303,13 @@ export default {
           this.selectedNode = sourceNode
           this.loopExitTargetChanged(params.target)
         }
+        return
+      }
+      if (sourceNode?.type === 'approval'
+        && sourceNode.config?.resultPolicy?.mode === 'BRANCH') {
+        const port = String(params.sourceHandle || '')
+        if (!['approved', 'rejected', 'expired'].includes(port)) return
+        this.approvalBranchTargetChanged({port, target: params.target}, sourceNode)
         return
       }
       const kind = sourceNode?.type === 'condition' ? 'CONDITION'
@@ -2358,6 +2470,44 @@ export default {
         this.syncLoopReturnEdge(this.selectedNode)
       }
       this.buildCanvas()
+    },
+    approvalConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'approval') return
+      const nodeId = this.selectedNode.id
+      const previousMode = this.selectedNode.config?.resultPolicy?.mode || 'SIMPLE'
+      const nextMode = value?.resultPolicy?.mode || 'SIMPLE'
+      if (previousMode !== nextMode) {
+        const outgoing = (this.definition.edges || []).filter(edge => edge.source === nodeId)
+        const preferredTarget = outgoing.find(edge => edge.sourcePort === 'approved')?.target
+          || outgoing.find(edge => !edge.sourcePort)?.target || ''
+        this.definition.edges = (this.definition.edges || []).filter(edge => edge.source !== nodeId)
+        if (preferredTarget) {
+          this.addDefinitionEdge(nodeId, preferredTarget, 'NORMAL',
+            nextMode === 'BRANCH' ? 'approved' : '')
+        }
+      }
+      this.schemaConfigChanged(value)
+      this.buildCanvas()
+    },
+    approvalBranchTargetChanged({port, target}, nodeOverride = null) {
+      const node = nodeOverride || this.selectedNode
+      if (!node || node.type !== 'approval'
+        || !['approved', 'rejected', 'expired'].includes(port)) return
+      if (target && !isClassifierTargetAllowed(this.definition, node.id, target)) {
+        this.$message.warning('审批结果只能连接下游节点，当前目标会形成循环')
+        return
+      }
+      const existing = (this.definition.edges || []).find(edge => edge.source === node.id
+        && edge.sourcePort === port)
+      if (!target) {
+        if (existing) this.definition.edges = this.definition.edges.filter(edge => edge !== existing)
+      } else if (existing) {
+        existing.target = target
+      } else {
+        this.addDefinitionEdge(node.id, target, 'NORMAL', port)
+      }
+      this.buildCanvas()
+      this.markDirty()
     },
     loopBodyTargetChanged(target) {
       if (!this.selectedNode || this.selectedNode.type !== 'loop') return
@@ -3581,6 +3731,8 @@ export default {
       this.testInputSchema = {type: 'object', properties: {}}
       this.testInputSchemaError = ''
       this.testInputValidation = {valid: false, message: '', errors: []}
+      this.testApprovalNodes = []
+      this.testApprovalSimulation = {}
       this.testInputSchemaLoading = true
       this.testDialogOpen = true
       try {
@@ -3589,6 +3741,16 @@ export default {
           this.currentDefinition.currentPublishedVersionId
         )
         this.testInputSchema = this.publishedInputSchema(response.data?.definitionJson)
+        const published = this.parseDefinitionJson(response.data?.definitionJson)
+        this.testApprovalNodes = (published?.nodes || [])
+          .filter(node => node.type === 'approval')
+          .map(node => ({
+            id: node.id,
+            name: node.name || node.id,
+            branched: String(node.config?.resultPolicy?.mode || '').toUpperCase() === 'BRANCH'
+          }))
+        this.testApprovalSimulation = Object.fromEntries(
+          this.testApprovalNodes.map(node => [node.id, 'APPROVED']))
       } catch (error) {
         this.testInputSchemaError = '未能读取发布版本的输入契约，仍可切换到 JSON 模式填写。'
       } finally {
@@ -3631,7 +3793,9 @@ export default {
           definitionId: this.currentDefinition.id,
           workflowVersionId: this.currentDefinition.currentPublishedVersionId,
           input: this.testInput,
-          environment: this.resourceEnvironment,
+          environment: this.testApprovalNodes.length ? 'TEST' : this.resourceEnvironment,
+          approvalSimulation: this.testApprovalNodes.length
+            ? this.testApprovalSimulation : null,
           idempotencyKey: `debug-${Date.now()}`
         })
         this.debugExecution = response.data
@@ -3658,6 +3822,14 @@ export default {
         }
       } catch (error) {
         return {type: 'object', properties: {}}
+      }
+    },
+    parseDefinitionJson(definitionJson) {
+      try {
+        return typeof definitionJson === 'string'
+          ? JSON.parse(definitionJson) : definitionJson
+      } catch (error) {
+        return null
       }
     },
     async pollExecution() {
@@ -6494,5 +6666,39 @@ export default {
 
 .transform-mapping-summary small {
   color: var(--workflow-text-muted, var(--el-text-color-secondary));
+}
+
+.approval-simulation-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 10px;
+  background: var(--el-color-warning-light-9);
+}
+
+.approval-simulation-heading,
+.approval-simulation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.approval-simulation-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.approval-simulation-heading span,
+.approval-simulation-panel small {
+  color: var(--el-text-color-secondary);
+}
+
+.approval-simulation-row {
+  min-height: 42px;
+  padding-top: 10px;
+  border-top: 1px solid var(--el-color-warning-light-7);
 }
 </style>

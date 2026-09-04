@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
@@ -35,7 +36,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
     private final WorkflowExecutionMapper executionMapper;
     private final WorkflowNodeRunMapper nodeRunMapper;
     private final WorkflowEventMapper eventMapper;
-    private final WorkflowApprovalTaskMapper approvalTaskMapper;
+    private final WorkflowApprovalInstanceMapper approvalInstanceMapper;
+    private final WorkflowApprovalStageMapper approvalStageMapper;
+    private final WorkflowApprovalAssignmentMapper approvalAssignmentMapper;
     private final WorkflowExecutionPersistence persistence;
     private final WorkflowResourceResolver resourceResolver;
     private final WorkflowInputValidator inputValidator;
@@ -50,7 +53,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             WorkflowExecutionMapper executionMapper,
             WorkflowNodeRunMapper nodeRunMapper,
             WorkflowEventMapper eventMapper,
-            WorkflowApprovalTaskMapper approvalTaskMapper,
+            WorkflowApprovalInstanceMapper approvalInstanceMapper,
+            WorkflowApprovalStageMapper approvalStageMapper,
+            WorkflowApprovalAssignmentMapper approvalAssignmentMapper,
             WorkflowExecutionPersistence persistence,
             WorkflowResourceResolver resourceResolver,
             WorkflowInputValidator inputValidator,
@@ -63,7 +68,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         this.executionMapper = executionMapper;
         this.nodeRunMapper = nodeRunMapper;
         this.eventMapper = eventMapper;
-        this.approvalTaskMapper = approvalTaskMapper;
+        this.approvalInstanceMapper = approvalInstanceMapper;
+        this.approvalStageMapper = approvalStageMapper;
+        this.approvalAssignmentMapper = approvalAssignmentMapper;
         this.persistence = persistence;
         this.resourceResolver = resourceResolver;
         this.inputValidator = inputValidator;
@@ -86,7 +93,8 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         return startDefinition(definition, command.workflowVersionId(),
                 WorkflowJsonPayload.toJsonNode(command.input(), objectMapper),
-                command.environment(), command.idempotencyKey());
+                command.environment(), command.idempotencyKey(),
+                WorkflowJsonPayload.toJsonNode(command.approvalSimulation(), objectMapper));
     }
 
     @Override
@@ -115,7 +123,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         return startDefinition(definition, null,
                 WorkflowJsonPayload.toJsonNode(command.input(), objectMapper),
-                command.environment(), command.idempotencyKey());
+                command.environment(), command.idempotencyKey(), null);
     }
 
     private WorkflowExecutionView startDefinition(
@@ -123,7 +131,8 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             String requestedVersionId,
             JsonNode requestedInput,
             String requestedEnvironment,
-            String requestedIdempotencyKey) {
+            String requestedIdempotencyKey,
+            JsonNode approvalSimulation) {
         String versionId = requestedVersionId;
         if (versionId == null || versionId.isBlank()) {
             versionId = definition.getCurrentPublishedVersionId();
@@ -155,6 +164,8 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             throw new ServiceException("工作流输入校验失败: " + String.join("; ", inputErrors));
         }
         String environment = normalizeEnvironment(requestedEnvironment);
+        JsonNode safeApprovalSimulation = validateApprovalSimulation(
+                environment, plan, approvalSimulation);
         Principal principal = currentPrincipal(definition);
         if (principal.tenantId() != null
                 && !properties.isEnabledForTenant(principal.tenantId())) {
@@ -163,12 +174,60 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         String idempotencyKey = normalizeIdempotencyKey(requestedIdempotencyKey);
         WorkflowExecution execution = createExecution(
                 definition, version, plan, inputJson, environment, principal,
-                idempotencyKey, writeJson(Map.of(
-                        "type", principal.type(),
-                        "id", principal.id(),
-                        "tenantId", principal.tenantId() == null ? 0 : principal.tenantId(),
-                        "username", CallerUtils.getUsername())), null);
+                idempotencyKey, principalSnapshot(principal, safeApprovalSimulation), null);
         return view(execution);
+    }
+
+    private JsonNode validateApprovalSimulation(
+            String environment,
+            WorkflowExecutionPlan plan,
+            JsonNode requested) {
+        if (requested == null || requested.isNull() || requested.isMissingNode()
+                || requested.isEmpty()) {
+            return null;
+        }
+        if (!"TEST".equals(environment)) {
+            throw new ServiceException("审批结果模拟只能在 TEST 环境使用");
+        }
+        if (!requested.isObject()) {
+            throw new ServiceException("审批结果模拟格式无效");
+        }
+        Set<String> approvalNodeIds = plan.getNodes().stream()
+                .filter(node -> "approval".equals(node.getType()))
+                .map(WorkflowExecutionPlan.PlanNode::getId)
+                .collect(java.util.stream.Collectors.toSet());
+        Iterator<Map.Entry<String, JsonNode>> fields = requested.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> field = fields.next();
+            if (!approvalNodeIds.contains(field.getKey())) {
+                throw new ServiceException("审批结果模拟包含未知节点：" + field.getKey());
+            }
+            String result = field.getValue().asText("").toUpperCase(Locale.ROOT);
+            if (!Set.of("APPROVED", "REJECTED", "EXPIRED").contains(result)) {
+                throw new ServiceException("审批模拟结果只能是 APPROVED、REJECTED 或 EXPIRED");
+            }
+            WorkflowExecutionPlan.PlanNode node = plan.getNodes().stream()
+                    .filter(item -> field.getKey().equals(item.getId()))
+                    .findFirst().orElseThrow();
+            boolean branched = "BRANCH".equalsIgnoreCase(
+                    node.getConfig().path("resultPolicy").path("mode").asText());
+            if (!branched && !"APPROVED".equals(result)) {
+                throw new ServiceException("等待通过型审批节点只能模拟通过：" + node.getId());
+            }
+        }
+        return requested.deepCopy();
+    }
+
+    private String principalSnapshot(Principal principal, JsonNode approvalSimulation) {
+        ObjectNode snapshot = objectMapper.createObjectNode();
+        snapshot.put("type", principal.type());
+        snapshot.put("id", principal.id());
+        snapshot.put("tenantId", principal.tenantId() == null ? 0 : principal.tenantId());
+        snapshot.put("username", CallerUtils.getUsername());
+        if (approvalSimulation != null && !approvalSimulation.isEmpty()) {
+            snapshot.set("approvalSimulation", approvalSimulation);
+        }
+        return writeJson(snapshot);
     }
 
     /** 不依赖请求线程调用上下文，启动一个不可变版本的子工作流。 */
@@ -373,12 +432,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 || executionMapper.cancelWhileWaiting(executionId) == 1;
         if (cancelledImmediately) {
             quotaService.release(execution);
-            approvalTaskMapper.update(null,
-                    new LambdaUpdateWrapper<WorkflowApprovalTask>()
-                            .eq(WorkflowApprovalTask::getExecutionId, executionId)
-                            .eq(WorkflowApprovalTask::getStatus, "PENDING")
-                            .set(WorkflowApprovalTask::getStatus, "CANCELLED")
-                            .set(WorkflowApprovalTask::getFinishTime, new Date()));
+            cancelApprovals(executionId);
             nodeRunMapper.update(null,
                     new LambdaUpdateWrapper<WorkflowNodeRun>()
                             .eq(WorkflowNodeRun::getExecutionId, executionId)
@@ -411,12 +465,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                     || executionMapper.cancelWhileWaiting(child.getExecutionId()) == 1;
             if (immediate) {
                 quotaService.release(child);
-                approvalTaskMapper.update(null,
-                        new LambdaUpdateWrapper<WorkflowApprovalTask>()
-                                .eq(WorkflowApprovalTask::getExecutionId, child.getExecutionId())
-                                .eq(WorkflowApprovalTask::getStatus, "PENDING")
-                                .set(WorkflowApprovalTask::getStatus, "CANCELLED")
-                                .set(WorkflowApprovalTask::getFinishTime, new Date()));
+                cancelApprovals(child.getExecutionId());
                 nodeRunMapper.update(null,
                         new LambdaUpdateWrapper<WorkflowNodeRun>()
                                 .eq(WorkflowNodeRun::getExecutionId, child.getExecutionId())
@@ -432,6 +481,37 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             } else {
                 executionMapper.requestCancel(child.getExecutionId());
             }
+        }
+    }
+
+    private void cancelApprovals(String executionId) {
+        Date now = new Date();
+        List<WorkflowApprovalInstance> instances = approvalInstanceMapper.selectList(
+                new LambdaQueryWrapper<WorkflowApprovalInstance>()
+                        .eq(WorkflowApprovalInstance::getExecutionId, executionId)
+                        .in(WorkflowApprovalInstance::getStatus,
+                                "CREATED", "PENDING", "CONFIG_ERROR"));
+        for (WorkflowApprovalInstance instance : instances) {
+            approvalAssignmentMapper.update(null,
+                    new LambdaUpdateWrapper<WorkflowApprovalAssignment>()
+                            .eq(WorkflowApprovalAssignment::getApprovalInstanceId,
+                                    instance.getApprovalInstanceId())
+                            .eq(WorkflowApprovalAssignment::getStatus, "PENDING")
+                            .set(WorkflowApprovalAssignment::getStatus, "CANCELLED")
+                            .set(WorkflowApprovalAssignment::getUpdateTime, now));
+            approvalStageMapper.update(null,
+                    new LambdaUpdateWrapper<WorkflowApprovalStage>()
+                            .eq(WorkflowApprovalStage::getApprovalInstanceId,
+                                    instance.getApprovalInstanceId())
+                            .in(WorkflowApprovalStage::getStatus,
+                                    "NOT_STARTED", "ACTIVE", "CONFIG_ERROR")
+                            .set(WorkflowApprovalStage::getStatus, "CANCELLED")
+                            .set(WorkflowApprovalStage::getFinishTime, now)
+                            .set(WorkflowApprovalStage::getUpdateTime, now));
+            instance.setStatus("CANCELLED");
+            instance.setFinishTime(now);
+            instance.setUpdateTime(now);
+            approvalInstanceMapper.updateById(instance);
         }
     }
 
@@ -464,7 +544,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         String idempotencyKey = command == null ? null : command.idempotencyKey();
         return startDefinition(definition, source.getWorkflowVersionId(), input,
-                source.getEnvironment(), idempotencyKey);
+                source.getEnvironment(), idempotencyKey, null);
     }
 
     private WorkflowExecution requireExecution(String executionId) {

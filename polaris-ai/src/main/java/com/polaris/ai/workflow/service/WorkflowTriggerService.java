@@ -163,7 +163,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
                 : WorkflowJsonPayload.toJsonNode(command.input(), objectMapper);
         return executionFacade.start(new WorkflowExecutionStartCommand(
                 trigger.getDefinitionId(), trigger.getWorkflowVersionId(), input,
-                "PROD", idempotencyKey));
+                "PROD", idempotencyKey, null));
     }
 
     private void validateConfig(String type, JsonNode config) {

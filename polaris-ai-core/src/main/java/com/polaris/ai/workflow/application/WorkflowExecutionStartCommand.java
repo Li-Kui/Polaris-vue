@@ -6,5 +6,6 @@ public record WorkflowExecutionStartCommand(
         String workflowVersionId,
         Object input,
         String environment,
-        String idempotencyKey) {
+        String idempotencyKey,
+        Object approvalSimulation) {
 }

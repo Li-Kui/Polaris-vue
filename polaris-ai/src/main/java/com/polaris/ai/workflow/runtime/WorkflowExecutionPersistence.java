@@ -22,7 +22,9 @@ public class WorkflowExecutionPersistence {
     private final WorkflowNodeRunMapper nodeRunMapper;
     private final WorkflowEventMapper eventMapper;
     private final WorkflowCheckpointMapper checkpointMapper;
-    private final WorkflowApprovalTaskMapper approvalTaskMapper;
+    private final WorkflowApprovalInstanceMapper approvalInstanceMapper;
+    private final WorkflowApprovalStageMapper approvalStageMapper;
+    private final WorkflowApprovalAssignmentMapper approvalAssignmentMapper;
     private final WorkflowQuotaService quotaService;
     private final WorkflowOutboxMapper outboxMapper;
     private final ObjectMapper objectMapper;
@@ -34,7 +36,9 @@ public class WorkflowExecutionPersistence {
             WorkflowNodeRunMapper nodeRunMapper,
             WorkflowEventMapper eventMapper,
             WorkflowCheckpointMapper checkpointMapper,
-            WorkflowApprovalTaskMapper approvalTaskMapper,
+            WorkflowApprovalInstanceMapper approvalInstanceMapper,
+            WorkflowApprovalStageMapper approvalStageMapper,
+            WorkflowApprovalAssignmentMapper approvalAssignmentMapper,
             WorkflowQuotaService quotaService,
             WorkflowOutboxMapper outboxMapper,
             ObjectMapper objectMapper,
@@ -44,7 +48,9 @@ public class WorkflowExecutionPersistence {
         this.nodeRunMapper = nodeRunMapper;
         this.eventMapper = eventMapper;
         this.checkpointMapper = checkpointMapper;
-        this.approvalTaskMapper = approvalTaskMapper;
+        this.approvalInstanceMapper = approvalInstanceMapper;
+        this.approvalStageMapper = approvalStageMapper;
+        this.approvalAssignmentMapper = approvalAssignmentMapper;
         this.quotaService = quotaService;
         this.outboxMapper = outboxMapper;
         this.objectMapper = objectMapper;
@@ -91,6 +97,29 @@ public class WorkflowExecutionPersistence {
             Object payload) {
         WorkflowExecution execution = lockAndCheckFence(executionId, runnerId, fencingToken);
         return appendEventLocked(execution, eventType, nodeRunId, nodeId, payload);
+    }
+
+    /** 在当前事务中登记可由站内信、邮件或IM消费者处理的可靠领域事件。 */
+    public void appendOutboxEvent(
+            Long tenantId,
+            String aggregateType,
+            String aggregateId,
+            String eventType,
+            Object payload) {
+        WorkflowOutbox outbox = new WorkflowOutbox();
+        outbox.setTenantId(tenantId);
+        outbox.setEventId(UUID.randomUUID().toString());
+        outbox.setAggregateType(aggregateType);
+        outbox.setAggregateId(aggregateId);
+        outbox.setEventType(eventType);
+        outbox.setPayloadJson(writeJson(payload));
+        outbox.setPublishStatus("PENDING");
+        outbox.setAttemptCount(0);
+        outbox.setCreateTime(new Date());
+        outbox.setUpdateTime(new Date());
+        if (outboxMapper.insert(outbox) != 1) {
+            throw new ServiceException("创建工作流通知事件失败");
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -200,21 +229,46 @@ public class WorkflowExecutionPersistence {
             String runnerId,
             long fencingToken,
             WorkflowNodeRun nodeRun,
-            WorkflowApprovalTask approvalTask,
+            WorkflowApprovalInstance instance,
+            WorkflowApprovalStage stage,
+            java.util.List<WorkflowApprovalAssignment> assignments,
             String stateJson,
             String planHash) {
         WorkflowExecution execution = lockAndCheckFence(executionId, runnerId, fencingToken);
-        if (nodeRunMapper.insert(nodeRun) != 1 || approvalTaskMapper.insert(approvalTask) != 1) {
-            throw new ServiceException("创建工作流审批任务失败");
+        if (nodeRunMapper.insert(nodeRun) != 1
+                || approvalInstanceMapper.insert(instance) != 1
+                || approvalStageMapper.insert(stage) != 1) {
+            throw new ServiceException("创建工作流审批实例失败");
+        }
+        for (WorkflowApprovalAssignment assignment : assignments) {
+            if (approvalAssignmentMapper.insert(assignment) != 1) {
+                throw new ServiceException("固化工作流审批人员失败");
+            }
         }
         saveCheckpointLocked(execution, nodeRun.getNodeRunId(), stateJson, planHash);
-        appendEventLocked(execution, "APPROVAL_CREATED", nodeRun.getNodeRunId(),
-                nodeRun.getNodeId(), Map.of(
-                        "approvalTaskId", approvalTask.getApprovalTaskId(),
-                        "deadline", approvalTask.getDeadline().getTime()));
-        appendEventLocked(execution, "EXECUTION_WAITING", nodeRun.getNodeRunId(),
-                nodeRun.getNodeId(), Map.of("reason", "APPROVAL"));
-        execution.setStatus("WAITING_APPROVAL");
+        java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>();
+        payload.put("approvalInstanceId", instance.getApprovalInstanceId());
+        payload.put("stageInstanceId", stage.getStageInstanceId());
+        payload.put("assigneeCount", assignments.size());
+        if (stage.getDeadline() != null) payload.put("deadline", stage.getDeadline().getTime());
+        appendEventLocked(execution,
+                "CONFIG_ERROR".equals(instance.getStatus())
+                        ? "APPROVAL_CONFIG_ERROR" : "APPROVAL_CREATED",
+                nodeRun.getNodeRunId(), nodeRun.getNodeId(), payload);
+        if ("CONFIG_ERROR".equals(instance.getStatus())) {
+            nodeRun.setStatus("NEEDS_ATTENTION");
+            nodeRun.setErrorCode("APPROVAL_CONFIG_ERROR");
+            nodeRun.setErrorMessage("审批级别没有有效审批人，或通过人数配置无法满足");
+            nodeRunMapper.updateById(nodeRun);
+            appendEventLocked(execution, "EXECUTION_NEEDS_ATTENTION",
+                    nodeRun.getNodeRunId(), nodeRun.getNodeId(),
+                    Map.of("reason", "APPROVAL_CONFIG_ERROR"));
+            execution.setStatus("NEEDS_ATTENTION");
+        } else {
+            appendEventLocked(execution, "EXECUTION_WAITING", nodeRun.getNodeRunId(),
+                    nodeRun.getNodeId(), Map.of("reason", "APPROVAL"));
+            execution.setStatus("WAITING_APPROVAL");
+        }
         execution.setRunnerId(null);
         execution.setLeaseUntil(null);
         execution.setHeartbeatTime(new Date());

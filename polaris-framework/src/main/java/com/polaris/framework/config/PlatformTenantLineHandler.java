@@ -22,7 +22,9 @@ public class PlatformTenantLineHandler implements TenantLineHandler {
         "ai_workflow_definition", "ai_workflow_version",
         "ai_workflow_resource_binding", "ai_workflow_execution",
         "ai_workflow_node_run", "ai_workflow_checkpoint",
-        "ai_workflow_event", "ai_workflow_approval_task",
+        "ai_workflow_event", "ai_workflow_approval_instance",
+        "ai_workflow_approval_stage", "ai_workflow_approval_assignment",
+        "ai_workflow_approval_decision",
         "ai_workflow_artifact", "ai_workflow_trigger",
         "ai_workflow_outbox", "ai_workflow_concurrency_quota"
     );

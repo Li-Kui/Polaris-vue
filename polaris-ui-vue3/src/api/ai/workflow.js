@@ -266,7 +266,7 @@ export function retryWorkflowExecution(executionId, idempotencyKey) {
   })
 }
 
-export function listWorkflowApprovals(status = 'PENDING') {
+export function listWorkflowApprovals(status = '') {
   return request({
     url: '/ai/workflow/approvals',
     method: 'get',
@@ -274,9 +274,60 @@ export function listWorkflowApprovals(status = 'PENDING') {
   })
 }
 
-export function decideWorkflowApproval(approvalTaskId, data) {
+export function getWorkflowApproval(approvalInstanceId) {
   return request({
-    url: `/ai/workflow/approvals/${approvalTaskId}/decision`,
+    url: `/ai/workflow/approvals/${approvalInstanceId}`,
+    method: 'get'
+  })
+}
+
+export function listWorkflowApprovalDirectory(keyword = '') {
+  return request({
+    url: '/ai/workflow/approvals/directory',
+    method: 'get',
+    params: {keyword}
+  })
+}
+
+export function decideWorkflowApproval(approvalInstanceId, data) {
+  return request({
+    url: `/ai/workflow/approvals/${approvalInstanceId}/decision`,
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
+export function repairWorkflowApproval(approvalInstanceId, data) {
+  return request({
+    url: `/ai/workflow/approvals/${approvalInstanceId}/repair`,
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
+export function reassignWorkflowApproval(approvalInstanceId, data) {
+  return request({
+    url: `/ai/workflow/approvals/${approvalInstanceId}/reassign`,
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
+export function restartWorkflowApprovalStage(approvalInstanceId, data) {
+  return request({
+    url: `/ai/workflow/approvals/${approvalInstanceId}/restart-stage`,
+    method: 'post',
+    data,
+    headers: {repeatSubmit: false}
+  })
+}
+
+export function remindWorkflowApproval(approvalInstanceId, data) {
+  return request({
+    url: `/ai/workflow/approvals/${approvalInstanceId}/remind`,
     method: 'post',
     data,
     headers: {repeatSubmit: false}
@@ -410,14 +461,14 @@ export async function streamWorkflowExecution(data, onEvent, signal) {
 
 export async function streamWorkflowApproval(
   executionId,
-  approvalTaskId,
+  approvalInstanceId,
   data,
   onEvent,
   signal
 ) {
   const execution = await getWorkflowExecution(executionId)
   const afterSequence = execution.data.eventSequence || 0
-  await decideWorkflowApproval(approvalTaskId, {
+  await decideWorkflowApproval(approvalInstanceId, {
     decision: data.approve ? 'APPROVE' : 'REJECT',
     comment: data.feedback || null,
     expectedLockVersion: null
@@ -468,7 +519,7 @@ async function emitChatWorkflowEvent(executionId, event, onEvent) {
   } else if (eventType === 'APPROVAL_CREATED') {
     onEvent?.('node_interrupt', {
       ...envelope,
-      payload: {...payload, approvalId: payload.approvalTaskId}
+      payload: {...payload, approvalId: payload.approvalInstanceId}
     })
   } else if (eventType === 'EXECUTION_REJECTED') {
     onEvent?.('workflow_rejected', envelope)

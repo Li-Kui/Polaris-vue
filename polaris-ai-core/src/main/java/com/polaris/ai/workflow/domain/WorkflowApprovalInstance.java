@@ -9,26 +9,29 @@ import lombok.Data;
 import java.io.Serializable;
 import java.util.Date;
 
-/** 包含不可变审批人策略快照的审批任务。 */
+/** 人工审批节点一次运行对应的审批实例。 */
 @Data
-@TableName("ai_workflow_approval_task")
-public class WorkflowApprovalTask implements Serializable {
+@TableName("ai_workflow_approval_instance")
+public class WorkflowApprovalInstance implements Serializable {
     private static final long serialVersionUID = 1L;
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long tenantId;
-    private String approvalTaskId;
+    private String approvalInstanceId;
     private String executionId;
     private String nodeRunId;
-    private String assigneeType;
-    private String assigneeSnapshot;
-    private String approvalMode;
-    private Integer requiredApprovals;
-    private Boolean allowSelfApproval;
+    private String configVersion;
+    private String configSnapshot;
+    private String contentSnapshot;
+    private String resultMode;
     private String status;
-    private String decisionSummary;
+    private String currentStageId;
+    private Integer currentStageSequence;
     private Date deadline;
+    private Date reminderTime;
+    private Date reminderSentTime;
+    private Integer escalationCount;
     @Version
     private Integer lockVersion;
     private Date createTime;

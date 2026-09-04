@@ -144,6 +144,7 @@ public class WorkflowDefinitionValidator {
                         .forEach(message -> diagnostics.add(error(
                                 "NODE_CONFIG_SCHEMA_INVALID", nodeId, path + ".config", message)));
                 validateStructuredOutput(node, path, diagnostics);
+                validateApproval(node, path, diagnostics);
                 validateOutputSchemaOverride(node, descriptor, path, diagnostics);
             }
             if (node.getTimeoutSeconds() != null
@@ -191,6 +192,227 @@ public class WorkflowDefinitionValidator {
                 .forEach(message -> diagnostics.add(error(
                         "LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID", node.getId(),
                         path + ".config.structuredOutputSchema", message)));
+    }
+
+    private void validateApproval(
+            WorkflowDefinitionSpec.Node node,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!"approval".equals(node.getType()) || node.getConfig() == null) return;
+        JsonNode config = node.getConfig();
+        if (!"2.0".equals(config.path("configVersion").asText())) {
+            diagnostics.add(error("APPROVAL_CONFIG_VERSION_INVALID", node.getId(),
+                    path + ".config.configVersion", "审批节点仅支持当前配置版本 2.0"));
+            return;
+        }
+        validateApprovalContent(node, config.path("content"), path, diagnostics);
+        JsonNode stages = config.path("stages");
+        if (!stages.isArray() || stages.isEmpty() || stages.size() > 20) {
+            diagnostics.add(error("APPROVAL_STAGES_INVALID", node.getId(),
+                    path + ".config.stages", "审批级别必须配置1到20个"));
+            return;
+        }
+        Set<String> stageIds = new HashSet<>();
+        for (int index = 0; index < stages.size(); index++) {
+            JsonNode stage = stages.get(index);
+            String stagePath = path + ".config.stages[" + index + "]";
+            String stageId = stage.path("id").asText();
+            if (!stageId.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}")
+                    || !stageIds.add(stageId)) {
+                diagnostics.add(error("APPROVAL_STAGE_ID_INVALID", node.getId(),
+                        stagePath + ".id", "审批级别标识不能为空、重复或格式无效"));
+            }
+            String name = stage.path("name").asText().trim();
+            if (name.isEmpty() || name.length() > 128) {
+                diagnostics.add(error("APPROVAL_STAGE_NAME_INVALID", node.getId(),
+                        stagePath + ".name", "审批级别名称不能为空且不能超过128个字符"));
+            }
+            JsonNode targets = stage.path("targets");
+            if (!targets.isArray() || targets.isEmpty() || targets.size() > 20) {
+                diagnostics.add(error("APPROVAL_TARGETS_INVALID", node.getId(),
+                        stagePath + ".targets", "每级必须配置1到20组审批对象"));
+            } else {
+                Set<String> selectedTargets = new HashSet<>();
+                for (int targetIndex = 0; targetIndex < targets.size(); targetIndex++) {
+                    JsonNode target = targets.get(targetIndex);
+                    String type = target.path("type").asText();
+                    if (!Set.of("USER", "ROLE", "DEPARTMENT").contains(type)
+                            || !target.path("ids").isArray()
+                            || target.path("ids").isEmpty()) {
+                        diagnostics.add(error("APPROVAL_TARGET_INVALID", node.getId(),
+                                stagePath + ".targets[" + targetIndex + "]",
+                                "审批对象必须选择用户、角色或部门，并包含至少一个ID"));
+                        continue;
+                    }
+                    for (JsonNode id : target.path("ids")) {
+                        String value = id.asText("").trim();
+                        if (value.isEmpty() || !selectedTargets.add(type + ":" + value)) {
+                            diagnostics.add(error("APPROVAL_TARGET_DUPLICATE", node.getId(),
+                                    stagePath + ".targets[" + targetIndex + "].ids",
+                                    "同一级中的审批对象不能为空或重复"));
+                        }
+                    }
+                }
+            }
+            JsonNode policy = stage.path("decisionPolicy");
+            String mode = policy.path("mode").asText();
+            if (!Set.of("ANY", "ALL", "N_OF_M").contains(mode)) {
+                diagnostics.add(error("APPROVAL_POLICY_INVALID", node.getId(),
+                        stagePath + ".decisionPolicy.mode", "多人审批方式无效"));
+            } else if ("N_OF_M".equals(mode)
+                    && policy.path("requiredApprovals").asInt(0) < 1) {
+                diagnostics.add(error("APPROVAL_THRESHOLD_INVALID", node.getId(),
+                        stagePath + ".decisionPolicy.requiredApprovals",
+                        "会签通过人数必须大于0"));
+            }
+            validateApprovalDeadline(node, stage.path("deadline"),
+                    stagePath + ".deadline", diagnostics);
+            JsonNode fallbackTargets = stage.path("fallbackTargets");
+            if (!fallbackTargets.isMissingNode() && !fallbackTargets.isArray()) {
+                diagnostics.add(error("APPROVAL_FALLBACK_TARGETS_INVALID", node.getId(),
+                        stagePath + ".fallbackTargets", "备用审批人配置格式无效"));
+            }
+        }
+        String resultMode = config.path("resultPolicy").path("mode").asText("SIMPLE");
+        if (!Set.of("SIMPLE", "BRANCH").contains(resultMode)) {
+            diagnostics.add(error("APPROVAL_RESULT_MODE_INVALID", node.getId(),
+                    path + ".config.resultPolicy.mode", "审批结果处理只能是直接结束或结果分支"));
+        }
+        validateApprovalDeadline(node, config.path("deadline"),
+                path + ".config.deadline", diagnostics);
+        JsonNode expiration = config.path("expirationPolicy");
+        if (!expiration.isMissingNode()
+                && "REASSIGN".equals(expiration.path("action").asText())
+                && (!expiration.path("targets").isArray()
+                || expiration.path("targets").isEmpty())) {
+            diagnostics.add(error("APPROVAL_ESCALATION_TARGET_REQUIRED", node.getId(),
+                    path + ".config.expirationPolicy.targets", "请选择审批超时后的转交对象"));
+        }
+    }
+
+    private void validateApprovalContent(
+            WorkflowDefinitionSpec.Node node,
+            JsonNode content,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!content.isObject()) {
+            diagnostics.add(error("APPROVAL_CONTENT_INVALID", node.getId(),
+                    path + ".config.content", "请配置审批标题和审批单内容"));
+            return;
+        }
+        String title = content.path("titleTemplate").asText().trim();
+        if (title.isEmpty() || title.length() > 200) {
+            diagnostics.add(error("APPROVAL_TITLE_INVALID", node.getId(),
+                    path + ".config.content.titleTemplate",
+                    "审批标题不能为空且不能超过200个字符"));
+        } else {
+            validateApprovalTemplate(node, title,
+                    path + ".config.content.titleTemplate", diagnostics);
+        }
+        String description = content.path("descriptionTemplate").asText("");
+        if (description.length() > 2000) {
+            diagnostics.add(error("APPROVAL_DESCRIPTION_INVALID", node.getId(),
+                    path + ".config.content.descriptionTemplate",
+                    "审批说明不能超过2000个字符"));
+        } else {
+            validateApprovalTemplate(node, description,
+                    path + ".config.content.descriptionTemplate", diagnostics);
+        }
+        JsonNode fields = content.path("fields");
+        if (!fields.isArray() || fields.size() > 50) {
+            diagnostics.add(error("APPROVAL_FIELDS_INVALID", node.getId(),
+                    path + ".config.content.fields", "审批单展示字段不能超过50个"));
+            return;
+        }
+        Set<String> keys = new HashSet<>();
+        for (int index = 0; index < fields.size(); index++) {
+            JsonNode field = fields.get(index);
+            String fieldPath = path + ".config.content.fields[" + index + "]";
+            String key = field.path("key").asText().trim();
+            String label = field.path("label").asText().trim();
+            if (!key.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}") || !keys.add(key)) {
+                diagnostics.add(error("APPROVAL_FIELD_KEY_INVALID", node.getId(),
+                        fieldPath + ".key", "字段标识不能为空、重复或格式无效"));
+            }
+            if (label.isEmpty() || label.length() > 128) {
+                diagnostics.add(error("APPROVAL_FIELD_LABEL_INVALID", node.getId(),
+                        fieldPath + ".label", "字段显示名称不能为空且不能超过128个字符"));
+            }
+            JsonNode source = field.path("source");
+            boolean expression = source.hasNonNull("expression")
+                    && !source.path("expression").asText().isBlank();
+            boolean value = source.has("value");
+            if (expression == value) {
+                diagnostics.add(error("APPROVAL_FIELD_SOURCE_INVALID", node.getId(),
+                        fieldPath + ".source", "字段来源必须在上游字段和固定值中选择一种"));
+            } else if (expression) {
+                try {
+                    JsonNode ast = expressionParser.parse(source.path("expression").asText());
+                    if (!"path".equals(ast.path("type").asText())) {
+                        throw new IllegalArgumentException("只允许选择变量路径");
+                    }
+                } catch (IllegalArgumentException ex) {
+                    diagnostics.add(error("APPROVAL_FIELD_EXPRESSION_INVALID", node.getId(),
+                            fieldPath + ".source.expression", ex.getMessage()));
+                }
+            }
+            if ("CUSTOM".equals(field.path("mask").asText())
+                    && field.path("maskPattern").asText().isBlank()) {
+                diagnostics.add(error("APPROVAL_CUSTOM_MASK_REQUIRED", node.getId(),
+                        fieldPath + ".maskPattern", "自定义脱敏必须填写规则"));
+            } else if ("CUSTOM".equals(field.path("mask").asText())
+                    && !field.path("maskPattern").asText().matches("[#*]{1,256}")) {
+                diagnostics.add(error("APPROVAL_CUSTOM_MASK_INVALID", node.getId(),
+                        fieldPath + ".maskPattern", "自定义脱敏规则只能使用 #（保留）和 *（隐藏）"));
+            }
+        }
+    }
+
+    private void validateApprovalTemplate(
+            WorkflowDefinitionSpec.Node node,
+            String template,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        int cursor = 0;
+        while ((cursor = template.indexOf("${", cursor)) >= 0) {
+            int end = template.indexOf('}', cursor + 2);
+            if (end < 0) {
+                diagnostics.add(error("APPROVAL_TEMPLATE_INVALID", node.getId(), path,
+                        "变量缺少结束符号 }"));
+                return;
+            }
+            String expression = template.substring(cursor + 2, end).trim();
+            try {
+                JsonNode ast = expressionParser.parse(expression);
+                if (!"path".equals(ast.path("type").asText())) {
+                    throw new IllegalArgumentException("模板变量只允许使用变量路径");
+                }
+            } catch (IllegalArgumentException ex) {
+                diagnostics.add(error("APPROVAL_TEMPLATE_INVALID", node.getId(), path,
+                        ex.getMessage()));
+            }
+            cursor = end + 1;
+        }
+    }
+
+    private void validateApprovalDeadline(
+            WorkflowDefinitionSpec.Node node,
+            JsonNode deadline,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!deadline.isObject() || deadline.isEmpty()) return;
+        long duration = deadline.path("duration").asLong(0);
+        String unit = deadline.path("unit").asText();
+        long maximum = switch (unit) {
+            case "MINUTE" -> 365L * 1440L;
+            case "HOUR" -> 365L * 24L;
+            case "DAY" -> 365L;
+            default -> -1L;
+        };
+        if (maximum < 0 || duration < 1 || duration > maximum) {
+            diagnostics.add(error("APPROVAL_DEADLINE_INVALID", node.getId(), path,
+                    "审批期限必须在1分钟到365天之间"));
+        }
     }
 
     private void validateOutputSchemaOverride(
@@ -378,23 +600,6 @@ public class WorkflowDefinitionValidator {
                 diagnostics.add(error("WAIT_EXCEEDS_WORKFLOW_TIMEOUT", node.getId(),
                         path + ".config.delaySeconds",
                         "等待时长必须小于工作流总超时"));
-            }
-        }
-        if ("approval".equals(node.getType())) {
-            int approvalTimeout = node.getConfig().path("timeoutSeconds").asInt(86400);
-            if (approvalTimeout >= policies.getTimeoutSeconds()) {
-                diagnostics.add(error("APPROVAL_EXCEEDS_WORKFLOW_TIMEOUT", node.getId(),
-                        path + ".config.timeoutSeconds",
-                        "审批时限必须小于工作流总超时"));
-            }
-            if ("N_OF_M".equals(node.getConfig().path("approvalMode").asText())) {
-                int required = node.getConfig().path("requiredApprovals").asInt(0);
-                int assignees = node.getConfig().path("assigneeIds").size();
-                if (required < 1 || required > assignees) {
-                    diagnostics.add(error("APPROVAL_THRESHOLD_INVALID", node.getId(),
-                            path + ".config.requiredApprovals",
-                            "N_OF_M审批阈值必须在1和审批人数量之间"));
-                }
             }
         }
     }
@@ -835,6 +1040,25 @@ public class WorkflowDefinitionValidator {
                     || !ports.equals(configured)) {
                 diagnostics.add(error("CLASSIFIER_BRANCH_INVALID", node.getId(), path,
                         "每个分类结果都必须选择且只能选择一个下一节点"));
+            }
+            return;
+        }
+        if ("approval".equals(node.getType()) && node.getConfig() != null) {
+            String resultMode = node.getConfig().path("resultPolicy")
+                    .path("mode").asText("SIMPLE");
+            if ("BRANCH".equals(resultMode)) {
+                Set<String> ports = new HashSet<>();
+                outgoing.forEach(edge -> ports.add(edge.getSourcePort()));
+                if (outgoing.size() != 3
+                        || outgoing.stream().anyMatch(edge -> !"NORMAL".equals(edge.getKind()))
+                        || !ports.equals(Set.of("approved", "rejected", "expired"))) {
+                    diagnostics.add(error("APPROVAL_BRANCH_INVALID", node.getId(), path,
+                            "结果分支模式必须分别连接通过、拒绝和超时三个出口"));
+                }
+            } else if (outgoing.size() != 1
+                    || !"NORMAL".equals(outgoing.get(0).getKind())) {
+                diagnostics.add(error("APPROVAL_SIMPLE_OUTGOING_INVALID", node.getId(), path,
+                        "直接结束模式必须且只能有一条普通出口"));
             }
             return;
         }

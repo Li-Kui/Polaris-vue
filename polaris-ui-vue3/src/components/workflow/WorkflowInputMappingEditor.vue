@@ -651,7 +651,7 @@ export default {
       if (hasApproval) {
         fields.push(
           this.sourceField('审批状态', 'status', '$.approval.status', 'string', '系统上下文'),
-          this.sourceField('审批任务 ID', 'approvalTaskId', '$.approval.approvalTaskId', 'string', '系统上下文'),
+          this.sourceField('审批实例 ID', 'approvalInstanceId', '$.approval.approvalInstanceId', 'string', '系统上下文'),
           this.sourceField('审批完成时间', 'finishedAt', '$.approval.finishedAt', 'integer', '系统上下文')
         )
       }

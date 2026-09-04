@@ -38,7 +38,9 @@ public class WorkflowExecutionEngine {
     private final WorkflowVersionMapper versionMapper;
     private final WorkflowNodeRunMapper nodeRunMapper;
     private final WorkflowCheckpointMapper checkpointMapper;
-    private final WorkflowApprovalTaskMapper approvalTaskMapper;
+    private final WorkflowApprovalInstanceMapper approvalInstanceMapper;
+    private final WorkflowApprovalStageMapper approvalStageMapper;
+    private final WorkflowApprovalV2Factory approvalV2Factory;
     private final WorkflowExecutionPersistence persistence;
     private final WorkflowNodeRegistry nodeRegistry;
     private final WorkflowResourceResolver resourceResolver;
@@ -53,7 +55,9 @@ public class WorkflowExecutionEngine {
             WorkflowVersionMapper versionMapper,
             WorkflowNodeRunMapper nodeRunMapper,
             WorkflowCheckpointMapper checkpointMapper,
-            WorkflowApprovalTaskMapper approvalTaskMapper,
+            WorkflowApprovalInstanceMapper approvalInstanceMapper,
+            WorkflowApprovalStageMapper approvalStageMapper,
+            WorkflowApprovalV2Factory approvalV2Factory,
             WorkflowExecutionPersistence persistence,
             WorkflowNodeRegistry nodeRegistry,
             WorkflowResourceResolver resourceResolver,
@@ -66,7 +70,9 @@ public class WorkflowExecutionEngine {
         this.versionMapper = versionMapper;
         this.nodeRunMapper = nodeRunMapper;
         this.checkpointMapper = checkpointMapper;
-        this.approvalTaskMapper = approvalTaskMapper;
+        this.approvalInstanceMapper = approvalInstanceMapper;
+        this.approvalStageMapper = approvalStageMapper;
+        this.approvalV2Factory = approvalV2Factory;
         this.persistence = persistence;
         this.nodeRegistry = nodeRegistry;
         this.resourceResolver = resourceResolver;
@@ -798,22 +804,89 @@ public class WorkflowExecutionEngine {
             long fencingToken) {
         String nodeRunId = logicalNodeRunId(
                 execution.getExecutionId(), node.getId(), token.getBranchPath());
-        WorkflowApprovalTask existing = approvalTaskMapper.selectByNodeRun(
+        WorkflowApprovalInstance existing = approvalInstanceMapper.selectByNodeRun(
                 execution.getExecutionId(), nodeRunId);
         if (existing != null) {
-            if (!"APPROVED".equals(existing.getStatus())) {
+            if (!Set.of("APPROVED", "REJECTED", "EXPIRED").contains(existing.getStatus())) {
                 throw new NodeFailure(WorkflowErrorCode.EXECUTION_CONFLICT.name(),
-                        "审批节点尚未完成或已被终止", false);
+                        "审批节点尚未完成或需要管理员处理", false);
+            }
+            if (!"APPROVED".equals(existing.getStatus())
+                    && !"BRANCH".equals(existing.getResultMode())) {
+                throw new NodeFailure(WorkflowErrorCode.EXECUTION_CONFLICT.name(),
+                        "审批节点已结束，不能继续执行", false);
             }
             WorkflowNodeRun run = waitingNodeRun(execution.getExecutionId(), nodeRunId);
+            List<WorkflowApprovalStage> stages = approvalStageMapper.selectByInstanceId(
+                    existing.getApprovalInstanceId());
+            int approved = stages.stream().mapToInt(item -> value(item.getApprovedCount())).sum();
+            int rejected = stages.stream().mapToInt(item -> value(item.getRejectedCount())).sum();
+            int completedStages = (int) stages.stream()
+                    .filter(item -> Set.of("APPROVED", "REJECTED", "EXPIRED")
+                            .contains(item.getStatus()))
+                    .count();
+            int totalStages = approvalV2Factory.stageCount(existing);
             ObjectNode output = objectMapper.createObjectNode();
-            output.put("status", "APPROVED");
-            output.put("approvalTaskId", existing.getApprovalTaskId());
+            output.put("status", existing.getStatus());
+            output.put("approvalInstanceId", existing.getApprovalInstanceId());
+            output.put("approvedCount", approved);
+            output.put("rejectedCount", rejected);
+            output.put("stageCount", totalStages);
+            output.put("startedAt", existing.getCreateTime() == null
+                    ? System.currentTimeMillis() : existing.getCreateTime().getTime());
+            output.put("completedStageCount", completedStages);
+            output.put("totalStageCount", totalStages);
+            output.putObject("decisionSummary")
+                    .put("approvedCount", approved)
+                    .put("rejectedCount", rejected)
+                    .put("completedStageCount", completedStages)
+                    .put("totalStageCount", totalStages);
             output.put("finishedAt", existing.getFinishTime() == null
                     ? System.currentTimeMillis() : existing.getFinishTime().getTime());
+            try {
+                JsonNode persisted = run.getOutputJson() == null
+                        ? NullNode.instance : objectMapper.readTree(run.getOutputJson());
+                if (persisted.hasNonNull("finalActor")) {
+                    output.set("finalActor", persisted.get("finalActor"));
+                }
+            } catch (Exception ignored) {
+                // 旧运行记录可能没有审批结果快照，不影响恢复执行。
+            }
             WorkflowNodeResult result = WorkflowNodeResult.success(output);
             validateFrozenOutput(node, result);
             run.setStatus("SUCCEEDED");
+            run.setOutputJson(persistedJson(output));
+            run.setFinishTime(new Date());
+            return new NodeExecution(result, run);
+        }
+        String simulatedStatus = simulatedApprovalStatus(execution, node);
+        if (simulatedStatus != null) {
+            WorkflowNodeRun run = newNodeRun(
+                    execution, node, token, nodeRunId,
+                    nextAttemptNo(execution.getExecutionId(), nodeRunId), fencingToken);
+            ObjectNode output = objectMapper.createObjectNode();
+            long now = System.currentTimeMillis();
+            int approved = "APPROVED".equals(simulatedStatus) ? 1 : 0;
+            int rejected = "REJECTED".equals(simulatedStatus) ? 1 : 0;
+            output.put("status", simulatedStatus);
+            output.put("approvalInstanceId", "simulation:" + nodeRunId);
+            output.put("approvedCount", approved);
+            output.put("rejectedCount", rejected);
+            output.put("stageCount", 1);
+            output.put("completedStageCount", 1);
+            output.put("totalStageCount", 1);
+            output.put("startedAt", now);
+            output.put("finishedAt", now);
+            output.put("simulated", true);
+            output.putObject("decisionSummary")
+                    .put("approvedCount", approved)
+                    .put("rejectedCount", rejected)
+                    .put("completedStageCount", 1)
+                    .put("totalStageCount", 1);
+            WorkflowNodeResult result = WorkflowNodeResult.success(output);
+            validateFrozenOutput(node, result);
+            run.setStatus("SUCCEEDED");
+            run.setInputJson(persistedJson(input));
             run.setOutputJson(persistedJson(output));
             run.setFinishTime(new Date());
             return new NodeExecution(result, run);
@@ -823,30 +896,38 @@ public class WorkflowExecutionEngine {
                 nextAttemptNo(execution.getExecutionId(), nodeRunId), fencingToken);
         run.setStatus("WAITING");
         run.setInputJson(persistedJson(input));
-        WorkflowApprovalTask task = new WorkflowApprovalTask();
-        task.setTenantId(execution.getTenantId());
-        task.setApprovalTaskId(UUID.randomUUID().toString());
-        task.setExecutionId(execution.getExecutionId());
-        task.setNodeRunId(nodeRunId);
-        task.setAssigneeType(node.getConfig().path("assigneeType").asText());
-        task.setAssigneeSnapshot(writeJson(node.getConfig()));
-        task.setApprovalMode(node.getConfig().path("approvalMode").asText("ANY"));
-        task.setRequiredApprovals(node.getConfig().path("requiredApprovals").asInt(1));
-        task.setAllowSelfApproval(node.getConfig().path("allowSelfApproval").asBoolean(false));
-        task.setStatus("PENDING");
-        task.setDecisionSummary("{\"decisions\":[]}");
-        int timeoutSeconds = node.getConfig().path("timeoutSeconds").asInt(86400);
-        task.setDeadline(new Date(System.currentTimeMillis()
-                + TimeUnit.SECONDS.toMillis(timeoutSeconds)));
-        task.setLockVersion(0);
-        task.setCreateTime(new Date());
-        task.setUpdateTime(new Date());
+        WorkflowApprovalV2Factory.Creation creation = approvalV2Factory.create(
+                execution, nodeRunId, node.getConfig(), node.getId(),
+                contextRoot(execution, state, token.getBranchPath()));
         state.setTotalNodeRuns(Math.max(0, state.getTotalNodeRuns() - 1));
         state.getPending().add(0, token);
         persistence.suspendForApproval(
-                execution.getExecutionId(), runnerId, fencingToken, run, task,
-                writeJson(state), plan.getContentHash());
+                execution.getExecutionId(), runnerId, fencingToken, run,
+                creation.instance(), creation.activation().stage(),
+                creation.activation().assignments(), writeJson(state), plan.getContentHash());
         return null;
+    }
+
+    private String simulatedApprovalStatus(
+            WorkflowExecution execution,
+            WorkflowExecutionPlan.PlanNode node) {
+        if (!"TEST".equals(execution.getEnvironment())
+                || execution.getPrincipalSnapshot() == null) {
+            return null;
+        }
+        try {
+            JsonNode snapshot = objectMapper.readTree(execution.getPrincipalSnapshot());
+            String value = snapshot.path("approvalSimulation")
+                    .path(node.getId()).asText("").toUpperCase(Locale.ROOT);
+            return Set.of("APPROVED", "REJECTED", "EXPIRED").contains(value)
+                    ? value : null;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static int value(Integer number) {
+        return number == null ? 0 : number;
     }
 
     private NodeExecution executeWaitNode(
@@ -1188,6 +1269,18 @@ public class WorkflowExecutionEngine {
             if (selected.isEmpty()) {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
                         "语义分类结果没有匹配的分支出口", false);
+            }
+        } else if ("approval".equals(node.getType())
+                && "BRANCH".equalsIgnoreCase(node.getConfig().path("resultPolicy")
+                .path("mode").asText())) {
+            String status = state.getOutputs().getOrDefault(
+                    node.getId(), NullNode.instance).path("status").asText();
+            edges.stream()
+                    .filter(edge -> status.equalsIgnoreCase(edge.getSourcePort()))
+                    .findFirst().ifPresent(selected::add);
+            if (selected.isEmpty()) {
+                throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                        "审批结果没有匹配的分支出口：" + status, false);
             }
         } else if ("loop".equals(node.getType())) {
             if (node.getConfig().path("version").asInt(1) >= 2) {

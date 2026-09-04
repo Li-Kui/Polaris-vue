@@ -47,6 +47,14 @@
         />
       </div>
     </div>
+    <div v-else-if="data.type === 'approval'" class="loop-content">
+      <small class="loop-mode-summary">{{ data.approvalSummary || '等待人工审批' }}</small>
+      <div v-for="branch in data.approvalBranches" :key="branch.port" class="loop-branch-row">
+        <span>{{ branch.label }}</span>
+        <small :class="{missing: !branch.connected}">{{ branch.targetName }}</small>
+        <Handle type="source" :id="branch.port" :position="Position.Right" class="workflow-node-handle loop-branch-handle" />
+      </div>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
@@ -65,7 +73,7 @@
     >
       <el-icon><VideoPlay /></el-icon><span>{{ data.testLabel || '试运行' }}</span>
     </button>
-    <Handle v-if="!data.end && !['llm_classifier', 'loop'].includes(data.type)" type="source" :position="Position.Right" class="workflow-node-handle" />
+    <Handle v-if="!data.end && !['llm_classifier', 'loop'].includes(data.type) && !(data.type === 'approval' && data.approvalBranches?.length)" type="source" :position="Position.Right" class="workflow-node-handle" />
   </article>
 </template>
 

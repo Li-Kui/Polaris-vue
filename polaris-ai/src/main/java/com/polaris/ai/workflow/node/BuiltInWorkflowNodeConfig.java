@@ -1816,37 +1816,192 @@ public class BuiltInWorkflowNodeConfig {
     private ObjectNode approvalConfigSchema() {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
-        schema.putArray("required")
-                .add("assigneeType").add("assigneeIds").add("approvalMode")
-                .add("timeoutSeconds");
         ObjectNode properties = schema.putObject("properties");
-        properties.putObject("assigneeType").put("type", "string")
+        properties.putObject("configVersion").put("type", "string")
+                .putArray("enum").add("2.0");
+        ObjectNode content = properties.putObject("content");
+        content.put("type", "object");
+        ObjectNode contentProperties = content.putObject("properties");
+        contentProperties.putObject("titleTemplate").put("type", "string")
+                .put("minLength", 1).put("maxLength", 200);
+        contentProperties.putObject("descriptionTemplate").put("type", "string")
+                .put("maxLength", 2000);
+        ObjectNode fields = contentProperties.putObject("fields");
+        fields.put("type", "array").put("maxItems", 50);
+        ObjectNode field = fields.putObject("items");
+        field.put("type", "object").put("additionalProperties", false);
+        ObjectNode fieldProperties = field.putObject("properties");
+        fieldProperties.putObject("key").put("type", "string")
+                .put("minLength", 1).put("maxLength", 64);
+        fieldProperties.putObject("label").put("type", "string")
+                .put("minLength", 1).put("maxLength", 128);
+        ObjectNode source = fieldProperties.putObject("source");
+        source.put("type", "object").put("additionalProperties", false);
+        ObjectNode sourceProperties = source.putObject("properties");
+        sourceProperties.putObject("expression").put("type", "string")
+                .put("minLength", 1).put("maxLength", 2000);
+        sourceProperties.set("value", JsonNodeFactory.instance.objectNode());
+        fieldProperties.putObject("displayType").put("type", "string")
+                .putArray("enum").add("AUTO").add("TEXT").add("NUMBER")
+                .add("MONEY").add("DATE").add("DATETIME").add("BOOLEAN")
+                .add("OBJECT").add("ARRAY").add("LINK").add("ATTACHMENT").add("JSON");
+        fieldProperties.putObject("mask").put("type", "string")
+                .putArray("enum").add("NONE").add("PARTIAL").add("HIDDEN")
+                .add("PHONE").add("EMAIL").add("ID_CARD").add("CUSTOM");
+        fieldProperties.putObject("maskPattern").put("type", "string").put("maxLength", 128);
+        field.putArray("required").add("key").add("label").add("source")
+                .add("displayType").add("mask");
+        content.putArray("required").add("titleTemplate").add("fields");
+        content.put("additionalProperties", false);
+
+        ObjectNode stages = properties.putObject("stages");
+        stages.put("type", "array").put("minItems", 1).put("maxItems", 20);
+        ObjectNode stage = stages.putObject("items");
+        stage.put("type", "object").put("additionalProperties", false);
+        ObjectNode stageProperties = stage.putObject("properties");
+        stageProperties.putObject("id").put("type", "string")
+                .put("minLength", 1).put("maxLength", 64);
+        stageProperties.putObject("name").put("type", "string")
+                .put("minLength", 1).put("maxLength", 128);
+        ObjectNode targets = stageProperties.putObject("targets");
+        targets.put("type", "array").put("minItems", 1).put("maxItems", 20);
+        ObjectNode target = targets.putObject("items");
+        target.put("type", "object").put("additionalProperties", false);
+        ObjectNode targetProperties = target.putObject("properties");
+        targetProperties.putObject("type").put("type", "string")
                 .putArray("enum").add("USER").add("ROLE").add("DEPARTMENT");
-        ObjectNode ids = properties.putObject("assigneeIds");
-        ids.put("type", "array");
-        ids.put("minItems", 1);
-        ids.put("uniqueItems", true);
-        ids.putObject("items").put("type", "string").put("minLength", 1).put("maxLength", 128);
-        properties.putObject("approvalMode").put("type", "string")
-                .putArray("enum").add("ANY").add("ALL").add("SEQUENTIAL").add("N_OF_M");
-        properties.putObject("requiredApprovals").put("type", "integer")
-                .put("minimum", 1).put("maximum", 100);
-        properties.putObject("allowSelfApproval").put("type", "boolean");
-        properties.putObject("timeoutSeconds").put("type", "integer")
-                .put("minimum", 60).put("maximum", 604800);
+        ObjectNode targetIds = targetProperties.putObject("ids");
+        targetIds.put("type", "array").put("minItems", 1)
+                .put("maxItems", 500).put("uniqueItems", true);
+        targetIds.putObject("items").put("type", "string")
+                .put("minLength", 1).put("maxLength", 128);
+        targetProperties.putObject("includeChildren").put("type", "boolean");
+        target.putArray("required").add("type").add("ids");
+        ObjectNode policy = stageProperties.putObject("decisionPolicy");
+        policy.put("type", "object").put("additionalProperties", false);
+        ObjectNode policyProperties = policy.putObject("properties");
+        policyProperties.putObject("mode").put("type", "string")
+                .putArray("enum").add("ANY").add("ALL").add("N_OF_M");
+        policyProperties.putObject("requiredApprovals").put("type", "integer")
+                .put("minimum", 1).put("maximum", 500);
+        policyProperties.putObject("rejectOnAny").put("type", "boolean");
+        policy.putArray("required").add("mode").add("requiredApprovals").add("rejectOnAny");
+        stageProperties.set("deadline", approvalDeadlineSchema(true));
+        stageProperties.set("fallbackTargets", approvalTargetsSchema(false));
+        stage.putArray("required").add("id").add("name").add("targets")
+                .add("decisionPolicy").add("deadline");
+
+        ObjectNode resultPolicy = properties.putObject("resultPolicy");
+        resultPolicy.put("type", "object").put("additionalProperties", false);
+        ObjectNode resultProperties = resultPolicy.putObject("properties");
+        resultProperties.putObject("mode").put("type", "string")
+                .putArray("enum").add("SIMPLE").add("BRANCH");
+        resultProperties.putObject("rejectAction").put("type", "string")
+                .putArray("enum").add("END").add("BRANCH");
+        resultProperties.putObject("expireAction").put("type", "string")
+                .putArray("enum").add("END").add("BRANCH");
+        resultPolicy.putArray("required").add("mode").add("rejectAction").add("expireAction");
+        properties.set("deadline", approvalDeadlineSchema(false));
+        ObjectNode reminder = properties.putObject("reminder");
+        reminder.put("type", "object").put("additionalProperties", false);
+        ObjectNode reminderProperties = reminder.putObject("properties");
+        reminderProperties.putObject("enabled").put("type", "boolean");
+        reminderProperties.putObject("beforeDuration").put("type", "integer")
+                .put("minimum", 1).put("maximum", 525600);
+        reminderProperties.putObject("beforeUnit").put("type", "string")
+                .putArray("enum").add("MINUTE").add("HOUR").add("DAY");
+        reminder.putArray("required").add("enabled").add("beforeDuration").add("beforeUnit");
+        ObjectNode expiration = properties.putObject("expirationPolicy");
+        expiration.put("type", "object").put("additionalProperties", false);
+        ObjectNode expirationProperties = expiration.putObject("properties");
+        expirationProperties.putObject("action").put("type", "string")
+                .putArray("enum").add("EXPIRE").add("REASSIGN");
+        expirationProperties.set("targets", approvalTargetsSchema(false));
+        expirationProperties.putObject("maxEscalations").put("type", "integer")
+                .put("minimum", 0).put("maximum", 10);
+        expiration.putArray("required").add("action").add("targets").add("maxEscalations");
+        ObjectNode options = properties.putObject("options");
+        options.put("type", "object").put("additionalProperties", false);
+        ObjectNode optionProperties = options.putObject("properties");
+        optionProperties.putObject("allowSelfApproval").put("type", "boolean");
+        optionProperties.putObject("requireApproveComment").put("type", "boolean");
+        optionProperties.putObject("requireRejectComment").put("type", "boolean");
+        options.putArray("required").add("allowSelfApproval")
+                .add("requireApproveComment").add("requireRejectComment");
+        schema.putArray("required").add("configVersion").add("content")
+                .add("stages").add("resultPolicy").add("deadline").add("options");
         schema.put("additionalProperties", false);
         return schema;
+    }
+
+    private ObjectNode approvalDeadlineSchema(boolean nullable) {
+        ObjectNode deadline = JsonNodeFactory.instance.objectNode();
+        if (nullable) deadline.putArray("type").add("object").add("null");
+        else deadline.put("type", "object");
+        ObjectNode properties = deadline.putObject("properties");
+        properties.putObject("duration").put("type", "integer")
+                .put("minimum", 1).put("maximum", 525600);
+        properties.putObject("unit").put("type", "string")
+                .putArray("enum").add("MINUTE").add("HOUR").add("DAY");
+        properties.putObject("calendar").put("type", "string")
+                .putArray("enum").add("CALENDAR_DAY").add("BUSINESS_DAY");
+        properties.putObject("timezone").put("type", "string")
+                .put("minLength", 1).put("maxLength", 64);
+        deadline.putArray("required").add("duration").add("unit")
+                .add("calendar").add("timezone");
+        deadline.put("additionalProperties", false);
+        return deadline;
+    }
+
+    private ObjectNode approvalTargetsSchema(boolean required) {
+        ObjectNode targets = JsonNodeFactory.instance.objectNode();
+        targets.put("type", "array").put("maxItems", 20);
+        if (required) targets.put("minItems", 1);
+        ObjectNode target = targets.putObject("items");
+        target.put("type", "object").put("additionalProperties", false);
+        ObjectNode properties = target.putObject("properties");
+        properties.putObject("type").put("type", "string")
+                .putArray("enum").add("USER").add("ROLE").add("DEPARTMENT");
+        ObjectNode ids = properties.putObject("ids");
+        ids.put("type", "array").put("minItems", 1).put("maxItems", 500)
+                .put("uniqueItems", true);
+        ids.putObject("items").put("type", "string").put("minLength", 1)
+                .put("maxLength", 128);
+        properties.putObject("includeChildren").put("type", "boolean");
+        target.putArray("required").add("type").add("ids");
+        return targets;
     }
 
     private ObjectNode approvalOutputSchema() {
         ObjectNode schema = objectSchema();
         ObjectNode properties = schema.putObject("properties");
         properties.putObject("status").put("type", "string")
-                .putArray("enum").add("APPROVED");
-        properties.putObject("approvalTaskId").put("type", "string");
+                .putArray("enum").add("APPROVED").add("REJECTED").add("EXPIRED");
+        properties.putObject("approvalInstanceId").put("type", "string");
+        properties.putObject("approvedCount").put("type", "integer");
+        properties.putObject("rejectedCount").put("type", "integer");
+        properties.putObject("stageCount").put("type", "integer");
+        properties.putObject("startedAt").put("type", "integer");
+        properties.putObject("completedStageCount").put("type", "integer");
+        properties.putObject("totalStageCount").put("type", "integer");
+        ObjectNode summary = properties.putObject("decisionSummary");
+        summary.put("type", "object");
+        ObjectNode summaryProperties = summary.putObject("properties");
+        summaryProperties.putObject("approvedCount").put("type", "integer");
+        summaryProperties.putObject("rejectedCount").put("type", "integer");
+        summaryProperties.putObject("completedStageCount").put("type", "integer");
+        summaryProperties.putObject("totalStageCount").put("type", "integer");
+        summary.putArray("required").add("approvedCount").add("rejectedCount")
+                .add("completedStageCount").add("totalStageCount");
+        summary.put("additionalProperties", false);
         properties.putObject("finishedAt").put("type", "integer");
+        properties.putObject("finalActor").put("type", "string");
+        properties.putObject("simulated").put("type", "boolean");
         schema.putArray("required")
-                .add("status").add("approvalTaskId").add("finishedAt");
+                .add("status").add("approvalInstanceId").add("approvedCount")
+                .add("rejectedCount").add("stageCount").add("startedAt")
+                .add("completedStageCount").add("totalStageCount")
+                .add("decisionSummary").add("finishedAt");
         return schema;
     }
 

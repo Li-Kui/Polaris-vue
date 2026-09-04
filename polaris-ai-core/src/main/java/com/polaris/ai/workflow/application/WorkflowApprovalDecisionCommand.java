@@ -4,5 +4,6 @@ package com.polaris.ai.workflow.application;
 public record WorkflowApprovalDecisionCommand(
         String decision,
         String comment,
-        Integer expectedLockVersion) {
+        Integer expectedLockVersion,
+        String requestId) {
 }

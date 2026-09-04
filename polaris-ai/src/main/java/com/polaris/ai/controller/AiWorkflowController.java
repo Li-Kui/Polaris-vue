@@ -325,13 +325,66 @@ public class AiWorkflowController extends BaseController {
         return ok(approvalFacade.list(status));
     }
 
+    @Operation(summary = "查询工作流审批详情")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @GetMapping("/approvals/{approvalInstanceId}")
+    public ResultData<WorkflowApprovalTaskView> getApproval(
+            @PathVariable String approvalInstanceId) {
+        return ok(approvalFacade.get(approvalInstanceId));
+    }
+
     @Operation(summary = "处理工作流审批任务")
     @PreAuthorize("@workflowAccess.canApprove()")
-    @PostMapping("/approvals/{approvalTaskId}/decision")
+    @PostMapping("/approvals/{approvalInstanceId}/decision")
     public ResultData<WorkflowApprovalTaskView> decideApproval(
-            @PathVariable String approvalTaskId,
+            @PathVariable String approvalInstanceId,
             @RequestBody WorkflowApprovalDecisionCommand command) {
-        return ok(approvalFacade.decide(approvalTaskId, command));
+        return ok(approvalFacade.decide(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "修复人工审批配置异常并恢复执行")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/repair")
+    public ResultData<WorkflowApprovalTaskView> repairApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalRepairCommand command) {
+        return ok(approvalFacade.repair(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "重新指派当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/reassign")
+    public ResultData<WorkflowApprovalTaskView> reassignApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalReassignCommand command) {
+        return ok(approvalFacade.reassign(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "作废并重新发起当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/restart-stage")
+    public ResultData<WorkflowApprovalTaskView> restartApprovalStage(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalRestartStageCommand command) {
+        return ok(approvalFacade.restartStage(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "催办当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @PostMapping("/approvals/{approvalInstanceId}/remind")
+    public ResultData<WorkflowApprovalTaskView> remindApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody(required = false) WorkflowApprovalRemindCommand command) {
+        return ok(approvalFacade.remind(approvalInstanceId,
+                command == null ? new WorkflowApprovalRemindCommand(null, null, null) : command));
+    }
+
+    @Operation(summary = "查询人工审批可选人员、角色和部门")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/approvals/directory")
+    public ResultData<List<com.polaris.ai.workflow.spi.WorkflowApprovalDirectoryEntry>>
+            listApprovalDirectory(@RequestParam(required = false) String keyword) {
+        return ok(approvalFacade.listDirectory(keyword));
     }
 
     @Operation(summary = "查询工作流资源绑定")
