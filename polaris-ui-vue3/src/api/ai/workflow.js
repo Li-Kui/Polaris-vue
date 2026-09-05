@@ -1,6 +1,14 @@
 import request from '@/utils/request'
 import {getAuthHeaders} from '@/utils/auth'
 
+export function listSubWorkflows(parentId) {
+  return request({url: '/ai/workflow/sub-workflows', method: 'get', params: {parentId}})
+}
+
+export function getSubWorkflowContract(definitionId, versionId) {
+  return request({url: `/ai/workflow/sub-workflows/${definitionId}`, method: 'get', params: {versionId}})
+}
+
 export function listWorkflowDefinitions() {
   return request({
     url: '/ai/workflow/definitions',

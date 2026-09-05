@@ -225,7 +225,9 @@ public class WorkflowExecutionEngine {
                 JsonNode contextRoot = contextRoot(execution, state, token.getBranchPath());
                 JsonNode nodeInput;
                 try {
-                    nodeInput = node.getInputMapping().isEmpty()
+                    nodeInput = "sub_workflow".equals(node.getType())
+                            ? WorkflowSubWorkflowInputs.evaluate(node.getConfig().path("_inputPlan"), node.getInputSchema(), contextRoot, expressionEvaluator)
+                            : node.getInputMapping().isEmpty()
                             ? state.getInput()
                             : expressionEvaluator.evaluateBindings(
                                     node.getInputMapping(), contextRoot);
@@ -1037,10 +1039,9 @@ public class WorkflowExecutionEngine {
         }
         if ("SUCCEEDED".equals(child.getStatus())) {
             ObjectNode output = objectMapper.createObjectNode();
-            output.put("childExecutionId", child.getExecutionId());
-            output.put("status", child.getStatus());
+            output.putObject("execution").put("executionId", child.getExecutionId()).put("status", child.getStatus());
             try {
-                output.set("output", child.getOutputJson() == null
+                output.set("result", child.getOutputJson() == null
                         ? com.fasterxml.jackson.databind.node.NullNode.instance
                         : objectMapper.readTree(child.getOutputJson()));
             } catch (Exception e) {
@@ -1054,8 +1055,18 @@ public class WorkflowExecutionEngine {
             run.setFinishTime(new Date());
             return new NodeExecution(result, run);
         }
-        if (Set.of("FAILED", "CANCELLED", "REJECTED", "NEEDS_ATTENTION")
+        if (Set.of("FAILED", "CANCELLED", "REJECTED")
                 .contains(child.getStatus())) {
+            if (!"STOP".equals(node.getConfig().path("resultMode").asText("STOP"))) {
+                ObjectNode output = objectMapper.createObjectNode();
+                output.putNull("result");
+                output.putObject("execution").put("executionId", child.getExecutionId()).put("status", child.getStatus())
+                        .put("errorCode", child.getErrorCode() == null ? child.getStatus() : child.getErrorCode());
+                WorkflowNodeResult result = WorkflowNodeResult.success(output);
+                validateFrozenOutput(node, result);
+                run.setStatus("SUCCEEDED"); run.setOutputJson(persistedJson(output)); run.setFinishTime(new Date());
+                return new NodeExecution(result, run);
+            }
             run.setStatus("FAILED");
             run.setErrorCode(child.getErrorCode() == null
                     ? WorkflowErrorCode.INTERNAL_ERROR.name() : child.getErrorCode());
@@ -1067,14 +1078,28 @@ public class WorkflowExecutionEngine {
             throw new NodeFailure(run.getErrorCode(), run.getErrorMessage(),
                     "NEEDS_ATTENTION".equals(child.getStatus()));
         }
-        int pollSeconds = node.getConfig().path("pollSeconds").asInt(2);
+        int maxWait = node.getConfig().path("maxWaitSeconds").asInt(0);
+        if (maxWait > 0 && child.getCreateTime() != null
+                && System.currentTimeMillis() - child.getCreateTime().getTime() >= TimeUnit.SECONDS.toMillis(maxWait)) {
+            executionService.cancelChild(execution.getExecutionId(), child.getExecutionId());
+        }
+        // 完成事件主动唤醒；分钟级检查兜底处理丢失事件和先完成后挂起的竞态。
+        int pollSeconds = maxWait > 0 ? Math.min(60, maxWait) : 60;
         Date resumeTime = new Date(System.currentTimeMillis()
                 + TimeUnit.SECONDS.toMillis(Math.max(1, Math.min(pollSeconds, 60))));
+        ObjectNode waitingOutput = objectMapper.createObjectNode();
+        waitingOutput.put("childExecutionId", child.getExecutionId());
+        waitingOutput.put("status", child.getStatus());
+        run.setOutputJson(persistedJson(waitingOutput));
         state.setTotalNodeRuns(Math.max(0, state.getTotalNodeRuns() - 1));
         state.getPending().add(0, token);
         persistence.suspendForChild(
                 execution.getExecutionId(), runnerId, fencingToken, run, created,
                 child.getExecutionId(), resumeTime, writeJson(state), plan.getContentHash());
+        // 关闭“子流程先结束、父流程后挂起”的窗口，无需等到兜底轮询。
+        WorkflowExecution latestChild = executionMapper.selectByExecutionId(child.getExecutionId());
+        if (latestChild != null && !Objects.equals(latestChild.getStatus(), child.getStatus()))
+            executionMapper.wakeForChild(execution.getExecutionId());
         return null;
     }
 
@@ -1270,6 +1295,17 @@ public class WorkflowExecutionEngine {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
                         "语义分类结果没有匹配的分支出口", false);
             }
+        } else if ("sub_workflow".equals(node.getType())) {
+            String status = state.getOutputs().getOrDefault(node.getId(), NullNode.instance)
+                    .path("execution").path("status").asText();
+            String mode = node.getConfig().path("resultMode").asText("STOP");
+            String port = "SUCCEEDED".equals(status) ? "completed" : "DETAILED".equals(mode)
+                    ? ("REJECTED".equals(status) ? "rejected" : "failed") : "incomplete";
+            edges.stream().filter(edge -> port.equals(edge.getSourcePort())
+                    || ("completed".equals(port) && edge.getSourcePort() == null))
+                    .findFirst().ifPresent(selected::add);
+            if (selected.isEmpty()) throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                    "子工作流结果出口未连接", false);
         } else if ("approval".equals(node.getType())
                 && "BRANCH".equalsIgnoreCase(node.getConfig().path("resultPolicy")
                 .path("mode").asText())) {

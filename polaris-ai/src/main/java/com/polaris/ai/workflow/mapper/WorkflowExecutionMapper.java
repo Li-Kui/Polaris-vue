@@ -13,6 +13,10 @@ import java.util.List;
 @Mapper
 public interface WorkflowExecutionMapper extends BaseMapper<WorkflowExecution> {
 
+    @Update("UPDATE ai_workflow_execution SET resume_time = NOW() "
+            + "WHERE execution_id = #{executionId} AND status = 'WAITING_EVENT' AND cancel_requested = 0")
+    int wakeForChild(@Param("executionId") String executionId);
+
     @Select("SELECT * FROM ai_workflow_execution WHERE execution_id = #{executionId}")
     WorkflowExecution selectByExecutionId(@Param("executionId") String executionId);
 

@@ -1062,6 +1062,23 @@ public class WorkflowDefinitionValidator {
             }
             return;
         }
+        if ("sub_workflow".equals(node.getType())) {
+            String mode = node.getConfig().path("resultMode").asText("STOP");
+            Set<String> expected = "DETAILED".equals(mode) ? Set.of("completed", "rejected", "failed")
+                    : "BRANCH".equals(mode) ? Set.of("completed", "incomplete") : Set.of("completed");
+            Set<String> actual = new HashSet<>();
+            outgoing.forEach(edge -> actual.add(edge.getSourcePort() == null ? "completed" : edge.getSourcePort()));
+            if (outgoing.size() != expected.size() || !actual.equals(expected)
+                    || outgoing.stream().anyMatch(edge -> !"NORMAL".equals(edge.getKind())))
+                diagnostics.add(error("SUB_WORKFLOW_BRANCH_INVALID", node.getId(), path,
+                        "子工作流每个结果出口必须连接一个下一节点"));
+            if (node.getOutputSchemaOverride() != null || "SKIP".equals(node.getOnError())
+                    || (node.getRetryPolicy() != null && node.getRetryPolicy().getMaxAttempts() != null
+                        && node.getRetryPolicy().getMaxAttempts() > 1))
+                diagnostics.add(error("SUB_WORKFLOW_POLICY_INVALID", node.getId(), path,
+                        "子工作流使用专用完成行为，不支持覆盖输出契约、跳过或普通节点重试"));
+            return;
+        }
         if ("loop".equals(node.getType())) {
             long loopEdges = outgoing.stream().filter(item -> "LOOP".equals(item.getKind())).count();
             long exitEdges = outgoing.stream().filter(item -> "CONDITION".equals(item.getKind())

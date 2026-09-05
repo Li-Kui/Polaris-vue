@@ -30,6 +30,12 @@ public class WorkflowDefinitionCompiler {
     private final WorkflowNodeDescriptorResolver descriptors;
     private final WorkflowExpressionParser expressionParser;
     private final WorkflowDefinitionValidator validator;
+    private com.polaris.ai.workflow.service.WorkflowSubWorkflowService subWorkflows;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setSubWorkflows(com.polaris.ai.workflow.service.WorkflowSubWorkflowService service) {
+        this.subWorkflows = service;
+    }
 
     public WorkflowDefinitionCompiler(
             ObjectMapper objectMapper,
@@ -68,6 +74,7 @@ public class WorkflowDefinitionCompiler {
         try {
             WorkflowExecutionPlan plan = buildPlan(
                     definition, workflowVersionId, schemaSnapshots(resolvedSchemas));
+            freezeSubWorkflows(definition, plan);
             plan.setContentHash(calculateContentHash(plan));
             return new WorkflowCompilationResult(plan, diagnostics);
         } catch (RuntimeException e) {
@@ -75,6 +82,87 @@ public class WorkflowDefinitionCompiler {
                     "PLAN_COMPILATION_FAILED", null, "$", "执行计划编译失败: " + e.getMessage()));
             return new WorkflowCompilationResult(null, diagnostics);
         }
+    }
+
+    private void freezeSubWorkflows(WorkflowDefinitionSpec definition, WorkflowExecutionPlan plan) {
+        for (var node : plan.getNodes()) {
+            if (!"sub_workflow".equals(node.getType())) continue;
+            if (subWorkflows == null) throw new IllegalStateException("子工作流契约解析服务不可用");
+            var config = (ObjectNode) node.getConfig();
+            Long tenant = com.polaris.ai.workflow.service.WorkflowSubWorkflowService.currentTenant();
+            boolean pinned = "PINNED".equals(config.path("versionPolicy").asText());
+            var contract = subWorkflows.resolve(config.path("definitionId").asLong(),
+                    pinned ? config.path("reviewedVersionId").asText() : null, tenant);
+            if (!contract.versionId().equals(config.path("reviewedVersionId").asText()))
+                throw new IllegalStateException("子工作流「" + contract.name() + "」已更新，请确认新版本的输入输出后再发布");
+            if (Objects.equals(contract.workflowCode(), definition.getMetadata().getCode()))
+                throw new IllegalStateException("子工作流不能调用当前工作流");
+            subWorkflows.assertDependencies(contract.versionId(), tenant,
+                    subWorkflows.parentIds(definition.getMetadata().getCode(), tenant), 1, new int[]{0});
+            config.put("workflowCode", contract.workflowCode());
+            config.put("workflowVersionId", contract.versionId());
+            config.put("contentHash", contract.contentHash());
+            config.put("workflowName", contract.name());
+            config.put("childWrites", contract.writes());
+            config.set("resultSchema", contract.outputSchema());
+            config.set("_inputPlan", com.polaris.ai.workflow.runtime.WorkflowSubWorkflowInputs.compile(config.get("inputs")));
+            com.polaris.ai.workflow.runtime.WorkflowSubWorkflowInputs.validate(config.get("_inputPlan"), contract.inputSchema());
+            validateSubWorkflowSources(config.get("_inputPlan"), definition, node.getId());
+            node.setInputSchema(contract.inputSchema());
+            node.setOutputSchema(subWorkflows.envelope(contract.outputSchema()));
+            node.setSchemaSource("SUB_WORKFLOW_VERSION");
+            node.setSchemaSourceVersion(contract.versionId());
+            node.setRetryPolicy(null);
+            node.setOnError("FAIL");
+            // 子流程自行校验资源；不能通过扩展资源绕过其执行身份。
+            node.setResourceRefs(List.of());
+        }
+    }
+
+    private void validateSubWorkflowSources(JsonNode inputs, WorkflowDefinitionSpec definition, String nodeId) {
+        Set<String> upstream = new HashSet<>();
+        Deque<String> pending = new ArrayDeque<>(); pending.add(nodeId);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            definition.getEdges().stream().filter(e -> current.equals(e.getTarget())
+                    && !"loop-return".equals(e.getTargetPort())).forEach(e -> {
+                if (!nodeId.equals(e.getSource()) && upstream.add(e.getSource())) pending.add(e.getSource());
+            });
+        }
+        boolean inLoop = definition.getNodes().stream().filter(n -> "loop".equals(n.getType())).anyMatch(loop -> {
+            String start = definition.getEdges().stream().filter(e -> loop.getId().equals(e.getSource()) && "body".equals(e.getSourcePort())).map(WorkflowDefinitionSpec.Edge::getTarget).findFirst().orElse(null);
+            String done = definition.getEdges().stream().filter(e -> loop.getId().equals(e.getSource()) && "done".equals(e.getSourcePort())).map(WorkflowDefinitionSpec.Edge::getTarget).findFirst().orElse(null);
+            if (start == null) return false;
+            Set<String> seen = new HashSet<>(); Deque<String> queue = new ArrayDeque<>(); queue.add(start);
+            while (!queue.isEmpty()) {
+                String current = queue.removeFirst();
+                if (current.equals(loop.getId()) || current.equals(done) || !seen.add(current)) continue;
+                if (current.equals(nodeId)) return true;
+                definition.getEdges().stream().filter(e -> current.equals(e.getSource()) && !"loop-return".equals(e.getTargetPort())).forEach(e -> queue.add(e.getTarget()));
+            }
+            return false;
+        });
+        validateSubWorkflowSourceTree(inputs, upstream, inLoop);
+    }
+
+    private void validateSubWorkflowSourceTree(JsonNode tree, Set<String> upstream, boolean inLoop) {
+        if ("SOURCE".equals(tree.path("mode").asText())) {
+            JsonNode ast = tree.path("ast");
+            String path = ast.path("value").asText();
+            if (!"path".equals(ast.path("type").asText())) throw new IllegalArgumentException("子工作流来源必须选择一个字段");
+            if (path.equals("$.input") || path.startsWith("$.input.") || path.startsWith("$.input[")) return;
+            if (inLoop && (path.equals("$.loop.current") || path.startsWith("$.loop.current."))) return;
+            if (path.startsWith("$.nodes.")) {
+                String rest = path.substring(8); int separator = rest.indexOf('.');
+                if (separator > 0 && upstream.contains(rest.substring(0, separator))) {
+                    String suffix = rest.substring(separator);
+                    if (suffix.equals(".output") || suffix.startsWith(".output.") || suffix.startsWith(".output[")) return;
+                }
+            }
+            throw new IllegalArgumentException("子工作流引用了不可用的上游字段：" + path);
+        }
+        tree.path("fields").forEach(child -> validateSubWorkflowSourceTree(child, upstream, inLoop));
+        tree.path("items").forEach(child -> validateSubWorkflowSourceTree(child, upstream, inLoop));
     }
 
     private WorkflowExecutionPlan buildPlan(

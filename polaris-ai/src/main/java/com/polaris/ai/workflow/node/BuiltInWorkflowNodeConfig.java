@@ -1668,17 +1668,18 @@ public class BuiltInWorkflowNodeConfig {
     public WorkflowNodeHandler subWorkflowNodeHandler() {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
-        schema.putArray("required").add("workflowCode").add("workflowVersionId");
+        schema.putArray("required").add("definitionId").add("reviewedVersionId").add("versionPolicy").add("resultMode");
         ObjectNode properties = schema.putObject("properties");
-        properties.putObject("workflowCode").put("type", "string")
-                .put("pattern", "^[A-Za-z][A-Za-z0-9_.-]{0,63}$");
-        properties.putObject("workflowVersionId").put("type", "string")
+        properties.putObject("definitionId").put("type", "integer").put("minimum", 1);
+        properties.putObject("reviewedVersionId").put("type", "string")
                 .put("minLength", 1).put("maxLength", 64);
-        properties.putObject("pollSeconds").put("type", "integer")
-                .put("minimum", 1).put("maximum", 60);
+        properties.putObject("versionPolicy").put("type", "string").putArray("enum").add("LATEST").add("PINNED");
+        properties.putObject("resultMode").put("type", "string").putArray("enum").add("STOP").add("BRANCH").add("DETAILED");
+        properties.putObject("maxWaitSeconds").put("type", "integer").put("minimum", 0).put("maximum", 2592000);
+        properties.putObject("inputs").put("type", "object");
         schema.put("additionalProperties", false);
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
-                "sub_workflow", "1.0", "子工作流", "control", schema,
+                "sub_workflow", "2.0", "子工作流", "control", schema,
                 JsonNodeFactory.instance.objectNode(), subWorkflowOutputSchema(),
                 WorkflowSideEffect.NONE, Set.of(),
                 Set.of(WorkflowNodeCapability.CANCELLABLE,
@@ -2032,11 +2033,9 @@ public class BuiltInWorkflowNodeConfig {
     private ObjectNode subWorkflowOutputSchema() {
         ObjectNode schema = objectSchema();
         ObjectNode properties = schema.putObject("properties");
-        properties.putObject("childExecutionId").put("type", "string");
-        properties.putObject("status").put("type", "string")
-                .putArray("enum").add("SUCCEEDED");
-        properties.set("output", JsonNodeFactory.instance.objectNode());
-        schema.putArray("required").add("childExecutionId").add("status").add("output");
+        properties.putObject("result");
+        properties.putObject("execution").put("type", "object");
+        schema.putArray("required").add("result").add("execution");
         return schema;
     }
 

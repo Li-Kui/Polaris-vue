@@ -242,6 +242,16 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 || workflowVersionId == null || workflowVersionId.isBlank()) {
             throw new ServiceException("子工作流配置不完整");
         }
+        String rootId = parent.getRootExecutionId() == null ? parent.getExecutionId() : parent.getRootExecutionId();
+        WorkflowExecution root = executionMapper.selectByExecutionIdForUpdate(rootId);
+        WorkflowExecution currentParent = executionMapper.selectByExecutionId(parent.getExecutionId());
+        if (root == null || currentParent == null || Boolean.TRUE.equals(root.getCancelRequested())
+                || Boolean.TRUE.equals(currentParent.getCancelRequested()) || isTerminal(root.getStatus()) || isTerminal(currentParent.getStatus()))
+            throw new ServiceException("父工作流已经停止，不能再创建子工作流");
+        WorkflowExecution existingChild = executionMapper.selectByIdempotency(parent.getIdempotencyScope() + ":child", nodeRunId);
+        if (existingChild == null && executionMapper.selectCount(new LambdaQueryWrapper<WorkflowExecution>()
+                .eq(WorkflowExecution::getRootExecutionId, rootId)) >= 1000)
+            throw new ServiceException("当前工作流累计子执行已达到 1000 次上限");
         int depth = parent.getExecutionDepth() == null ? 0 : parent.getExecutionDepth();
         if (depth >= 5) {
             throw new ServiceException("子工作流递归深度不能超过5层");
@@ -461,6 +471,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                         .notIn(WorkflowExecution::getStatus,
                                 "SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"));
         for (WorkflowExecution child : descendants) {
+            if (!isDescendantOf(child, parent.getExecutionId())) continue;
             boolean immediate = executionMapper.cancelBeforeRun(child.getExecutionId()) == 1
                     || executionMapper.cancelWhileWaiting(child.getExecutionId()) == 1;
             if (immediate) {
@@ -482,6 +493,50 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 executionMapper.requestCancel(child.getExecutionId());
             }
         }
+    }
+
+    private boolean isDescendantOf(WorkflowExecution child, String parentId) {
+        Set<String> visited = new HashSet<>();
+        String id = child.getParentExecutionId();
+        while (id != null && visited.add(id)) {
+            if (parentId.equals(id)) return true;
+            WorkflowExecution ancestor = executionMapper.selectByExecutionId(id);
+            id = ancestor == null ? null : ancestor.getParentExecutionId();
+        }
+        return false;
+    }
+
+    /** 调度器取消一次调用，不依赖请求线程，也不能影响兄弟子流程。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelChild(String parentId, String childId) {
+        WorkflowExecution child = executionMapper.selectByExecutionIdForUpdate(childId);
+        if (child == null || !Objects.equals(parentId, child.getParentExecutionId()))
+            throw new ServiceException("子工作流调用关系无效");
+        if (isTerminal(child.getStatus())) return;
+        if (executionMapper.cancelBeforeRun(childId) == 1 || executionMapper.cancelWhileWaiting(childId) == 1) {
+            quotaService.release(child);
+            cancelApprovals(childId);
+            nodeRunMapper.update(null, new LambdaUpdateWrapper<WorkflowNodeRun>()
+                    .eq(WorkflowNodeRun::getExecutionId, childId).eq(WorkflowNodeRun::getStatus, "WAITING")
+                    .set(WorkflowNodeRun::getStatus, "CANCELLED")
+                    .set(WorkflowNodeRun::getErrorCode, "NODE_CANCELLED")
+                    .set(WorkflowNodeRun::getErrorMessage, "子工作流超过等待时限")
+                    .set(WorkflowNodeRun::getFinishTime, new Date()));
+            persistence.appendEvent(childId, null, null, "EXECUTION_CANCELLED", null, null,
+                    Map.of("reason", "SUB_WORKFLOW_DEADLINE"));
+        } else executionMapper.requestCancel(childId);
+        cancelActiveDescendants(child);
+    }
+
+    /** 终态提交后清理仍活跃的后代；与创建子执行使用相同的根锁。 */
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelChildrenOfStoppedExecution(String executionId) {
+        WorkflowExecution parent = executionMapper.selectByExecutionId(executionId);
+        if (parent == null) return;
+        executionMapper.selectByExecutionIdForUpdate(parent.getRootExecutionId() == null
+                ? executionId : parent.getRootExecutionId());
+        parent = executionMapper.selectByExecutionId(executionId);
+        if (parent != null && isTerminal(parent.getStatus())) cancelActiveDescendants(parent);
     }
 
     private void cancelApprovals(String executionId) {

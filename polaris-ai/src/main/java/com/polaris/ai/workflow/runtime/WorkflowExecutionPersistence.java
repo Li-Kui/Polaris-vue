@@ -349,6 +349,9 @@ public class WorkflowExecutionPersistence {
         if (createNodeRun && nodeRunMapper.insert(nodeRun) != 1) {
             throw new ServiceException("创建子工作流节点运行记录失败");
         }
+        if (!createNodeRun && nodeRunMapper.updateById(nodeRun) != 1) {
+            throw new ServiceException("更新子工作流等待状态失败");
+        }
         saveCheckpointLocked(execution, nodeRun.getNodeRunId(), stateJson, planHash);
         appendEventLocked(execution, "EXECUTION_WAITING",
                 nodeRun.getNodeRunId(), nodeRun.getNodeId(), Map.of(
@@ -472,6 +475,12 @@ public class WorkflowExecutionPersistence {
         event.setCreateTime(new Date());
         if (eventMapper.insert(event) != 1) {
             throw new ServiceException("保存工作流事件失败");
+        }
+        if (java.util.Set.of(
+                "EXECUTION_SUCCEEDED", "EXECUTION_FAILED", "EXECUTION_CANCELLED", "EXECUTION_REJECTED",
+                "EXECUTION_NEEDS_ATTENTION", "EXECUTION_WAITING").contains(eventType)) {
+            boolean terminal = java.util.Set.of("EXECUTION_SUCCEEDED", "EXECUTION_FAILED", "EXECUTION_CANCELLED", "EXECUTION_REJECTED").contains(eventType);
+            eventPublisher.publishEvent(new WorkflowChildChanged(execution.getParentExecutionId(), execution.getExecutionId(), terminal));
         }
         return sequence;
     }

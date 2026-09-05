@@ -238,6 +238,21 @@
                   @update:body-target="loopBodyTargetChanged"
                   @update:exit-target="loopExitTargetChanged"
                 />
+                <WorkflowSubWorkflowEditor
+                  v-else-if="isSubWorkflowNode"
+                  :config="selectedNode.config"
+                  :catalog="subWorkflowCatalog"
+                  :selected-contract="selectedSubWorkflowContract"
+                  :loading="subWorkflowLoading"
+                  :error="subWorkflowError"
+                  :fields="subWorkflowFields"
+                  :targets="subWorkflowTargets"
+                  :branch-targets="subWorkflowBranchTargets"
+                  :disabled="!canEdit"
+                  @update:config="subWorkflowConfigChanged"
+                  @refresh="refreshSubWorkflows"
+                  @branch-target="subWorkflowBranchChanged"
+                />
                 <WorkflowApprovalEditor
                   v-else-if="isApprovalNode"
                   :config="selectedNode.config"
@@ -327,7 +342,7 @@
                 </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : '资源'" name="resource">
+            <el-tab-pane v-if="!isSubWorkflowNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -455,7 +470,11 @@
               </template>
             </el-tab-pane>
             <el-tab-pane label="输入输出" name="mapping">
-              <section v-if="isTransformNode" class="transform-mapping-summary">
+              <section v-if="isSubWorkflowNode" class="transform-mapping-summary">
+                <strong>输入已统一在“配置”页填写</strong>
+                <el-button type="primary" plain @click="selectedInspectorTab = 'config'">配置子工作流</el-button>
+              </section>
+              <section v-else-if="isTransformNode" class="transform-mapping-summary">
                 <div>
                   <strong>转换来源与输出字段已统一到“配置”页</strong>
                   <small>避免在两个位置重复配置。这里仅展示系统自动生成的正式输出结构。</small>
@@ -485,13 +504,13 @@
                     <small>发布后进入执行计划，并用于节点输出校验</small>
                   </div>
                   <el-tag :type="isTransformNode || selectedNode.outputSchemaOverride ? 'success' : 'info'" size="small">
-                    {{ isTransformNode ? '转换规则自动生成' : (selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约') }}
+                    {{ isSubWorkflowNode ? '来自已确认的子工作流版本' : isTransformNode ? '转换规则自动生成' : (selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约') }}
                   </el-tag>
                 </div>
-                <template v-if="isTransformNode">
+                <template v-if="isTransformNode || isSubWorkflowNode">
                   <pre>{{ formatNodeTestJson(resolvedNodeSchemas[selectedNode.id]?.outputSchema || {}) }}</pre>
                   <div class="formal-schema-actions">
-                    <small>修改转换规则后自动更新，无需手写或再次确认。</small>
+                    <small>{{ isSubWorkflowNode ? '结果结构来自已确认的发布版本；使用新版本前请检查下游字段引用。' : '修改转换规则后自动更新，无需手写或再次确认。' }}</small>
                   </div>
                 </template>
                 <template v-else-if="selectedNode.outputSchemaOverride">
@@ -521,7 +540,20 @@
               </section>
             </el-tab-pane>
             <el-tab-pane label="运行策略" name="policy">
-              <el-form label-position="top" size="small">
+              <el-form v-if="isSubWorkflowNode" label-position="top" size="small">
+                <el-alert title="等待期间会保存进度；服务恢复后继续等待同一次子流程调用。" type="info" :closable="false" />
+                <el-form-item label="最长等待时间（秒，0 表示沿用工作流总时限）">
+                  <el-input-number :model-value="selectedNode.config.maxWaitSeconds || 0" :min="0" :max="2592000" :disabled="!canEdit" @change="subWorkflowConfigChanged({...selectedNode.config, maxWaitSeconds: $event})" />
+                </el-form-item>
+                <el-form-item label="子工作流版本">
+                  <el-select :model-value="selectedNode.config.versionPolicy || 'LATEST'" :disabled="!canEdit" @change="subWorkflowConfigChanged({...selectedNode.config, versionPolicy: $event})">
+                    <el-option value="LATEST" label="发布时检查最新版本，有更新时需重新确认" />
+                    <el-option value="PINNED" label="固定使用已经确认的版本" />
+                  </el-select>
+                </el-form-item>
+                <p>超过等待时间会取消本次子流程调用；不会自动创建新的调用。</p>
+              </el-form>
+              <el-form v-else label-position="top" size="small">
                 <el-form-item label="执行超时（秒）"><el-input-number v-model="selectedNode.timeoutSeconds" :min="1" :max="86400" :disabled="!canEdit" style="width: 100%" @change="markDirty" /></el-form-item>
                 <el-form-item label="错误策略">
                   <el-select v-model="selectedNode.onError" :disabled="!canEdit || selectedDescriptor?.sideEffect === 'WRITE'" style="width: 100%" @change="markDirty">
@@ -543,7 +575,7 @@
           </el-tabs>
           <div class="inspector-footer">
             <el-tooltip
-              v-if="canDebug"
+              v-if="isSubWorkflowNode ? canExecute : canDebug"
               :content="nodeTestAvailability.reason"
               :disabled="nodeTestAvailability.available"
               placement="top"
@@ -557,7 +589,7 @@
                   @click="openNodeTest"
                 ><el-icon><VideoPlay /></el-icon><span>{{ selectedNode?.type === 'loop'
                     ? '测试完整流程'
-                    : (nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
+                    : (isSubWorkflowNode ? '试运行子工作流' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
               </span>
             </el-tooltip>
             <el-button v-if="canEdit" class="node-delete-button" type="danger" text @click="removeSelectedNode">
@@ -686,7 +718,7 @@
 
       <nav class="context-rail" aria-label="节点属性入口">
         <button
-          v-for="item in inspectorTabOptions"
+          v-for="item in visibleInspectorTabs"
           :key="item.value"
           type="button"
           :class="{active: selectedNode && !inspectorCollapsed && selectedInspectorTab === item.value}"
@@ -965,6 +997,7 @@
         </el-button>
       </template>
     </el-dialog>
+    <WorkflowSubWorkflowTest v-model="subWorkflowTestOpen" :contract="subWorkflowTestContract" />
   </div>
 </template>
 
@@ -977,10 +1010,12 @@ import {
   cancelWorkflowExecution,
   cancelWorkflowNodeTest,
   createWorkflowDraft,
+  getSubWorkflowContract,
   getWorkflowExecution,
   getWorkflowNodeTest,
   getWorkflowVersion,
   inferWorkflowNodeTestSchema,
+  listSubWorkflows,
   listWorkflowNodeRuns,
   listWorkflowResourceBindings,
   listWorkflowResources,
@@ -1037,6 +1072,9 @@ import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
 import WorkflowLoopEditor from './WorkflowLoopEditor.vue'
 import WorkflowLoopScope from './WorkflowLoopScope.vue'
 import WorkflowApprovalEditor from './WorkflowApprovalEditor.vue'
+import WorkflowSubWorkflowEditor from './WorkflowSubWorkflowEditor.vue'
+import WorkflowSubWorkflowTest from './WorkflowSubWorkflowTest.vue'
+import {isInsideSubWorkflowLoop, subWorkflowPorts} from './workflowSubWorkflow'
 import {
   classifierSchemaOptions as buildClassifierSchemaOptions,
   classifierTargetOptions as buildClassifierTargetOptions,
@@ -1053,6 +1091,8 @@ export default {
     VueFlow,
     Background,
     WorkflowSchemaConfig,
+    WorkflowSubWorkflowEditor,
+    WorkflowSubWorkflowTest,
     WorkflowCanvasNode,
     WorkflowApiConnectionStep,
     WorkflowDatasourceConnectionStep,
@@ -1167,6 +1207,13 @@ export default {
       diagnostics: [],
       validationPassed: false,
       dirty: false,
+      savedDefinitionSnapshot: '',
+      subWorkflowCatalog: [],
+      subWorkflowContracts: {},
+      subWorkflowLoading: false,
+      subWorkflowError: '',
+      subWorkflowTestOpen: false,
+      subWorkflowTestContract: null,
       saving: false,
       validating: false,
       publishing: false,
@@ -1257,6 +1304,24 @@ export default {
     },
     isApprovalNode() {
       return this.selectedNode?.type === 'approval'
+    },
+    isSubWorkflowNode() { return this.selectedNode?.type === 'sub_workflow' },
+    selectedSubWorkflowContract() { return this.subWorkflowContracts[this.selectedNode?.config?.reviewedVersionId] },
+    visibleInspectorTabs() { return this.inspectorTabOptions.filter(item => !this.isSubWorkflowNode || item.value !== 'resource') },
+    subWorkflowFields() {
+      if (!this.isSubWorkflowNode) return []
+      const fields = this.buildClassifierSourceGroups(this.selectedNode.id)
+        .flatMap(group => (group.options || group.fields || []).map(field => ({...field, group: group.label})))
+      if (isInsideSubWorkflowLoop(this.definition, this.selectedNode.id)) fields.unshift(
+        {expression:'$.loop.current.item',label:'本轮数据',type:'any',typeLabel:'保留原始类型',group:'当前循环'},
+        {expression:'$.loop.current.number',label:'当前序号（从 1 开始）',type:'integer',group:'当前循环'},
+        {expression:'$.loop.current.index',label:'数组下标（从 0 开始）',type:'integer',group:'当前循环'})
+      return fields
+    },
+    subWorkflowTargets() { return this.isSubWorkflowNode ? buildClassifierTargetOptions(this.definition, this.selectedNode.id) : [] },
+    subWorkflowBranchTargets() {
+      return this.isSubWorkflowNode ? Object.fromEntries((this.definition.edges || []).filter(e=>e.source===this.selectedNode.id)
+        .map(e=>[e.sourcePort || 'completed', e.target])) : {}
     },
     approvalSourceGroups() {
       return this.isApprovalNode && this.selectedNode
@@ -1375,6 +1440,8 @@ export default {
           && item.handlerVersion === this.selectedNode.typeVersion) || null
     },
     nodeTestAvailability() {
+      if (this.isSubWorkflowNode) return this.canExecute && this.selectedSubWorkflowContract
+        ? {available:true,reason:''} : {available:false,reason:'请先选择可用的子工作流，并确认有运行权限'}
       if (this.nodeTestRunning) return {available: true, reason: ''}
       if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
       if (this.selectedNode.type === 'loop') {
@@ -1425,6 +1492,13 @@ export default {
     },
     resolvedNodeSchemas() {
       const result = (this.definition.nodes || []).reduce((schemas, node) => {
+        if (node.type === 'sub_workflow') {
+          const contract = this.subWorkflowContracts[node.config?.reviewedVersionId]
+          if (contract) schemas[node.id] = {inputSchema:contract.inputSchema, outputSchema:{type:'object', properties:{
+            result:{...contract.outputSchema, title:'子流程结果'}, execution:{type:'object', properties:{status:{type:'string',title:'运行状态'},executionId:{type:'string',title:'运行记录'}}}
+          }}, source:'子工作流发布版本', sourceVersion:contract.versionId, diagnostics:[]}
+          return schemas
+        }
         if (node.type === 'transform') {
           const descriptor = this.descriptors.find(item => item.type === node.type
             && item.handlerVersion === node.typeVersion)
@@ -1716,6 +1790,7 @@ export default {
   created() {
     this.loadDefinition(this.modelValue)
     this.refreshResourceContext()
+    this.refreshSubWorkflows()
   },
   beforeUnmount() {
     clearTimeout(this.historyTimer)
@@ -1725,6 +1800,42 @@ export default {
     window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    async refreshSubWorkflows() {
+      this.subWorkflowLoading = true
+      this.subWorkflowError = ''
+      try {
+        const response = await listSubWorkflows(this.currentDefinition?.id)
+        this.subWorkflowCatalog = response.data || []
+        this.subWorkflowCatalog.filter(c=>c.versionId).forEach(c=>{this.subWorkflowContracts[c.versionId]=c})
+        await Promise.all(this.definition.nodes.filter(n=>n.type==='sub_workflow' && n.config?.reviewedVersionId
+          && !this.subWorkflowContracts[n.config.reviewedVersionId]).map(async node=>{
+            const detail=await getSubWorkflowContract(node.config.definitionId,node.config.reviewedVersionId)
+            this.subWorkflowContracts[node.config.reviewedVersionId]=detail.data
+          }))
+        this.refreshCanvasNodeData()
+      } catch { this.subWorkflowError = '子工作流列表加载失败，请刷新重试' }
+      finally { this.subWorkflowLoading = false }
+    },
+    subWorkflowConfigChanged(config) {
+      if (!this.isSubWorkflowNode) return
+      const ports = subWorkflowPorts(config.resultMode).map(p=>p.port)
+      this.definition.edges = this.definition.edges.filter(e => e.source !== this.selectedNode.id || ports.includes(e.sourcePort || 'completed'))
+      this.selectedNode.inputMapping = {}
+      this.selectedNode.resourceRefs = []
+      this.selectedNode.retryPolicy = null
+      this.selectedNode.onError = 'FAIL'
+      delete this.selectedNode.outputSchemaOverride
+      this.schemaConfigChanged(config)
+      this.buildCanvas()
+    },
+    subWorkflowBranchChanged({port, target}, node = this.selectedNode) {
+      if (!node || node.type !== 'sub_workflow' || !subWorkflowPorts(node.config.resultMode).some(p=>p.port===port)) return
+      if (target && !isClassifierTargetAllowed(this.definition, node.id, target)) { this.$message.warning('此连线会形成循环'); return }
+      this.definition.edges = this.definition.edges.filter(e=>e.source!==node.id || (e.sourcePort || 'completed')!==port)
+      if (target) this.addDefinitionEdge(node.id, target, 'NORMAL', port)
+      this.buildCanvas()
+      this.markDirty()
+    },
     presentDiagnostic(item) {
       const node = item.nodeId
         ? this.definition.nodes.find(value => value.id === item.nodeId)
@@ -1979,6 +2090,7 @@ export default {
       this.normalizeInferredOutputSchemas()
       this.buildCanvas()
       this.dirty = false
+      this.savedDefinitionSnapshot = JSON.stringify(this.definition)
       this.resetHistory()
     },
     canvasNodeData(node) {
@@ -2053,16 +2165,21 @@ export default {
         outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
         resourceName: reference ? this.selectedResource(reference)?.name : '',
         status: this.latestNodeStatus(node.id),
-        testable: node.type === 'loop'
+        testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
           : this.canDebug && this.nodeSupportsTest(node),
-        testLabel: node.type === 'loop' ? '测试完整流程' : '',
-        testTitle: node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : '',
+        testLabel: node.type === 'sub_workflow' ? '试运行子工作流' : node.type === 'loop' ? '测试完整流程' : '',
+        testTitle: node.type === 'sub_workflow' ? '在 TEST 环境独立运行已确认的子工作流版本' : node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : '',
         classifierBranches,
         loopBranches,
         loopModeSummary,
         approvalBranches,
-        approvalSummary
+        approvalSummary,
+        subWorkflowName: this.subWorkflowCatalog.find(c=>c.definitionId===node.config?.definitionId)?.name || '请选择子工作流',
+        subWorkflowBranches: node.type === 'sub_workflow' ? subWorkflowPorts(node.config?.resultMode).map(branch => {
+          const edge = this.definition.edges.find(e=>e.source===node.id && (e.sourcePort || 'completed')===branch.port)
+          return {...branch, connected:!!edge, targetName:edge?.target==='__end__' ? '结束流程' : this.definition.nodes.find(n=>n.id===edge?.target)?.name || '未连接'}
+        }) : []
       }
     },
     buildCanvas() {
@@ -2163,14 +2280,14 @@ export default {
         id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
         source: edge.source,
         sourceHandle: ['SEMANTIC', 'LOOP'].includes(edge.kind)
-          || ['approved', 'rejected', 'expired'].includes(edge.sourcePort)
+          || ['approved', 'rejected', 'expired', 'completed', 'incomplete', 'failed'].includes(edge.sourcePort)
           || (edge.kind === 'CONDITION' && edge.default && edge.sourcePort === 'done')
           ? edge.sourcePort : undefined,
         target: edge.target,
         label: edge.kind === 'CONDITION'
           ? (edge.default ? '默认' : edge.condition?.expression || '条件')
           : edge.kind === 'SEMANTIC' ? this.semanticBranchLabel(edge)
-            : ({approved: '通过', rejected: '拒绝', expired: '超时'}[edge.sourcePort] || ''),
+            : ({approved: '通过', rejected: '未通过', expired: '超时', completed: '完成', incomplete: '未完成', failed: '执行失败'}[edge.sourcePort] || ''),
         animated: edge.kind === 'CONDITION' || edge.kind === 'LOOP',
         style: {stroke: '#6762e8', strokeWidth: 1.6},
         labelStyle: {fill: '#6f7890', fontSize: 10},
@@ -2265,7 +2382,7 @@ export default {
       if (type === 'wait') return {delaySeconds: 60}
       if (type === 'database_query') return {sql: '', maxRows: 100, queryTimeoutSeconds: 10}
       if (type === 'sub_workflow') {
-        return {workflowCode: '', workflowVersionId: '', pollSeconds: 2}
+        return {definitionId: null, reviewedVersionId: '', versionPolicy: 'LATEST', resultMode: 'STOP', maxWaitSeconds: 0, inputs:{mode:'OBJECT',fields:{}}}
       }
       if (type === 'approval') {
         return {
@@ -2294,6 +2411,10 @@ export default {
     onConnect(params) {
       if (!this.canEdit || !params.source || !params.target || params.source === params.target) return
       const sourceNode = this.definition.nodes.find(node => node.id === params.source)
+      if (sourceNode?.type === 'sub_workflow') {
+        this.subWorkflowBranchChanged({port: params.sourceHandle || 'completed', target: params.target}, sourceNode)
+        return
+      }
       if (sourceNode?.type === 'loop') {
         const port = String(params.sourceHandle || '')
         if (port === 'body') {
@@ -3270,6 +3391,7 @@ export default {
         .sort((left, right) => (right.attemptNo || 0) - (left.attemptNo || 0))[0]?.status || ''
     },
     nodeSupportsTest(node) {
+      if (node?.type === 'sub_workflow') return this.canExecute && !!this.subWorkflowContracts[node.config?.reviewedVersionId]
       if (node?.type === 'loop') {
         return !!this.currentDefinition?.currentPublishedVersionId
       }
@@ -3334,6 +3456,11 @@ export default {
       this.openNodeTest()
     },
     openNodeTest() {
+      if (this.isSubWorkflowNode) {
+        this.subWorkflowTestContract = this.selectedSubWorkflowContract
+        this.subWorkflowTestOpen = !!this.subWorkflowTestContract
+        return
+      }
       if (this.selectedNode?.type === 'loop') {
         this.openTestRun()
         return
@@ -3934,7 +4061,7 @@ export default {
       const pending = [nodeId]
       while (pending.length) {
         const current = pending.shift()
-        ;(this.definition.edges || []).filter(edge => edge.target === current)
+        ;(this.definition.edges || []).filter(edge => edge.target === current && edge.targetPort !== 'loop-return')
           .forEach(edge => {
             if (edge.source === '__start__' || edge.source === nodeId || upstreamIds.has(edge.source)) return
             upstreamIds.add(edge.source)
@@ -4165,7 +4292,7 @@ export default {
       this.reconcilePendingResourceBindings()
       this.buildCanvas()
       this.clearSelection()
-      this.dirty = true
+      this.dirty = JSON.stringify(this.definition) !== this.savedDefinitionSnapshot || this.pendingResourceBindings.length > 0
       this.$nextTick(() => {
         this.historyRestoring = false
       })
@@ -4212,6 +4339,7 @@ export default {
         await this.flushPendingResourceBindings()
         await this.refreshResolvedNodeSchemas()
         this.dirty = false
+        this.savedDefinitionSnapshot = JSON.stringify(this.definition)
         if (!options?.silent) this.$message.success('草稿已保存')
         this.$emit('saved', response.data)
         return true
