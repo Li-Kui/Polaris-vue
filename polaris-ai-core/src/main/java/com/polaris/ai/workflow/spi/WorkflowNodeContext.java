@@ -15,10 +15,13 @@ public record WorkflowNodeContext(
         JsonNode input,
         JsonNode config,
         Map<String, ResolvedWorkflowResource> resources,
-        WorkflowCancellation cancellation) {
+        WorkflowCancellation cancellation,
+        WorkflowToolCallObserver toolCallObserver) {
 
     public WorkflowNodeContext {
         resources = resources == null ? Map.of() : Map.copyOf(resources);
         cancellation = cancellation == null ? WorkflowCancellation.NONE : cancellation;
+        toolCallObserver = toolCallObserver == null
+                ? WorkflowToolCallObserver.NONE : toolCallObserver;
     }
 }

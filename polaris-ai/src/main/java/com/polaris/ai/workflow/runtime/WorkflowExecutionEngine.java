@@ -436,7 +436,9 @@ public class WorkflowExecutionEngine {
                     execution.getExecutionId(), nodeRunId, run.getAttemptNo(),
                     execution.getTenantId(), execution.getPrincipalType(), execution.getPrincipalId(),
                     input, compensation.getConfig(),
-                    resourceResolver.forNode(compensation, resources), compensationCancellation);
+                    resourceResolver.forNode(compensation, resources), compensationCancellation,
+                    toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
+                            nodeRunId, compensation.getId()));
             try {
                 long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(
                         Math.min(compensation.getTimeoutSeconds(), 900));
@@ -738,7 +740,9 @@ public class WorkflowExecutionEngine {
         WorkflowNodeContext context = new WorkflowNodeContext(
                 execution.getExecutionId(), nodeRunId, attemptNo,
                 execution.getTenantId(), execution.getPrincipalType(), execution.getPrincipalId(),
-                input, node.getConfig(), resourceResolver.forNode(node, resources), cancellation);
+                input, node.getConfig(), resourceResolver.forNode(node, resources), cancellation,
+                toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
+                        nodeRunId, node.getId()));
         Future<WorkflowNodeResult> future = nodeExecutor.submit(() -> handler.execute(context));
         long nodeDeadline = Math.min(workflowDeadline,
                 System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(node.getTimeoutSeconds()));
@@ -1156,7 +1160,9 @@ public class WorkflowExecutionEngine {
                     input,
                     node.getConfig(),
                     resourceResolver.forNode(node, resources),
-                    cancellation);
+                    cancellation,
+                    toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
+                            nodeRunId, node.getId()));
             try {
                 WorkflowNodeResult result = executeWithHeartbeat(
                         handler, context, node.getTimeoutSeconds(), execution.getExecutionId(),
@@ -1872,6 +1878,32 @@ public class WorkflowExecutionEngine {
     private String errorCode(Throwable error) {
         if (error instanceof NodeFailure failure) return failure.code;
         return WorkflowErrorCode.INTERNAL_ERROR.name();
+    }
+
+    WorkflowToolCallObserver toolCallObserver(
+            String executionId,
+            String runnerId,
+            long fencingToken,
+            String nodeRunId,
+            String nodeId) {
+        return event -> {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("toolName", event.toolName());
+            payload.put("callNo", event.callNo());
+            if (event.status() != WorkflowToolCallObserver.Status.STARTED) {
+                payload.put("durationMs", event.durationMs());
+            }
+            if (event.reasonCode() != null && !event.reasonCode().isBlank()) {
+                payload.put("reasonCode", event.reasonCode());
+            }
+            if (event.resultTruncated()) {
+                payload.put("resultTruncated", true);
+            }
+            persistence.appendEvent(
+                    executionId, runnerId, fencingToken,
+                    "AGENT_TOOL_" + event.status().name(),
+                    nodeRunId, nodeId, payload);
+        };
     }
 
     private void validateFrozenOutput(

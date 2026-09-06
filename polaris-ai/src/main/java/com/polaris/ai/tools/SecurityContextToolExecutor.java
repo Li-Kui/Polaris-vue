@@ -1,11 +1,13 @@
 package com.polaris.ai.tools;
 
-import com.polaris.ai.tools.base.AiAgentTool;
-import com.polaris.ai.tools.base.AiTool;
-import com.polaris.ai.tools.base.AiToolPermission;
+import com.polaris.ai.context.SecurityCallerContext;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
+import com.polaris.ai.tools.base.*;
 import com.polaris.ai.utils.SearchKeyHolder;
 import com.polaris.ai.utils.ToolSseHolder;
 import com.polaris.ai.workflow.event.WorkflowSsePublisher;
+import com.polaris.common.core.domain.model.LoginUser;
 import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -28,6 +30,7 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -150,10 +153,8 @@ public class SecurityContextToolExecutor {
 
             if (toolNames.contains(className)) {
                 AiAgentTool ann = targetClass.getAnnotation(AiAgentTool.class);
-                if (com.polaris.ai.core.context.CallerUtils.isPlatformMode()
-                        && ann != null && ann.scope() == com.polaris.ai.tools.base.ToolScope.ADMIN_ONLY) {
-                    continue;
-                }
+                ToolScope toolScope = ann == null ? ToolScope.UNIVERSAL : ann.scope();
+                if (!isToolScopeAllowed(securityContext, toolScope)) continue;
                 if (className.contains("WebSearchTools")
                         && (searchKey == null || searchKey.trim().isEmpty())) {
                     continue;
@@ -181,6 +182,55 @@ public class SecurityContextToolExecutor {
                         map.put(spec, wrappedExecutor);
                     }
                 }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * 为工作流智能体构建内部只读工具集。写操作、外部调用和未分类工具一律不暴露，
+     * 并对单个节点尝试设置共享调用次数上限。
+     */
+    public static Map<ToolSpecification, ToolExecutor> getWorkflowReadOnlyTools(
+            List<? extends AiTool> allTools,
+            String toolsConfig,
+            SecurityContext securityContext,
+            Supplier<SecurityContext> securityContextSupplier,
+            int maxToolCalls,
+            int maxToolResultChars,
+            BooleanSupplier cancellationProbe,
+            WorkflowToolCallTracker tracker) {
+        Map<ToolSpecification, ToolExecutor> map = new LinkedHashMap<>();
+        if (toolsConfig == null || toolsConfig.isBlank()
+                || allTools == null || allTools.isEmpty()
+                || securityContext == null) {
+            return map;
+        }
+        Set<String> toolNames = resolveToolClassNames(toolsConfig);
+        SimpleRequestAttributes simpleAttrs =
+                new SimpleRequestAttributes(RequestContextHolder.getRequestAttributes());
+        int safeMaximum = Math.max(1, Math.min(maxToolCalls, 20));
+        int safeResultMaximum = Math.max(1000, Math.min(maxToolResultChars, 100000));
+        for (AiTool tool : allTools) {
+            Class<?> targetClass = AopUtils.getTargetClass(tool);
+            if (!toolNames.contains(targetClass.getSimpleName())) continue;
+            AiAgentTool toolDefinition = targetClass.getAnnotation(AiAgentTool.class);
+            ToolScope toolScope = toolDefinition == null
+                    ? ToolScope.UNIVERSAL : toolDefinition.scope();
+            if (!isToolScopeAllowed(securityContext, toolScope)) continue;
+            for (Method method : targetClass.getDeclaredMethods()) {
+                if (!method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) continue;
+                AiToolPermission permission = method.getAnnotation(AiToolPermission.class);
+                if (!isWorkflowInternalReadOnly(permission)) continue;
+                String requiredPermission = permission.value();
+                if (!hasPermission(securityContext, requiredPermission)) continue;
+                ToolSpecification specification = ToolSpecifications.toolSpecificationFrom(method);
+                ToolExecutor executor = new DefaultToolExecutor(tool, method);
+                map.put(specification, new PropagatingExecutor(
+                        executor, securityContext, simpleAttrs, null,
+                        null, null, requiredPermission, null, null,
+                        null, null, cancellationProbe, securityContextSupplier,
+                        tracker, safeMaximum, safeResultMaximum, toolScope));
             }
         }
         return map;
@@ -236,6 +286,11 @@ public class SecurityContextToolExecutor {
             if (!allowedClassNames.contains(className)) {
                 continue;
             }
+
+            AiAgentTool toolDefinition = targetClass.getAnnotation(AiAgentTool.class);
+            ToolScope toolScope = toolDefinition == null
+                    ? ToolScope.UNIVERSAL : toolDefinition.scope();
+            if (!isToolScopeAllowed(securityContext, toolScope)) continue;
 
             if (className.contains("WebSearchTools")
                     && (searchKey == null || searchKey.trim().isEmpty())) {
@@ -303,6 +358,12 @@ public class SecurityContextToolExecutor {
         private final AtomicBoolean workflowCancelled;
         private final AtomicBoolean nodeCancelled;
         private final BooleanSupplier cancellationProbe;
+        private final Supplier<SecurityContext> securityContextSupplier;
+        private final WorkflowToolCallTracker toolCallTracker;
+        private final int maxToolExecutions;
+        private final int maxToolResultChars;
+        private final ToolScope workflowToolScope;
+        private final CallerContext callerContext;
         private final Long conversationId;
         private final String fileUrl;
 
@@ -312,6 +373,22 @@ public class SecurityContextToolExecutor {
                                    WorkflowSsePublisher eventPublisher, String executionId,
                                    AtomicBoolean workflowCancelled, AtomicBoolean nodeCancelled,
                                    BooleanSupplier cancellationProbe) {
+            this(delegate, securityContext, requestAttributes, searchKey, emitter, nodeCode,
+                    requiredPermission, eventPublisher, executionId, workflowCancelled,
+                    nodeCancelled, cancellationProbe, null, null, 0, 0, null);
+        }
+
+        public PropagatingExecutor(ToolExecutor delegate, SecurityContext securityContext,
+                                   RequestAttributes requestAttributes, String searchKey,
+                                   SseEmitter emitter, String nodeCode, String requiredPermission,
+                                   WorkflowSsePublisher eventPublisher, String executionId,
+                                   AtomicBoolean workflowCancelled, AtomicBoolean nodeCancelled,
+                                   BooleanSupplier cancellationProbe,
+                                   Supplier<SecurityContext> securityContextSupplier,
+                                   WorkflowToolCallTracker toolCallTracker,
+                                   int maxToolExecutions,
+                                   int maxToolResultChars,
+                                   ToolScope workflowToolScope) {
             this.delegate = delegate;
             this.securityContext = securityContext;
             this.requestAttributes = requestAttributes;
@@ -324,6 +401,12 @@ public class SecurityContextToolExecutor {
             this.workflowCancelled = workflowCancelled;
             this.nodeCancelled = nodeCancelled;
             this.cancellationProbe = cancellationProbe;
+            this.securityContextSupplier = securityContextSupplier;
+            this.toolCallTracker = toolCallTracker;
+            this.maxToolExecutions = maxToolExecutions;
+            this.maxToolResultChars = maxToolResultChars;
+            this.workflowToolScope = workflowToolScope;
+            this.callerContext = callerContext(securityContext);
             this.conversationId = com.polaris.ai.utils.ChatContextHolder.getConversationId();
             this.fileUrl = com.polaris.ai.utils.ChatContextHolder.getFileUrl();
         }
@@ -331,11 +414,33 @@ public class SecurityContextToolExecutor {
         @Override
         public String execute(ToolExecutionRequest request, Object memoryId) {
             SecurityContext previousContext = SecurityContextHolder.getContext();
+            CallerContext previousCaller = CallerContextHolder.get();
             RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
+            String toolName = request == null ? "unknown" : request.name();
+            int callNo = 0;
             try {
-                ensureNotCancelled();
-                SecurityContextHolder.setContext(securityContext);
-                if (!hasPermission(securityContext, requiredPermission)) {
+                try {
+                    ensureNotCancelled();
+                } catch (CancellationException e) {
+                    blocked(toolName, "CANCELLED");
+                    throw e;
+                }
+                SecurityContext activeSecurityContext = resolveSecurityContext();
+                if (activeSecurityContext == null) {
+                    blocked(toolName, "PRINCIPAL_UNAVAILABLE");
+                    throw new SecurityException("工作流执行身份已失效，工具调用已阻止");
+                }
+                if (workflowToolScope != null
+                        && !isToolScopeAllowed(activeSecurityContext, workflowToolScope)) {
+                    blocked(toolName, "SCOPE_DENIED");
+                    throw new SecurityException("当前执行身份不能使用该类型的 AI 工具");
+                }
+                SecurityContextHolder.setContext(activeSecurityContext);
+                CallerContextHolder.clear();
+                CallerContextHolder.set(securityContextSupplier == null
+                        ? callerContext : callerContext(activeSecurityContext));
+                if (!hasPermission(activeSecurityContext, requiredPermission)) {
+                    blocked(toolName, "PERMISSION_REVOKED");
                     throw new SecurityException("无权执行 AI 工具 " + request.name()
                             + "，缺少权限: " + requiredPermission);
                 }
@@ -362,13 +467,51 @@ public class SecurityContextToolExecutor {
                     ToolSseHolder.setWorkflow(
                             emitter, eventPublisher, executionId, nodeCode,
                             workflowCancelled, nodeCancelled, cancellationProbe);
+                } else if (cancellationProbe != null
+                        || workflowCancelled != null
+                        || nodeCancelled != null) {
+                    ToolSseHolder.setWorkflow(
+                            emitter, null, null, nodeCode,
+                            workflowCancelled, nodeCancelled, cancellationProbe);
                 } else {
                     ToolSseHolder.set(emitter);
                 }
                 com.polaris.ai.utils.ChatContextHolder.setConversationId(conversationId);
                 com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
-                ensureNotCancelled();
-                return delegate.execute(request, memoryId);
+                try {
+                    ensureNotCancelled();
+                } catch (CancellationException e) {
+                    blocked(toolName, "CANCELLED");
+                    throw e;
+                }
+                if (toolCallTracker != null) {
+                    callNo = toolCallTracker.reserve(toolName, maxToolExecutions);
+                }
+                if (callNo < 0) {
+                    throw new SecurityException("工作流智能体工具调用次数超过安全上限");
+                }
+                long startedAt = System.nanoTime();
+                String result;
+                try {
+                    result = delegate.execute(request, memoryId);
+                } catch (RuntimeException | Error e) {
+                    if (toolCallTracker != null) {
+                        toolCallTracker.failed(toolName, callNo,
+                                elapsedMs(startedAt), failureCode(e));
+                    }
+                    throw e;
+                }
+                boolean truncated = toolCallTracker != null
+                        && result != null && result.length() > maxToolResultChars;
+                if (truncated) {
+                    result = result.substring(0, maxToolResultChars)
+                            + "\n[工具结果超过安全长度，已截断]";
+                }
+                if (toolCallTracker != null) {
+                    toolCallTracker.succeeded(
+                            toolName, callNo, elapsedMs(startedAt), truncated);
+                }
+                return result;
             } finally {
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
                 ToolSseHolder.clear();
@@ -382,6 +525,8 @@ public class SecurityContextToolExecutor {
                 } else {
                     SecurityContextHolder.clearContext();
                 }
+                CallerContextHolder.clear();
+                CallerContextHolder.set(previousCaller);
             }
         }
 
@@ -393,11 +538,68 @@ public class SecurityContextToolExecutor {
                 throw new CancellationException("工作流工具执行已取消");
             }
         }
+
+        private SecurityContext resolveSecurityContext() {
+            if (securityContextSupplier == null) return securityContext;
+            try {
+                return securityContextSupplier.get();
+            } catch (RuntimeException e) {
+                log.warn(">>> 工作流工具调用前重新校验执行身份失败", e);
+                return null;
+            }
+        }
+
+        private void blocked(String toolName, String reasonCode) {
+            if (toolCallTracker != null) {
+                toolCallTracker.blocked(toolName, reasonCode);
+            }
+        }
+
+        private long elapsedMs(long startedAt) {
+            return Math.max(0, (System.nanoTime() - startedAt) / 1_000_000L);
+        }
+
+        private String failureCode(Throwable error) {
+            if (error instanceof CancellationException
+                    || Thread.currentThread().isInterrupted()) {
+                return "CANCELLED";
+            }
+            if (error instanceof SecurityException) return "PERMISSION_DENIED";
+            return "TOOL_EXECUTION_FAILED";
+        }
     }
 
     private static String requiredPermission(Method method) {
         AiToolPermission permission = method.getAnnotation(AiToolPermission.class);
         return permission == null ? null : permission.value();
+    }
+
+    private static boolean isWorkflowInternalReadOnly(AiToolPermission permission) {
+        return permission != null
+                && permission.sideEffect() == ToolSideEffect.READ
+                && permission.dataBoundary() == ToolDataBoundary.INTERNAL;
+    }
+
+    private static boolean isToolScopeAllowed(
+            SecurityContext securityContext, ToolScope scope) {
+        if (securityContext == null || securityContext.getAuthentication() == null
+                || !securityContext.getAuthentication().isAuthenticated()) {
+            return false;
+        }
+        Object principal = securityContext.getAuthentication().getPrincipal();
+        if (scope == ToolScope.ADMIN_ONLY) return principal instanceof LoginUser;
+        if (scope == ToolScope.PLATFORM) {
+            return principal instanceof CallerContext context && context.isPlatformMode();
+        }
+        return true;
+    }
+
+    private static CallerContext callerContext(SecurityContext securityContext) {
+        if (securityContext == null || securityContext.getAuthentication() == null) return null;
+        Object principal = securityContext.getAuthentication().getPrincipal();
+        if (principal instanceof CallerContext context) return context;
+        if (principal instanceof LoginUser loginUser) return new SecurityCallerContext(loginUser);
+        return null;
     }
 
     private static boolean hasPermission(SecurityContext securityContext, String permission) {
@@ -411,6 +613,10 @@ public class SecurityContextToolExecutor {
         }
         if (permission.isBlank()) {
             return true;
+        }
+        Object principal = securityContext.getAuthentication().getPrincipal();
+        if (principal instanceof CallerContext callerContext) {
+            return callerContext.hasPermission(permission);
         }
         List<String> permissions = securityContext.getAuthentication().getAuthorities().stream()
                 .map(authority -> authority.getAuthority())

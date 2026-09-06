@@ -14,6 +14,7 @@ public class WorkflowProperties {
     private boolean enabled;
     private boolean writeNodesEnabled;
     private boolean codeNodeEnabled;
+    private boolean agentReadOnlyToolsEnabled;
     private boolean workerEnabled = true;
     private boolean acceptingNewExecutions = true;
     private int workerBatchSize = 10;
@@ -21,6 +22,8 @@ public class WorkflowProperties {
     private int tenantConcurrency = 20;
     private int workflowConcurrency = 10;
     private int principalConcurrency = 5;
+    private int agentMaxToolCalls = 5;
+    private int agentMaxToolResultChars = 20000;
     private Set<Long> allowedTenantIds = new LinkedHashSet<>();
 
     public boolean isEnabled() {
@@ -41,6 +44,14 @@ public class WorkflowProperties {
 
     public boolean isCodeNodeEnabled() {
         return codeNodeEnabled;
+    }
+
+    public boolean isAgentReadOnlyToolsEnabled() {
+        return agentReadOnlyToolsEnabled;
+    }
+
+    public void setAgentReadOnlyToolsEnabled(boolean agentReadOnlyToolsEnabled) {
+        this.agentReadOnlyToolsEnabled = agentReadOnlyToolsEnabled;
     }
 
     public boolean isWorkerEnabled() {
@@ -97,6 +108,22 @@ public class WorkflowProperties {
 
     public void setPrincipalConcurrency(int principalConcurrency) {
         this.principalConcurrency = principalConcurrency;
+    }
+
+    public int getAgentMaxToolCalls() {
+        return Math.max(1, Math.min(agentMaxToolCalls, 20));
+    }
+
+    public void setAgentMaxToolCalls(int agentMaxToolCalls) {
+        this.agentMaxToolCalls = agentMaxToolCalls;
+    }
+
+    public int getAgentMaxToolResultChars() {
+        return Math.max(1000, Math.min(agentMaxToolResultChars, 100000));
+    }
+
+    public void setAgentMaxToolResultChars(int agentMaxToolResultChars) {
+        this.agentMaxToolResultChars = agentMaxToolResultChars;
     }
 
     public void setCodeNodeEnabled(boolean codeNodeEnabled) {

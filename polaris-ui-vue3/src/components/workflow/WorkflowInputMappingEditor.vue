@@ -74,6 +74,7 @@
           size="small"
           clearable
           prefix-icon="Search"
+          aria-label="搜索上游节点或字段"
           placeholder="搜索节点或字段"
         />
         <div class="source-tree">

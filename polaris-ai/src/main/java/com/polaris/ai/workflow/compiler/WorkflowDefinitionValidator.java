@@ -144,6 +144,7 @@ public class WorkflowDefinitionValidator {
                         .forEach(message -> diagnostics.add(error(
                                 "NODE_CONFIG_SCHEMA_INVALID", nodeId, path + ".config", message)));
                 validateStructuredOutput(node, path, diagnostics);
+                validateAgentTask(node, path, diagnostics);
                 validateApproval(node, path, diagnostics);
                 validateOutputSchemaOverride(node, descriptor, path, diagnostics);
             }
@@ -192,6 +193,19 @@ public class WorkflowDefinitionValidator {
                 .forEach(message -> diagnostics.add(error(
                         "LLM_STRUCTURED_OUTPUT_SCHEMA_INVALID", node.getId(),
                         path + ".config.structuredOutputSchema", message)));
+    }
+
+    private void validateAgentTask(
+            WorkflowDefinitionSpec.Node node, String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!"agent".equals(node.getType()) || node.getConfig() == null) return;
+        boolean hasTask = !node.getConfig().path("task").asText("").trim().isEmpty();
+        boolean hasInput = node.getInputMapping() != null && !node.getInputMapping().isEmpty();
+        if (!hasTask && !hasInput) {
+            diagnostics.add(error("AGENT_TASK_OR_INPUT_REQUIRED", node.getId(),
+                    path + ".config.task",
+                    "请填写本次任务要求，或为智能体配置至少一个输入"));
+        }
     }
 
     private void validateApproval(

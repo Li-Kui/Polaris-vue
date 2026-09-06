@@ -31,6 +31,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** 对已保存草稿中的单个无副作用或只读节点执行隔离试运行。 */
 @Service
@@ -369,11 +371,13 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         WorkflowExecutionPlan.PlanNode node = prepared.node();
         WorkflowCancellation cancellation = () -> cancelled.get()
                 || Thread.currentThread().isInterrupted();
+        ToolCallAuditSummary toolAudit = new ToolCallAuditSummary();
         WorkflowNodeContext context = new WorkflowNodeContext(
                 "node-test:" + testRunId, testRunId, 1,
                 prepared.definition().tenantId(), prepared.principalType(),
                 prepared.principalId(), prepared.input(), node.getConfig(),
-                resourceResolver.forNode(node, prepared.resources().resources()), cancellation);
+                resourceResolver.forNode(node, prepared.resources().resources()), cancellation,
+                toolAudit);
         long startedAt = System.nanoTime();
         Future<WorkflowNodeResult> future;
         try {
@@ -385,14 +389,14 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             WorkflowNodeResult result = future.get(
                     prepared.timeoutSeconds(), TimeUnit.SECONDS);
             if (cancelled.get()) {
-                return cancelled(testRunId, prepared, elapsedMs(startedAt));
+                return cancelled(testRunId, prepared, elapsedMs(startedAt), toolAudit.usage());
             }
             JsonNode output = result == null ? null : result.output();
             try {
                 ensureSize(output, MAX_OUTPUT_BYTES, "试运行输出超过1MB，请缩小返回范围");
             } catch (ServiceException e) {
                 return failed(testRunId, prepared, WorkflowErrorCode.QUOTA_EXCEEDED.name(),
-                        e.getMessage(), elapsedMs(startedAt));
+                        e.getMessage(), elapsedMs(startedAt), toolAudit.usage());
             }
             List<String> outputErrors = schemaValidator.validate(
                     prepared.schema() == null ? node.getOutputSchema()
@@ -403,29 +407,30 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                         WorkflowErrorCode.OUTPUT_SCHEMA_MISMATCH.name(),
                         "节点输出不符合有效 Schema: " + String.join("；",
                                 outputErrors.subList(0, Math.min(outputErrors.size(), 5))),
-                        elapsedMs(startedAt));
+                        elapsedMs(startedAt), toolAudit.usage());
             }
             return new WorkflowNodeTestResult(
                     testRunId, prepared.definition().id(),
                     prepared.definition().draftRevision(), node.getId(), node.getType(),
                     node.getHandlerVersion(), prepared.environment(), prepared.mode(), "SUCCEEDED",
                     node.getSideEffect(), dataRedactor.redact(prepared.input()),
-                    dataRedactor.redact(output), result == null ? Map.of() : result.usage(),
+                    dataRedactor.redact(output), withToolAudit(
+                            result == null ? Map.of() : result.usage(), toolAudit),
                     schemaSource(prepared.schema()), schemaVersion(prepared.schema()),
                     schemaDiagnostics(prepared.schema()), null, null, elapsedMs(startedAt));
         } catch (TimeoutException e) {
             cancelled.set(true);
             future.cancel(true);
             return failed(testRunId, prepared, WorkflowErrorCode.NODE_TIMEOUT.name(),
-                    "单节点试运行超时", elapsedMs(startedAt));
+                    "单节点试运行超时", elapsedMs(startedAt), toolAudit.usage());
         } catch (InterruptedException e) {
             cancelled.set(true);
             future.cancel(true);
             Thread.currentThread().interrupt();
-            return cancelled(testRunId, prepared, elapsedMs(startedAt));
+            return cancelled(testRunId, prepared, elapsedMs(startedAt), toolAudit.usage());
         } catch (ExecutionException e) {
             return failed(testRunId, prepared, WorkflowErrorCode.INTERNAL_ERROR.name(),
-                    safeMessage(e.getCause()), elapsedMs(startedAt));
+                    safeMessage(e.getCause()), elapsedMs(startedAt), toolAudit.usage());
         }
     }
 
@@ -449,6 +454,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         contextRoot.putObject("loop").put("branchPath", "node-test");
         contextRoot.putObject("approval");
         Map<String, Number> usage = new LinkedHashMap<>();
+        ToolCallAuditSummary toolAudit = new ToolCallAuditSummary();
         JsonNode finalInput = prepared.input();
         JsonNode finalOutput = null;
         Future<WorkflowNodeResult> activeFuture = null;
@@ -456,7 +462,8 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             for (int index = 0; index < prepared.chain().size(); index++) {
                 if (cancelled.get()) {
                     return cancelledWithInput(
-                            testRunId, prepared, finalInput, elapsedMs(startedAt));
+                            testRunId, prepared, finalInput, elapsedMs(startedAt),
+                            withToolAudit(usage, toolAudit));
                 }
                 WorkflowExecutionPlan.PlanNode current = prepared.chain().get(index);
                 finalInput = current.getInputMapping().isEmpty()
@@ -475,7 +482,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                             WorkflowErrorCode.DEFINITION_INVALID.name(),
                             "链式试运行输入不符合节点契约: " + String.join("；",
                                     inputErrors.subList(0, Math.min(5, inputErrors.size()))),
-                            elapsedMs(startedAt));
+                            elapsedMs(startedAt), withToolAudit(usage, toolAudit));
                 }
                 WorkflowNodeHandler currentHandler = nodeRegistry.findHandler(
                                 current.getType(), current.getHandlerVersion())
@@ -489,7 +496,8 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                         prepared.definition().tenantId(), prepared.principalType(),
                         prepared.principalId(), finalInput, current.getConfig(),
                         resourceResolver.forNode(
-                                current, prepared.resources().resources()), cancellation);
+                                current, prepared.resources().resources()), cancellation,
+                        toolAudit);
                 activeFuture = nodeExecutor.submit(() -> currentHandler.execute(nodeContext));
                 long remainingMs = deadline - System.currentTimeMillis();
                 long nodeMs = TimeUnit.SECONDS.toMillis(
@@ -511,7 +519,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                             WorkflowErrorCode.OUTPUT_SCHEMA_MISMATCH.name(),
                             "链式试运行输出不符合节点契约: " + String.join("；",
                                     outputErrors.subList(0, Math.min(5, outputErrors.size()))),
-                            elapsedMs(startedAt));
+                            elapsedMs(startedAt), withToolAudit(usage, toolAudit));
                 }
                 if (result != null && result.usage() != null) {
                     result.usage().forEach((key, value) -> mergeUsage(usage, key, value));
@@ -526,7 +534,8 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                     prepared.definition().draftRevision(), prepared.node().getId(),
                     prepared.node().getType(), prepared.node().getHandlerVersion(),
                     prepared.environment(), prepared.mode(), "SUCCEEDED", prepared.node().getSideEffect(),
-                    dataRedactor.redact(finalInput), dataRedactor.redact(finalOutput), usage,
+                    dataRedactor.redact(finalInput), dataRedactor.redact(finalOutput),
+                    withToolAudit(usage, toolAudit),
                     schemaSource(prepared.schema()), schemaVersion(prepared.schema()),
                     schemaDiagnostics(prepared.schema()), null, null, elapsedMs(startedAt));
         } catch (TimeoutException e) {
@@ -535,23 +544,25 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             return failedWithInput(
                     testRunId, prepared, finalInput,
                     WorkflowErrorCode.NODE_TIMEOUT.name(),
-                    "链式试运行超过总超时时间", elapsedMs(startedAt));
+                    "链式试运行超过总超时时间", elapsedMs(startedAt),
+                    withToolAudit(usage, toolAudit));
         } catch (InterruptedException e) {
             cancelled.set(true);
             if (activeFuture != null) activeFuture.cancel(true);
             Thread.currentThread().interrupt();
             return cancelledWithInput(
-                    testRunId, prepared, finalInput, elapsedMs(startedAt));
+                    testRunId, prepared, finalInput, elapsedMs(startedAt),
+                    withToolAudit(usage, toolAudit));
         } catch (ExecutionException e) {
             return failedWithInput(
                     testRunId, prepared, finalInput,
                     WorkflowErrorCode.INTERNAL_ERROR.name(), safeMessage(e.getCause()),
-                    elapsedMs(startedAt));
+                    elapsedMs(startedAt), withToolAudit(usage, toolAudit));
         } catch (RuntimeException e) {
             return failedWithInput(
                     testRunId, prepared, finalInput,
                     WorkflowErrorCode.INTERNAL_ERROR.name(), safeMessage(e),
-                    elapsedMs(startedAt));
+                    elapsedMs(startedAt), withToolAudit(usage, toolAudit));
         }
     }
 
@@ -568,11 +579,69 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         }
     }
 
+    private Map<String, Number> withToolAudit(
+            Map<String, Number> usage, ToolCallAuditSummary toolAudit) {
+        Map<String, Number> result = new LinkedHashMap<>();
+        if (usage != null) result.putAll(usage);
+        if (toolAudit != null) result.putAll(toolAudit.usage());
+        return Map.copyOf(result);
+    }
+
+    private static final class ToolCallAuditSummary
+            implements WorkflowToolCallObserver {
+
+        private final AtomicInteger attempts = new AtomicInteger();
+        private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicInteger succeeded = new AtomicInteger();
+        private final AtomicInteger failed = new AtomicInteger();
+        private final AtomicInteger blocked = new AtomicInteger();
+        private final AtomicInteger truncated = new AtomicInteger();
+        private final AtomicLong durationMs = new AtomicLong();
+
+        @Override
+        public void onEvent(Event event) {
+            if (event == null) return;
+            switch (event.status()) {
+                case STARTED -> {
+                    attempts.incrementAndGet();
+                    calls.incrementAndGet();
+                }
+                case SUCCEEDED -> {
+                    succeeded.incrementAndGet();
+                    durationMs.addAndGet(event.durationMs());
+                    if (event.resultTruncated()) truncated.incrementAndGet();
+                }
+                case FAILED -> {
+                    failed.incrementAndGet();
+                    durationMs.addAndGet(event.durationMs());
+                }
+                case BLOCKED -> {
+                    attempts.incrementAndGet();
+                    blocked.incrementAndGet();
+                }
+            }
+        }
+
+        private Map<String, Number> usage() {
+            if (attempts.get() == 0) return Map.of();
+            Map<String, Number> usage = new LinkedHashMap<>();
+            usage.put("toolAttempts", attempts.get());
+            usage.put("toolCalls", calls.get());
+            usage.put("toolSucceeded", succeeded.get());
+            usage.put("toolFailed", failed.get());
+            usage.put("toolBlocked", blocked.get());
+            usage.put("toolDurationMs", durationMs.get());
+            usage.put("toolResultTruncated", truncated.get());
+            return Map.copyOf(usage);
+        }
+    }
+
     private WorkflowNodeTestResult failedWithInput(
             String testRunId, PreparedTest prepared, JsonNode input,
-            String errorCode, String errorMessage, long durationMs) {
+            String errorCode, String errorMessage, long durationMs,
+            Map<String, Number> usage) {
         WorkflowNodeTestResult failed = failed(
-                testRunId, prepared, errorCode, errorMessage, durationMs);
+                testRunId, prepared, errorCode, errorMessage, durationMs, usage);
         return new WorkflowNodeTestResult(
                 failed.testRunId(), failed.definitionId(), failed.draftRevision(),
                 failed.nodeId(), failed.nodeType(), failed.handlerVersion(),
@@ -584,9 +653,10 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     }
 
     private WorkflowNodeTestResult cancelledWithInput(
-            String testRunId, PreparedTest prepared, JsonNode input, long durationMs) {
+            String testRunId, PreparedTest prepared, JsonNode input, long durationMs,
+            Map<String, Number> usage) {
         WorkflowNodeTestResult cancelled = cancelled(
-                testRunId, prepared, durationMs);
+                testRunId, prepared, durationMs, usage);
         return new WorkflowNodeTestResult(
                 cancelled.testRunId(), cancelled.definitionId(), cancelled.draftRevision(),
                 cancelled.nodeId(), cancelled.nodeType(), cancelled.handlerVersion(),
@@ -622,12 +692,19 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private WorkflowNodeTestResult failed(
             String testRunId, PreparedTest prepared, String errorCode,
             String errorMessage, long durationMs) {
+        return failed(testRunId, prepared, errorCode, errorMessage, durationMs, Map.of());
+    }
+
+    private WorkflowNodeTestResult failed(
+            String testRunId, PreparedTest prepared, String errorCode,
+            String errorMessage, long durationMs, Map<String, Number> usage) {
         WorkflowExecutionPlan.PlanNode node = prepared.node();
         return new WorkflowNodeTestResult(
                 testRunId, prepared.definition().id(),
                 prepared.definition().draftRevision(), node.getId(), node.getType(),
                 node.getHandlerVersion(), prepared.environment(), prepared.mode(), "FAILED",
-                node.getSideEffect(), dataRedactor.redact(prepared.input()), null, Map.of(),
+                node.getSideEffect(), dataRedactor.redact(prepared.input()), null,
+                usage == null ? Map.of() : Map.copyOf(usage),
                 schemaSource(prepared.schema()), schemaVersion(prepared.schema()),
                 schemaDiagnostics(prepared.schema()), errorCode,
                 safeMessage(new IllegalStateException(errorMessage)), durationMs);
@@ -635,9 +712,15 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
 
     private WorkflowNodeTestResult cancelled(
             String testRunId, PreparedTest prepared, long durationMs) {
+        return cancelled(testRunId, prepared, durationMs, Map.of());
+    }
+
+    private WorkflowNodeTestResult cancelled(
+            String testRunId, PreparedTest prepared, long durationMs,
+            Map<String, Number> usage) {
         WorkflowNodeTestResult result = failed(
                 testRunId, prepared, WorkflowErrorCode.NODE_CANCELLED.name(),
-                "单节点试运行已取消", durationMs);
+                "单节点试运行已取消", durationMs, usage);
         return new WorkflowNodeTestResult(
                 result.testRunId(), result.definitionId(), result.draftRevision(),
                 result.nodeId(), result.nodeType(), result.handlerVersion(),

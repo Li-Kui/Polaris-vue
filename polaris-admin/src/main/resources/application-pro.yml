@@ -146,6 +146,9 @@ ai:
         enabled: true
         write-nodes-enabled: false
         code-node-enabled: false
+        agent-read-only-tools-enabled: true
+        agent-max-tool-calls: 5
+        agent-max-tool-result-chars: 20000
         worker-enabled: true
         accepting-new-executions: true
         worker-batch-size: 10

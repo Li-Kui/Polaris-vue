@@ -127,7 +127,7 @@
 
       <aside
         :class="['inspector-panel', {
-        'inspector-panel--guided': isGuidedIntegrationNode,
+        'inspector-panel--guided': isGuidedInspectorNode,
         'inspector-panel--mapping': isMappingEditorOpen,
         'is-collapsed': inspectorCollapsed
       }]"
@@ -164,6 +164,7 @@
             <button
               type="button"
               :class="{active: selectedInspectorTab === 'resource', completed: selectedInspectorTab !== 'resource'}"
+              :aria-current="selectedInspectorTab === 'resource' ? 'step' : undefined"
               @click="selectedInspectorTab = 'resource'"
             >
               <span>1</span>
@@ -173,6 +174,7 @@
             <button
               type="button"
               :class="{active: selectedInspectorTab !== 'resource'}"
+              :aria-current="selectedInspectorTab !== 'resource' ? 'step' : undefined"
               :disabled="isApiNode
                 ? !apiConnectorReference || !selectedResourceId(apiConnectorReference)
                 : !datasourceReference || !selectedResourceId(datasourceReference)"
@@ -182,6 +184,40 @@
               <strong>{{ isApiNode ? '配置请求' : '编写查询' }}</strong>
             </button>
           </nav>
+          <nav
+            v-if="isAgentNode"
+            class="integration-stepper integration-stepper--three"
+            aria-label="AI 智能体节点配置步骤"
+          >
+            <button
+              type="button"
+              :class="{active: selectedInspectorTab === 'resource', completed: !!selectedAgentResource}"
+              :aria-current="selectedInspectorTab === 'resource' ? 'step' : undefined"
+              @click="selectedInspectorTab = 'resource'"
+            >
+              <span>1</span><strong>选择智能体</strong>
+            </button>
+            <i></i>
+            <button
+              type="button"
+              :class="{active: selectedInspectorTab === 'config', completed: agentConfiguration.code === 'READY' || agentConfiguration.code === 'VERIFIED'}"
+              :aria-current="selectedInspectorTab === 'config' ? 'step' : undefined"
+              :disabled="!selectedAgentResource"
+              @click="selectedInspectorTab = 'config'"
+            >
+              <span>2</span><strong>配置任务</strong>
+            </button>
+            <i></i>
+            <button
+              type="button"
+              :class="{active: selectedInspectorTab === 'mapping', completed: agentConfiguration.code === 'VERIFIED'}"
+              :aria-current="selectedInspectorTab === 'mapping' ? 'step' : undefined"
+              :disabled="!selectedAgentResource"
+              @click="selectedInspectorTab = 'mapping'"
+            >
+              <span>3</span><strong>输入与测试</strong>
+            </button>
+          </nav>
           <div v-if="isGuidedIntegrationNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
             <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">
               {{ isApiNode ? '请求参数' : '查询设置' }}
@@ -189,12 +225,23 @@
             <button type="button" :class="{active: selectedInspectorTab === 'mapping'}" @click="selectedInspectorTab = 'mapping'">输入输出</button>
             <button type="button" :class="{active: selectedInspectorTab === 'policy'}" @click="selectedInspectorTab = 'policy'">运行策略</button>
           </div>
-          <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isGuidedIntegrationNode}]">
-            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : '配置'" name="config">
+          <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isGuidedInspectorNode}]">
+            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : isAgentNode ? '2 配置任务' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
+                <WorkflowAgentEditor
+                  v-if="isAgentNode"
+                  :config="selectedNode.config"
+                  :selected-agent="selectedAgentResource"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :test-succeeded="agentTestSucceeded"
+                  :disabled="!canEdit"
+                  @update:config="agentConfigChanged"
+                  @select-agent="selectedInspectorTab = 'resource'"
+                  @configure-input="selectedInspectorTab = 'mapping'"
+                />
                 <WorkflowSemanticClassifierEditor
-                  v-if="isClassifierNode"
+                  v-else-if="isClassifierNode"
                   :config="selectedNode.config"
                   :input-mapping="selectedNode.inputMapping || {}"
                   :source-groups="classifierSourceGroups"
@@ -342,7 +389,7 @@
                 </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane v-if="!isSubWorkflowNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : '资源'" name="resource">
+            <el-tab-pane v-if="!isSubWorkflowNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -376,6 +423,16 @@
                 :error="catalogError"
                 @select="selectDatasource"
                 @created="createAndSelectDatasource"
+              />
+              <WorkflowAgentPicker
+                v-else-if="isAgentNode && agentReference"
+                :resources="resourceCatalog.AGENT || []"
+                :selected-resource-id="selectedResourceId(agentReference)"
+                :selected-resource="selectedAgentResource"
+                :loading="resourceLoading"
+                :can-edit="canEdit"
+                :error="catalogError"
+                @select="selectAgentResource"
               />
               <template v-else>
                 <div v-if="!selectedNode.resourceRefs.length" class="empty-resource">该节点不需要外部资源</div>
@@ -469,7 +526,15 @@
                 <el-button v-if="canEdit" class="resource-add" plain @click="addResourceReference"><el-icon><Plus /></el-icon><span>添加扩展资源</span></el-button>
               </template>
             </el-tab-pane>
-            <el-tab-pane label="输入输出" name="mapping">
+            <el-tab-pane :label="isAgentNode ? '3 输入与测试' : '输入输出'" name="mapping">
+              <el-alert
+                v-if="isAgentNode"
+                :title="agentConfiguration.issues[0] || '选择上游数据后，可使用底部按钮试运行当前智能体节点。'"
+                :type="agentConfiguration.issues.length ? 'warning' : 'success'"
+                :closable="false"
+                show-icon
+                class="agent-mapping-alert"
+              />
               <section v-if="isSubWorkflowNode" class="transform-mapping-summary">
                 <strong>输入已统一在“配置”页填写</strong>
                 <el-button type="primary" plain @click="selectedInspectorTab = 'config'">配置子工作流</el-button>
@@ -592,6 +657,9 @@
                     : (isSubWorkflowNode ? '试运行子工作流' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
               </span>
             </el-tooltip>
+            <el-button v-if="isAgentNode && canEdit" type="primary" @click="completeAgentConfiguration">
+              <el-icon><CircleCheck /></el-icon><span>完成配置</span>
+            </el-button>
             <el-button v-if="canEdit" class="node-delete-button" type="danger" text @click="removeSelectedNode">
               <el-icon><Delete /></el-icon><span>删除节点</span>
             </el-button>
@@ -875,7 +943,7 @@
 
     <el-dialog
       v-model="nodeTestDialogOpen"
-      class="workflow-dialog"
+      class="workflow-dialog node-test-dialog"
       :title="workflowDraftTest
         ? `试运行工作流 · ${definition.metadata.name || '未命名工作流'}`
         : `试运行节点 · ${nodeTestNodeName}`"
@@ -914,7 +982,7 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
           <el-input
             v-if="nodeTestIsClassifier && nodeTestMode === 'NODE'"
             v-model="classifierTestContent"
@@ -923,6 +991,15 @@
             maxlength="12000"
             show-word-limit
             placeholder="输入一句用户问题、一段文本，或粘贴需要分类的 JSON 内容"
+          />
+          <el-input
+            v-else-if="nodeTestIsAgent && nodeTestMode === 'NODE'"
+            v-model="agentTestContent"
+            type="textarea"
+            :rows="7"
+            maxlength="12000"
+            show-word-limit
+            placeholder="输入一段用于验证任务效果的内容；如果任务不需要额外输入，可以留空"
           />
           <el-input v-else v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
@@ -955,10 +1032,24 @@
             <code>{{ nodeTestResult.errorCode }}</code>
           </span>
         </div>
+        <div
+          v-if="nodeTestIsAgent && nodeTestAgentToolUsage.visible
+            && nodeTestResult.status !== 'SUCCEEDED'"
+          class="agent-test-tool-usage is-standalone"
+        >
+          <el-tag :type="nodeTestAgentToolUsage.type" size="small" effect="plain">
+            内部只读工具
+          </el-tag>
+          <span>{{ nodeTestAgentToolUsage.summary }}</span>
+          <small>耗时 {{ nodeTestAgentToolUsage.durationMs }} ms</small>
+        </div>
         <div v-if="nodeTestResult.schemaDiagnostics?.length" class="node-test-diagnostics">
           <span v-for="item in nodeTestResult.schemaDiagnostics" :key="item">{{ item }}</span>
         </div>
-        <div v-if="nodeTestResult.status === 'SUCCEEDED'" class="node-test-schema-action">
+        <div
+          v-if="nodeTestResult.status === 'SUCCEEDED' && !(nodeTestIsAgent && nodeTestMode === 'NODE')"
+          class="node-test-schema-action"
+        >
           <div>
             <strong>样本字段结构</strong>
             <small>仅补充编辑器字段提示，不会改变正式 Schema 或运行校验。</small>
@@ -979,7 +1070,38 @@
             @click="promoteNodeTestSchema"
           >{{ nodeTestSchemaPromoted ? '已设为正式结构' : '设为正式结构' }}</el-button>
         </div>
-        <label class="node-test-output">
+        <section
+          v-if="nodeTestIsAgent && nodeTestMode === 'NODE' && nodeTestResult.status === 'SUCCEEDED'"
+          class="agent-test-answer"
+        >
+          <header>
+            <span class="agent-test-avatar"><el-icon><ChatDotRound /></el-icon></span>
+            <span>
+              <strong>{{ nodeTestAgentOutput.agentName }}</strong>
+              <small v-if="nodeTestAgentOutput.agentCode">{{ nodeTestAgentOutput.agentCode }}</small>
+            </span>
+          </header>
+          <div class="agent-test-answer__content">
+            {{ nodeTestAgentOutput.text || '智能体执行成功，但没有返回文本内容。' }}
+          </div>
+          <div v-if="nodeTestAgentToolUsage.visible" class="agent-test-tool-usage">
+            <el-tag :type="nodeTestAgentToolUsage.type" size="small" effect="plain">
+              内部只读工具
+            </el-tag>
+            <span>{{ nodeTestAgentToolUsage.summary }}</span>
+            <small>
+              耗时 {{ nodeTestAgentToolUsage.durationMs }} ms
+              <template v-if="nodeTestAgentToolUsage.truncated">
+                · {{ nodeTestAgentToolUsage.truncated }} 次结果已截断
+              </template>
+            </small>
+          </div>
+          <details>
+            <summary>查看原始数据</summary>
+            <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
+          </details>
+        </section>
+        <label v-else class="node-test-output">
           <span>脱敏输出</span>
           <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
         </label>
@@ -1062,6 +1184,8 @@ import {
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
 import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
 import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
+import WorkflowAgentEditor from './WorkflowAgentEditor.vue'
+import WorkflowAgentPicker from './WorkflowAgentPicker.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
@@ -1081,6 +1205,13 @@ import {
   isClassifierTargetAllowed
 } from './workflowClassifier'
 import {loopResultNodeOptions, withSynchronizedLoopReturn} from './workflowLoop'
+import {
+  agentConfigurationState,
+  agentTaskSummary,
+  agentTestResultView,
+  agentToolUsageView,
+  normalizeAgentConfig
+} from './workflowAgent'
 import {createOptimizedNodesExample} from './workflowExamples'
 
 export default {
@@ -1095,6 +1226,8 @@ export default {
     WorkflowSubWorkflowTest,
     WorkflowCanvasNode,
     WorkflowApiConnectionStep,
+    WorkflowAgentEditor,
+    WorkflowAgentPicker,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
     WorkflowDisclosureCard,
@@ -1246,6 +1379,7 @@ export default {
       nodeTestTimeoutSeconds: 60,
       nodeTestInputJson: '{}',
       classifierTestContent: '',
+      agentTestContent: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
       nodeTestGeneratingSchema: false,
@@ -1287,8 +1421,14 @@ export default {
     isDatabaseNode() {
       return this.selectedNode?.type === 'database_query'
     },
+    isAgentNode() {
+      return this.selectedNode?.type === 'agent'
+    },
     isGuidedIntegrationNode() {
       return this.isApiNode || this.isDatabaseNode
+    },
+    isGuidedInspectorNode() {
+      return this.isGuidedIntegrationNode || this.isAgentNode
     },
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
@@ -1402,6 +1542,15 @@ export default {
     nodeTestIsClassifier() {
       return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'llm_classifier'
     },
+    nodeTestIsAgent() {
+      return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'agent'
+    },
+    nodeTestAgentOutput() {
+      return agentTestResultView(this.nodeTestResult?.output)
+    },
+    nodeTestAgentToolUsage() {
+      return agentToolUsageView(this.nodeTestResult?.usage)
+    },
     transformDownstreamImpacts() {
       if (!this.isTransformNode || !this.selectedNode) return []
       return this.outputSchemaImpacts(
@@ -1433,6 +1582,26 @@ export default {
     datasourceReference() {
       return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'DATASOURCE') || null
     },
+    agentReference() {
+      return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'AGENT') || null
+    },
+    selectedAgentResource() {
+      return this.agentReference ? this.selectedResource(this.agentReference) : null
+    },
+    agentTestSucceeded() {
+      return this.isAgentNode
+        && this.nodeTestNodeId === this.selectedNode?.id
+        && this.nodeTestResult?.status === 'SUCCEEDED'
+    },
+    agentConfiguration() {
+      if (!this.isAgentNode) return {code: '', label: '', tone: 'info', issues: []}
+      return agentConfigurationState({
+        selectedAgent: this.selectedAgentResource,
+        config: this.selectedNode?.config,
+        inputMapping: this.selectedNode?.inputMapping,
+        testSucceeded: this.agentTestSucceeded
+      })
+    },
     selectedDescriptor() {
       if (!this.selectedNode) return null
       return this.descriptors.find(item =>
@@ -1451,6 +1620,9 @@ export default {
       }
       if ((!this.currentDefinition?.id || this.dirty) && !this.canEdit) {
         return {available: false, reason: '当前修改尚未保存，暂无权限同步草稿'}
+      }
+      if (this.isAgentNode && !['READY', 'VERIFIED'].includes(this.agentConfiguration.code)) {
+        return {available: false, reason: this.agentConfiguration.issues[0] || '请先完成智能体配置'}
       }
       if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
       if (this.selectedDescriptor.sideEffect === 'WRITE') {
@@ -1897,6 +2069,10 @@ export default {
           title: '循环可能超过运行预算',
           suggestion: '降低最大循环次数，或在工作流设置中提高节点运行总上限。'
         },
+        AGENT_TASK_OR_INPUT_REQUIRED: {
+          title: '智能体还不知道要做什么',
+          suggestion: '打开“配置任务”填写本次要求，或者在“输入与测试”中选择至少一个上游输入。'
+        },
         PUBLISH_CONTENT_UNCHANGED: {
           title: '当前内容已经发布',
           suggestion: '无需重复发布；如需生成新版本，请先修改并保存草稿。'
@@ -2085,6 +2261,7 @@ export default {
         this.definition = this.createEmptyDefinition()
       }
       this.normalizeHttpNodeConfigs()
+      this.normalizeAgentNodeConfigs()
       this.normalizeClassifierNodeConfigs()
       this.normalizeLoopNodeConfigs()
       this.normalizeInferredOutputSchemas()
@@ -2097,6 +2274,16 @@ export default {
       const descriptor = this.descriptors.find(item =>
         item.type === node.type && item.handlerVersion === node.typeVersion)
       const reference = Array.isArray(node.resourceRefs) ? node.resourceRefs[0] : null
+      const resource = reference ? this.selectedResource(reference) : null
+      const agentState = node.type === 'agent'
+        ? agentConfigurationState({
+            selectedAgent: resource,
+            config: node.config,
+            inputMapping: node.inputMapping,
+            testSucceeded: this.nodeTestNodeId === node.id
+              && this.nodeTestResult?.status === 'SUCCEEDED'
+          })
+        : null
       const classifierBranches = node.type === 'llm_classifier'
         ? (Array.isArray(node.config?.branches) ? node.config.branches : []).map((branch, index) => {
             const edge = (this.definition.edges || []).find(item => item.source === node.id
@@ -2163,7 +2350,10 @@ export default {
         inputSummary: Object.keys(node.inputMapping || {}).length
           ? `${Object.keys(node.inputMapping).length} 个映射` : '对象',
         outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
-        resourceName: reference ? this.selectedResource(reference)?.name : '',
+        resourceName: resource?.name || '',
+        agentTaskSummary: node.type === 'agent' ? agentTaskSummary(node.config) : '',
+        agentConfigurationLabel: agentState?.label || '',
+        agentConfigurationTone: agentState?.tone || 'info',
         status: this.latestNodeStatus(node.id),
         testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
@@ -2340,6 +2530,7 @@ export default {
     defaultNodeConfig(type) {
       if (type === 'http_get') return {method: 'GET', path: ''}
       if (type === 'http_request') return {method: 'POST', path: ''}
+      if (type === 'agent') return {task: '', maxWaitSeconds: 300}
       if (type === 'transform') {
         return {
           version: 1,
@@ -2478,7 +2669,12 @@ export default {
       this.selectedEdge = null
       this.selectedNodeConfig = JSON.stringify(this.selectedNode?.config || {}, null, 2)
       this.selectedNodeInputMapping = JSON.stringify(this.selectedNode?.inputMapping || {}, null, 2)
-      this.selectedInspectorTab = this.selectedNode?.resourceRefs?.length ? 'resource' : 'config'
+      const agentReference = this.selectedNode?.type === 'agent'
+        ? this.selectedNode.resourceRefs.find(reference => reference.kind === 'AGENT')
+        : null
+      this.selectedInspectorTab = agentReference && this.selectedResourceId(agentReference)
+        ? 'config'
+        : this.selectedNode?.resourceRefs?.length ? 'resource' : 'config'
       this.configError = ''
       this.mappingError = ''
       this.inspectorCollapsed = false
@@ -2571,6 +2767,12 @@ export default {
       this.selectedNodeConfig = JSON.stringify(value, null, 2)
       this.configError = ''
       this.markDirty()
+    },
+    agentConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'agent') return
+      this.schemaConfigChanged(normalizeAgentConfig(value))
+      const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
+      if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
     },
     classifierConfigChanged(value) {
       if (!this.selectedNode || this.selectedNode.type !== 'llm_classifier') return
@@ -2721,6 +2923,14 @@ export default {
         if (!node.config.method) {
           node.config.method = node.type === 'http_get' ? 'GET' : 'POST'
         }
+      })
+    },
+    normalizeAgentNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'agent') return
+        const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
+          ? node.config : {}
+        node.config = normalizeAgentConfig(current)
       })
     },
     normalizeClassifierNodeConfigs() {
@@ -3342,6 +3552,11 @@ export default {
       const selected = await this.bindResource(this.datasourceReference, resourceId)
       if (selected) this.selectedInspectorTab = 'config'
     },
+    async selectAgentResource(resourceId) {
+      if (!this.agentReference) return
+      const selected = await this.bindResource(this.agentReference, resourceId)
+      if (selected) this.selectedInspectorTab = 'config'
+    },
     async createAndSelectDatasource(resourceId) {
       await this.refreshResourceContext()
       await this.selectDatasource(resourceId)
@@ -3482,6 +3697,7 @@ export default {
       this.nodeTestSchemaApplied = false
       this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
       this.nodeTestInferredSchema = this.selectedNode.ui?.inferredOutputSchema?.schema || null
+      this.agentTestContent = ''
       this.nodeTestDialogOpen = true
     },
     async fetchNodeFields() {
@@ -3499,6 +3715,10 @@ export default {
           return
         }
         input = {input: this.classifierTestContent}
+      } else if (this.nodeTestIsAgent && this.nodeTestMode === 'NODE') {
+        input = this.agentTestContent.trim()
+          ? {input: this.agentTestContent.trim()}
+          : {}
       } else {
         try {
           input = JSON.parse(this.nodeTestInputJson)
@@ -3542,6 +3762,23 @@ export default {
         this.nodeTestAutoPersistSchema = false
       }
     },
+    completeAgentConfiguration() {
+      if (!this.isAgentNode) return
+      if (!this.selectedAgentResource) {
+        this.selectedInspectorTab = 'resource'
+        this.$message.warning('请先选择一个可用的智能体')
+        return
+      }
+      if (!['READY', 'VERIFIED'].includes(this.agentConfiguration.code)) {
+        this.selectedInspectorTab = 'config'
+        this.$message.warning(this.agentConfiguration.issues[0] || '请先完成智能体配置')
+        return
+      }
+      this.collapseInspector()
+      this.$message.success(this.agentConfiguration.code === 'VERIFIED'
+        ? '智能体节点已配置并通过试运行'
+        : '智能体节点配置完成，可按需试运行')
+    },
     async pollNodeTest() {
       const testRunId = this.nodeTestResult?.testRunId
       if (!testRunId) return
@@ -3554,6 +3791,7 @@ export default {
           return
         }
         this.nodeTestRunning = false
+        this.refreshCanvasNodeData()
         if (response.data?.status === 'SUCCEEDED') {
           const schemaUpdated = await this.generateNodeTestSchema({silent: true})
           if (schemaUpdated && this.nodeTestAutoPersistSchema) {
@@ -4487,6 +4725,9 @@ export default {
         this.selectedEdge = null
         this.selectedNodeConfig = JSON.stringify(node.config || {}, null, 2)
         this.selectedNodeInputMapping = JSON.stringify(node.inputMapping || {}, null, 2)
+        this.selectedInspectorTab = item.code === 'AGENT_TASK_OR_INPUT_REQUIRED'
+          ? 'config'
+          : (node.resourceRefs?.length ? 'resource' : 'config')
         this.inspectorCollapsed = false
         this.refreshCanvasLayout()
       }
@@ -5656,6 +5897,10 @@ export default {
   background: var(--workflow-surface, var(--el-bg-color));
 }
 
+.integration-stepper--three {
+  grid-template-columns: auto minmax(28px, 1fr) auto minmax(28px, 1fr) auto;
+}
+
 .integration-stepper button {
   padding: 0;
   display: inline-flex;
@@ -5760,6 +6005,10 @@ export default {
 
 .inspector-tabs--guided :deep(.el-tab-pane) {
   min-height: 100%;
+}
+
+.agent-mapping-alert {
+  margin-bottom: 12px;
 }
 
 .inspector-panel--guided .inspector-footer,
@@ -6459,6 +6708,25 @@ export default {
   margin-top: 16px;
 }
 
+:global(.node-test-dialog.el-dialog) {
+  box-sizing: border-box;
+  max-height: calc(100vh - 24px);
+  margin: 12px auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+:global(.node-test-dialog .el-dialog__header),
+:global(.node-test-dialog .el-dialog__footer) {
+  flex: 0 0 auto;
+}
+
+:global(.node-test-dialog .el-dialog__body) {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .node-test-form {
   margin-top: 18px;
 }
@@ -6613,6 +6881,104 @@ export default {
   word-break: break-word;
 }
 
+.agent-test-answer {
+  overflow: hidden;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 9px;
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.node-test-result .agent-test-answer > header {
+  margin: 0;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  background: var(--workflow-primary-soft, var(--el-color-primary-light-9));
+
+  > span:last-child {
+    min-width: 0;
+  }
+
+  strong,
+  small {
+    display: block;
+  }
+
+  small {
+    margin-top: 2px;
+    color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+    font-size: 10px;
+  }
+}
+
+.agent-test-avatar {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--workflow-primary, var(--el-color-primary));
+}
+
+.agent-test-answer__content {
+  min-height: 76px;
+  padding: 14px;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-test-tool-usage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 12px;
+  padding: 9px 10px;
+  border-radius: 7px;
+  background: var(--workflow-muted, var(--el-fill-color-extra-light));
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+
+  span {
+    color: var(--workflow-text, var(--el-text-color-primary));
+  }
+
+  small {
+    margin-left: auto;
+    font-size: 10px;
+  }
+
+  &.is-standalone {
+    margin: 0;
+  }
+}
+
+.agent-test-answer details {
+  padding: 0 14px 12px;
+
+  summary {
+    color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  pre {
+    max-height: 220px;
+    margin: 8px 0 0;
+    padding: 10px;
+    overflow: auto;
+    border-radius: 7px;
+    background: var(--workflow-muted, var(--el-fill-color-extra-light));
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}
+
 @media (max-width: 1360px) {
   .workbench-header {
     grid-template-columns: minmax(220px, 1fr) auto;
@@ -6655,6 +7021,10 @@ export default {
 }
 
 @media (max-width: 920px) {
+  :global(.node-test-dialog.el-dialog) {
+    width: calc(100% - 24px) !important;
+  }
+
   .workbench-header {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6720,6 +7090,12 @@ export default {
   flex: 1;
 }
 
+.workspace-stage .inspector-tabs--guided {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .workspace-stage .inspector-tabs :deep(.el-tabs__content),
 .workspace-stage .inspector-tabs--guided :deep(.el-tabs__content),
 .workspace-stage .inspector-panel--mapping .inspector-tabs :deep(.el-tabs__content) {
@@ -6729,12 +7105,21 @@ export default {
   overflow: auto;
 }
 
+.workspace-stage .inspector-tabs--guided :deep(.el-tabs__content) {
+  height: auto;
+  flex: 1;
+}
+
 .workspace-stage .integration-stepper {
   min-height: 50px;
   padding: 6px 20px;
   box-sizing: border-box;
   gap: 10px;
   flex: 0 0 auto;
+}
+
+.workspace-stage .integration-stepper--three {
+  grid-template-columns: auto minmax(24px, 1fr) auto minmax(24px, 1fr) auto;
 }
 
 .workspace-stage .integration-stepper button {

@@ -44,7 +44,10 @@ public class ImageGenerateTools implements AiTool {
          "你只能用『图N的颜色』这类引用方式表达。正确：『将图1汽车的车身颜色替换为图2汽车的车身颜色』；错误：『将图1的车改成橙色』。" +
          "【颜色互换/多图修改场景】当用户要求『互换两张图的颜色』或分别对多张图片进行修改时，修改每张图属于独立的绘图任务。你必须针对每一张图片分别调用一次本工具（例如第一次调用将图1改成图2的颜色，第二次调用将图2改成图1的颜色），严禁合并为同一次工具调用。" +
          "【重要约束】工具执行后会返回一个 JSON 字符串，你可以附带简短的友善说明，但必须在回复中包含工具返回的 JSON 内容。")
-    @AiToolPermission("ai:draw:list")
+    @AiToolPermission(
+            value = "ai:draw:list",
+            sideEffect = ToolSideEffect.WRITE,
+            dataBoundary = ToolDataBoundary.EXTERNAL)
     public String drawImage(
             @P("必须传入，绘图/改图的具体提示词。必须是纯粹独立的单图画面视觉描述（如'一只活泼的橘色小猫...'）。"
              + "【多图纯净铁律】绝对严禁包含'生成N张'、'第1张/第2张'、'1. 2. 3.'等数量词或列表编号！数量请用 count 或 prompts 传。在 prompt 里写数量会导致绘图模型画成多宫格拼图！"

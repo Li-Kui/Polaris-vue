@@ -62,6 +62,13 @@
         <Handle type="source" :id="branch.port" :position="Position.Right" class="workflow-node-handle loop-branch-handle" />
       </div>
     </div>
+    <div v-else-if="data.type === 'agent'" class="agent-node-content">
+      <strong>{{ data.resourceName || '请选择智能体' }}</strong>
+      <small>{{ data.agentTaskSummary || '配置本次任务' }}</small>
+      <span :class="['agent-config-state', `is-${data.agentConfigurationTone || 'info'}`]">
+        {{ data.agentConfigurationLabel || '未配置' }}
+      </span>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
@@ -222,6 +229,60 @@ export default {
 
 .loop-content {
   padding: 8px 0;
+}
+
+.agent-node-content {
+  position: relative;
+  padding: 10px 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-node-content > strong,
+.agent-node-content > small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-node-content > strong {
+  padding-right: 54px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.agent-node-content > small {
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 10px;
+}
+
+.agent-config-state {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-light);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.agent-config-state.is-success,
+.agent-config-state.is-primary {
+  color: var(--el-color-success);
+  background: var(--el-color-success-light-9);
+}
+
+.agent-config-state.is-warning {
+  color: var(--el-color-warning);
+  background: var(--el-color-warning-light-9);
+}
+
+.agent-config-state.is-danger {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
 }
 
 .loop-mode-summary {

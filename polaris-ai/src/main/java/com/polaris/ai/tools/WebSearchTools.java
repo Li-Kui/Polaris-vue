@@ -33,7 +33,9 @@ public class WebSearchTools implements AiTool {
     private static final String TAVILY_API_URL = "https://api.tavily.com/search";
 
     @Tool("当用户需要获取最新的网络实时信息、新闻、天气或进行事实核对时，调用此工具搜索互联网")
-    @AiToolPermission
+    @AiToolPermission(
+            sideEffect = ToolSideEffect.READ,
+            dataBoundary = ToolDataBoundary.EXTERNAL)
     public String searchWeb(String query) {
         ToolSseHolder.ensureActive();
         log.info(">>> [WebSearchTools] 触发联网搜索工具, query: {}", query);

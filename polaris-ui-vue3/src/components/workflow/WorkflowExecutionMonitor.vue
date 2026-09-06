@@ -110,6 +110,36 @@
               <el-table-column prop="createTime" label="时间" width="180" />
             </el-table>
           </el-tab-pane>
+          <el-tab-pane name="tools">
+            <template #label><span class="detail-tab-label">工具调用<em>{{ toolCallCount }}</em></span></template>
+            <el-empty v-if="!toolCalls.length" description="本次执行没有调用智能体工具" />
+            <el-table v-else :data="toolCalls" size="small" class="detail-table">
+              <el-table-column prop="sequenceNo" label="#" width="70" />
+              <el-table-column prop="nodeId" label="节点" min-width="120" />
+              <el-table-column prop="toolName" label="工具" min-width="180" />
+              <el-table-column prop="callNo" label="调用序号" width="90" align="center" />
+              <el-table-column label="结果" width="110" align="center">
+                <template #default="{row}">
+                  <el-tag :type="toolEventType(row.status)" size="small" effect="plain">
+                    {{ toolEventStatus(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="耗时" width="100" align="right">
+                <template #default="{row}">{{ row.status === 'STARTED' ? '-' : `${row.durationMs} ms` }}</template>
+              </el-table-column>
+              <el-table-column label="说明" min-width="180">
+                <template #default="{row}">
+                  <span v-if="row.reasonCode">{{ toolEventReason(row.reasonCode) }}</span>
+                  <el-tag v-if="row.resultTruncated" type="warning" size="small" effect="plain">
+                    结果已截断
+                  </el-tag>
+                  <span v-if="!row.reasonCode && !row.resultTruncated">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="createTime" label="时间" width="180" />
+            </el-table>
+          </el-tab-pane>
           <el-tab-pane name="artifacts">
             <template #label><span class="detail-tab-label">执行产物<em>{{ artifacts.length }}</em></span></template>
             <el-empty v-if="!artifacts.length" description="当前执行没有持久化产物" />
@@ -157,6 +187,7 @@ import {
   streamWorkflowExecutionEvents
 } from '@/api/ai/workflow'
 import {ArrowLeft, Refresh} from '@element-plus/icons-vue'
+import {agentToolCalls, agentToolEventReason, agentToolEventStatus, agentToolEventType} from './workflowAgent'
 
 export default {
   name: 'WorkflowExecutionMonitor',
@@ -201,6 +232,12 @@ export default {
     streamStateLabel() {
       if (this.terminal(this.selected?.status)) return '执行已结束'
       return this.streamConnected ? '事件实时连接' : '事件重连中'
+    },
+    toolCalls() {
+      return agentToolCalls(this.events)
+    },
+    toolCallCount() {
+      return this.toolCalls.length
     }
   },
   created() {
@@ -266,6 +303,15 @@ export default {
       if (['FAILED', 'REJECTED', 'NEEDS_ATTENTION'].includes(status)) return 'danger'
       if (status === 'CANCELLED') return 'neutral'
       return 'running'
+    },
+    toolEventStatus(status) {
+      return agentToolEventStatus(status)
+    },
+    toolEventType(status) {
+      return agentToolEventType(status)
+    },
+    toolEventReason(reasonCode) {
+      return agentToolEventReason(reasonCode)
     },
     formatBytes(value) {
       const bytes = Number(value || 0)

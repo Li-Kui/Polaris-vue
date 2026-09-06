@@ -42,7 +42,7 @@ public class DocumentGenerateTools implements AiTool {
      * 生成 Excel 并返回可供下载的绝对链接
      */
     @Tool("根据给定的数据内容和列名生成Excel电子表格文件(.xlsx)，并返回可以直接下载的超链接。")
-    @AiToolPermission
+    @AiToolPermission(sideEffect = ToolSideEffect.WRITE)
     public String generateExcel(
             @P("要生成的文件名，例如 '2026年销售业绩表.xlsx'，必须以 .xlsx 结尾") String fileName,
             @P("表格的主标题，将显示在表格第一行第一列（合并单元格居中），例如：'北辰AI 2026年销售业绩汇总表'") String title,
@@ -212,7 +212,7 @@ public class DocumentGenerateTools implements AiTool {
      * 生成 Word 并返回可供下载的绝对链接
      */
     @Tool("根据指定的标题和段落内容生成Word文档(.docx)，支持大标题、二级标题、正文段落和表格的排版，并返回下载链接。")
-    @AiToolPermission
+    @AiToolPermission(sideEffect = ToolSideEffect.WRITE)
     public String generateWord(
             @P("要生成的文件名，例如 '项目设计说明书.docx'，必须以 .docx 结尾") String fileName,
             @P("文档的大标题，将显示在Word文档的第一页顶部，例如：'北辰智能体工作流设计方案'") String title,
