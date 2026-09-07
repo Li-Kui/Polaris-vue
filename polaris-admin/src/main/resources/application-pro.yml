@@ -21,7 +21,7 @@ spring:
             # 主库数据源
             master:
                 # 强制数据库会话使用东八区，保证 SQL NOW() 与应用写入时间处于同一时区
-                url: jdbc:mysql://172.31.61.41:3306/ry-vue?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true
+                url: jdbc:mysql://172.31.61.41:3306/polaris_pro?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true
                 username: root
                 password: 123456
             # 从库数据源
