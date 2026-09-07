@@ -4,5 +4,7 @@ package com.polaris.ai.workflow.spi;
 public enum WorkflowSideEffect {
     NONE,
     READ,
+    /** 写入平台内部、受权限保护且具备幂等语义的持久化数据。 */
+    DURABLE_INTERNAL,
     WRITE
 }

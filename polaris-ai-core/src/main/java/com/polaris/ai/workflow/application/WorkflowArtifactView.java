@@ -7,10 +7,12 @@ public record WorkflowArtifactView(
         String artifactId,
         String executionId,
         String nodeRunId,
+        String sourceType,
         String fileName,
-        String mimeType,
+        String mediaType,
         Long sizeBytes,
-        String contentHash,
+        String sha256,
+        String status,
         Date expiresTime,
         Date createTime) {
 }

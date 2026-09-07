@@ -218,6 +218,33 @@
               <span>3</span><strong>输入与测试</strong>
             </button>
           </nav>
+          <nav
+            v-if="isArtifactNode"
+            class="integration-stepper integration-stepper--three"
+            aria-label="保存产物节点配置步骤"
+          >
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'mapping', completed: !!selectedNode.inputMapping?.content}"
+              :aria-current="selectedInspectorTab === 'mapping' ? 'step' : undefined"
+              @click="selectedInspectorTab = 'mapping'">
+              <span>1</span><strong>保存内容</strong>
+            </button>
+            <i></i>
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'config', completed: artifactConfiguration.code === 'READY'}"
+              :aria-current="selectedInspectorTab === 'config' ? 'step' : undefined"
+              @click="selectedInspectorTab = 'config'">
+              <span>2</span><strong>文件设置</strong>
+            </button>
+            <i></i>
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'policy'}"
+              :aria-current="selectedInspectorTab === 'policy' ? 'step' : undefined"
+              :disabled="artifactConfiguration.code !== 'READY'"
+              @click="selectedInspectorTab = 'policy'">
+              <span>3</span><strong>预览测试</strong>
+            </button>
+          </nav>
           <div v-if="isGuidedIntegrationNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
             <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">
               {{ isApiNode ? '请求参数' : '查询设置' }}
@@ -226,11 +253,17 @@
             <button type="button" :class="{active: selectedInspectorTab === 'policy'}" @click="selectedInspectorTab = 'policy'">运行策略</button>
           </div>
           <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isGuidedInspectorNode}]">
-            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : isAgentNode ? '2 配置任务' : '配置'" name="config">
+            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : isAgentNode ? '2 配置任务' : isArtifactNode ? '2 文件设置' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
+                <WorkflowArtifactEditor
+                  v-if="isArtifactNode"
+                  :config="selectedNode.config"
+                  :disabled="!canEdit"
+                  @update:config="schemaConfigChanged"
+                />
                 <WorkflowAgentEditor
-                  v-if="isAgentNode"
+                  v-else-if="isAgentNode"
                   :config="selectedNode.config"
                   :selected-agent="selectedAgentResource"
                   :input-mapping="selectedNode.inputMapping || {}"
@@ -389,7 +422,7 @@
                 </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane v-if="!isSubWorkflowNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : '资源'" name="resource">
+            <el-tab-pane v-if="!isSubWorkflowNode && !isArtifactNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -526,11 +559,19 @@
                 <el-button v-if="canEdit" class="resource-add" plain @click="addResourceReference"><el-icon><Plus /></el-icon><span>添加扩展资源</span></el-button>
               </template>
             </el-tab-pane>
-            <el-tab-pane :label="isAgentNode ? '3 输入与测试' : '输入输出'" name="mapping">
+            <el-tab-pane :label="isAgentNode ? '3 输入与测试' : isArtifactNode ? '1 保存内容' : '输入输出'" name="mapping">
               <el-alert
                 v-if="isAgentNode"
                 :title="agentConfiguration.issues[0] || '选择上游数据后，可使用底部按钮试运行当前智能体节点。'"
                 :type="agentConfiguration.issues.length ? 'warning' : 'success'"
+                :closable="false"
+                show-icon
+                class="agent-mapping-alert"
+              />
+              <el-alert
+                v-else-if="isArtifactNode"
+                :title="artifactConfiguration.issues[0] || '已选择要保存的内容，下一步设置文件名和格式。'"
+                :type="artifactConfiguration.issues.length ? 'warning' : 'success'"
                 :closable="false"
                 show-icon
                 class="agent-mapping-alert"
@@ -605,7 +646,27 @@
               </section>
             </el-tab-pane>
             <el-tab-pane label="运行策略" name="policy">
-              <el-form v-if="isSubWorkflowNode" label-position="top" size="small">
+              <section v-if="isArtifactNode" class="artifact-preview-step">
+                <div class="formal-schema-heading">
+                  <div>
+                    <strong>保存结果预览</strong>
+                    <small>试运行会完成脱敏、格式、文件名和 20MB 限制校验，但不会创建真实文件</small>
+                  </div>
+                  <el-tag :type="artifactConfiguration.tone" size="small" effect="plain">
+                    {{ artifactConfiguration.label }}
+                  </el-tag>
+                </div>
+                <dl>
+                  <div><dt>文件名</dt><dd>{{ artifactConfiguration.fileName }}</dd></div>
+                  <div><dt>格式</dt><dd>{{ artifactConfiguration.formatLabel }}</dd></div>
+                  <div><dt>失败处理</dt><dd>失败并终止；仅瞬时故障自动重试</dd></div>
+                  <div><dt>安全</dt><dd>保存前自动脱敏，仅有执行查看权限的用户可下载</dd></div>
+                </dl>
+                <el-button type="primary" plain :disabled="!nodeTestAvailability.available" @click="openNodeTest">
+                  <el-icon><VideoPlay /></el-icon><span>无落盘预览</span>
+                </el-button>
+              </section>
+              <el-form v-else-if="isSubWorkflowNode" label-position="top" size="small">
                 <el-alert title="等待期间会保存进度；服务恢复后继续等待同一次子流程调用。" type="info" :closable="false" />
                 <el-form-item label="最长等待时间（秒，0 表示沿用工作流总时限）">
                   <el-input-number :model-value="selectedNode.config.maxWaitSeconds || 0" :min="0" :max="2592000" :disabled="!canEdit" @change="subWorkflowConfigChanged({...selectedNode.config, maxWaitSeconds: $event})" />
@@ -654,7 +715,7 @@
                   @click="openNodeTest"
                 ><el-icon><VideoPlay /></el-icon><span>{{ selectedNode?.type === 'loop'
                     ? '测试完整流程'
-                    : (isSubWorkflowNode ? '试运行子工作流' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
+                    : (isSubWorkflowNode ? '试运行子工作流' : isArtifactNode ? '无落盘预览' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
               </span>
             </el-tooltip>
             <el-button v-if="isAgentNode && canEdit" type="primary" @click="completeAgentConfiguration">
@@ -953,6 +1014,8 @@
       <el-alert
         :title="workflowDraftTest
           ? '直接运行当前草稿，不创建发布版本或正式运行记录；仅支持无写操作的线性安全流程。'
+          : nodeTestIsArtifact && nodeTestMode === 'NODE'
+          ? '使用正式脱敏与序列化规则预览文件信息，但不会创建数据库记录或真实文件。'
           : nodeTestMode === 'UPSTREAM_CHAIN'
           ? '按普通连线依次执行安全的线性上游链；条件、并行、循环、多入口和写节点会被阻止。输入表示流程输入。'
           : '仅执行当前节点，不执行上游；输入表示当前节点最终输入。写操作节点不会执行。'"
@@ -982,7 +1045,7 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : nodeTestIsArtifact && nodeTestMode === 'NODE' ? '要保存的内容' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
           <el-input
             v-if="nodeTestIsClassifier && nodeTestMode === 'NODE'"
             v-model="classifierTestContent"
@@ -1000,6 +1063,15 @@
             maxlength="12000"
             show-word-limit
             placeholder="输入一段用于验证任务效果的内容；如果任务不需要额外输入，可以留空"
+          />
+          <el-input
+            v-else-if="nodeTestIsArtifact && nodeTestMode === 'NODE'"
+            v-model="artifactTestContent"
+            type="textarea"
+            :rows="8"
+            maxlength="200000"
+            show-word-limit
+            placeholder="输入文本，或粘贴一段 JSON 数据"
           />
           <el-input v-else v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
@@ -1047,7 +1119,8 @@
           <span v-for="item in nodeTestResult.schemaDiagnostics" :key="item">{{ item }}</span>
         </div>
         <div
-          v-if="nodeTestResult.status === 'SUCCEEDED' && !(nodeTestIsAgent && nodeTestMode === 'NODE')"
+          v-if="nodeTestResult.status === 'SUCCEEDED'
+            && !((nodeTestIsAgent || nodeTestIsArtifact) && nodeTestMode === 'NODE')"
           class="node-test-schema-action"
         >
           <div>
@@ -1186,6 +1259,7 @@ import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
 import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
 import WorkflowAgentEditor from './WorkflowAgentEditor.vue'
 import WorkflowAgentPicker from './WorkflowAgentPicker.vue'
+import WorkflowArtifactEditor from './WorkflowArtifactEditor.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
@@ -1212,6 +1286,7 @@ import {
   agentToolUsageView,
   normalizeAgentConfig
 } from './workflowAgent'
+import {ARTIFACT_DEFAULT_CONFIG, artifactConfigurationState, artifactSummary} from './workflowArtifact'
 import {createOptimizedNodesExample} from './workflowExamples'
 
 export default {
@@ -1228,6 +1303,7 @@ export default {
     WorkflowApiConnectionStep,
     WorkflowAgentEditor,
     WorkflowAgentPicker,
+    WorkflowArtifactEditor,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
     WorkflowDisclosureCard,
@@ -1380,6 +1456,7 @@ export default {
       nodeTestInputJson: '{}',
       classifierTestContent: '',
       agentTestContent: '',
+      artifactTestContent: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
       nodeTestGeneratingSchema: false,
@@ -1424,11 +1501,14 @@ export default {
     isAgentNode() {
       return this.selectedNode?.type === 'agent'
     },
+    isArtifactNode() {
+      return this.selectedNode?.type === 'artifact'
+    },
     isGuidedIntegrationNode() {
       return this.isApiNode || this.isDatabaseNode
     },
     isGuidedInspectorNode() {
-      return this.isGuidedIntegrationNode || this.isAgentNode
+      return this.isGuidedIntegrationNode || this.isAgentNode || this.isArtifactNode
     },
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
@@ -1447,7 +1527,16 @@ export default {
     },
     isSubWorkflowNode() { return this.selectedNode?.type === 'sub_workflow' },
     selectedSubWorkflowContract() { return this.subWorkflowContracts[this.selectedNode?.config?.reviewedVersionId] },
-    visibleInspectorTabs() { return this.inspectorTabOptions.filter(item => !this.isSubWorkflowNode || item.value !== 'resource') },
+    visibleInspectorTabs() {
+      if (this.isArtifactNode) {
+        return [
+          {label: '保存内容', value: 'mapping', icon: 'Operation'},
+          {label: '文件设置', value: 'config', icon: 'Setting'},
+          {label: '预览测试', value: 'policy', icon: 'VideoPlay'}
+        ]
+      }
+      return this.inspectorTabOptions.filter(item => !this.isSubWorkflowNode || item.value !== 'resource')
+    },
     subWorkflowFields() {
       if (!this.isSubWorkflowNode) return []
       const fields = this.buildClassifierSourceGroups(this.selectedNode.id)
@@ -1545,6 +1634,9 @@ export default {
     nodeTestIsAgent() {
       return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'agent'
     },
+    nodeTestIsArtifact() {
+      return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'artifact'
+    },
     nodeTestAgentOutput() {
       return agentTestResultView(this.nodeTestResult?.output)
     },
@@ -1602,6 +1694,13 @@ export default {
         testSucceeded: this.agentTestSucceeded
       })
     },
+    artifactConfiguration() {
+      if (!this.isArtifactNode) return {code: '', label: '', tone: 'info', issues: []}
+      return artifactConfigurationState({
+        config: this.selectedNode?.config,
+        inputMapping: this.selectedNode?.inputMapping
+      })
+    },
     selectedDescriptor() {
       if (!this.selectedNode) return null
       return this.descriptors.find(item =>
@@ -1624,6 +1723,9 @@ export default {
       if (this.isAgentNode && !['READY', 'VERIFIED'].includes(this.agentConfiguration.code)) {
         return {available: false, reason: this.agentConfiguration.issues[0] || '请先完成智能体配置'}
       }
+      if (this.isArtifactNode && this.artifactConfiguration.code !== 'READY') {
+        return {available: false, reason: this.artifactConfiguration.issues[0] || '请先完成产物配置'}
+      }
       if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
       if (this.selectedDescriptor.sideEffect === 'WRITE') {
         return {available: false, reason: '写操作节点暂不允许单节点真实试运行'}
@@ -1632,6 +1734,10 @@ export default {
         return {available: false, reason: '持久化控制节点暂不支持隔离试运行'}
       }
       const capabilities = this.selectedDescriptor.capabilities || []
+      if (this.selectedDescriptor.sideEffect === 'DURABLE_INTERNAL'
+        && !capabilities.includes('PREVIEWABLE')) {
+        return {available: false, reason: '该持久化节点未提供安全预览能力'}
+      }
       if (this.selectedDescriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) {
         return {available: false, reason: '该节点未声明可安全模拟能力'}
       }
@@ -2089,7 +2195,7 @@ export default {
       }
     },
     inspectorTabLabel(value) {
-      return this.inspectorTabOptions.find(item => item.value === value)?.label || '配置'
+      return this.visibleInspectorTabs.find(item => item.value === value)?.label || '配置'
     },
     openInspectorTab(value) {
       if (!this.selectedNode) return
@@ -2168,7 +2274,8 @@ export default {
         join: '汇聚并行分支结果',
         loop: '在限制范围内循环执行',
         wait: '延迟后恢复执行',
-        approval: '发起人工审批任务'
+        approval: '发起人工审批任务',
+        artifact: '把流程结果保存为可下载的私有文件'
       }
       return descriptions[descriptor.type] || this.nodeCategoryLabel(descriptor.category)
     },
@@ -2343,17 +2450,24 @@ export default {
             return `${Math.max(1, stages.length)} 级 · ${rule}${wait}`
           })()
         : ''
+      const artifactState = node.type === 'artifact'
+        ? artifactConfigurationState({config: node.config, inputMapping: node.inputMapping})
+        : null
       return {
         label: node.name,
         type: node.type,
         category: descriptor?.category || 'general',
         inputSummary: Object.keys(node.inputMapping || {}).length
           ? `${Object.keys(node.inputMapping).length} 个映射` : '对象',
-        outputSummary: node.type === 'knowledge_rag' ? '知识片段' : '结果对象',
+        outputSummary: node.type === 'knowledge_rag' ? '知识片段'
+          : node.type === 'artifact' ? '产物信息' : '结果对象',
         resourceName: resource?.name || '',
         agentTaskSummary: node.type === 'agent' ? agentTaskSummary(node.config) : '',
         agentConfigurationLabel: agentState?.label || '',
         agentConfigurationTone: agentState?.tone || 'info',
+        artifactSummary: node.type === 'artifact' ? artifactSummary(node.config) : '',
+        artifactConfigurationLabel: artifactState?.label || '',
+        artifactConfigurationTone: artifactState?.tone || 'info',
         status: this.latestNodeStatus(node.id),
         testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
@@ -2502,6 +2616,12 @@ export default {
         config: this.defaultNodeConfig(descriptor.type),
         timeoutSeconds: 120,
         onError: 'FAIL',
+        ...(descriptor.type === 'artifact' ? {retryPolicy: {
+          maxAttempts: 3,
+          backoff: 'EXPONENTIAL',
+          initialDelayMs: 1000,
+          maxDelayMs: 10000
+        }} : {}),
         resourceRefs: resourceReferences,
         ui: { x: 260 + this.definition.nodes.length * 40, y: 180 + this.definition.nodes.length * 30 }
       }
@@ -2522,7 +2642,8 @@ export default {
       this.selectedEdge = null
       this.selectedNodeConfig = JSON.stringify(node.config, null, 2)
       this.selectedNodeInputMapping = JSON.stringify(node.inputMapping, null, 2)
-      this.selectedInspectorTab = resourceReferences.length ? 'resource' : 'config'
+      this.selectedInspectorTab = descriptor.type === 'artifact'
+        ? 'mapping' : resourceReferences.length ? 'resource' : 'config'
       this.inspectorCollapsed = false
       this.markDirty()
       this.refreshCanvasLayout()
@@ -2531,6 +2652,7 @@ export default {
       if (type === 'http_get') return {method: 'GET', path: ''}
       if (type === 'http_request') return {method: 'POST', path: ''}
       if (type === 'agent') return {task: '', maxWaitSeconds: 300}
+      if (type === 'artifact') return {...ARTIFACT_DEFAULT_CONFIG}
       if (type === 'transform') {
         return {
           version: 1,
@@ -2672,7 +2794,9 @@ export default {
       const agentReference = this.selectedNode?.type === 'agent'
         ? this.selectedNode.resourceRefs.find(reference => reference.kind === 'AGENT')
         : null
-      this.selectedInspectorTab = agentReference && this.selectedResourceId(agentReference)
+      this.selectedInspectorTab = this.selectedNode?.type === 'artifact'
+        ? 'mapping'
+        : agentReference && this.selectedResourceId(agentReference)
         ? 'config'
         : this.selectedNode?.resourceRefs?.length ? 'resource' : 'config'
       this.configError = ''
@@ -2766,6 +2890,8 @@ export default {
       this.syncHttpNodeType(value?.method)
       this.selectedNodeConfig = JSON.stringify(value, null, 2)
       this.configError = ''
+      const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
+      if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
       this.markDirty()
     },
     agentConfigChanged(value) {
@@ -3616,6 +3742,7 @@ export default {
       if (!descriptor || descriptor.sideEffect === 'WRITE') return false
       if (['approval', 'wait', 'sub_workflow'].includes(node.type)) return false
       const capabilities = descriptor.capabilities || []
+      if (descriptor.sideEffect === 'DURABLE_INTERNAL' && !capabilities.includes('PREVIEWABLE')) return false
       if (descriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) return false
       return capabilities.includes('CANCELLABLE')
     },
@@ -3698,6 +3825,8 @@ export default {
       this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
       this.nodeTestInferredSchema = this.selectedNode.ui?.inferredOutputSchema?.schema || null
       this.agentTestContent = ''
+      this.artifactTestContent = this.isArtifactNode
+        ? '这是一段用于预览的示例内容' : ''
       this.nodeTestDialogOpen = true
     },
     async fetchNodeFields() {
@@ -3719,6 +3848,21 @@ export default {
         input = this.agentTestContent.trim()
           ? {input: this.agentTestContent.trim()}
           : {}
+      } else if (this.nodeTestIsArtifact && this.nodeTestMode === 'NODE') {
+        if (!this.artifactTestContent.trim()) {
+          this.$message.warning('请输入要保存的内容')
+          return
+        }
+        let content = this.artifactTestContent
+        const node = (this.definition.nodes || []).find(item => item.id === this.nodeTestNodeId)
+        if (node?.config?.format === 'JSON') {
+          try {
+            content = JSON.parse(this.artifactTestContent)
+          } catch (error) {
+            content = this.artifactTestContent
+          }
+        }
+        input = {content}
       } else {
         try {
           input = JSON.parse(this.nodeTestInputJson)
@@ -4725,7 +4869,9 @@ export default {
         this.selectedEdge = null
         this.selectedNodeConfig = JSON.stringify(node.config || {}, null, 2)
         this.selectedNodeInputMapping = JSON.stringify(node.inputMapping || {}, null, 2)
-        this.selectedInspectorTab = item.code === 'AGENT_TASK_OR_INPUT_REQUIRED'
+        this.selectedInspectorTab = node.type === 'artifact'
+          ? 'mapping'
+          : item.code === 'AGENT_TASK_OR_INPUT_REQUIRED'
           ? 'config'
           : (node.resourceRefs?.length ? 'resource' : 'config')
         this.inspectorCollapsed = false
@@ -4761,6 +4907,38 @@ export default {
 </script>
 
 <style scoped>
+.artifact-preview-step {
+  padding: 6px 0 18px;
+  display: grid;
+  gap: 16px;
+}
+
+.artifact-preview-step dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.artifact-preview-step dl > div {
+  padding: 12px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 9px;
+  background: var(--workflow-surface-muted, var(--el-fill-color-lighter));
+}
+
+.artifact-preview-step dt {
+  margin-bottom: 5px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+}
+
+.artifact-preview-step dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--workflow-text, var(--el-text-color-primary));
+  font-size: 12px;
+}
 .workflow-workbench {
   height: calc(100vh - 120px);
   min-height: 650px;

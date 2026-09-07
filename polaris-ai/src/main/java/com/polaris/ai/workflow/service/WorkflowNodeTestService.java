@@ -381,7 +381,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         long startedAt = System.nanoTime();
         Future<WorkflowNodeResult> future;
         try {
-            future = nodeExecutor.submit(() -> prepared.handler().execute(context));
+            future = nodeExecutor.submit(() -> executeForTest(prepared.handler(), context));
         } catch (RuntimeException e) {
             throw new ServiceException("试运行任务繁忙，请稍后重试");
         }
@@ -498,7 +498,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                         resourceResolver.forNode(
                                 current, prepared.resources().resources()), cancellation,
                         toolAudit);
-                activeFuture = nodeExecutor.submit(() -> currentHandler.execute(nodeContext));
+                activeFuture = nodeExecutor.submit(() -> executeForTest(currentHandler, nodeContext));
                 long remainingMs = deadline - System.currentTimeMillis();
                 long nodeMs = TimeUnit.SECONDS.toMillis(
                         current.getTimeoutSeconds() == null ? 60 : current.getTimeoutSeconds());
@@ -678,6 +678,12 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         if (ENGINE_CONTROL_NODES.contains(node.getType())) {
             throw new ServiceException("持久化控制节点暂不支持隔离试运行");
         }
+        if ("DURABLE_INTERNAL".equals(node.getSideEffect())
+                && (!(handler instanceof WorkflowNodePreviewer)
+                || !handler.descriptor().capabilities()
+                .contains(WorkflowNodeCapability.PREVIEWABLE))) {
+            throw new ServiceException("该持久化节点没有提供安全预览能力");
+        }
         if ("NONE".equals(node.getSideEffect())
                 && !handler.descriptor().capabilities()
                 .contains(WorkflowNodeCapability.MOCKABLE)) {
@@ -687,6 +693,17 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                 .contains(WorkflowNodeCapability.CANCELLABLE)) {
             throw new ServiceException("该节点未声明可取消能力，暂不允许隔离试运行");
         }
+    }
+
+    private WorkflowNodeResult executeForTest(
+            WorkflowNodeHandler handler, WorkflowNodeContext context) throws Exception {
+        if (handler.descriptor().sideEffect() == WorkflowSideEffect.DURABLE_INTERNAL) {
+            if (!(handler instanceof WorkflowNodePreviewer previewer)) {
+                throw new ServiceException("该持久化节点没有提供安全预览能力");
+            }
+            return previewer.preview(context);
+        }
+        return handler.execute(context);
     }
 
     private WorkflowNodeTestResult failed(

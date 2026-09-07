@@ -6,4 +6,6 @@ public interface WorkflowArtifactStorage {
     void store(String storageRef, byte[] content);
 
     byte[] load(String storageRef);
+
+    void delete(String storageRef);
 }

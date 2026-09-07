@@ -272,6 +272,9 @@ public class AiWorkflowController extends BaseController {
         byte[] content = artifact.content();
         response.setContentType(artifact.mimeType());
         response.setContentLength(content.length);
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Cache-Control", "private, no-store, max-age=0");
+        response.setHeader("Pragma", "no-cache");
         String encodedName = URLEncoder.encode(
                 artifact.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
         response.setHeader("Content-Disposition",

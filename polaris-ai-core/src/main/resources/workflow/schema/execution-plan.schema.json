@@ -30,7 +30,7 @@
           "handlerVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
           "inputMapping": { "type": "object", "additionalProperties": true },
           "config": { "type": "object", "additionalProperties": true },
-          "sideEffect": { "enum": ["NONE", "READ", "WRITE"] },
+          "sideEffect": { "enum": ["NONE", "READ", "DURABLE_INTERNAL", "WRITE"] },
           "inputSchema": { "type": "object", "additionalProperties": true },
           "outputSchema": { "type": "object", "additionalProperties": true },
           "schemaSource": { "type": "string", "minLength": 1, "maxLength": 64 },

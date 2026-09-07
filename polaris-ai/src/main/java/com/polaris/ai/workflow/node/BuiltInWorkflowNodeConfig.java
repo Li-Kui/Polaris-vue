@@ -2,8 +2,6 @@ package com.polaris.ai.workflow.node;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.*;
-import com.polaris.ai.workflow.application.WorkflowArtifactView;
-import com.polaris.ai.workflow.service.WorkflowArtifactService;
 import com.polaris.ai.workflow.spi.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -1620,51 +1618,6 @@ public class BuiltInWorkflowNodeConfig {
     }
 
     @Bean
-    public WorkflowNodeHandler artifactWorkflowNodeHandler(
-            WorkflowArtifactService artifactService) {
-        ObjectNode schema = JsonNodeFactory.instance.objectNode();
-        schema.put("type", "object");
-        ObjectNode properties = schema.putObject("properties");
-        properties.putObject("fileName").put("type", "string")
-                .put("minLength", 1).put("maxLength", 200);
-        properties.putObject("mimeType").put("type", "string")
-                .put("pattern", "^[a-zA-Z0-9.+-]+/[a-zA-Z0-9.+-]+$");
-        properties.putObject("retentionDays").put("type", "integer")
-                .put("minimum", 1).put("maximum", 3650);
-        schema.put("additionalProperties", false);
-        WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
-                "artifact", "1.0", "保存产物", "data", schema,
-                JsonNodeFactory.instance.objectNode(), artifactOutputSchema(),
-                WorkflowSideEffect.NONE, Set.of(),
-                Set.of(WorkflowNodeCapability.CANCELLABLE,
-                        WorkflowNodeCapability.RETRYABLE,
-                        WorkflowNodeCapability.CHECKPOINT_SAFE));
-        return new WorkflowNodeHandler() {
-            @Override
-            public WorkflowNodeDescriptor descriptor() {
-                return descriptor;
-            }
-
-            @Override
-            public WorkflowNodeResult execute(WorkflowNodeContext context) {
-                context.cancellation().throwIfCancellationRequested();
-                WorkflowArtifactView artifact = artifactService.storeJson(
-                        context.tenantId(), context.executionId(), context.nodeRunId(),
-                        context.input(), context.config().path("fileName").asText(null),
-                        context.config().path("mimeType").asText("application/json"),
-                        context.config().path("retentionDays").asInt(30));
-                ObjectNode output = JsonNodeFactory.instance.objectNode();
-                output.put("artifactId", artifact.artifactId());
-                output.put("fileName", artifact.fileName());
-                output.put("mimeType", artifact.mimeType());
-                output.put("sizeBytes", artifact.sizeBytes());
-                output.put("contentHash", artifact.contentHash());
-                return WorkflowNodeResult.success(output);
-            }
-        };
-    }
-
-    @Bean
     public WorkflowNodeHandler subWorkflowNodeHandler() {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
@@ -2013,20 +1966,6 @@ public class BuiltInWorkflowNodeConfig {
                 .putArray("enum").add("RESUMED");
         properties.putObject("resumedAt").put("type", "integer");
         schema.putArray("required").add("status").add("resumedAt");
-        return schema;
-    }
-
-    private ObjectNode artifactOutputSchema() {
-        ObjectNode schema = objectSchema();
-        ObjectNode properties = schema.putObject("properties");
-        properties.putObject("artifactId").put("type", "string");
-        properties.putObject("fileName").put("type", "string");
-        properties.putObject("mimeType").put("type", "string");
-        properties.putObject("sizeBytes").put("type", "integer");
-        properties.putObject("contentHash").put("type", "string");
-        schema.putArray("required")
-                .add("artifactId").add("fileName").add("mimeType")
-                .add("sizeBytes").add("contentHash");
         return schema;
     }
 

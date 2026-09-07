@@ -50,7 +50,10 @@ public class WorkflowExpressionEvaluator {
         }
         bindings.forEach((key, binding) -> {
             JsonNode ast = binding.getExpressionAst();
-            JsonNode value = ast == null ? binding.getValue() : evaluate(ast, context);
+            // Jackson 将持久化计划中的 JSON null 反序列化为 NullNode，而不是 Java null。
+            // 常量绑定因此不能仅用 ast == null 判断，否则恢复执行时会把 NullNode 当作 AST。
+            JsonNode value = ast == null || ast.isNull()
+                    ? binding.getValue() : evaluate(ast, context);
             result.set(key, value == null ? NullNode.instance : value.deepCopy());
         });
         return result;

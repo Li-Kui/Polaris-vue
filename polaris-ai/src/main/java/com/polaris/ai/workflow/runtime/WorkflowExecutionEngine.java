@@ -1744,7 +1744,10 @@ public class WorkflowExecutionEngine {
         run.setHandlerVersion(node.getHandlerVersion());
         run.setStatus("RUNNING");
         run.setSideEffect(node.getSideEffect());
-        run.setSideEffectStatus("WRITE".equals(node.getSideEffect()) ? "PENDING" : "NONE");
+        run.setSideEffectStatus(
+                "WRITE".equals(node.getSideEffect())
+                        || "DURABLE_INTERNAL".equals(node.getSideEffect())
+                        ? "PENDING" : "NONE");
         run.setIdempotencyKey(execution.getExecutionId() + ":" + nodeRunId);
         run.setInputJson("{}");
         run.setFencingToken(fencingToken);

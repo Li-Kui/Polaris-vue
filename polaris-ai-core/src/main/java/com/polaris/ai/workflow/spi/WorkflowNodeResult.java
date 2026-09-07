@@ -17,4 +17,8 @@ public record WorkflowNodeResult(
     public static WorkflowNodeResult success(JsonNode output) {
         return new WorkflowNodeResult(output, Map.of(), "NONE");
     }
+
+    public static WorkflowNodeResult success(JsonNode output, String sideEffectStatus) {
+        return new WorkflowNodeResult(output, Map.of(), sideEffectStatus);
+    }
 }

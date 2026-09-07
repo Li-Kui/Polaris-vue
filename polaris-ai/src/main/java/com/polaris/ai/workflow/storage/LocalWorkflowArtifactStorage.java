@@ -54,6 +54,17 @@ public class LocalWorkflowArtifactStorage implements WorkflowArtifactStorage {
         }
     }
 
+    @Override
+    public void delete(String storageRef) {
+        try {
+            Files.deleteIfExists(resolveStorage(storageRef));
+        } catch (ServiceException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ServiceException("删除工作流产物内容失败");
+        }
+    }
+
     private Path resolveStorage(String storageRef) {
         if (storageRef == null || storageRef.isBlank()) {
             throw new ServiceException("工作流产物存储引用不能为空");

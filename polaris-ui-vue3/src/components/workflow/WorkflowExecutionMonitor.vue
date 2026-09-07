@@ -96,7 +96,9 @@
                   </span>
                 </template>
               </el-table-column>
-              <el-table-column prop="sideEffectStatus" label="副作用" width="140" />
+              <el-table-column label="写入状态" width="140">
+                <template #default="{row}">{{ nodeWriteStatusLabel(row) }}</template>
+              </el-table-column>
               <el-table-column prop="errorMessage" label="错误" min-width="220" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
@@ -145,15 +147,27 @@
             <el-empty v-if="!artifacts.length" description="当前执行没有持久化产物" />
             <el-table v-else :data="artifacts" size="small">
               <el-table-column prop="fileName" label="文件名" min-width="220" />
-              <el-table-column prop="mimeType" label="类型" min-width="150" />
+              <el-table-column label="来源" width="120">
+                <template #default="{row}">{{ artifactSourceLabel(row.sourceType) }}</template>
+              </el-table-column>
+              <el-table-column prop="mediaType" label="类型" min-width="150" />
               <el-table-column label="大小" width="110">
                 <template #default="{row}">{{ formatBytes(row.sizeBytes) }}</template>
               </el-table-column>
+              <el-table-column label="状态" width="100" align="center">
+                <template #default="{row}">
+                  <el-tag :type="artifactStatusType(row.status)" size="small" effect="plain">
+                    {{ artifactStatusLabel(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
               <el-table-column prop="createTime" label="生成时间" width="180" />
-              <el-table-column prop="expiresTime" label="到期时间" width="180" />
+              <el-table-column label="到期时间" width="180">
+                <template #default="{row}">{{ row.expiresTime || '执行结束后计算' }}</template>
+              </el-table-column>
               <el-table-column label="操作" width="100" align="center">
                 <template #default="{row}">
-                  <el-button link type="primary" icon="Download" @click="downloadArtifact(row)">
+                  <el-button link type="primary" icon="Download" :disabled="row.status !== 'AVAILABLE'" @click="downloadArtifact(row)">
                     下载
                   </el-button>
                 </template>
@@ -247,6 +261,33 @@ export default {
     this.stopEventStream()
   },
   methods: {
+    nodeWriteStatusLabel(row) {
+      if (row?.sideEffect === 'DURABLE_INTERNAL') {
+        return row.sideEffectStatus === 'COMMITTED' ? '产物已保存'
+          : row.sideEffectStatus === 'PENDING' ? '正在保存' : '未写入'
+      }
+      if (row?.sideEffect === 'WRITE') {
+        return row.sideEffectStatus === 'COMMITTED' ? '外部写入已确认'
+          : row.sideEffectStatus === 'PENDING' ? '外部写入待确认' : row.sideEffectStatus
+      }
+      return '无写入'
+    },
+    artifactSourceLabel(sourceType) {
+      return sourceType === 'APPROVAL_SNAPSHOT' ? '审批快照' : '保存产物节点'
+    },
+    artifactStatusLabel(status) {
+      return {
+        PREPARING: '生成中',
+        AVAILABLE: '可下载',
+        DELETING: '清理中',
+        DELETED: '已清理'
+      }[status] || status || '未知'
+    },
+    artifactStatusType(status) {
+      if (status === 'AVAILABLE') return 'success'
+      if (status === 'DELETED') return 'info'
+      return 'warning'
+    },
     async loadExecutions() {
       this.loading = true
       try {

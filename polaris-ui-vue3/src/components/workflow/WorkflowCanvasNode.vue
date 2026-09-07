@@ -69,6 +69,13 @@
         {{ data.agentConfigurationLabel || '未配置' }}
       </span>
     </div>
+    <div v-else-if="data.type === 'artifact'" class="agent-node-content artifact-node-content">
+      <strong>{{ data.artifactSummary || 'JSON · 工作流产物.json' }}</strong>
+      <small>{{ data.inputSummary === '对象' ? '请选择要保存的内容' : data.inputSummary }}</small>
+      <span :class="['agent-config-state', `is-${data.artifactConfigurationTone || 'info'}`]">
+        {{ data.artifactConfigurationLabel || '待配置' }}
+      </span>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
