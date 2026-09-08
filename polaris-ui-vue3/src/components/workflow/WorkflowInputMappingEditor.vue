@@ -574,7 +574,7 @@ export default {
     nodeIcon(type) {
       const icons = {
         llm: 'Cpu', agent: 'ChatDotRound', llm_classifier: 'MagicStick',
-        knowledge_rag: 'Collection', http_get: 'Connection', http_request: 'Connection',
+        knowledge_retrieval: 'Collection', http_get: 'Connection', http_request: 'Connection',
         database_query: 'Coin', condition: 'Switch', parallel: 'Share', join: 'Grid',
         loop: 'Refresh', wait: 'Timer', approval: 'User', transform: 'Operation',
         artifact: 'DataAnalysis', sub_workflow: 'Finished'
@@ -766,14 +766,14 @@ export default {
     preferredAutoTarget(source) {
       const compatible = this.declaredTargets.filter(field =>
         this.typesCompatible(source.type, field.type))
-      const preferredKeys = this.selectedNode.type === 'knowledge_rag'
+      const preferredKeys = this.selectedNode.type === 'knowledge_retrieval'
         ? ['query', 'prompt'] : ['prompt', 'query']
       return preferredKeys
         .map(key => compatible.find(field => field.key === key))
         .find(Boolean) || compatible[0] || null
     },
     cleanupLegacyAutoMappings() {
-      if (this.disabled || !['llm', 'agent', 'llm_classifier', 'knowledge_rag']
+      if (this.disabled || !['llm', 'agent', 'llm_classifier', 'knowledge_retrieval']
         .includes(this.selectedNode?.type)) return
       const mapping = this.modelValue || {}
       if (!Object.prototype.hasOwnProperty.call(mapping, 'input')) return

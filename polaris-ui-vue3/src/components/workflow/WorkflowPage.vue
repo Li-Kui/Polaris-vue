@@ -19,7 +19,6 @@
     />
     <WorkflowWorkbench
       v-else-if="pageMode === 'workbench'"
-      :key="selectedDefinition?.id || 'new'"
       :model-value="selectedDefinition"
       :descriptors="descriptors"
       :can-edit="canEdit"

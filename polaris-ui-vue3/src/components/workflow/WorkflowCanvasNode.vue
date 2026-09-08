@@ -76,6 +76,13 @@
         {{ data.artifactConfigurationLabel || '待配置' }}
       </span>
     </div>
+    <div v-else-if="data.type === 'knowledge_retrieval'" class="agent-node-content knowledge-node-content">
+      <strong>{{ data.knowledgeSourceSummary || '请选择知识库' }}</strong>
+      <small>{{ data.knowledgeSummary || '均衡 · 最多 5 条' }}</small>
+      <span :class="['agent-config-state', `is-${data.knowledgeConfigurationTone || 'info'}`]">
+        {{ data.knowledgeConfigurationLabel || '待配置' }}
+      </span>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>
@@ -176,7 +183,7 @@ export default {
         llm: 'Cpu',
         agent: 'ChatDotRound',
         llm_classifier: 'MagicStick',
-        knowledge_rag: 'Collection',
+        knowledge_retrieval: 'Collection',
         http_get: 'Connection',
         http_request: 'Connection',
         database_query: 'Coin',

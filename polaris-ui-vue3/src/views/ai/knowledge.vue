@@ -303,7 +303,7 @@ import {
   updateKnowledge
 } from "@/api/ai/knowledge";
 import {listAvailableEmbeddingModel} from "@/api/ai/model";
-import {getToken} from "@/utils/auth";
+import {getAuthHeaders} from "@/utils/auth";
 
 export default {
   name: "AiKnowledge",
@@ -355,9 +355,7 @@ export default {
       },
       // 上传配置
       uploadUrl: import.meta.env.VITE_APP_BASE_API + "/ai/knowledge/document/upload",
-      uploadHeaders: {
-        Authorization: "Bearer " + getToken()
-      },
+      uploadHeaders: getAuthHeaders(),
       // 自动刷新的定时器
       timer: null
     };
@@ -525,12 +523,15 @@ export default {
       }).catch(() => {});
     },
     // 文件上传前校验
-    beforeUpload(file) {
+    async beforeUpload(file) {
       const isLt20M = file.size / 1024 / 1024 < 20;
       if (!isLt20M) {
         this.$modal.msgError("上传文件大小不能超过 20MB!");
         return false;
       }
+      // 上传组件不经过 axios 拦截器，按当前控制台身份刷新认证头。
+      this.uploadHeaders = getAuthHeaders();
+      await this.$nextTick();
       this.$modal.loading("文件正在上传并解析中，请稍候...");
       return true;
     },

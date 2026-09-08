@@ -136,7 +136,7 @@ const definition = {
   nodes: [
     node('order_api', 'http_get', '订单 API', 160, 70, 'primary_api'),
     node('user_database', 'database_query', '用户数据库', 160, 235, 'primary_database'),
-    node('risk_knowledge', 'knowledge_rag', '风控知识库', 160, 400, 'primary_knowledge'),
+    node('risk_knowledge', 'knowledge_retrieval', '风控知识库', 160, 400, 'primary_knowledge'),
     node('merge_data', 'transform', '合并数据', 430, 205),
     node('risk_analysis', 'llm', '大模型风险分析', 685, 205, 'primary_model'),
     node('risk_classifier', 'llm_classifier', '风险等级判断', 685, 405, 'primary_model'),
@@ -244,7 +244,7 @@ function monitorEvent(sequenceNo, eventType, payload = {}) {
 
 function node(id, type, name, x, y, resourceKey) {
   const kinds = {
-    http_get: 'API_CONNECTOR', database_query: 'DATASOURCE', knowledge_rag: 'KNOWLEDGE_BASE',
+    http_get: 'API_CONNECTOR', database_query: 'DATASOURCE', knowledge_retrieval: 'KNOWLEDGE_BASE',
     llm: 'MODEL', llm_classifier: 'MODEL', agent: 'AGENT'
   }
   return {
@@ -269,7 +269,7 @@ const descriptors = [
   descriptor('llm', '大模型调用', 'ai', ['MODEL']),
   descriptor('agent', 'AI 智能体', 'ai', ['AGENT']),
   descriptor('llm_classifier', '大模型语义分类', 'ai', ['MODEL']),
-  descriptor('knowledge_rag', '知识库检索', 'ai', ['KNOWLEDGE_BASE']),
+  descriptor('knowledge_retrieval', '知识库检索', 'ai', ['KNOWLEDGE_BASE']),
   descriptor('http_get', 'HTTP GET', 'integration', ['API_CONNECTOR']),
   descriptor('http_request', 'HTTP 写请求', 'integration', ['API_CONNECTOR'], 'WRITE'),
   descriptor('database_query', '数据库只读查询', 'data', ['DATASOURCE']),

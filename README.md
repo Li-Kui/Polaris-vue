@@ -1,157 +1,320 @@
-# 🌌 北辰 (Polaris) · 智能大模型对话与数据分析管理平台
+# 🌌 北辰 (Polaris) · 企业级智能大模型管理、工作流编排与 AI 开放中台
 
 <p align="center">
-  <img src="polaris-ui/src/assets/logo/logo_full.png" alt="Polaris Logo" width="160" height="160">
+  <img src="polaris-ui-vue3/src/assets/logo/logo_full.png" alt="Polaris Logo" width="160" height="160">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Spring%20Boot-3.x%20%2F%204.x-brightgreen.svg" alt="Spring Boot">
+  <img src="https://img.shields.io/badge/Spring%20Boot-4.0.6-brightgreen.svg" alt="Spring Boot">
   <img src="https://img.shields.io/badge/LangChain4j-1.17.0-blue.svg" alt="LangChain4j">
-  <img src="https://img.shields.io/badge/Vue-2.6.12-4fc08d.svg" alt="Vue">
-  <img src="https://img.shields.io/badge/Element%20UI-2.15.14-409EFF.svg" alt="Element UI">
-  <img src="https://img.shields.io/badge/ECharts-5.4.0-red.svg" alt="ECharts">
-  <img src="https://img.shields.io/badge/JDK-17%2B-orange.svg" alt="JDK">
+  <img src="https://img.shields.io/badge/Vue-3.5.26-4fc08d.svg" alt="Vue 3">
+  <img src="https://img.shields.io/badge/Vite-6.4.1-646CFF.svg" alt="Vite">
+  <img src="https://img.shields.io/badge/Element%20Plus-2.13.1-409EFF.svg" alt="Element Plus">
+  <img src="https://img.shields.io/badge/Vue%20Flow-1.42.5-ff0072.svg" alt="Vue Flow">
+  <img src="https://img.shields.io/badge/ECharts-5.6.0-red.svg" alt="ECharts">
+  <img src="https://img.shields.io/badge/JDK-17%2B-orange.svg" alt="JDK 17+">
   <img src="https://img.shields.io/badge/License-Apache%202.0-lightgrey.svg" alt="License">
 </p>
 
 ---
 
-## 🌐 在线演示
+## 🌐 在线演示与入口
 
-- **演示地址**：[https://beichen-ai.tech](http://8.163.1.222:9000)
-- **默认账号**：`test`
-- **默认密码**：`123456`
+- **管理后台体验**：[http://beichen-ai.tech](http://8.163.1.222:9000)
+- **默认管理员账号**：`admin` / `admin123` （或 `test` / `123456`）
+- **AI 开放中台控制台**：`/platform/login`
+- **中台开发者文档中心**：`/platform/docs/` （内置交互式接口文档与多语言 SDK 示例）
 
 ---
 
 > **“为政以德，譬如北辰，居其所而众星共之。”** ——《论语·为政》
 >
-> **「北辰」**，即北极星，是夜空中指引方向的璀璨恒星。在通用人工智能（AGI）与大模型爆发的浪潮中，**北辰 (Polaris)** 致力于成为企业级 AI 落地征程中的指路明灯。它以稳固、成熟的中后台管理为基石（居其所），让各种大模型、智能体、知识库和业务数据如众星拱卫般有机结合，赋能开发者和企业快速构建更具深度、更加优雅的智能业务系统。
+> **「北辰」**，即北极星，是夜空中指引方向的璀璨恒星。在通用人工智能（AGI）与大模型爆发的浪潮中，**北辰 (Polaris)** 致力于成为企业级 AI 落地征程中的核心基础设施。它以稳固、成熟的中后台与多租户架构为基石（居其所），让各种大模型、智能体、知识库、外部系统连接器和工作流如众星拱卫般有机结合，赋能开发者和企业快速构建更具深度、更加优雅、生产就绪的智能业务系统。
 
 ---
 
 ## 🌌 项目简介
 
-**北辰 (Polaris)** 是一个全新设计的高端人工智能对话、数据分析与报告可视化管理平台。项目后端依托先进的 Java 大模型集成框架 **LangChain4j** 构建，前端集成流式渲染与动态数据可视化引擎，打破了“大模型对话”与“传统企业业务”之间的壁垒，打造真正融入日常办公与数据协作的智能化生产力工具。
+**北辰 (Polaris)** 是一个面向企业级场景深度打造的 **全栈人工智能大模型对话、通用工作流编排引擎与多租户 AI 开放中台**。
 
-平台不仅提供开箱即用的系统管理功能（用户、角色、部门、菜单、权限、日志控制等），更深度重构了大模型流式响应、知识库管理（RAG 向量检索）、思维链思考过程展示以及智能数据报告分析。
+项目后端依托先进的 Java 生态大模型集成框架 **LangChain4j** 与 **Spring Boot 4.x** 构建，前端基于 **Vue 3 + Vite 6 + Element Plus + Vue Flow** 构建现代化大屏沉浸式工作台。北辰打破了“大模型单轮对话”与“传统企业复杂业务”之间的断层，具备 **“管理后台 + 租户中台 + 开放 API”** 的三位一体全景能力：
+
+1. **企业运营底座（Admin Console）**：完备的 RBAC 权限管理、多模型路由配置、智能体工坊、知识库 RAG、敏感词与内容安全双轨风控、系统监控与代码生成。
+2. **企业 AI 开放中台（Platform Console）**：独立的租户工作台、API Key 细粒度授权、Token 级配额与计量、外部数据源（HikariCP 隔离池）及 API 连接器。
+3. **标准化开放能力（OpenAPI Engine）**：全兼容 **OpenAI 规范协议**（`/platform/v1/chat/completions`、`/platform/v1/models`），已有 LangChain、LlamaIndex、OpenAI SDK 代码仅需修改 Base URL 和 Key 即可无缝接入。
+4. **工业级工作流引擎（Universal Workflow V2）**：具有不可变版本管理、节点原子测试、单调递增租约恢复、人工审批工作流、持久化等待与子流程调用的企业级工作流调度核心。
 
 ---
 
-## 🌟 核心智能星象（特色功能）
+## 🌟 核心智能星象（八大核心特性矩阵）
 
-我们将北辰的核心 AI 能力与传统星宿命名相融合，为您呈现兼具科技感与文化底蕴的功能矩阵：
+我们将北辰的核心 AI 能力与传统星宿命名相融合，构筑兼具科技感与文化底蕴的功能矩阵：
 
 ### 1. 🌌 天枢星 (Polaris-Pivot) - 多模型热插拔路由
-* **多提供商接入**：原生兼容 **DeepSeek 官方 API**、**阿里云通义千问 (DashScope)**、**标准 OpenAI** 以及 **本地 Ollama 离线部署模型**。
-* **热插拔与细粒度隔离**：支持在后台进行多模型参数（随机温度、最大 Token、专属 System Prompt）的可视化配置，即改即生效。
-* **部门级共用/独享**：可按部门独立设置独享的模型配置，亦可设置全局共享的兜底模型，轻松满足不同业务部门对模型精度与成本的精细化考量。
+- **全主流提供商原生集成**：原生兼容 **DeepSeek**、**阿里云通义千问 (DashScope)**、**标准 OpenAI** 以及 **本地 Ollama 离线部署模型**。
+- **热插拔与细粒度隔离**：支持在后台进行多模型参数（随机温度 Temperature、最大 Token、专属 System Prompt）的可视化配置，即改即生效。
+- **部门与租户级隔离/共享**：支持按租户/部门独立配置独享的模型端点与参数，亦可设置全局共享的兜底模型，平衡业务效果与 Token 成本。
 
-### 2. 🧠 天璇星 (Polaris-Thinking) - 深度思维链思考流
-* **流式拦截渲染**：后端基于 LangChain4j 最新版接口拦截思考流（`onPartialThinking` 回调），前端利用 SSE（Server-Sent Events）实现打字机般流畅的思考过程流式推送。
-* **芯片呼吸动效**：前端特设科技感十足的 **CPU 芯片脉冲呼吸指示器**，搭配大方的折叠面板，点击可自由折叠与展开思考步骤，全面比肩主流大模型官网体验。
+### 2. 🧠 天璇星 (Polaris-Thinking) - 深度思维链思考流与极速 SSE
+- **流式思考回调拦截**：后端基于 LangChain4j 接口拦截思考流（`onPartialThinking` 回调），前端利用 SSE（Server-Sent Events）实现打字机般流畅的流式推送。
+- **芯片呼吸动效与可折叠面板**：前端配备极具科技感的 **CPU 芯片脉冲呼吸指示器**，支持对复杂思考步骤自由折叠与展开，比肩顶级大模型交互体验。
 
-### 3. 📊 天玑星 (Polaris-Analysis) - 智能分析与图表生成
-* **智能时机判定**：采用启发式权重算法，在聊天中智能识别大模型输出的“对比分析/数据报告”特征，日常闲聊、普通逻辑题清爽无打扰。
-* **ECharts 可视化对比图表**：自动解析报告中的 Markdown 数据表格，动态抽离数值（自动过滤“元/kg/%”等干扰单位），一键渲染生成精美的 **对比柱状图** 与 **趋势折线图** 并支持实时无缝切换。
-* **高质感排版设计**：重构传统的数据网格表，升级为带有 **渐变蓝色表头**、奇偶行自适应灰白交替、轻盈圆角投影的现代化报告排版。
+### 3. 📊 天玑星 (Polaris-Analysis) - 启发式智能分析与 ECharts 报告引擎
+- **智能时机判定**：采用启发式权重算法，在对话中自动识别大模型输出的“对比分析/数据报告”特征，日常闲聊清爽无扰。
+- **动态图表生成与切换**：自动解析 Markdown 数据表格，动态抽离数值（过滤干扰单位），无缝一键渲染生成 **对比柱状图** 与 **趋势折线图**。
+- **高质量研报排版与 PDF 导出**：渐变蓝表头、奇偶行自适应排版，并集成前端渲染导出引擎，支持一键将分析报告生成高清 PDF。
 
-### 4. 📎 天权星 (Polaris-Attachment) - 附件关联与免导解析
-* **附件免导升级**：后端利用 Spring 容灾自愈机制，在项目启动时自动检查并安全增量修改消息表结构，自动补齐附件字段。
-* **分字段存储设计**：上传的超长附件内容（如 Excel 几万字单元格明细）经解析后与用户提问正文实行分离存储，避免在历史记录加载时在用户对话气泡中堆积大块文字。
-* **半透明磨砂卡片**：用户蓝色对话气泡内部展现干净提问，正上方以精致的 **半透明毛玻璃高质感卡片** 展现文件信息与“*已成功关联此对话解析*”标识，并支持一键下载。
+### 4. 📎 天权星 (Polaris-Attachment) - 多模态附件解析与分层隔离
+- **全格式文档深度抽取**：集成 Apache PDFBox，支持 PDF、TXT、Markdown、Excel 等多格式文件的秒级文本抽离与分块。
+- **分字段隔离存储设计**：超长附件内容与用户提问正文分离存储，避免在历史记录渲染时造成对话气泡文字堆积与卡顿。
+- **毛玻璃高质感卡片**：用户对话气泡上方以精致的 **半透明磨砂毛玻璃卡片** 展现文件属性与解析状态，支持一键下载。
 
-### 🛡️ 5. 玉衡星 (Polaris-Base) - 坚如磐石的系统底座
-* **经典的后台系统底座**：集成了用户管理、角色管理、部门管理、菜单管理、字典管理等全套功能，具备完善的前后端权限控制和代码生成能力。
-* **开发自愈与平滑升级**：针对数据库结构调整，采用启动期校验自愈策略，无需开发手动执行复杂的 SQL 补丁，确保框架升级与更新时的顺畅过渡。
+### 5. 🛡️ 玉衡星 (Polaris-Base & Safety) - 坚如磐石的底座与双轨安全风控
+- **成熟中后台底座**：开箱即用的用户、角色、部门、岗位、菜单、字典、参数及全套操作审计。
+- **敏感词与内容安全双轨风控**：
+  - **本地极速引擎**：基于 `sensitive-word` + 拼音深度识别，自带受控种子库，拦截违规文本。
+  - **云端深度审计**：集成阿里云内容安全（Green 2022），保障多租户交互与大模型生成内容的合规合法。
+- **启动自愈策略**：数据库增量变更在启动期通过容灾自愈机制平滑补齐，无需繁琐的手工补丁。
 
-### ⚙️ 6. 开阳星 (Polaris-Mizar) - 智能体装配与深色工作台
-* **大屏双栏配置工作台**：弃用局促的弹窗，将智能体配置重塑为独立的整屏设计空间，使温度参数等滑动项横向大方伸展，解决原本文字换行与拥挤痛点。
-* **深色 Prompt 编辑器**：核心系统指令（System Prompt）输入框升级为高对比度的 **Dark-mode 程序员深色代码风格编辑器**，提供更具沉浸感的编写体验。
-* **工具装备大卡片板**：系统级扩展工具（`AiTool` 接口组件）采用双列卡片装配。用户点击直接“装备”到智能体身上，带有亮紫色呼吸发光边框与蓝色链接小图标，交互质感极强。
-* **声明式工具反射解耦**：后端首创自定义 `@AiAgentTool` 注解，新开发工具只需类头添加注解和描述即可动态加载到前端列表中，实现 Controller 控制层核心代码零改动。
+### 6. ⚙️ 开阳星 (Polaris-Mizar) - 智能体装配与深色工作台
+- **沉浸式双栏大屏工作台**：告别局促弹窗，提供完整的智能体装配空间，温度参数与高级策略横向伸展。
+- **程序员 Dark-Mode 编辑器**：系统提示词（System Prompt）输入框升级为高对比度程序员深色代码风格编辑器。
+- **声明式工具反射解耦 (`@AiAgentTool`)**：后端首创自定义 `@AiAgentTool` 注解，扩展工具只需类头标注即可自动注册至前端装备板，Controller 零改动。支持网络搜索、文档生成、图片生成、数据查询等工具。
 
-### ⛓️ 7. 摇光星 (Polaris-Alkaid) - 三栏式多智能体工作流引擎
-* **三栏式大屏编排画布**：将工作流管线（Workflows）编排器升格为独立的整屏大画布，由“左元数据配置、中极简管线画布、右属性透视抽屉”三栏黄金分割组成，页面视觉清爽开阔。
-* **H5 原生拖拽与避位动画**：中面板画布基于 H5 `draggable` 机制，允许用户随心所欲长按卡片上下调换执行顺序，伴随 Vue `v-move` 的平滑 `Cubic-bezier` 液体重新排列避位特效。
-* **发光流光能量管道线**：卡片间距拉大至 54px，管道线在垂直中继空间中完美显现，搭配淡蓝色流光粒子沿管道向下传输的无限循环动画，展现精美的“控制与数据流传输”。
-* **节点实时透视抽屉**：点击画布上聚焦的节点卡片，右侧配置区立即展示其绑定的底座大模型名称、温度滑块、绑定工具胶丸与深色 System Role Prompt，方便开发者实时审计和覆盖节点细节。
+### 7. ⛓️ 摇光星 (Polaris-Workflow) - 企业级通用工作流编排引擎 V2
+- **三栏式 Vue Flow 大屏画布**：基于 `@vue-flow/core` 与 `dagre` 自动布局，中面板支持原生拖拽、液体避位动画与流光能量管道线。
+- **版本不可变与强一致性**：引入 `schemaVersion`、`revision`、`versionNo`、`contentHash` 分层体系，执行实例与版本定义强绑定，杜绝运行时配置漂移。
+- **完整丰富的节点生态**：
+  - **AI 智能节点**：LLM 提示词节点、语义分类器 (`llm_classifier`)、智能体节点 (`agent`)、知识库检索 (`rag`)。
+  - **逻辑控制节点**：确定性条件分支 (`condition`)、并行分支 (`parallel`)、多分支汇聚 (`ALL` / `ANY` / `N_OF_M`)、循环节点 (`loop`)。
+  - **数据与外部连接**：HTTP 接口节点、只读数据库查询节点 (`datasource`)、数据结构转换节点 (`transform`)。
+  - **人机协同与高级调度**：人工审批节点 V2 (`approval`，支持单人、会签、或签、多级审批与超时处理)、持久化等待 (`wait`)、产物存储 (`artifact`)、子工作流 (`sub_workflow`，支持多层嵌套与独立试运行)。
+- **高可用执行与故障恢复机制**：
+  - **执行持久化**：后台 Worker 异步持久化运行，与 SSE 观察通道彻底解耦，支持网络重连与断点续读。
+  - **租约与防护**：单调递增 `fencingToken` 租约机制，结合数据库快照（Checkpoint）与事务 Outbox，提供节点级自动重试与状态自愈。
+
+### 8. 👑 紫微星 (Polaris-Platform) - 标准 OpenAI 规范中台与多租户开放平台
+- **标准 OpenAI 协议全兼容**：
+  - 提供标准的 `/platform/v1/chat/completions` 与 `/platform/v1/models` 接口规范。
+  - 无缝兼容官方 OpenAI Python SDK、Node.js SDK、LangChain、LlamaIndex 等外部生态调用。
+- **严格多租户数据隔离体系**：租户间模型参数、知识库向量库、API Key、外部数据源连接器、对话历史完全隔离。
+- **API Key 细粒度授权与滑动窗口限流**：支持配置调用权限 Scope、速率限制（RPM/TPM），保障业务调用安全。
+- **精确 Token 计量与配额治理**：内置 Token 级消耗统计与租户用量扣减，提供多维度消耗大屏看板与配额告警。
+- **安全的外部连接器体系**：
+  - **数据源连接器**：隔离的 HikariCP 连接池，强制执行只读 SQL 策略与主机白名单。
+  - **API 连接器**：内置 SSRF 防御、重定向限制、请求凭据动态混入与加密存储。
+- **内置 VitePress 交互式开发文档平台**：前端开箱即用集成文档工程，提供从快速入门、流式对接、错误码到多语言 SDK 的完整指南。
 
 ---
 
-## 🧭 系统架构与模块说明
+## 🧭 系统架构与模块划分
 
-项目后端采用 Maven 多模块架构，结构层次分明，易于扩展和维护：
+北辰后端采用清晰的 Maven 多模块分层架构，各子系统职责明确：
 
-| 模块名称 | 对应包路径 | 职责说明 |
-| :--- | :--- | :--- |
-| **`polaris-admin`** | `com.polaris.web` | 系统启动入口，提供 Web 接口、安全配置及全局异常处理 |
-| **`polaris-ai`** | `com.polaris.ai` | 大模型 AI 核心模块。整合 LangChain4j、大模型对接、思维链拦截及数据解析 |
-| **`polaris-system`** | `com.polaris.system` | 核心系统业务模块。包含用户、角色、部门、菜单、参数配置等逻辑 |
-| **`polaris-framework`** | `com.polaris.framework` | 框架核心配置。如 Spring Security 鉴权、数据源、限流及防重复提交等 |
-| **`polaris-common`** | `com.polaris.common` | 通用工具类、异常类、实体基类及常量定义 |
-| **`polaris-quartz`** | `com.polaris.quartz` | 定时任务调度管理模块 |
-| **`polaris-generator`** | `com.polaris.generator` | 代码生成工具模块，支持一键生成前后端 CRUD 代码 |
-| **`polaris-ui`** | *(前端工程)* | 基于 Vue 2 + Element UI 的前端工程，集成大模型对话、ECharts 报告展示等 |
+```mermaid
+flowchart TB
+    subgraph Client ["🖥️ 前端与外部接入层"]
+        WebAdmin["Vue 3 管理后台\n(polaris-ui-vue3)"]
+        TenantConsole["Vue 3 租户中台控制台\n(Platform Console)"]
+        OpenApiClients["外部第三方系统\n(OpenAI SDK / LangChain / cURL)"]
+        DocsSite["VitePress 文档中心\n(polaris-docs)"]
+    end
 
+    subgraph Entry ["🚀 网关与启动入口"]
+        AdminModule["polaris-admin\n(端口: 8081 / Web 接口 / 鉴权拦截 / 异常处理)"]
+    end
 
+    subgraph Business ["💼 业务应用与中台核心"]
+        PlatformCore["polaris-platform-core\n(租户管理 / API Key 鉴权 / Token 计量 / 连接器)"]
+        AiModule["polaris-ai\n(智能体 / 对话会话 / 知识库 / 工作流执行引擎 V2)"]
+        SystemModule["polaris-system\n(用户 / 角色 / 部门 / 菜单 / 字典 / 岗位)"]
+    end
+
+    subgraph Engine ["⚙️ 底座引擎与基础设施"]
+        AiCore["polaris-ai-core\n(LangChain4j 封装 / Qdrant 向量适配 / 敏感词风控 / PDFBox)"]
+        FrameworkModule["polaris-framework\n(Spring Security / Druid 连接池 / 限流防重)"]
+        QuartzModule["polaris-quartz\n(定时任务 / 工作流触发调度)"]
+        GenModule["polaris-generator\n(代码生成引擎)"]
+        CommonModule["polaris-common\n(通用常量 / 工具类 / 基础实体)"]
+    end
+
+    Client --> Entry
+    Entry --> Business
+    Business --> Engine
 ```
+
+### 模块职责一览表
+
+| 模块名称 | 职责说明 |
+| :--- | :--- |
+| **`polaris-admin`** | 系统启动入口，集成 Web 接口配置、Spring Security 安全拦截、Swagger/Knife4j 文档及全局异常处理 |
+| **`polaris-platform-core`** | **中台核心模块**。提供多租户隔离、API Key 授权与限流、Token 配额与计量审计、数据源与 API 连接器、兼容 OpenAI 开放接口 |
+| **`polaris-ai`** | **AI 业务应用模块**。智能体编排、模型配置、知识库管理、通用工作流引擎 V2（编译器、执行引擎、审批状态机、事件流） |
+| **`polaris-ai-core`** | **AI 底座核心层**。LangChain4j 驱动集成、Qdrant 向量库适配、本地敏感词与阿里云内容安全、PDFBox 解析 |
+| **`polaris-system`** | **系统管理模块**。包含用户、角色、部门、菜单、参数配置、字典及操作日志等基础业务 |
+| **`polaris-framework`** | **框架核心配置**。Spring Security 鉴权机制、数据源监控、分布式限流切面、XSS 与防重复提交 |
+| **`polaris-common`** | **通用工具库**。基础实体、常量、JSON/加密/反射工具类、自定义注解与全局异常类 |
+| **`polaris-quartz`** | **定时任务模块**。基于 Quartz 提供定时作业调度，支持工作流定时触发器 |
+| **`polaris-generator`** | **代码生成模块**。支持一键快速生成单表及树表的前后端 CRUD 代码 |
+| **`polaris-docs`** | **中台开发者文档**。基于 VitePress 搭建，构建后自动输出至前端工程提供在线技术文档 |
+| **`polaris-ui-vue3`** | **现代化前端工程**。基于 Vue 3 + Vite 6 + Element Plus + Vue Flow，双控制台设计，集成图表渲染与流式交互 |
+
 ---
 
-## 🛠️ 技术选型
+## 🛠️ 技术选型全景
 
 ### ☕ 后端核心技术栈
 | 技术 | 说明 | 版本 |
 | :--- | :--- | :--- |
-| **Spring Boot** | 容器及核心基础设施 | 4.x / 2.x 兼容 |
-| **LangChain4j** | 大语言模型集成开发框架 | 1.17.0 |
-| **Spring Security** | 系统权限与会话安全控制 | 适配版 |
-| **MyBatis / Druid** | 数据库连接与 ORM 持久层 | 4.0.1 / 1.2.28 |
-| **Apache PDFBox** | PDF 文档解析与文本抽离 | 2.0.31 |
+| **Java** | 运行环境开发语言 | 17+ |
+| **Spring Boot** | 核心开发框架与容器底座 | 4.0.6 (Spring 6 + Jakarta EE) |
+| **LangChain4j** | 大语言模型生态与链路框架 | 1.17.0 |
+| **Qdrant Client** | 高性能向量数据库适配 | 1.17.0 |
+| **Spring Security** | 系统权限认证与 API Key 鉴权 | 适配版 |
+| **MyBatis / Druid** | 数据持久层与数据库连接池 | 4.0.1 / 1.2.28 |
+| **HikariCP** | 外部工作流数据源隔离连接池 | Spring Boot 内置 |
+| **Quartz** | 分布式定时任务调度 | 2.3.2 |
+| **Sensitive-Word** | 本地高性能敏感词与拼音匹配过滤 | 0.29.5 / 0.4.0 |
+| **Aliyun Green** | 阿里云内容安全审计开放接口 | 3.3.3 |
+| **Apache PDFBox** | PDF 文档结构解析与文本抽离 | 2.0.31 |
+| **Fastjson2** | 现代化 JSON 解析引擎 | 2.0.62 |
 
 ### 🎨 前端核心技术栈
 | 技术 | 说明 | 版本 |
 | :--- | :--- | :--- |
-| **Vue.js** | 前端渐进式框架 | 2.6.12 |
-| **Element UI** | 桌面端组件库 | 2.15.14 |
-| **Apache ECharts** | 数据可视化图表库 | 5.4.0 |
-| **SSE / Web 通信** | SSE (Server-Sent Events) 流式推送 | 原生支持 |
-| **Markdown Parser** | 高性能 HTML/Markdown 解析渲染引擎 | 自研/集成 |
+| **Vue.js** | 渐进式前端框架 | 3.5.26 |
+| **Vite** | 极速前端构建工具 | 6.4.1 |
+| **Element Plus** | 现代桌面端 UI 组件库 | 2.13.1 |
+| **Pinia** | 新一代 Vue 状态管理库 | 3.0.4 |
+| **Vue Router** | 官方路由管理库 | 4.6.4 |
+| **@vue-flow/core** | 专业级节点与工作流可视化画布 | 1.42.5 |
+| **Dagre** | 复杂有向图自动排版算法引擎 | 0.8.5 |
+| **Apache ECharts** | 数据可视化图表库 | 5.6.0 |
+| **VitePress** | 极简现代化静态文档站点生成器 | 1.6.4 |
+| **html2pdf.js** | 浏览器端研报渲染与 PDF 导出 | 0.14.0 |
+| **Sass** | CSS 预处理器 | 1.97.2 (Embedded) |
 
 ---
 
 ## ⚙️ 快速启动指南
 
-### 1. 数据库准备
-1. 运行根目录下 `sql/` 目录中的 SQL 脚本（以初始化基础表结构与 AI 相关数据表）。
-2. 后端服务启动时，会自动对数据库中的 AI 消息表（如 `ai_message`）进行增量字段校验（如缺少 `file_url`, `file_name`, `file_content` 字段将自动 ALTER 补齐），无需手动干预。
+### 1. 环境准备
+在开始运行项目前，请确保您的本地开发环境满足以下要求：
+- **JDK**：17 或更高版本
+- **Maven**：3.8+
+- **Node.js**：18.x 或 20.x（建议配合 npm 9+ 或 pnpm）
+- **MySQL**：8.0+
+- **Redis**：6.x 或更高版本（可选，支持会话缓存与限流）
 
-### 2. 启动后端服务
-请确保本地已配置好 JDK 17 和 Maven 环境，并已在 `application-druid.yml` 中配置好数据库连接。
+### 2. 数据库初始化
+在 MySQL 中创建数据库（推荐 utf8mb4 字符集），并依次执行项目根目录下 `sql/` 目录中的脚本：
 
 ```bash
-# 1. 编译并验证 AI 模块
-mvn clean compile -pl polaris-ai
+# 1. 初始化底座系统表结构与数据（用户/菜单/角色等）
+mysql -u root -p polaris < sql/ry_20260417.sql
 
-# 2. 启动 polaris-admin 主程序 (运行主启动类，位于 polaris-admin 模块下)
-# 默认服务端口为 8080
+# 2. 初始化 AI 大模型、智能体与知识库表
+mysql -u root -p polaris < sql/ry_ai.sql
+
+# 3. 初始化 AI 中台、租户、连接器与 API Key 表
+mysql -u root -p polaris < sql/ry_platform.sql
+
+# 4. 初始化企业通用工作流引擎 V2 相关表
+mysql -u root -p polaris < sql/ai_workflow.sql
+
+# 5. 初始化 Quartz 定时任务调度表
+mysql -u root -p polaris < sql/quartz.sql
 ```
 
-### 3. 启动前端服务
-```bash
-# 1. 进入前端模块目录
-cd polaris-ui
+> [!NOTE]
+> 系统在启动时具备自愈机制，会自动对消息历史等相关表结构进行兼容性增量检查，确保无缝升级。
 
-# 2. 安装依赖项
+### 3. 启动后端服务
+1. 打开 `polaris-admin/src/main/resources/application-druid.yml`，修改您的 MySQL 数据库连接用户名与密码。
+2. 在项目根目录执行 Maven 编译并启动主工程：
+
+```bash
+# 根目录下安装与打包依赖
+mvn clean install -DskipTests
+
+# 启动 polaris-admin 服务（端口默认为 8081）
+cd polaris-admin
+mvn spring-boot:run
+```
+
+或直接在 IDEA / Eclipse 中运行 `com.polaris.PolarisApplication` 主启动类。
+
+### 4. 启动前端服务
+前端工程集成了 VitePress 开发文档自动化构建流程：
+
+```bash
+# 进入前端工程目录
+cd polaris-ui-vue3
+
+# 安装依赖
 npm install
 
-# 3. 运行本地开发服务
+# 启动本地开发服务（会自动构建最新平台文档并启动 Vite）
 npm run dev
 ```
-打开浏览器访问本地端口，使用系统管理员账户登录后台，点击左侧 **“AI对话”**，在 **“模型管理”** 配置好您的 API 密钥及提供商端点后，即可开启全功能智能体验！
+
+启动完成后，控制台将输出前端访问地址（默认：`http://localhost:80`）。
+
+---
+
+## 🔑 访问入口与使用说明
+
+| 入口类型 | 访问路径 | 默认凭据 | 功能说明 |
+| :--- | :--- | :--- | :--- |
+| **管理运营后台** | `http://localhost/` | `admin` / `admin123` | 系统管理、全局模型配置、全局智能体、全流程工作流调度管理、安全风控日志 |
+| **AI 开放中台** | `http://localhost/platform/login` | 租户管理员账号 | 租户控制台仪表盘、专属 API Key 管理、外部数据源连接池、租户工作流、Token 用量分析 |
+| **中台开发者文档** | `http://localhost/platform/docs/` | 免登录直接访问 | 在线 API 参考、SDK 接入示例（Python/JS/Java/cURL）、SSE 流式调试说明 |
+
+---
+
+## 🚀 开放接口接入示例 (OpenAI 协议兼容)
+
+北辰开放平台原生兼容 OpenAI 接口规范，开发者现有的程序无需修改代码架构，仅需替换请求端点与密钥：
+
+### Python 接入 (OpenAI SDK)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="sk-polaris-xxxxxxxxxxxxxxxx", # 在中台“API 密钥管理”创建的 Key
+    base_url="http://localhost:8081/platform/v1" # 北辰开放平台端点
+)
+
+response = client.chat.completions.create(
+    model="deepseek-chat",
+    messages=[
+        {"role": "system", "content": "你是由北辰AI赋能的企业级助手。"},
+        {"role": "user", "content": "请简要分析当下工业大模型的演进趋势。"}
+    ],
+    stream=True
+)
+
+for chunk in response:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+### cURL 命令行流式调用
+
+```bash
+curl -X POST http://localhost:8081/platform/v1/chat/completions \
+  -H "Authorization: Bearer sk-polaris-xxxxxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-chat",
+    "messages": [{"role": "user", "content": "你好，请自我介绍"}],
+    "stream": true
+  }'
+```
 
 ---
 
 ## 📜 开源协议
 
-本项目遵循 [Apache 2.0 开源协议](LICENSE)。允许商业使用、修改与分发，但请保留原作者的版权声明。
+本项目遵循 [Apache 2.0 开源协议](LICENSE)。允许自由用于商业及个人开发，二次开发及分发请保留原作者及版权声明。

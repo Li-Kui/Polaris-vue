@@ -14,6 +14,9 @@
         </div>
       </div>
       <div class="header-actions">
+        <el-button class="node-palette-toggle" @click="paletteOpen = !paletteOpen">
+          <el-icon><Plus /></el-icon><span>添加节点</span>
+        </el-button>
         <el-button-group v-if="canEdit">
           <el-button :disabled="!canUndo" title="撤销" aria-label="撤销" @click="undo"><el-icon><RefreshLeft /></el-icon></el-button>
           <el-button :disabled="!canRedo" title="重做" aria-label="重做" @click="redo"><el-icon><RefreshRight /></el-icon></el-button>
@@ -43,8 +46,13 @@
     </header>
 
     <div :class="['workbench-body', {'workbench-body--dock-open': !inspectorCollapsed}]">
-      <aside class="node-palette">
-        <div class="palette-heading"><strong>节点库</strong><small>{{ filteredDescriptors.length }} 个节点</small></div>
+      <aside :class="['node-palette', {'is-mobile-open': paletteOpen}]">
+        <div class="palette-heading">
+          <strong>节点库</strong><small>{{ filteredDescriptors.length }} 个节点</small>
+          <el-button class="node-palette-close" text circle aria-label="关闭节点库" @click="paletteOpen = false">
+            <el-icon><Close /></el-icon>
+          </el-button>
+        </div>
         <el-input v-model="descriptorKeyword" placeholder="搜索节点名称或类型" clearable size="small" prefix-icon="Search" />
         <div class="palette-tabs">
           <button
@@ -245,6 +253,34 @@
               <span>3</span><strong>预览测试</strong>
             </button>
           </nav>
+          <nav
+            v-if="isKnowledgeNode"
+            class="integration-stepper integration-stepper--three"
+            aria-label="知识库检索节点配置步骤"
+          >
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'resource', completed: selectedKnowledgeResources.length > 0}"
+              :aria-current="selectedInspectorTab === 'resource' ? 'step' : undefined"
+              @click="selectedInspectorTab = 'resource'">
+              <span>1</span><strong>选择知识库</strong>
+            </button>
+            <i></i>
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'config', completed: knowledgeConfiguration.code === 'READY'}"
+              :aria-current="selectedInspectorTab === 'config' ? 'step' : undefined"
+              :disabled="!selectedKnowledgeResources.length"
+              @click="selectedInspectorTab = 'config'">
+              <span>2</span><strong>设置检索</strong>
+            </button>
+            <i></i>
+            <button type="button"
+              :class="{active: selectedInspectorTab === 'mapping', completed: knowledgeConfiguration.code === 'READY'}"
+              :aria-current="selectedInspectorTab === 'mapping' ? 'step' : undefined"
+              :disabled="!selectedKnowledgeResources.length"
+              @click="selectedInspectorTab = 'mapping'">
+              <span>3</span><strong>输入与试查</strong>
+            </button>
+          </nav>
           <div v-if="isGuidedIntegrationNode && selectedInspectorTab !== 'resource'" class="api-config-tabs">
             <button type="button" :class="{active: selectedInspectorTab === 'config'}" @click="selectedInspectorTab = 'config'">
               {{ isApiNode ? '请求参数' : '查询设置' }}
@@ -253,7 +289,7 @@
             <button type="button" :class="{active: selectedInspectorTab === 'policy'}" @click="selectedInspectorTab = 'policy'">运行策略</button>
           </div>
           <el-tabs v-model="selectedInspectorTab" :class="['inspector-tabs', {'inspector-tabs--guided': isGuidedInspectorNode}]">
-            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : isAgentNode ? '2 配置任务' : isArtifactNode ? '2 文件设置' : '配置'" name="config">
+            <el-tab-pane :label="isApiNode ? '2 配置请求' : isDatabaseNode ? '2 编写查询' : isAgentNode ? '2 配置任务' : isArtifactNode ? '2 文件设置' : isKnowledgeNode ? '2 设置检索' : '配置'" name="config">
               <el-form label-position="top" size="small">
                 <el-form-item label="节点名称"><el-input v-model="selectedNode.name" :disabled="!canEdit" @input="nodeChanged" /></el-form-item>
                 <WorkflowArtifactEditor
@@ -271,6 +307,17 @@
                   :disabled="!canEdit"
                   @update:config="agentConfigChanged"
                   @select-agent="selectedInspectorTab = 'resource'"
+                  @configure-input="selectedInspectorTab = 'mapping'"
+                />
+                <WorkflowKnowledgeRetrievalEditor
+                  v-else-if="isKnowledgeNode"
+                  :config="selectedNode.config"
+                  :resources="selectedKnowledgeResources"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :query-issue="knowledgeQueryIssue"
+                  :disabled="!canEdit"
+                  @update:config="knowledgeConfigChanged"
+                  @select-sources="selectedInspectorTab = 'resource'"
                   @configure-input="selectedInspectorTab = 'mapping'"
                 />
                 <WorkflowSemanticClassifierEditor
@@ -422,7 +469,7 @@
                 </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane v-if="!isSubWorkflowNode && !isArtifactNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : '资源'" name="resource">
+            <el-tab-pane v-if="!isSubWorkflowNode && !isArtifactNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : isKnowledgeNode ? '1 选择知识库' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -466,6 +513,15 @@
                 :can-edit="canEdit"
                 :error="catalogError"
                 @select="selectAgentResource"
+              />
+              <WorkflowKnowledgeSourcePicker
+                v-else-if="isKnowledgeNode"
+                :resources="resourceCatalog.KNOWLEDGE_BASE || []"
+                :selected-resource-ids="selectedKnowledgeResourceIds"
+                :loading="resourceLoading"
+                :can-edit="canEdit"
+                :error="catalogError"
+                @change="selectKnowledgeResources"
               />
               <template v-else>
                 <div v-if="!selectedNode.resourceRefs.length" class="empty-resource">该节点不需要外部资源</div>
@@ -559,7 +615,7 @@
                 <el-button v-if="canEdit" class="resource-add" plain @click="addResourceReference"><el-icon><Plus /></el-icon><span>添加扩展资源</span></el-button>
               </template>
             </el-tab-pane>
-            <el-tab-pane :label="isAgentNode ? '3 输入与测试' : isArtifactNode ? '1 保存内容' : '输入输出'" name="mapping">
+            <el-tab-pane :label="isAgentNode ? '3 输入与测试' : isArtifactNode ? '1 保存内容' : isKnowledgeNode ? '3 输入与试查' : '输入输出'" name="mapping">
               <el-alert
                 v-if="isAgentNode"
                 :title="agentConfiguration.issues[0] || '选择上游数据后，可使用底部按钮试运行当前智能体节点。'"
@@ -572,6 +628,14 @@
                 v-else-if="isArtifactNode"
                 :title="artifactConfiguration.issues[0] || '已选择要保存的内容，下一步设置文件名和格式。'"
                 :type="artifactConfiguration.issues.length ? 'warning' : 'success'"
+                :closable="false"
+                show-icon
+                class="agent-mapping-alert"
+              />
+              <el-alert
+                v-else-if="isKnowledgeNode"
+                :title="knowledgeConfiguration.issues[0] || '查询内容已设置，可使用底部按钮验证实际检索效果。'"
+                :type="knowledgeConfiguration.issues.length ? 'warning' : 'success'"
                 :closable="false"
                 show-icon
                 class="agent-mapping-alert"
@@ -1045,7 +1109,7 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : nodeTestIsArtifact && nodeTestMode === 'NODE' ? '要保存的内容' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : nodeTestIsArtifact && nodeTestMode === 'NODE' ? '要保存的内容' : nodeTestIsKnowledge && nodeTestMode === 'NODE' ? '要查找什么' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
           <el-input
             v-if="nodeTestIsClassifier && nodeTestMode === 'NODE'"
             v-model="classifierTestContent"
@@ -1072,6 +1136,15 @@
             maxlength="200000"
             show-word-limit
             placeholder="输入文本，或粘贴一段 JSON 数据"
+          />
+          <el-input
+            v-else-if="nodeTestIsKnowledge && nodeTestMode === 'NODE'"
+            v-model="knowledgeTestContent"
+            type="textarea"
+            :rows="6"
+            maxlength="4000"
+            show-word-limit
+            placeholder="例如：退款申请需要满足哪些条件？"
           />
           <el-input v-else v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
@@ -1120,7 +1193,7 @@
         </div>
         <div
           v-if="nodeTestResult.status === 'SUCCEEDED'
-            && !((nodeTestIsAgent || nodeTestIsArtifact) && nodeTestMode === 'NODE')"
+            && !((nodeTestIsAgent || nodeTestIsArtifact || nodeTestIsKnowledge) && nodeTestMode === 'NODE')"
           class="node-test-schema-action"
         >
           <div>
@@ -1170,6 +1243,13 @@
             </small>
           </div>
           <details>
+            <summary>查看原始数据</summary>
+            <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
+          </details>
+        </section>
+        <section v-else-if="nodeTestIsKnowledge && nodeTestMode === 'NODE' && nodeTestResult.status === 'SUCCEEDED'">
+          <WorkflowKnowledgeTestResult :output="nodeTestResult.output" />
+          <details class="knowledge-test-raw">
             <summary>查看原始数据</summary>
             <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
           </details>
@@ -1260,6 +1340,9 @@ import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
 import WorkflowAgentEditor from './WorkflowAgentEditor.vue'
 import WorkflowAgentPicker from './WorkflowAgentPicker.vue'
 import WorkflowArtifactEditor from './WorkflowArtifactEditor.vue'
+import WorkflowKnowledgeRetrievalEditor from './WorkflowKnowledgeRetrievalEditor.vue'
+import WorkflowKnowledgeSourcePicker from './WorkflowKnowledgeSourcePicker.vue'
+import WorkflowKnowledgeTestResult from './WorkflowKnowledgeTestResult.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
@@ -1287,6 +1370,12 @@ import {
   normalizeAgentConfig
 } from './workflowAgent'
 import {ARTIFACT_DEFAULT_CONFIG, artifactConfigurationState, artifactSummary} from './workflowArtifact'
+import {
+  KNOWLEDGE_RETRIEVAL_DEFAULT_CONFIG,
+  knowledgeRetrievalConfigurationState,
+  knowledgeRetrievalSummary,
+  normalizeKnowledgeRetrievalConfig
+} from './workflowKnowledgeRetrieval'
 import {createOptimizedNodesExample} from './workflowExamples'
 
 export default {
@@ -1304,6 +1393,9 @@ export default {
     WorkflowAgentEditor,
     WorkflowAgentPicker,
     WorkflowArtifactEditor,
+    WorkflowKnowledgeRetrievalEditor,
+    WorkflowKnowledgeSourcePicker,
+    WorkflowKnowledgeTestResult,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
     WorkflowDisclosureCard,
@@ -1457,6 +1549,7 @@ export default {
       classifierTestContent: '',
       agentTestContent: '',
       artifactTestContent: '',
+      knowledgeTestContent: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
       nodeTestGeneratingSchema: false,
@@ -1465,6 +1558,7 @@ export default {
       nodeTestInferredSchema: null,
       nodeTestAutoPersistSchema: false,
       nodeDragOrigin: null,
+      paletteOpen: false,
       debugExecution: null,
       debugNodeRuns: [],
       executionPollTimer: null,
@@ -1504,11 +1598,14 @@ export default {
     isArtifactNode() {
       return this.selectedNode?.type === 'artifact'
     },
+    isKnowledgeNode() {
+      return this.selectedNode?.type === 'knowledge_retrieval'
+    },
     isGuidedIntegrationNode() {
       return this.isApiNode || this.isDatabaseNode
     },
     isGuidedInspectorNode() {
-      return this.isGuidedIntegrationNode || this.isAgentNode || this.isArtifactNode
+      return this.isGuidedIntegrationNode || this.isAgentNode || this.isArtifactNode || this.isKnowledgeNode
     },
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
@@ -1637,6 +1734,9 @@ export default {
     nodeTestIsArtifact() {
       return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'artifact'
     },
+    nodeTestIsKnowledge() {
+      return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'knowledge_retrieval'
+    },
     nodeTestAgentOutput() {
       return agentTestResultView(this.nodeTestResult?.output)
     },
@@ -1679,6 +1779,29 @@ export default {
     },
     selectedAgentResource() {
       return this.agentReference ? this.selectedResource(this.agentReference) : null
+    },
+    knowledgeReferences() {
+      return this.isKnowledgeNode
+        ? (this.selectedNode?.resourceRefs || []).filter(reference => reference.kind === 'KNOWLEDGE_BASE')
+        : []
+    },
+    selectedKnowledgeResources() {
+      return this.knowledgeReferences.map(reference => this.selectedResource(reference)).filter(Boolean)
+    },
+    selectedKnowledgeResourceIds() {
+      return this.knowledgeReferences.map(reference => this.selectedResourceId(reference)).filter(Boolean)
+    },
+    knowledgeConfiguration() {
+      if (!this.isKnowledgeNode) return {code: '', label: '', tone: 'info', issues: []}
+      return knowledgeRetrievalConfigurationState({
+        resources: this.selectedKnowledgeResources,
+        config: this.selectedNode?.config,
+        inputMapping: this.selectedNode?.inputMapping,
+        queryIssue: this.knowledgeQueryIssue
+      })
+    },
+    knowledgeQueryIssue() {
+      return this.isKnowledgeNode ? this.knowledgeQueryMappingIssue(this.selectedNode) : ''
     },
     agentTestSucceeded() {
       return this.isAgentNode
@@ -1725,6 +1848,9 @@ export default {
       }
       if (this.isArtifactNode && this.artifactConfiguration.code !== 'READY') {
         return {available: false, reason: this.artifactConfiguration.issues[0] || '请先完成产物配置'}
+      }
+      if (this.isKnowledgeNode && this.knowledgeConfiguration.code !== 'READY') {
+        return {available: false, reason: this.knowledgeConfiguration.issues[0] || '请先完成知识库检索配置'}
       }
       if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
       if (this.selectedDescriptor.sideEffect === 'WRITE') {
@@ -2250,7 +2376,7 @@ export default {
     nodeIcon(type) {
       const icons = {
         llm: 'Cpu', agent: 'ChatDotRound', llm_classifier: 'MagicStick',
-        knowledge_rag: 'Collection', http_get: 'Connection', http_request: 'Connection',
+        knowledge_retrieval: 'Collection', http_get: 'Connection', http_request: 'Connection',
         database_query: 'Coin', condition: 'Switch', parallel: 'Share', join: 'Grid',
         loop: 'Refresh', wait: 'Timer', approval: 'User', transform: 'Operation',
         artifact: 'DataAnalysis', sub_workflow: 'Finished'
@@ -2265,7 +2391,7 @@ export default {
         llm: '调用现有大模型理解与生成',
         agent: '运行已配置的 AI 智能体',
         llm_classifier: '基于语义进行稳定分支',
-        knowledge_rag: '检索现有知识库内容',
+        knowledge_retrieval: '从一个或多个知识库查找相关资料',
         http_get: '调用现有 API 连接器',
         http_request: '执行受控外部写请求',
         database_query: '查询现有只读数据源',
@@ -2369,6 +2495,7 @@ export default {
       }
       this.normalizeHttpNodeConfigs()
       this.normalizeAgentNodeConfigs()
+      this.normalizeKnowledgeNodeConfigs()
       this.normalizeClassifierNodeConfigs()
       this.normalizeLoopNodeConfigs()
       this.normalizeInferredOutputSchemas()
@@ -2459,7 +2586,7 @@ export default {
         category: descriptor?.category || 'general',
         inputSummary: Object.keys(node.inputMapping || {}).length
           ? `${Object.keys(node.inputMapping).length} 个映射` : '对象',
-        outputSummary: node.type === 'knowledge_rag' ? '知识片段'
+        outputSummary: node.type === 'knowledge_retrieval' ? '资料与引用'
           : node.type === 'artifact' ? '产物信息' : '结果对象',
         resourceName: resource?.name || '',
         agentTaskSummary: node.type === 'agent' ? agentTaskSummary(node.config) : '',
@@ -2468,6 +2595,32 @@ export default {
         artifactSummary: node.type === 'artifact' ? artifactSummary(node.config) : '',
         artifactConfigurationLabel: artifactState?.label || '',
         artifactConfigurationTone: artifactState?.tone || 'info',
+        knowledgeSummary: node.type === 'knowledge_retrieval' ? knowledgeRetrievalSummary(node.config) : '',
+        knowledgeSourceSummary: node.type === 'knowledge_retrieval'
+          ? (() => {
+              const count = (node.resourceRefs || []).filter(reference =>
+                reference.kind === 'KNOWLEDGE_BASE' && this.selectedResourceId(reference)).length
+              return count ? `${count} 个知识库` : '请选择知识库'
+            })()
+          : '',
+        knowledgeConfigurationLabel: node.type === 'knowledge_retrieval'
+          ? knowledgeRetrievalConfigurationState({
+              resources: (node.resourceRefs || []).filter(reference => reference.kind === 'KNOWLEDGE_BASE')
+                .map(reference => this.selectedResource(reference)).filter(Boolean),
+              config: node.config,
+              inputMapping: node.inputMapping,
+              queryIssue: this.knowledgeQueryMappingIssue(node)
+            }).label
+          : '',
+        knowledgeConfigurationTone: node.type === 'knowledge_retrieval'
+          ? knowledgeRetrievalConfigurationState({
+              resources: (node.resourceRefs || []).filter(reference => reference.kind === 'KNOWLEDGE_BASE')
+                .map(reference => this.selectedResource(reference)).filter(Boolean),
+              config: node.config,
+              inputMapping: node.inputMapping,
+              queryIssue: this.knowledgeQueryMappingIssue(node)
+            }).tone
+          : 'info',
         status: this.latestNodeStatus(node.id),
         testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
@@ -2645,6 +2798,7 @@ export default {
       this.selectedInspectorTab = descriptor.type === 'artifact'
         ? 'mapping' : resourceReferences.length ? 'resource' : 'config'
       this.inspectorCollapsed = false
+      this.paletteOpen = false
       this.markDirty()
       this.refreshCanvasLayout()
     },
@@ -2653,6 +2807,7 @@ export default {
       if (type === 'http_request') return {method: 'POST', path: ''}
       if (type === 'agent') return {task: '', maxWaitSeconds: 300}
       if (type === 'artifact') return {...ARTIFACT_DEFAULT_CONFIG}
+      if (type === 'knowledge_retrieval') return {...KNOWLEDGE_RETRIEVAL_DEFAULT_CONFIG}
       if (type === 'transform') {
         return {
           version: 1,
@@ -2794,9 +2949,12 @@ export default {
       const agentReference = this.selectedNode?.type === 'agent'
         ? this.selectedNode.resourceRefs.find(reference => reference.kind === 'AGENT')
         : null
+      const hasKnowledgeSource = this.selectedNode?.type === 'knowledge_retrieval'
+        && this.selectedNode.resourceRefs.some(reference =>
+          reference.kind === 'KNOWLEDGE_BASE' && this.selectedResourceId(reference))
       this.selectedInspectorTab = this.selectedNode?.type === 'artifact'
         ? 'mapping'
-        : agentReference && this.selectedResourceId(agentReference)
+        : (agentReference && this.selectedResourceId(agentReference)) || hasKnowledgeSource
         ? 'config'
         : this.selectedNode?.resourceRefs?.length ? 'resource' : 'config'
       this.configError = ''
@@ -2899,6 +3057,10 @@ export default {
       this.schemaConfigChanged(normalizeAgentConfig(value))
       const canvasNode = this.canvasNodes.find(item => item.id === this.selectedNode.id)
       if (canvasNode) canvasNode.data = this.canvasNodeData(this.selectedNode)
+    },
+    knowledgeConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'knowledge_retrieval') return
+      this.schemaConfigChanged(normalizeKnowledgeRetrievalConfig(value))
     },
     classifierConfigChanged(value) {
       if (!this.selectedNode || this.selectedNode.type !== 'llm_classifier') return
@@ -3057,6 +3219,14 @@ export default {
         const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
           ? node.config : {}
         node.config = normalizeAgentConfig(current)
+      })
+    },
+    normalizeKnowledgeNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'knowledge_retrieval') return
+        const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
+          ? node.config : {}
+        node.config = normalizeKnowledgeRetrievalConfig(current)
       })
     },
     normalizeClassifierNodeConfigs() {
@@ -3448,7 +3618,7 @@ export default {
       const keys = {
         MODEL: 'primary_model',
         AGENT: 'primary_agent',
-        KNOWLEDGE_BASE: 'primary_knowledge',
+        KNOWLEDGE_BASE: `knowledge.${nodeId}.1`,
         API_CONNECTOR: `api.${nodeId}`,
         DATASOURCE: `db.${nodeId}`
       }
@@ -3463,7 +3633,7 @@ export default {
       const defaults = {
         llm: {kind: 'MODEL', key: 'primary_model', required: true},
         agent: {kind: 'AGENT', key: 'primary_agent', required: true},
-        knowledge_rag: {kind: 'KNOWLEDGE_BASE', key: 'primary_knowledge', required: true},
+        knowledge_retrieval: {kind: 'KNOWLEDGE_BASE', key: `knowledge.${nodeId}.1`, required: true},
         http_get: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
         http_request: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
         database_query: {kind: 'DATASOURCE', key: `db.${nodeId}`, required: true}
@@ -3683,6 +3853,59 @@ export default {
       const selected = await this.bindResource(this.agentReference, resourceId)
       if (selected) this.selectedInspectorTab = 'config'
     },
+    async selectKnowledgeResources(resourceIds) {
+      if (!this.isKnowledgeNode || !this.canEdit) return
+      const selectedIds = [...new Set((resourceIds || []).filter(Boolean))]
+      const node = this.selectedNode
+      const oldReferences = (node.resourceRefs || []).filter(reference => reference.kind === 'KNOWLEDGE_BASE')
+      const referencesByResourceId = new Map(oldReferences
+        .map(reference => [this.selectedResourceId(reference), reference])
+        .filter(([resourceId]) => resourceId))
+      const usedReferences = new Set()
+      const nextReferences = selectedIds.map((resourceId, index) => {
+        const existing = referencesByResourceId.get(resourceId)
+        if (existing) {
+          usedReferences.add(existing)
+          return existing
+        }
+        const reusable = oldReferences.find(reference => !usedReferences.has(reference)
+          && !selectedIds.includes(this.selectedResourceId(reference)))
+        if (reusable) {
+          usedReferences.add(reusable)
+          return reusable
+        }
+        return {kind: 'KNOWLEDGE_BASE', key: `knowledge.${node.id}.${index + 1}`, required: true}
+      })
+      const usedKeys = new Set()
+      nextReferences.forEach((reference, index) => {
+        reference.kind = 'KNOWLEDGE_BASE'
+        let key = reference.key || `knowledge.${node.id}.${index + 1}`
+        let sequence = index + 1
+        while (usedKeys.has(key)) key = `knowledge.${node.id}.${++sequence}`
+        reference.key = key
+        reference.required = true
+        usedKeys.add(key)
+      })
+      const removed = oldReferences.filter(reference => !nextReferences.includes(reference))
+      this.pendingResourceBindings = this.pendingResourceBindings.filter(binding =>
+        !removed.some(reference => binding.nodeId === node.id
+          && binding.resourceKind === reference.kind
+          && binding.resourceKey === reference.key))
+      node.resourceRefs = [
+        ...(node.resourceRefs || []).filter(reference => reference.kind !== 'KNOWLEDGE_BASE'),
+        ...nextReferences
+      ]
+      for (let index = 0; index < selectedIds.length; index++) {
+        const reference = nextReferences[index]
+        if (this.selectedResourceId(reference) !== selectedIds[index]) {
+          await this.bindResource(reference, selectedIds[index])
+        }
+      }
+      this.invalidateSelectedInferredSchema()
+      this.refreshCanvasNodeData()
+      this.markDirty()
+      if (selectedIds.length) this.selectedInspectorTab = 'config'
+    },
     async createAndSelectDatasource(resourceId) {
       await this.refreshResourceContext()
       await this.selectDatasource(resourceId)
@@ -3827,6 +4050,7 @@ export default {
       this.agentTestContent = ''
       this.artifactTestContent = this.isArtifactNode
         ? '这是一段用于预览的示例内容' : ''
+      this.knowledgeTestContent = ''
       this.nodeTestDialogOpen = true
     },
     async fetchNodeFields() {
@@ -3863,6 +4087,12 @@ export default {
           }
         }
         input = {content}
+      } else if (this.nodeTestIsKnowledge && this.nodeTestMode === 'NODE') {
+        if (!this.knowledgeTestContent.trim()) {
+          this.$message.warning('请输入要查找的内容')
+          return
+        }
+        input = {query: this.knowledgeTestContent.trim()}
       } else {
         try {
           input = JSON.parse(this.nodeTestInputJson)
@@ -4437,6 +4667,23 @@ export default {
       const flow = this.$refs.workflowCanvas
       if (delta > 0) flow?.zoomIn?.({duration: 160})
       else flow?.zoomOut?.({duration: 160})
+    },
+    knowledgeQueryMappingIssue(node) {
+      const binding = node?.inputMapping?.query
+      if (!binding) return ''
+      if (Object.prototype.hasOwnProperty.call(binding, 'value')) {
+        return typeof binding.value === 'string' && binding.value.trim()
+          ? '' : '检索内容必须是非空文本'
+      }
+      const expression = String(binding.expression || '').trim()
+      if (!expression) return '检索内容尚未配置数据来源'
+      if (/^\$\.(env|execution|loop|approval)(\.|$)/.test(expression)) return ''
+      const source = this.buildClassifierSourceGroups(node.id)
+        .flatMap(group => group.options || [])
+        .find(item => item.expression === expression)
+      if (!source) return '查询来源字段已失效，请重新选择流程输入或上游字段'
+      return ['string', 'any'].includes(source.type)
+        ? '' : `查询来源必须是文本，当前为${source.typeLabel || source.type}`
     },
     buildClassifierSourceGroups(nodeId) {
       const upstreamIds = new Set()
@@ -5337,6 +5584,11 @@ export default {
 .node-palette {
   width: 256px;
   box-sizing: border-box;
+}
+
+.node-palette-toggle,
+.node-palette-close {
+  display: none;
 }
 
 .workspace-stage {
@@ -7182,7 +7434,28 @@ export default {
 
 @media (max-width: 1080px) {
   .node-palette {
+    position: absolute;
+    z-index: 20;
+    inset: 0 auto 0 0;
     display: none;
+    box-shadow: 12px 0 30px rgb(30 35 70 / 16%);
+  }
+
+  .node-palette.is-mobile-open {
+    display: block;
+  }
+
+  .node-palette-toggle,
+  .node-palette-close {
+    display: inline-flex;
+  }
+
+  .node-palette-close {
+    margin-left: auto;
+  }
+
+  .workbench-body {
+    position: relative;
   }
 
   .workbench-body {

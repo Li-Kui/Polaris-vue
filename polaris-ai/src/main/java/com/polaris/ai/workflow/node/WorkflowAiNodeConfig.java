@@ -24,15 +24,12 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
-import dev.langchain4j.store.embedding.EmbeddingMatch;
-import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.core.context.SecurityContext;
@@ -125,6 +122,11 @@ public class WorkflowAiNodeConfig {
                 if (!"READY".equalsIgnoreCase(knowledge.getIndexStatus())) {
                     return List.of("知识库索引尚未就绪");
                 }
+                if (request.resourceVersion() != null
+                        && knowledge.getIndexVersion() != null
+                        && request.resourceVersion().longValue() != knowledge.getIndexVersion()) {
+                    return List.of("执行固定的知识库索引版本已变化，请重新运行工作流");
+                }
                 if (knowledge.getEmbeddingModelId() == null
                         || modelMapper.selectWorkflowResource(
                         request.tenantId(), knowledge.getEmbeddingModelId()) == null) {
@@ -137,7 +139,7 @@ public class WorkflowAiNodeConfig {
             public ResolvedWorkflowResource resolve(WorkflowResourceRequest request) {
                 AiKnowledgeBase knowledge = knowledge(request, knowledgeMapper);
                 if (knowledge == null) throw new IllegalArgumentException("知识库资源不存在");
-                KnowledgeHandle handle = new KnowledgeHandle(
+                WorkflowKnowledgeResourceHandle handle = new WorkflowKnowledgeResourceHandle(
                         knowledge, vectorStoreResolver.resolve(knowledge));
                 Map<String, Object> attributes = new LinkedHashMap<>();
                 if (knowledge.getName() != null) attributes.put("name", knowledge.getName());
@@ -145,7 +147,7 @@ public class WorkflowAiNodeConfig {
                     attributes.put("indexVersion", knowledge.getIndexVersion());
                 }
                 return new ResolvedWorkflowResource(
-                        kind(), request.resourceKey(), request.resourceId(), 0,
+                        kind(), request.resourceKey(), request.resourceId(), resourceVersion(knowledge),
                         attributes,
                         handle);
             }
@@ -171,6 +173,13 @@ public class WorkflowAiNodeConfig {
                         .toList();
             }
         };
+    }
+
+    private static int resourceVersion(AiKnowledgeBase knowledge) {
+        if (knowledge == null || knowledge.getIndexVersion() == null
+                || knowledge.getIndexVersion() <= 0) return 0;
+        if (knowledge.getIndexVersion() > Integer.MAX_VALUE) return 0;
+        return knowledge.getIndexVersion().intValue();
     }
 
     @Bean
@@ -578,71 +587,6 @@ public class WorkflowAiNodeConfig {
         };
     }
 
-    @Bean
-    public WorkflowNodeHandler knowledgeRagWorkflowNodeHandler(ObjectMapper objectMapper) {
-        WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
-                "knowledge_rag", "1.0", "知识库检索", "ai",
-                objectSchema(Map.of(
-                        "topK", integerSchema(1, 50),
-                        "minScore", numberSchema(0, 1))),
-                promptInputSchema(),
-                knowledgeOutputSchema(),
-                WorkflowSideEffect.READ,
-                Set.of("KNOWLEDGE_BASE"),
-                Set.of(WorkflowNodeCapability.CANCELLABLE,
-                        WorkflowNodeCapability.RETRYABLE,
-                        WorkflowNodeCapability.CHECKPOINT_SAFE));
-        return new WorkflowNodeHandler() {
-            @Override
-            public WorkflowNodeDescriptor descriptor() {
-                return descriptor;
-            }
-
-            @Override
-            public WorkflowNodeResult execute(WorkflowNodeContext context) {
-                ResolvedWorkflowResource resource = firstResource(context, "KNOWLEDGE_BASE");
-                if (!(resource.handle() instanceof KnowledgeHandle handle)) {
-                    throw new IllegalArgumentException("知识库节点缺少KNOWLEDGE_BASE资源");
-                }
-                context.cancellation().throwIfCancellationRequested();
-                String query = prompt(context.input());
-                var embedding = handle.vectorContext().embeddingModel().embed(query).content();
-                int topK = context.config().path("topK").asInt(
-                        handle.knowledge().getRetrievalTopK() == null
-                                ? 5 : handle.knowledge().getRetrievalTopK());
-                double minScore = context.config().path("minScore").asDouble(
-                        handle.knowledge().getRetrievalMinScore() == null
-                                ? 0.5 : handle.knowledge().getRetrievalMinScore());
-                EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
-                        .queryEmbedding(embedding)
-                        .maxResults(Math.max(1, Math.min(topK, 50)))
-                        .minScore(Math.max(0, Math.min(minScore, 1)))
-                        .filter(dev.langchain4j.store.embedding.filter.MetadataFilterBuilder
-                                .metadataKey("knowledge_base_id")
-                                .isEqualTo(handle.knowledge().getId().toString()))
-                        .build();
-                List<EmbeddingMatch<TextSegment>> matches = handle.vectorContext()
-                        .embeddingStore().search(request).matches();
-                var items = objectMapper.createArrayNode();
-                if (matches != null) {
-                    for (EmbeddingMatch<TextSegment> match : matches) {
-                        ObjectNode item = items.addObject();
-                        item.put("score", match.score());
-                        item.put("text", match.embedded().text());
-                        var metadata = match.embedded().metadata();
-                        if (metadata != null) {
-                            item.put("documentId", metadata.getString("doc_id"));
-                            item.put("documentName", metadata.getString("doc_name"));
-                        }
-                    }
-                }
-                ObjectNode result = objectMapper.createObjectNode();
-                result.set("matches", items);
-                return WorkflowNodeResult.success(result);
-            }
-        };
-    }
-
     private static AiModelConfig model(
             WorkflowResourceRequest request, AiModelConfigMapper mapper) {
         try {
@@ -862,19 +806,6 @@ public class WorkflowAiNodeConfig {
                 "branch", "label", "confidence", "summary", "fallbackUsed", "routeReason");
     }
 
-    private static ObjectNode knowledgeOutputSchema() {
-        ObjectNode item = objectSchema(Map.of(
-                "score", numberSchema(0, 1),
-                "text", stringSchema(),
-                "documentId", stringSchema(),
-                "documentName", stringSchema()));
-        item.putArray("required").add("score").add("text");
-        ObjectNode matches = JsonNodeFactory.instance.objectNode();
-        matches.put("type", "array");
-        matches.set("items", item);
-        return requiredObjectSchema(Map.of("matches", matches), "matches");
-    }
-
     private static ObjectNode objectSchema(Map<String, JsonNode> properties) {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
@@ -1075,11 +1006,6 @@ public class WorkflowAiNodeConfig {
     private static ObjectNode numberSchema(double minimum, double maximum) {
         return JsonNodeFactory.instance.objectNode()
                 .put("type", "number").put("minimum", minimum).put("maximum", maximum);
-    }
-
-    private record KnowledgeHandle(
-            AiKnowledgeBase knowledge,
-            AiVectorStoreResolver.VectorContext vectorContext) {
     }
 
     private record AgentHandle(AiAgent agent, StreamingChatModel model) {
