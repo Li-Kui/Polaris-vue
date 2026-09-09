@@ -8,6 +8,7 @@ public enum WorkflowExecutionStatus {
     QUEUED,
     RUNNING,
     WAITING_APPROVAL,
+    WAITING_TIMER,
     WAITING_EVENT,
     RECOVERING,
     NEEDS_ATTENTION,
@@ -31,9 +32,10 @@ public enum WorkflowExecutionStatus {
         return switch (this) {
             case QUEUED -> EnumSet.of(RUNNING, FAILED, CANCELLED);
             case RUNNING -> EnumSet.of(
-                    WAITING_APPROVAL, WAITING_EVENT, RECOVERING, NEEDS_ATTENTION,
+                    WAITING_APPROVAL, WAITING_TIMER, WAITING_EVENT, RECOVERING, NEEDS_ATTENTION,
                     SUCCEEDED, FAILED, CANCELLED);
             case WAITING_APPROVAL -> EnumSet.of(QUEUED, FAILED, CANCELLED, REJECTED);
+            case WAITING_TIMER -> EnumSet.of(QUEUED, FAILED, CANCELLED);
             case WAITING_EVENT -> EnumSet.of(QUEUED, FAILED, CANCELLED);
             case RECOVERING -> EnumSet.of(QUEUED, NEEDS_ATTENTION, FAILED, CANCELLED);
             case NEEDS_ATTENTION -> EnumSet.of(QUEUED, FAILED, CANCELLED);

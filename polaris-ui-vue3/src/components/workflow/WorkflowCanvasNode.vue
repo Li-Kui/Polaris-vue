@@ -83,6 +83,13 @@
         {{ data.knowledgeConfigurationLabel || '待配置' }}
       </span>
     </div>
+    <div v-else-if="data.type === 'wait'" class="agent-node-content wait-node-content">
+      <strong>{{ data.waitSummary || '设置恢复时间' }}</strong>
+      <small>到点后从此处继续</small>
+      <span :class="['agent-config-state', `is-${data.waitConfigurationTone || 'info'}`]">
+        {{ data.waitConfigurationLabel || '待配置' }}
+      </span>
+    </div>
     <div v-else-if="!data.start && !data.end" class="node-content">
       <div><span>输入</span><small>{{ data.inputSummary || '对象' }}</small></div>
       <div><span>输出</span><small>{{ data.outputSummary || '结果对象' }}</small></div>

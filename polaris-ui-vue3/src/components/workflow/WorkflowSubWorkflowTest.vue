@@ -33,7 +33,7 @@ defineEmits(['update:modelValue'])
 const input=ref({}), validation=ref({valid:false}), execution=ref(null), loading=ref(false), error=ref('')
 let timer, key, requestSnapshot
 const active=computed(()=>execution.value && !['SUCCEEDED','FAILED','CANCELLED','REJECTED'].includes(execution.value.status))
-const statusLabel=computed(()=>({QUEUED:'等待执行',RUNNING:'执行中',RECOVERING:'恢复中',WAITING_EVENT:'等待子流程或事件',WAITING_APPROVAL:'等待审批',NEEDS_ATTENTION:'需要人工处理',SUCCEEDED:'执行成功',FAILED:'执行失败',CANCELLED:'已取消',REJECTED:'未通过'})[execution.value?.status] || execution.value?.status)
+const statusLabel=computed(()=>({QUEUED:'等待执行',RUNNING:'执行中',RECOVERING:'恢复中',WAITING_TIMER:'等待时间',WAITING_EVENT:'等待子流程或事件',WAITING_APPROVAL:'等待审批',NEEDS_ATTENTION:'需要人工处理',SUCCEEDED:'执行成功',FAILED:'执行失败',CANCELLED:'已取消',REJECTED:'未通过'})[execution.value?.status] || execution.value?.status)
 const outputText=computed(()=>{try{return JSON.stringify(JSON.parse(execution.value.outputJson),null,2)}catch{return execution.value.outputJson}})
 watch(()=>props.contract?.versionId,()=>{clearTimeout(timer);execution.value=null;input.value={};key=null;requestSnapshot=null;error.value=''})
 watch(()=>props.modelValue,open=>{clearTimeout(timer);if(open && execution.value)refresh()})

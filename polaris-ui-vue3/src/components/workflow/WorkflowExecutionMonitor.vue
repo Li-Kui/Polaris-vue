@@ -16,7 +16,7 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="executions" class="polaris-el-table">
+    <el-table v-loading="loading" :data="executions" class="polaris-el-table execution-table">
       <el-table-column prop="executionId" label="执行 ID" min-width="260">
         <template #default="{row}"><code>{{ row.executionId }}</code></template>
       </el-table-column>
@@ -42,6 +42,36 @@
         <el-empty description="该工作流暂无运行记录" :image-size="72" />
       </template>
     </el-table>
+
+    <div v-loading="loading" class="execution-cards">
+      <article
+        v-for="row in executions"
+        :key="row.executionId"
+        class="execution-card"
+        :aria-label="`执行 ${row.executionId}`"
+      >
+        <header>
+          <code>{{ row.executionId }}</code>
+          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
+            <i></i>{{ row.status }}
+          </span>
+        </header>
+        <dl>
+          <div><dt>版本</dt><dd>v{{ row.versionNo }}</dd></div>
+          <div><dt>创建时间</dt><dd>{{ row.createTime }}</dd></div>
+        </dl>
+        <footer>
+          <el-button link type="primary" @click="openDetail(row)">查看详情</el-button>
+          <el-button v-if="canExecute && !terminal(row.status)" link type="danger" @click="cancel(row)">取消执行</el-button>
+          <el-button v-if="canExecute && retryable(row.status)" link type="warning" @click="retry(row)">安全重试</el-button>
+        </footer>
+      </article>
+      <el-empty
+        v-if="!loading && !executions.length"
+        description="该工作流暂无运行记录"
+        :image-size="72"
+      />
+    </div>
 
     <el-drawer
       v-model="drawerOpen"
@@ -264,11 +294,14 @@ export default {
     nodeWriteStatusLabel(row) {
       if (row?.sideEffect === 'DURABLE_INTERNAL') {
         return row.sideEffectStatus === 'COMMITTED' ? '产物已保存'
-          : row.sideEffectStatus === 'PENDING' ? '正在保存' : '未写入'
+          : row.sideEffectStatus === 'PENDING' && !this.terminal(row.status)
+            ? '处理中' : '无需外部写入'
       }
       if (row?.sideEffect === 'WRITE') {
         return row.sideEffectStatus === 'COMMITTED' ? '外部写入已确认'
-          : row.sideEffectStatus === 'PENDING' ? '外部写入待确认' : row.sideEffectStatus
+          : row.sideEffectStatus === 'PENDING' && !this.terminal(row.status)
+            ? '外部写入待确认'
+            : row.sideEffectStatus === 'NONE' ? '未执行外部写入' : row.sideEffectStatus
       }
       return '无写入'
     },
@@ -444,6 +477,68 @@ export default {
   border-radius: var(--workflow-radius, 18px);
   background: var(--workflow-surface, var(--el-bg-color));
   box-shadow: var(--workflow-shadow, none);
+}
+
+.execution-cards {
+  display: none;
+}
+
+.execution-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 12px;
+  background: var(--workflow-surface-raised, var(--el-bg-color-overlay));
+}
+
+.execution-card header,
+.execution-card footer,
+.execution-card dl,
+.execution-card dl > div {
+  display: flex;
+  align-items: center;
+}
+
+.execution-card header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.execution-card header code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--workflow-text, var(--el-text-color-primary));
+}
+
+.execution-card dl {
+  gap: 18px;
+  margin: 13px 0;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 12px;
+}
+
+.execution-card dl > div {
+  gap: 6px;
+}
+
+.execution-card dt,
+.execution-card dd {
+  margin: 0;
+}
+
+.execution-card dt {
+  font-weight: 650;
+}
+
+.execution-card footer {
+  justify-content: flex-end;
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+}
+
+.execution-card footer :deep(.el-button) {
+  margin-left: 0;
 }
 
 .monitor-header {
@@ -818,6 +913,44 @@ export default {
   :global(.workflow-execution-drawer .el-drawer__body) {
     padding-right: 16px;
     padding-left: 16px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .execution-monitor {
+    padding: 18px;
+  }
+
+  .execution-table {
+    display: none;
+  }
+
+  .execution-cards {
+    display: grid;
+    gap: 10px;
+  }
+
+  .monitor-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 560px) {
+  .execution-card header,
+  .execution-card dl {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .execution-card footer {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .monitor-refresh.el-button {
+    min-width: auto;
+    padding-inline: 11px;
   }
 }
 </style>

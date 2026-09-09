@@ -448,6 +448,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                             .eq(WorkflowNodeRun::getExecutionId, executionId)
                             .eq(WorkflowNodeRun::getStatus, "WAITING")
                             .set(WorkflowNodeRun::getStatus, "CANCELLED")
+                            .set(WorkflowNodeRun::getSideEffectStatus, "NONE")
                             .set(WorkflowNodeRun::getErrorCode,
                                     com.polaris.ai.workflow.contract.WorkflowErrorCode.NODE_CANCELLED.name())
                             .set(WorkflowNodeRun::getErrorMessage, "工作流等待期间被取消")
@@ -458,6 +459,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             executionMapper.requestCancel(executionId);
         }
         cancelActiveDescendants(execution);
+        persistence.signalTimerRefresh();
         return view(requireExecution(executionId));
     }
 
@@ -482,6 +484,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                                 .eq(WorkflowNodeRun::getExecutionId, child.getExecutionId())
                                 .eq(WorkflowNodeRun::getStatus, "WAITING")
                                 .set(WorkflowNodeRun::getStatus, "CANCELLED")
+                                .set(WorkflowNodeRun::getSideEffectStatus, "NONE")
                                 .set(WorkflowNodeRun::getErrorCode,
                                         com.polaris.ai.workflow.contract.WorkflowErrorCode.NODE_CANCELLED.name())
                                 .set(WorkflowNodeRun::getErrorMessage, "父工作流取消，子工作流同步取消")
@@ -519,6 +522,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             nodeRunMapper.update(null, new LambdaUpdateWrapper<WorkflowNodeRun>()
                     .eq(WorkflowNodeRun::getExecutionId, childId).eq(WorkflowNodeRun::getStatus, "WAITING")
                     .set(WorkflowNodeRun::getStatus, "CANCELLED")
+                    .set(WorkflowNodeRun::getSideEffectStatus, "NONE")
                     .set(WorkflowNodeRun::getErrorCode, "NODE_CANCELLED")
                     .set(WorkflowNodeRun::getErrorMessage, "子工作流超过等待时限")
                     .set(WorkflowNodeRun::getFinishTime, new Date()));
@@ -526,6 +530,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                     Map.of("reason", "SUB_WORKFLOW_DEADLINE"));
         } else executionMapper.requestCancel(childId);
         cancelActiveDescendants(child);
+        persistence.signalTimerRefresh();
     }
 
     /** 终态提交后清理仍活跃的后代；与创建子执行使用相同的根锁。 */
@@ -536,7 +541,10 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         executionMapper.selectByExecutionIdForUpdate(parent.getRootExecutionId() == null
                 ? executionId : parent.getRootExecutionId());
         parent = executionMapper.selectByExecutionId(executionId);
-        if (parent != null && isTerminal(parent.getStatus())) cancelActiveDescendants(parent);
+        if (parent != null && isTerminal(parent.getStatus())) {
+            cancelActiveDescendants(parent);
+            persistence.signalTimerRefresh();
+        }
     }
 
     private void cancelApprovals(String executionId) {

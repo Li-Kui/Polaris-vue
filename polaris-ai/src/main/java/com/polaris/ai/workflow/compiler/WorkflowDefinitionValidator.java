@@ -1,17 +1,21 @@
 package com.polaris.ai.workflow.compiler;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.contract.WorkflowErrorCategory;
 import com.polaris.ai.workflow.contract.WorkflowErrorCode;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowDefinitionSpec;
 import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
+import com.polaris.ai.workflow.node.WorkflowWaitPolicy;
 import com.polaris.ai.workflow.runtime.WorkflowInputValidator;
 import com.polaris.ai.workflow.runtime.WorkflowOutputSchemaGovernance;
 import com.polaris.ai.workflow.runtime.WorkflowStructuredOutput;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 
+import java.time.Instant;
 import java.util.*;
 
 /** 工作流定义的结构和语义校验器。 */
@@ -77,7 +81,7 @@ public class WorkflowDefinitionValidator {
             diagnostics.add(error("POLICIES_REQUIRED", null, "$.policies", "执行策略不能为空"));
             return;
         }
-        range(policies.getTimeoutSeconds(), 1, 604800, "$.policies.timeoutSeconds",
+        range(policies.getTimeoutSeconds(), 1, 31536000, "$.policies.timeoutSeconds",
                 "WORKFLOW_TIMEOUT_INVALID", diagnostics);
         range(policies.getMaxNodeRuns(), 1, 10000, "$.policies.maxNodeRuns",
                 "MAX_NODE_RUNS_INVALID", diagnostics);
@@ -604,17 +608,59 @@ public class WorkflowDefinitionValidator {
             WorkflowDefinitionSpec.Policies policies,
             String path,
             List<WorkflowDiagnostic> diagnostics) {
-        if (node.getConfig() == null || policies == null
-                || policies.getTimeoutSeconds() == null) {
+        if (!"wait".equals(node.getType()) || node.getConfig() == null) {
             return;
         }
-        if ("wait".equals(node.getType())) {
-            int delaySeconds = node.getConfig().path("delaySeconds").asInt(0);
-            if (delaySeconds >= policies.getTimeoutSeconds()) {
-                diagnostics.add(error("WAIT_EXCEEDS_WORKFLOW_TIMEOUT", node.getId(),
-                        path + ".config.delaySeconds",
-                        "等待时长必须小于工作流总超时"));
+        JsonNode config = node.getConfig();
+        JsonNode schedule = config.path("schedule");
+        JsonNode source = schedule.path("source");
+        String mode = schedule.path("kind").asText();
+        String sourceType = source.path("kind").asText();
+        if (!"2.0".equals(config.path("configVersion").asText())) {
+            diagnostics.add(error("WAIT_CONFIG_VERSION_INVALID", node.getId(),
+                    path + ".config.configVersion", "等待节点仅支持当前配置版本 2.0"));
+            return;
+        }
+        if (!Set.of("AFTER", "AT").contains(mode)
+                || !Set.of("FIXED", "INPUT").contains(sourceType)) {
+            diagnostics.add(error("WAIT_SCHEDULE_INVALID", node.getId(),
+                    path + ".config.schedule", "请选择有效的等待方式和时间来源"));
+            return;
+        }
+        long maxWaitSeconds = config.path("safety").path("maxWaitSeconds")
+                .asLong(WorkflowWaitPolicy.DEFAULT_MAX_WAIT_SECONDS);
+        if (policies != null && policies.getTimeoutSeconds() != null
+                && maxWaitSeconds >= policies.getTimeoutSeconds()) {
+            diagnostics.add(error("WAIT_EXCEEDS_WORKFLOW_TIMEOUT", node.getId(),
+                    path + ".config.safety.maxWaitSeconds",
+                    "节点最大等待时间必须小于工作流最大生命周期"));
+        }
+        if ("INPUT".equals(sourceType)) {
+            String inputName = "AFTER".equals(mode) ? "duration" : "targetAt";
+            if (node.getInputMapping() == null
+                    || !node.getInputMapping().containsKey(inputName)) {
+                diagnostics.add(error("WAIT_INPUT_MAPPING_REQUIRED", node.getId(),
+                        path + ".inputMapping." + inputName,
+                        "请选择提供" + ("duration".equals(inputName) ? "等待时长" : "目标时间")
+                                + "的上游字段"));
             }
+        }
+        Instant validationTime = Instant.now();
+        ObjectNode validationInput = null;
+        if ("INPUT".equals(sourceType)) {
+            validationInput = JsonNodeFactory.instance.objectNode();
+            if ("AFTER".equals(mode)) validationInput.put("duration", 0);
+            else validationInput.put("targetAt", validationTime.plusSeconds(1).toString());
+        }
+        try {
+            WorkflowWaitPolicy.resolve(config, validationInput, validationTime);
+        } catch (WorkflowWaitPolicy.WaitException exception) {
+            diagnostics.add(error(exception.code(), node.getId(),
+                    path + ".config.schedule", exception.getMessage()));
+        }
+        if (node.getRetryPolicy() != null) {
+            diagnostics.add(error("WAIT_RETRY_NOT_ALLOWED", node.getId(),
+                    path + ".retryPolicy", "等待由持久化调度器恢复，不需要配置节点重试"));
         }
     }
 

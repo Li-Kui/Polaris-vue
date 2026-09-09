@@ -2,6 +2,7 @@ package com.polaris.ai.workflow.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.application.WorkflowTaskSignal;
+import com.polaris.ai.workflow.application.WorkflowTimerSignal;
 import com.polaris.ai.workflow.domain.*;
 import com.polaris.ai.workflow.mapper.*;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
@@ -10,6 +11,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
@@ -283,7 +285,7 @@ public class WorkflowExecutionPersistence {
             String runnerId,
             long fencingToken,
             WorkflowNodeRun nodeRun,
-            Date resumeTime,
+            Instant resumeAt,
             String stateJson,
             String planHash) {
         WorkflowExecution execution = lockAndCheckFence(executionId, runnerId, fencingToken);
@@ -294,15 +296,47 @@ public class WorkflowExecutionPersistence {
         appendEventLocked(execution, "EXECUTION_WAITING", nodeRun.getNodeRunId(),
                 nodeRun.getNodeId(), Map.of(
                         "reason", "TIMER",
-                        "resumeTime", resumeTime.getTime()));
-        execution.setStatus("WAITING_EVENT");
-        execution.setResumeTime(resumeTime);
+                        "resumeTime", resumeAt.toEpochMilli()));
+        execution.setStatus("WAITING_TIMER");
+        execution.setResumeTime(Date.from(resumeAt));
         execution.setRunnerId(null);
         execution.setLeaseUntil(null);
         execution.setHeartbeatTime(new Date());
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("挂起工作流等待节点失败");
         }
+        eventPublisher.publishEvent(new WorkflowTimerSignal(resumeAt));
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public void resuspendForWait(
+            String executionId,
+            String runnerId,
+            long fencingToken,
+            WorkflowNodeRun nodeRun,
+            Instant resumeAt,
+            String stateJson,
+            String planHash) {
+        WorkflowExecution execution = lockAndCheckFence(executionId, runnerId, fencingToken);
+        saveCheckpointLocked(execution, nodeRun.getNodeRunId(), stateJson, planHash);
+        appendEventLocked(execution, "EXECUTION_WAITING", nodeRun.getNodeRunId(),
+                nodeRun.getNodeId(), Map.of(
+                        "reason", "TIMER_PRECISION",
+                        "resumeTime", resumeAt.toEpochMilli()));
+        execution.setStatus("WAITING_TIMER");
+        execution.setResumeTime(Date.from(resumeAt));
+        execution.setRunnerId(null);
+        execution.setLeaseUntil(null);
+        execution.setHeartbeatTime(new Date());
+        if (executionMapper.updateById(execution) != 1) {
+            throw new ServiceException("重新挂起工作流等待节点失败");
+        }
+        eventPublisher.publishEvent(new WorkflowTimerSignal(resumeAt));
+    }
+
+    /** 当前事务提交后重新核对最近闹钟，供取消等删除等待时间的操作使用。 */
+    public void signalTimerRefresh() {
+        eventPublisher.publishEvent(WorkflowTimerSignal.refreshSchedule());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -332,6 +366,7 @@ public class WorkflowExecutionPersistence {
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("挂起工作流重试失败");
         }
+        eventPublisher.publishEvent(new WorkflowTimerSignal(resumeTime.toInstant()));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -366,6 +401,7 @@ public class WorkflowExecutionPersistence {
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("挂起工作流等待子工作流失败");
         }
+        eventPublisher.publishEvent(new WorkflowTimerSignal(resumeTime.toInstant()));
     }
 
     @Transactional(rollbackFor = Exception.class)

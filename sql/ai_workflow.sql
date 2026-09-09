@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_execution` (
   `runner_id` varchar(64) DEFAULT NULL COMMENT '当前工作节点实例ID',
   `fencing_token` bigint(20) NOT NULL DEFAULT '0' COMMENT '工作节点单调递增隔离令牌',
   `lease_until` datetime DEFAULT NULL COMMENT '工作节点租约到期时间',
-  `resume_time` datetime DEFAULT NULL COMMENT '等待节点最早可恢复时间',
+  `resume_time` datetime(3) DEFAULT NULL COMMENT '等待节点最早可恢复时间',
   `heartbeat_time` datetime DEFAULT NULL COMMENT '最近心跳时间',
   `recovery_count` int(11) NOT NULL DEFAULT '0' COMMENT '恢复尝试次数',
   `cancel_requested` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否已请求持久化取消',
@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_execution` (
     REFERENCES `ai_workflow_version` (`version_id`),
   CONSTRAINT `chk_wf_execution_environment` CHECK (`environment` IN ('DEV','TEST','PROD')),
   CONSTRAINT `chk_wf_execution_status` CHECK (`status` IN (
-    'QUEUED','RUNNING','WAITING_APPROVAL','WAITING_EVENT','RECOVERING','NEEDS_ATTENTION',
+    'QUEUED','RUNNING','WAITING_APPROVAL','WAITING_TIMER','WAITING_EVENT','RECOVERING','NEEDS_ATTENTION',
     'SUCCEEDED','FAILED','CANCELLED','REJECTED'
   ))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流持久化执行记录';

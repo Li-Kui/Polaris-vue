@@ -320,6 +320,16 @@
                   @select-sources="selectedInspectorTab = 'resource'"
                   @configure-input="selectedInspectorTab = 'mapping'"
                 />
+                <WorkflowWaitEditor
+                  v-else-if="isWaitNode"
+                  :config="selectedNode.config"
+                  :input-mapping="selectedNode.inputMapping || {}"
+                  :source-groups="waitSourceGroups"
+                  :disabled="!canEdit"
+                  @update:config="waitConfigChanged"
+                  @update:input-mapping="visualInputMappingChanged"
+                  @test="openNodeTest"
+                />
                 <WorkflowSemanticClassifierEditor
                   v-else-if="isClassifierNode"
                   :config="selectedNode.config"
@@ -779,7 +789,7 @@
                   @click="openNodeTest"
                 ><el-icon><VideoPlay /></el-icon><span>{{ selectedNode?.type === 'loop'
                     ? '测试完整流程'
-                    : (isSubWorkflowNode ? '试运行子工作流' : isArtifactNode ? '无落盘预览' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
+                    : (isSubWorkflowNode ? '试运行子工作流' : isArtifactNode ? '无落盘预览' : isWaitNode ? '模拟等待' : nodeTestRunning ? '查看试运行' : '试运行当前节点') }}</span></el-button>
               </span>
             </el-tooltip>
             <el-button v-if="isAgentNode && canEdit" type="primary" @click="completeAgentConfiguration">
@@ -1080,6 +1090,8 @@
           ? '直接运行当前草稿，不创建发布版本或正式运行记录；仅支持无写操作的线性安全流程。'
           : nodeTestIsArtifact && nodeTestMode === 'NODE'
           ? '使用正式脱敏与序列化规则预览文件信息，但不会创建数据库记录或真实文件。'
+          : nodeTestIsWait && nodeTestMode === 'NODE'
+          ? '使用虚拟时间计算恢复结果，不会真的等待，也不会创建定时任务。'
           : nodeTestMode === 'UPSTREAM_CHAIN'
           ? '按普通连线依次执行安全的线性上游链；条件、并行、循环、多入口和写节点会被阻止。输入表示流程输入。'
           : '仅执行当前节点，不执行上游；输入表示当前节点最终输入。写操作节点不会执行。'"
@@ -1109,7 +1121,7 @@
           <el-input-number v-model="nodeTestTimeoutSeconds" :min="1" :max="120" />
           <span class="node-test-unit">秒</span>
         </el-form-item>
-        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : nodeTestIsArtifact && nodeTestMode === 'NODE' ? '要保存的内容' : nodeTestIsKnowledge && nodeTestMode === 'NODE' ? '要查找什么' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
+        <el-form-item :label="nodeTestIsClassifier && nodeTestMode === 'NODE' ? '待分类内容' : nodeTestIsAgent && nodeTestMode === 'NODE' ? '测试输入' : nodeTestIsArtifact && nodeTestMode === 'NODE' ? '要保存的内容' : nodeTestIsKnowledge && nodeTestMode === 'NODE' ? '要查找什么' : nodeTestIsWait && nodeTestMode === 'NODE' ? '模拟输入' : workflowDraftTest || nodeTestMode === 'UPSTREAM_CHAIN' ? '流程输入' : '节点输入'">
           <el-input
             v-if="nodeTestIsClassifier && nodeTestMode === 'NODE'"
             v-model="classifierTestContent"
@@ -1146,6 +1158,14 @@
             show-word-limit
             placeholder="例如：退款申请需要满足哪些条件？"
           />
+          <div v-else-if="nodeTestIsWait && nodeTestMode === 'NODE'" class="wait-test-input">
+            <template v-if="nodeTestWaitUsesInput && nodeTestWaitMode === 'AFTER'">
+              <el-input-number v-model="waitTestDuration" :min="0" :max="31536000" />
+              <span>使用节点中设置的时间单位</span>
+            </template>
+            <el-date-picker v-else-if="nodeTestWaitUsesInput" v-model="waitTestTargetAt" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" format="YYYY-MM-DD HH:mm" placeholder="选择模拟目标时间" style="width:100%" />
+            <span v-else>固定时间已配置，无需输入测试数据。</span>
+          </div>
           <el-input v-else v-model="nodeTestInputJson" type="textarea" :rows="10" spellcheck="false" />
         </el-form-item>
       </el-form>
@@ -1193,7 +1213,7 @@
         </div>
         <div
           v-if="nodeTestResult.status === 'SUCCEEDED'
-            && !((nodeTestIsAgent || nodeTestIsArtifact || nodeTestIsKnowledge) && nodeTestMode === 'NODE')"
+            && !((nodeTestIsAgent || nodeTestIsArtifact || nodeTestIsKnowledge || nodeTestIsWait) && nodeTestMode === 'NODE')"
           class="node-test-schema-action"
         >
           <div>
@@ -1254,6 +1274,16 @@
             <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
           </details>
         </section>
+        <section v-else-if="nodeTestIsWait && nodeTestMode === 'NODE' && nodeTestResult.status === 'SUCCEEDED'" class="wait-test-result">
+          <el-alert title="模拟完成：正式运行会持久化进度，并在目标时间后恢复。" type="success" :closable="false" show-icon />
+          <dl>
+            <div><dt>进入时间</dt><dd>{{ nodeTestResult.output?.enteredAt || '-' }}</dd></div>
+            <div><dt>计划恢复</dt><dd>{{ nodeTestResult.output?.targetAt || '-' }}</dd></div>
+            <div><dt>模拟结果</dt><dd>{{ nodeTestResult.output?.skipped ? '目标已过，立即继续' : '到点后继续' }}</dd></div>
+            <div><dt>业务时区</dt><dd>{{ nodeTestResult.output?.timezone || '-' }}</dd></div>
+          </dl>
+          <details><summary>查看原始数据</summary><pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre></details>
+        </section>
         <label v-else class="node-test-output">
           <span>脱敏输出</span>
           <pre>{{ formatNodeTestJson(nodeTestResult.output) }}</pre>
@@ -1268,7 +1298,7 @@
           @click="cancelNodeTest"
         >取消运行</el-button>
         <el-button v-else type="primary" @click="runNodeTest">
-          {{ workflowDraftTest ? '运行当前草稿' : '运行当前节点' }}
+          {{ workflowDraftTest ? '运行当前草稿' : nodeTestIsWait ? '模拟等待' : '运行当前节点' }}
         </el-button>
       </template>
     </el-dialog>
@@ -1343,6 +1373,7 @@ import WorkflowArtifactEditor from './WorkflowArtifactEditor.vue'
 import WorkflowKnowledgeRetrievalEditor from './WorkflowKnowledgeRetrievalEditor.vue'
 import WorkflowKnowledgeSourcePicker from './WorkflowKnowledgeSourcePicker.vue'
 import WorkflowKnowledgeTestResult from './WorkflowKnowledgeTestResult.vue'
+import WorkflowWaitEditor from './WorkflowWaitEditor.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
@@ -1377,6 +1408,7 @@ import {
   normalizeKnowledgeRetrievalConfig
 } from './workflowKnowledgeRetrieval'
 import {createOptimizedNodesExample} from './workflowExamples'
+import {normalizeWaitConfig, WAIT_DEFAULT_CONFIG, waitConfigurationState, waitSummary} from './workflowWait'
 
 export default {
   name: 'WorkflowWorkbench',
@@ -1396,6 +1428,7 @@ export default {
     WorkflowKnowledgeRetrievalEditor,
     WorkflowKnowledgeSourcePicker,
     WorkflowKnowledgeTestResult,
+    WorkflowWaitEditor,
     WorkflowDatasourceConnectionStep,
     WorkflowDatabaseQueryStep,
     WorkflowDisclosureCard,
@@ -1550,6 +1583,8 @@ export default {
       agentTestContent: '',
       artifactTestContent: '',
       knowledgeTestContent: '',
+      waitTestDuration: 5,
+      waitTestTargetAt: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
       nodeTestGeneratingSchema: false,
@@ -1601,11 +1636,14 @@ export default {
     isKnowledgeNode() {
       return this.selectedNode?.type === 'knowledge_retrieval'
     },
+    isWaitNode() {
+      return this.selectedNode?.type === 'wait'
+    },
     isGuidedIntegrationNode() {
       return this.isApiNode || this.isDatabaseNode
     },
     isGuidedInspectorNode() {
-      return this.isGuidedIntegrationNode || this.isAgentNode || this.isArtifactNode || this.isKnowledgeNode
+      return this.isGuidedIntegrationNode || this.isAgentNode || this.isArtifactNode || this.isKnowledgeNode || this.isWaitNode
     },
     isLlmNode() {
       return this.selectedNode?.type === 'llm'
@@ -1625,6 +1663,7 @@ export default {
     isSubWorkflowNode() { return this.selectedNode?.type === 'sub_workflow' },
     selectedSubWorkflowContract() { return this.subWorkflowContracts[this.selectedNode?.config?.reviewedVersionId] },
     visibleInspectorTabs() {
+      if (this.isWaitNode) return [{label: '等待设置', value: 'config', icon: 'Timer'}]
       if (this.isArtifactNode) {
         return [
           {label: '保存内容', value: 'mapping', icon: 'Operation'},
@@ -1651,6 +1690,10 @@ export default {
     },
     approvalSourceGroups() {
       return this.isApprovalNode && this.selectedNode
+        ? this.buildClassifierSourceGroups(this.selectedNode.id) : []
+    },
+    waitSourceGroups() {
+      return this.isWaitNode && this.selectedNode
         ? this.buildClassifierSourceGroups(this.selectedNode.id) : []
     },
     approvalTargetOptions() {
@@ -1736,6 +1779,17 @@ export default {
     },
     nodeTestIsKnowledge() {
       return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'knowledge_retrieval'
+    },
+    nodeTestIsWait() {
+      return (this.definition.nodes || []).find(node => node.id === this.nodeTestNodeId)?.type === 'wait'
+    },
+    nodeTestWaitMode() {
+      return normalizeWaitConfig((this.definition.nodes || [])
+        .find(node => node.id === this.nodeTestNodeId)?.config).schedule.kind
+    },
+    nodeTestWaitUsesInput() {
+      return normalizeWaitConfig((this.definition.nodes || [])
+        .find(node => node.id === this.nodeTestNodeId)?.config).schedule.source.kind === 'INPUT'
     },
     nodeTestAgentOutput() {
       return agentTestResultView(this.nodeTestResult?.output)
@@ -1824,6 +1878,13 @@ export default {
         inputMapping: this.selectedNode?.inputMapping
       })
     },
+    waitConfiguration() {
+      if (!this.isWaitNode) return {code: '', label: '', tone: 'info', issues: []}
+      return waitConfigurationState({
+        config: this.selectedNode?.config,
+        inputMapping: this.selectedNode?.inputMapping
+      })
+    },
     selectedDescriptor() {
       if (!this.selectedNode) return null
       return this.descriptors.find(item =>
@@ -1852,11 +1913,14 @@ export default {
       if (this.isKnowledgeNode && this.knowledgeConfiguration.code !== 'READY') {
         return {available: false, reason: this.knowledgeConfiguration.issues[0] || '请先完成知识库检索配置'}
       }
+      if (this.isWaitNode && this.waitConfiguration.code !== 'READY') {
+        return {available: false, reason: this.waitConfiguration.issues[0] || '请先完成等待设置'}
+      }
       if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
       if (this.selectedDescriptor.sideEffect === 'WRITE') {
         return {available: false, reason: '写操作节点暂不允许单节点真实试运行'}
       }
-      if (['approval', 'wait', 'sub_workflow'].includes(this.selectedNode.type)) {
+      if (['approval', 'sub_workflow'].includes(this.selectedNode.type)) {
         return {available: false, reason: '持久化控制节点暂不支持隔离试运行'}
       }
       const capabilities = this.selectedDescriptor.capabilities || []
@@ -2178,13 +2242,13 @@ export default {
       if (status === 'SUCCEEDED') return 'success'
       if (['FAILED', 'REJECTED', 'NEEDS_ATTENTION'].includes(status)) return 'danger'
       if (status === 'CANCELLED') return 'neutral'
-      if (['WAITING_APPROVAL', 'WAITING_EVENT'].includes(status)) return 'warning'
+      if (['WAITING_APPROVAL', 'WAITING_TIMER', 'WAITING_EVENT'].includes(status)) return 'warning'
       return 'running'
     },
     executionStatusLabel() {
       const labels = {
         QUEUED: '等待执行', RUNNING: '正在执行', WAITING_APPROVAL: '等待审批',
-        WAITING_EVENT: '等待事件', RECOVERING: '正在恢复', SUCCEEDED: '运行成功',
+        WAITING_TIMER: '等待时间', WAITING_EVENT: '等待事件', RECOVERING: '正在恢复', SUCCEEDED: '运行成功',
         FAILED: '运行失败', CANCELLED: '已取消', REJECTED: '已拒绝',
         NEEDS_ATTENTION: '需要人工处理'
       }
@@ -2399,7 +2463,7 @@ export default {
         parallel: '并行执行多条分支',
         join: '汇聚并行分支结果',
         loop: '在限制范围内循环执行',
-        wait: '延迟后恢复执行',
+        wait: '暂停一段时间，或等到指定时间后继续',
         approval: '发起人工审批任务',
         artifact: '把流程结果保存为可下载的私有文件'
       }
@@ -2430,7 +2494,7 @@ export default {
         outputs: {},
         ui: {},
         policies: {
-          timeoutSeconds: 1800,
+          timeoutSeconds: 2678400,
           maxNodeRuns: 200,
           maxParallelism: 10,
           tokenBudget: 100000,
@@ -2496,6 +2560,7 @@ export default {
       this.normalizeHttpNodeConfigs()
       this.normalizeAgentNodeConfigs()
       this.normalizeKnowledgeNodeConfigs()
+      this.normalizeWaitNodeConfigs()
       this.normalizeClassifierNodeConfigs()
       this.normalizeLoopNodeConfigs()
       this.normalizeInferredOutputSchemas()
@@ -2580,6 +2645,8 @@ export default {
       const artifactState = node.type === 'artifact'
         ? artifactConfigurationState({config: node.config, inputMapping: node.inputMapping})
         : null
+      const waitState = node.type === 'wait'
+        ? waitConfigurationState({config: node.config, inputMapping: node.inputMapping}) : null
       return {
         label: node.name,
         type: node.type,
@@ -2621,12 +2688,15 @@ export default {
               queryIssue: this.knowledgeQueryMappingIssue(node)
             }).tone
           : 'info',
+        waitSummary: node.type === 'wait' ? waitSummary(node.config, node.inputMapping) : '',
+        waitConfigurationLabel: waitState?.label || '',
+        waitConfigurationTone: waitState?.tone || 'info',
         status: this.latestNodeStatus(node.id),
         testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
           : this.canDebug && this.nodeSupportsTest(node),
-        testLabel: node.type === 'sub_workflow' ? '试运行子工作流' : node.type === 'loop' ? '测试完整流程' : '',
-        testTitle: node.type === 'sub_workflow' ? '在 TEST 环境独立运行已确认的子工作流版本' : node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : '',
+        testLabel: node.type === 'sub_workflow' ? '试运行子工作流' : node.type === 'loop' ? '测试完整流程' : node.type === 'wait' ? '模拟等待' : '',
+        testTitle: node.type === 'sub_workflow' ? '在 TEST 环境独立运行已确认的子工作流版本' : node.type === 'loop' ? '使用真实执行引擎测试已发布的完整流程' : node.type === 'wait' ? '使用虚拟时间检查恢复结果，不会真的等待' : '',
         classifierBranches,
         loopBranches,
         loopModeSummary,
@@ -2767,8 +2837,7 @@ export default {
         name: descriptor.displayName,
         inputMapping: {},
         config: this.defaultNodeConfig(descriptor.type),
-        timeoutSeconds: 120,
-        onError: 'FAIL',
+        ...(descriptor.type === 'wait' ? {} : {timeoutSeconds: 120, onError: 'FAIL'}),
         ...(descriptor.type === 'artifact' ? {retryPolicy: {
           maxAttempts: 3,
           backoff: 'EXPONENTIAL',
@@ -2847,7 +2916,7 @@ export default {
         }
       }
       if (type === 'join') return {mode: 'ALL'}
-      if (type === 'wait') return {delaySeconds: 60}
+      if (type === 'wait') return normalizeWaitConfig(WAIT_DEFAULT_CONFIG)
       if (type === 'database_query') return {sql: '', maxRows: 100, queryTimeoutSeconds: 10}
       if (type === 'sub_workflow') {
         return {definitionId: null, reviewedVersionId: '', versionPolicy: 'LATEST', resultMode: 'STOP', maxWaitSeconds: 0, inputs:{mode:'OBJECT',fields:{}}}
@@ -3062,6 +3131,10 @@ export default {
       if (!this.selectedNode || this.selectedNode.type !== 'knowledge_retrieval') return
       this.schemaConfigChanged(normalizeKnowledgeRetrievalConfig(value))
     },
+    waitConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'wait') return
+      this.schemaConfigChanged(normalizeWaitConfig(value))
+    },
     classifierConfigChanged(value) {
       if (!this.selectedNode || this.selectedNode.type !== 'llm_classifier') return
       const nodeId = this.selectedNode.id
@@ -3227,6 +3300,12 @@ export default {
         const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
           ? node.config : {}
         node.config = normalizeKnowledgeRetrievalConfig(current)
+      })
+    },
+    normalizeWaitNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'wait') return
+        node.config = normalizeWaitConfig(node.config)
       })
     },
     normalizeClassifierNodeConfigs() {
@@ -3963,7 +4042,7 @@ export default {
       const descriptor = this.descriptors.find(item => item.type === node.type
         && item.handlerVersion === node.typeVersion)
       if (!descriptor || descriptor.sideEffect === 'WRITE') return false
-      if (['approval', 'wait', 'sub_workflow'].includes(node.type)) return false
+      if (['approval', 'sub_workflow'].includes(node.type)) return false
       const capabilities = descriptor.capabilities || []
       if (descriptor.sideEffect === 'DURABLE_INTERNAL' && !capabilities.includes('PREVIEWABLE')) return false
       if (descriptor.sideEffect === 'NONE' && !capabilities.includes('MOCKABLE')) return false
@@ -4051,6 +4130,8 @@ export default {
       this.artifactTestContent = this.isArtifactNode
         ? '这是一段用于预览的示例内容' : ''
       this.knowledgeTestContent = ''
+      this.waitTestDuration = 5
+      this.waitTestTargetAt = ''
       this.nodeTestDialogOpen = true
     },
     async fetchNodeFields() {
@@ -4093,6 +4174,16 @@ export default {
           return
         }
         input = {query: this.knowledgeTestContent.trim()}
+      } else if (this.nodeTestIsWait && this.nodeTestMode === 'NODE') {
+        if (!this.nodeTestWaitUsesInput) input = {}
+        else if (this.nodeTestWaitMode === 'AFTER') input = {duration: Number(this.waitTestDuration || 0)}
+        else {
+          if (!this.waitTestTargetAt) {
+            this.$message.warning('请选择模拟目标时间')
+            return
+          }
+          input = {targetAt: this.waitTestTargetAt}
+        }
       } else {
         try {
           input = JSON.parse(this.nodeTestInputJson)
@@ -7309,6 +7400,44 @@ export default {
   line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.wait-test-input {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+}
+
+.wait-test-result {
+  display: grid;
+  gap: 12px;
+}
+
+.wait-test-result dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.wait-test-result dl > div {
+  padding: 10px 12px;
+  border: 1px solid var(--workflow-border, var(--el-border-color-lighter));
+  border-radius: 8px;
+  background: var(--workflow-surface, var(--el-bg-color));
+}
+
+.wait-test-result dt {
+  margin-bottom: 4px;
+  color: var(--workflow-text-secondary, var(--el-text-color-secondary));
+  font-size: 11px;
+}
+
+.wait-test-result dd {
+  margin: 0;
+  word-break: break-all;
 }
 
 .agent-test-answer {

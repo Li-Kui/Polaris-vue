@@ -70,6 +70,7 @@ export function classifierSchemaOptions(schema, baseExpression, rootLabel, limit
         expression,
         label: path || rootLabel,
         type,
+        format: current.format || '',
         typeLabel: labels[type] || '数据'
       })
     }

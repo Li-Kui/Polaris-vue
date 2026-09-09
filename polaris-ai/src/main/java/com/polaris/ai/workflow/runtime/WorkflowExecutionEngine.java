@@ -10,6 +10,7 @@ import com.polaris.ai.workflow.contract.WorkflowErrorCode;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import com.polaris.ai.workflow.domain.*;
 import com.polaris.ai.workflow.mapper.*;
+import com.polaris.ai.workflow.node.WorkflowWaitPolicy;
 import com.polaris.ai.workflow.registry.WorkflowNodeRegistry;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
 import com.polaris.ai.workflow.service.WorkflowExecutionService;
@@ -20,6 +21,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -959,12 +961,31 @@ public class WorkflowExecutionEngine {
                 throw new NodeFailure(WorkflowErrorCode.EXECUTION_CONFLICT.name(),
                         "等待节点状态无法恢复", false);
             }
-            ObjectNode output = objectMapper.createObjectNode();
-            output.put("status", "RESUMED");
-            output.put("resumedAt", System.currentTimeMillis());
+            WorkflowWaitPolicy.Resolution resolution;
+            try {
+                resolution = WorkflowWaitPolicy.restore(
+                        objectMapper.readTree(run.getOutputJson()));
+            } catch (WorkflowWaitPolicy.WaitException exception) {
+                throw new NodeFailure(exception.code(), exception.getMessage(), false);
+            } catch (Exception exception) {
+                throw new NodeFailure("WAIT_STATE_INVALID",
+                        "等待节点的持久化时间状态无法恢复", false);
+            }
+            Instant resumedAt = Instant.now();
+            if (!WorkflowWaitPolicy.isDue(resolution, resumedAt)) {
+                state.setTotalNodeRuns(Math.max(0, state.getTotalNodeRuns() - 1));
+                state.getPending().add(0, token);
+                persistence.resuspendForWait(
+                        execution.getExecutionId(), runnerId, fencingToken, run,
+                        resolution.targetAt(), writeJson(state), plan.getContentHash());
+                return null;
+            }
+            ObjectNode output = WorkflowWaitPolicy.output(
+                    resolution, resumedAt, false, false);
             WorkflowNodeResult result = WorkflowNodeResult.success(output);
             validateFrozenOutput(node, result);
             run.setStatus("SUCCEEDED");
+            run.setSideEffectStatus(result.sideEffectStatus());
             run.setOutputJson(persistedJson(output));
             run.setFinishTime(new Date());
             return new NodeExecution(result, run);
@@ -974,13 +995,29 @@ public class WorkflowExecutionEngine {
                 nextAttemptNo(execution.getExecutionId(), nodeRunId), fencingToken);
         run.setStatus("WAITING");
         run.setInputJson(persistedJson(input));
-        int delaySeconds = node.getConfig().path("delaySeconds").asInt();
-        Date resumeTime = new Date(System.currentTimeMillis()
-                + TimeUnit.SECONDS.toMillis(delaySeconds));
+        WorkflowWaitPolicy.Resolution resolution;
+        try {
+            resolution = WorkflowWaitPolicy.resolve(node.getConfig(), input, Instant.now());
+        } catch (WorkflowWaitPolicy.WaitException exception) {
+            throw new NodeFailure(exception.code(), exception.getMessage(), false);
+        }
+        if (resolution.skipped()) {
+            ObjectNode output = WorkflowWaitPolicy.output(
+                    resolution, resolution.enteredAt(), false, false);
+            WorkflowNodeResult result = WorkflowNodeResult.success(output);
+            validateFrozenOutput(node, result);
+            run.setStatus("SUCCEEDED");
+            run.setSideEffectStatus(result.sideEffectStatus());
+            run.setOutputJson(persistedJson(output));
+            run.setFinishTime(new Date());
+            return new NodeExecution(result, run);
+        }
+        run.setOutputJson(persistedJson(WorkflowWaitPolicy.waitingOutput(resolution)));
         state.setTotalNodeRuns(Math.max(0, state.getTotalNodeRuns() - 1));
         state.getPending().add(0, token);
         persistence.suspendForWait(
-                execution.getExecutionId(), runnerId, fencingToken, run, resumeTime,
+                execution.getExecutionId(), runnerId, fencingToken, run,
+                resolution.targetAt(),
                 writeJson(state), plan.getContentHash());
         return null;
     }

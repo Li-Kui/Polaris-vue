@@ -1597,27 +1597,6 @@ public class BuiltInWorkflowNodeConfig {
     }
 
     @Bean
-    public WorkflowNodeHandler waitWorkflowNodeHandler() {
-        ObjectNode schema = JsonNodeFactory.instance.objectNode();
-        schema.put("type", "object");
-        schema.putArray("required").add("delaySeconds");
-        ObjectNode delay = schema.putObject("properties").putObject("delaySeconds");
-        delay.put("type", "integer");
-        delay.put("minimum", 1);
-        delay.put("maximum", 604800);
-        delay.put("description", "持久化等待秒数，不占用Worker线程");
-        schema.put("additionalProperties", false);
-        WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
-                "wait", "1.0", "定时等待", "control", schema,
-                JsonNodeFactory.instance.objectNode(), waitOutputSchema(),
-                WorkflowSideEffect.NONE, Set.of(),
-                Set.of(WorkflowNodeCapability.CANCELLABLE,
-                        WorkflowNodeCapability.MOCKABLE,
-                        WorkflowNodeCapability.CHECKPOINT_SAFE));
-        return markerHandler(descriptor);
-    }
-
-    @Bean
     public WorkflowNodeHandler subWorkflowNodeHandler() {
         ObjectNode schema = JsonNodeFactory.instance.objectNode();
         schema.put("type", "object");
@@ -1956,16 +1935,6 @@ public class BuiltInWorkflowNodeConfig {
                 .add("rejectedCount").add("stageCount").add("startedAt")
                 .add("completedStageCount").add("totalStageCount")
                 .add("decisionSummary").add("finishedAt");
-        return schema;
-    }
-
-    private ObjectNode waitOutputSchema() {
-        ObjectNode schema = objectSchema();
-        ObjectNode properties = schema.putObject("properties");
-        properties.putObject("status").put("type", "string")
-                .putArray("enum").add("RESUMED");
-        properties.putObject("resumedAt").put("type", "integer");
-        schema.putArray("required").add("status").add("resumedAt");
         return schema;
     }
 

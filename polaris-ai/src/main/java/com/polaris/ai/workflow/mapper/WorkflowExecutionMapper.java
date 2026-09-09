@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.Date;
 import java.util.List;
 
 /** 支持租约和隔离令牌操作的工作流持久化执行数据访问接口。 */
@@ -23,6 +24,11 @@ public interface WorkflowExecutionMapper extends BaseMapper<WorkflowExecution> {
     @Select("SELECT * FROM ai_workflow_execution WHERE execution_id = #{executionId} FOR UPDATE")
     WorkflowExecution selectByExecutionIdForUpdate(@Param("executionId") String executionId);
 
+    @Select("SELECT MIN(resume_time) FROM ai_workflow_execution "
+            + "WHERE cancel_requested = 0 AND status IN ('WAITING_TIMER','WAITING_EVENT') "
+            + "AND resume_time IS NOT NULL")
+    Date selectNextResumeTime();
+
     @Select("SELECT * FROM ai_workflow_execution "
             + "WHERE idempotency_scope = #{scope} AND idempotency_key = #{key} LIMIT 1")
     WorkflowExecution selectByIdempotency(
@@ -30,20 +36,20 @@ public interface WorkflowExecutionMapper extends BaseMapper<WorkflowExecution> {
 
     @Select("SELECT execution_id FROM ai_workflow_execution "
             + "WHERE cancel_requested = 0 AND (status = 'QUEUED' "
-            + "OR (status = 'WAITING_EVENT' AND resume_time <= NOW()) "
+            + "OR (status IN ('WAITING_TIMER','WAITING_EVENT') AND resume_time <= NOW()) "
             + "OR (status IN ('RUNNING','RECOVERING') AND lease_until < NOW())) "
-            + "ORDER BY CASE WHEN status IN ('QUEUED','WAITING_EVENT') THEN 0 ELSE 1 END, create_time, id LIMIT #{limit}")
+            + "ORDER BY CASE WHEN status IN ('QUEUED','WAITING_TIMER','WAITING_EVENT') THEN 0 ELSE 1 END, create_time, id LIMIT #{limit}")
     List<String> selectClaimCandidates(@Param("limit") int limit);
 
     @Update("UPDATE ai_workflow_execution SET "
-            + "recovery_count = recovery_count + CASE WHEN status IN ('QUEUED','WAITING_EVENT') THEN 0 ELSE 1 END, "
-            + "status = CASE WHEN status IN ('QUEUED','WAITING_EVENT') THEN 'RUNNING' ELSE 'RECOVERING' END, "
+            + "recovery_count = recovery_count + CASE WHEN status IN ('QUEUED','WAITING_TIMER','WAITING_EVENT') THEN 0 ELSE 1 END, "
+            + "status = CASE WHEN status IN ('QUEUED','WAITING_TIMER','WAITING_EVENT') THEN 'RUNNING' ELSE 'RECOVERING' END, "
             + "runner_id = #{runnerId}, fencing_token = fencing_token + 1, "
             + "lease_until = DATE_ADD(NOW(), INTERVAL #{leaseSeconds} SECOND), "
             + "resume_time = NULL, "
             + "heartbeat_time = NOW(), start_time = COALESCE(start_time, NOW()) "
             + "WHERE execution_id = #{executionId} AND cancel_requested = 0 AND "
-            + "(status = 'QUEUED' OR (status = 'WAITING_EVENT' AND resume_time <= NOW()) "
+            + "(status = 'QUEUED' OR (status IN ('WAITING_TIMER','WAITING_EVENT') AND resume_time <= NOW()) "
             + "OR (status IN ('RUNNING','RECOVERING') AND lease_until < NOW()))")
     int claimLease(
             @Param("executionId") String executionId,
@@ -73,7 +79,7 @@ public interface WorkflowExecutionMapper extends BaseMapper<WorkflowExecution> {
     @Update("UPDATE ai_workflow_execution SET cancel_requested = 1, status = 'CANCELLED', "
             + "finish_time = NOW(), lease_until = NULL, resume_time = NULL, runner_id = NULL "
             + "WHERE execution_id = #{executionId} "
-            + "AND status IN ('WAITING_APPROVAL','WAITING_EVENT','NEEDS_ATTENTION')")
+            + "AND status IN ('WAITING_APPROVAL','WAITING_TIMER','WAITING_EVENT','NEEDS_ATTENTION')")
     int cancelWhileWaiting(@Param("executionId") String executionId);
 
     @Update("UPDATE ai_workflow_execution SET status = 'QUEUED', runner_id = NULL, "

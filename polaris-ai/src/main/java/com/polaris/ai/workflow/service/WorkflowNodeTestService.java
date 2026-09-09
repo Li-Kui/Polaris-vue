@@ -14,6 +14,7 @@ import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import com.polaris.ai.workflow.domain.WorkflowNodeTestAudit;
 import com.polaris.ai.workflow.domain.WorkflowNodeTestRun;
 import com.polaris.ai.workflow.mapper.WorkflowNodeTestRunMapper;
+import com.polaris.ai.workflow.node.WorkflowWaitPolicy;
 import com.polaris.ai.workflow.registry.WorkflowNodeRegistry;
 import com.polaris.ai.workflow.runtime.*;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
@@ -43,7 +44,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private static final int MAX_TIMEOUT_SECONDS = 120;
     private static final int MAX_SCHEMA_SAMPLES = 20;
     private static final Set<String> ENGINE_CONTROL_NODES = Set.of(
-            "approval", "wait", "sub_workflow", "loop");
+            "approval", "sub_workflow", "loop");
     private static final Set<String> CHAIN_CONTROL_NODES = Set.of(
             "approval", "wait", "sub_workflow", "condition", "parallel",
             "join", "loop", "llm_classifier");
@@ -429,6 +430,10 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             Thread.currentThread().interrupt();
             return cancelled(testRunId, prepared, elapsedMs(startedAt), toolAudit.usage());
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof WorkflowWaitPolicy.WaitException waitException) {
+                return failed(testRunId, prepared, waitException.code(),
+                        waitException.getMessage(), elapsedMs(startedAt), toolAudit.usage());
+            }
             return failed(testRunId, prepared, WorkflowErrorCode.INTERNAL_ERROR.name(),
                     safeMessage(e.getCause()), elapsedMs(startedAt), toolAudit.usage());
         }
