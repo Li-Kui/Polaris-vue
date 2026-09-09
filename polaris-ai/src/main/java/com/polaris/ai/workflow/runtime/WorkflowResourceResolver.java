@@ -54,7 +54,8 @@ public class WorkflowResourceResolver {
                         : bindingMapper.selectActive(
                                 ownerType, ownerId, "WORKFLOW", definitionId, environment,
                                 reference.getKind(), reference.getKey());
-                if (binding == null) {
+                // 中台资源必须由当前工作流显式绑定；仅管理端系统工作流保留 OWNER 默认值。
+                if (binding == null && tenantId == null) {
                     binding = bindingMapper.selectActive(
                             ownerType, ownerId, "OWNER", ownerId, environment,
                             reference.getKind(), reference.getKey());

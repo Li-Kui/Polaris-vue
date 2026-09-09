@@ -3,6 +3,7 @@ import {ElMessage} from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import {getPlatformToken, getToken} from '@/utils/auth'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 import {isHttp, isPathMatch} from '@/utils/validate'
 import {isRelogin} from '@/utils/request'
 import useUserStore from '@/store/modules/user'
@@ -25,7 +26,7 @@ router.beforeEach(async (to, from) => {
   // ==========================================
   // 分支 1：中台控制台路由处理 (/platform/login 或 /platform/console/**)
   // ==========================================
-  const isPlatformRoute = to.path === '/platform/login' || to.path.startsWith('/platform/console')
+  const isPlatformRoute = isPlatformConsolePath(to.path)
   if (isPlatformRoute) {
     const platformToken = getPlatformToken()
     if (to.path === '/platform/login') {

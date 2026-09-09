@@ -683,6 +683,7 @@ import {
   updateModel
 } from '@/api/ai/model'
 import {deptTreeSelect} from '@/api/system/user'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 import {
   ChatDotRound,
   ChatLineRound,
@@ -835,7 +836,7 @@ export default {
   },
   methods: {
     isPlatformMode() {
-      return this.$route && this.$route.path && this.$route.path.startsWith('/platform')
+      return this.$route && isPlatformConsolePath(this.$route.path)
     },
     isEmbeddingModel(modelName) {
       if (!modelName) return false

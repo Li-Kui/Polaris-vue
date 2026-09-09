@@ -1,4 +1,5 @@
 import Cookies from 'js-cookie'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 
 const TokenKey = 'Admin-Token'
 const PlatformTokenKey = 'Platform-Token'
@@ -57,7 +58,7 @@ function isJwtExpired(token) {
 export function getAuthHeaders() {
   const platformToken = getPlatformToken()
   const adminToken = getToken()
-  const isPlatform = window.location.pathname.startsWith('/platform')
+  const isPlatform = isPlatformConsolePath(window.location.pathname)
 
   // 两套控制台严格使用各自令牌，防止中台会话失效后回退到管理端身份。
   if (isPlatform) {

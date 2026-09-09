@@ -15,7 +15,7 @@
           <el-option label="生产 PROD" value="PROD" />
         </el-select>
         <el-button :loading="loading" icon="Refresh" @click="loadBindings">刷新</el-button>
-        <el-button v-if="canEdit" type="primary" icon="Plus" @click="openCreate">新增绑定</el-button>
+        <el-button v-if="canCreate" type="primary" icon="Plus" @click="openCreate">新增绑定</el-button>
       </div>
     </div>
 
@@ -171,6 +171,11 @@ export default {
     canEdit: {
       type: Boolean,
       default: false
+    },
+    appearance: {
+      type: String,
+      default: 'admin',
+      validator: value => ['admin', 'platform'].includes(value)
     }
   },
   emits: ['back'],
@@ -188,6 +193,10 @@ export default {
     }
   },
   computed: {
+    canCreate() {
+      // 中台只能在具体工作流编辑器中建立 WORKFLOW 绑定。
+      return this.canEdit && this.appearance === 'admin'
+    },
     selectedResource() {
       return this.dialogResources.find(item => item.resourceId === this.form.resourceId) || null
     }
@@ -296,7 +305,8 @@ export default {
       return resource.description || details.modelName || details.type || details.baseUrl || ''
     },
     scopeLabel(scopeType) {
-      return scopeType === 'WORKFLOW' ? '当前工作流' : '租户共享'
+      if (scopeType === 'WORKFLOW') return '当前工作流'
+      return this.appearance === 'platform' ? '待迁移共享绑定' : '系统共享'
     },
     resourceKindLabel(resourceKind) {
       const labels = {

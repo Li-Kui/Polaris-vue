@@ -1,6 +1,7 @@
 import axios from 'axios'
 import {ElLoading, ElMessage, ElMessageBox, ElNotification} from 'element-plus'
 import {getAuthHeaders, removePlatformToken} from '@/utils/auth'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 import errorCode from '@/utils/errorCode'
 import {blobValidate, tansParams} from '@/utils/ruoyi'
 import cache from '@/plugins/cache'
@@ -28,7 +29,7 @@ function showReloginDialog() {
     cancelButtonText: '取消',
     type: 'warning'
   }).then(() => {
-    if (location.pathname.startsWith('/platform')) {
+    if (isPlatformConsolePath(location.pathname)) {
       import('@/store/modules/platformUser').then(m => {
         m.default().$reset()
         removePlatformToken()

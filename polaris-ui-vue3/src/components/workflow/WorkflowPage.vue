@@ -50,6 +50,7 @@
     <WorkflowResourceBindings
       v-else
       :can-edit="canEdit"
+      :appearance="appearance"
       @back="backToList"
     />
 

@@ -61,7 +61,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where d.id = #{id}
         <choose>
             <when test="tenantId != null">
-                and (d.tenant_id = #{tenantId} or d.tenant_id is null)
+                and d.tenant_id = #{tenantId}
             </when>
             <otherwise>
                 and d.tenant_id is null
@@ -74,13 +74,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <include refid="selectPlatformDatasourceVo"/>
         <choose>
             <when test="tenantId != null">
-                where d.tenant_id = #{tenantId} or d.tenant_id is null
+                where d.tenant_id = #{tenantId}
             </when>
             <otherwise>
                 where d.tenant_id is null
             </otherwise>
         </choose>
-        order by case when d.tenant_id is null then 1 else 0 end, d.ds_name, d.id
+        order by d.ds_name, d.id
     </select>
 
     <select id="selectList" parameterType="com.polaris.platform.domain.PlatformDatasource" resultMap="PlatformDatasourceResult">

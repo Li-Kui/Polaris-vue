@@ -139,7 +139,8 @@ public class WorkflowNodeSchemaService implements WorkflowNodeSchemaApplicationF
             }
             WorkflowResourceBinding binding = bindingMapper.selectActive(
                     ownerType, ownerId, "WORKFLOW", definition.id(), environment, kind, key);
-            if (binding == null) {
+            // 中台资源必须由当前工作流显式绑定；仅管理端系统工作流保留 OWNER 默认值。
+            if (binding == null && definition.tenantId() == null) {
                 binding = bindingMapper.selectActive(
                         ownerType, ownerId, "OWNER", ownerId, environment, kind, key);
             }

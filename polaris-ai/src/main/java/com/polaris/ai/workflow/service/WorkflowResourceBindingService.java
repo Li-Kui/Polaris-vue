@@ -57,7 +57,12 @@ public class WorkflowResourceBindingService
                 new LambdaQueryWrapper<WorkflowResourceBinding>()
                         .eq(WorkflowResourceBinding::getOwnerType, scope.ownerType())
                         .eq(WorkflowResourceBinding::getOwnerId, scope.ownerId());
-        if (definitionId != null) {
+        if (CallerUtils.isPlatformMode()) {
+            query.eq(WorkflowResourceBinding::getScopeType, "WORKFLOW");
+            if (definitionId != null) {
+                query.eq(WorkflowResourceBinding::getScopeId, definitionId);
+            }
+        } else if (definitionId != null) {
             query.and(wrapper -> wrapper
                     .and(shared -> shared
                             .eq(WorkflowResourceBinding::getScopeType, "OWNER")
@@ -88,6 +93,9 @@ public class WorkflowResourceBindingService
         String key = normalizeKey(command.resourceKey());
         String resourceId = normalizeResourceId(command.resourceId());
         String scopeType = normalizeScopeType(command.scopeType(), command.definitionId());
+        if (CallerUtils.isPlatformMode() && !"WORKFLOW".equals(scopeType)) {
+            throw new ServiceException("中台资源必须绑定到具体工作流，不能创建租户共享绑定");
+        }
         Long scopeId = scopeId(scopeType, command.definitionId(), scope);
         validateResource(scope.tenantId(), environment, kind, key, resourceId);
         if (command.id() == null) {
