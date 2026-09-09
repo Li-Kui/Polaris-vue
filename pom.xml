@@ -33,7 +33,9 @@
         <jaxb-api.version>2.3.1</jaxb-api.version>
         <knife4j.version>4.5.0</knife4j.version>
         <lombok.version>1.18.30</lombok.version>
-        <langgraph4j.version>1.8.20</langgraph4j.version>
+        <sensitive-word.version>0.29.5</sensitive-word.version>
+        <houbb-pinyin.version>0.4.0</houbb-pinyin.version>
+        <aliyun-green.version>3.3.3</aliyun-green.version>
     </properties>
 
     <!-- 依赖声明 -->
@@ -187,21 +189,18 @@
                 <version>${polaris.version}</version>
             </dependency>
 
-            <!-- LangGraph4j 依赖管理 (精准声明，防止 BOM 污染全局通用 Jackson 版本) -->
+            <!-- ai核心引擎模块 -->
             <dependency>
-                <groupId>org.bsc.langgraph4j</groupId>
-                <artifactId>langgraph4j-core</artifactId>
-                <version>${langgraph4j.version}</version>
+                <groupId>com.polaris</groupId>
+                <artifactId>polaris-ai-core</artifactId>
+                <version>${polaris.version}</version>
             </dependency>
+
+            <!-- 中台核心模块 -->
             <dependency>
-                <groupId>org.bsc.langgraph4j</groupId>
-                <artifactId>langgraph4j-langchain4j</artifactId>
-                <version>${langgraph4j.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.bsc.langgraph4j</groupId>
-                <artifactId>langgraph4j-mysql-saver</artifactId>
-                <version>${langgraph4j.version}</version>
+                <groupId>com.polaris</groupId>
+                <artifactId>polaris-platform-core</artifactId>
+                <version>${polaris.version}</version>
             </dependency>
 
         </dependencies>
@@ -215,6 +214,8 @@
         <module>polaris-generator</module>
         <module>polaris-common</module>
         <module>polaris-ai</module>
+        <module>polaris-ai-core</module>
+        <module>polaris-platform-core</module>
     </modules>
     <packaging>pom</packaging>
 

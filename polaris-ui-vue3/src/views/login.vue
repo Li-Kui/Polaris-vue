@@ -86,8 +86,8 @@
 
             <!-- 流光文字 (自适应漂移) -->
             <div class="visual-content float-animation-delayed">
-              <h2 class="visual-title-shimmer">北辰 · Polaris<br/>智能对话与数据分析</h2>
-              <p class="visual-desc">基于 LangChain4j 构建的全新一代人工智能对话、知识库检索与数据分析可视化管理平台。打破大模型与业务数据壁垒，赋能企业智能化生产力。</p>
+              <h2 class="visual-title-shimmer">北辰 · Polaris<br/>AI 平台运营与系统管理</h2>
+              <p class="visual-desc">面向系统管理员的一站式管理后台，统一管理租户、模型、知识库、智能体、工作流与平台资源，保障企业级 AI 服务稳定运行。</p>
             </div>
             
             <div class="visual-footer">
@@ -112,10 +112,10 @@
                   <!-- 安全验证芯片 HUD 贴片 -->
                   <div class="secure-hud-badge">
                     <span class="badge-dot"></span>
-                    <span class="badge-txt">POLARIS PLATFORM LOGIN</span>
+                    <span class="badge-txt">POLARIS ADMIN CONSOLE</span>
                   </div>
-                  <h3 class="form-title">用户登录</h3>
-                  <p class="form-subtitle">北辰 (Polaris) · 智能大模型对话与数据分析管理平台</p>
+                  <h3 class="form-title">管理端登录</h3>
+                  <p class="form-subtitle">北辰 (Polaris) · 系统管理后台</p>
                 </div>
 
                 <el-form ref="formRef" :model="loginForm" :rules="loginRules" class="modern-form">
@@ -179,7 +179,12 @@
                   </el-form-item>
                 </el-form>
 
-
+                <div class="portal-switch-entry">
+                  <span>租户用户？</span>
+                  <router-link to="/platform/login" class="platform-entry-link">
+                    进入开放中台 <span aria-hidden="true">→</span>
+                  </router-link>
+                </div>
               </div>
             </div>
           </div>
@@ -1758,6 +1763,36 @@ body, .login-container {
   
   .submit-btn-glow-container:hover & {
     opacity: 0.6;
+  }
+}
+
+.portal-switch-entry {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 18px;
+  font-size: 12px;
+  font-weight: 600;
+
+  .theme-light & { color: #64748b; }
+  .theme-dark & { color: #94a3b8; }
+}
+
+.platform-entry-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  transition: color 0.2s, transform 0.2s;
+
+  .theme-light & { color: #4f46e5; }
+  .theme-dark & { color: #38bdf8; }
+
+  &:hover {
+    transform: translateX(2px);
+    .theme-light & { color: #4338ca; }
+    .theme-dark & { color: #7dd3fc; }
   }
 }
 

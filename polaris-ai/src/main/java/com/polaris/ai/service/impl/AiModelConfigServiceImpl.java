@@ -35,6 +35,12 @@ public class AiModelConfigServiceImpl extends ServiceImpl<AiModelConfigMapper, A
     }
 
     @Override
+    public List<AiModelConfig> selectAvailableModelConfigsByType(String modelType, Long deptId, Boolean isAdmin)
+    {
+        return modelConfigMapper.selectAvailableModelConfigsByType(modelType, deptId, isAdmin);
+    }
+
+    @Override
     public AiModelConfig selectModelConfigById(Long id)
     {
         return modelConfigMapper.selectModelConfigById(id);

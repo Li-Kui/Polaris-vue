@@ -28,6 +28,11 @@ public interface IAiKnowledgeService extends IService<AiKnowledgeBase>
     AiKnowledgeBase selectKnowledgeBaseById(Long id);
 
     /**
+     * 根据当前用户数据范围查询知识库。
+     */
+    AiKnowledgeBase selectAccessibleKnowledgeBaseById(Long id);
+
+    /**
      * 新增知识库
      */
     int insertKnowledgeBase(AiKnowledgeBase kb);
@@ -74,4 +79,14 @@ public interface IAiKnowledgeService extends IService<AiKnowledgeBase>
      * 异步解析文档并向量化
      */
     void importDocumentAsync(Long docId);
+
+    /**
+     * 在新 collection 中重建整个知识库，成功后切换生效版本。
+     */
+    void rebuildKnowledgeBaseAsync(Long knowledgeBaseId);
+
+    /**
+     * 标记所有绑定指定向量模型的知识库索引为过期。
+     */
+    int markIndexesStaleByEmbeddingModelId(Long modelConfigId, String reason);
 }

@@ -27,6 +27,10 @@ public class AiMessage
     @Schema(description = "所属会话 ID，关联 ai_conversation 表")
     private Long conversationId;
 
+    /** 关联的工作流执行 ID，用于精确更新流式回复。 */
+    @Schema(description = "关联的工作流执行 ID")
+    private String workflowExecutionId;
+
     /**
      * 消息角色
      * user      —— 用户发送的消息
@@ -58,6 +62,26 @@ public class AiMessage
     /** 附件解析出的内容 */
     @Schema(description = "附件解析出的内容")
     private String fileContent;
+
+    /** 私有附件 Token 列表（逗号分隔） */
+    @Schema(description = "私有附件 Token 列表")
+    private String attachmentTokens;
+
+    /**
+     * 安全检测状态
+     * SAFE —— 合规
+     * INTERRUPTED_BLOCKED —— 流式输出中途被阻断
+     */
+    @Schema(description = "安全检测状态：SAFE, INTERRUPTED_BLOCKED")
+    private String moderationStatus;
+
+    /** 安全检测事件ID */
+    @Schema(description = "安全检测事件ID")
+    private Long moderationEventId;
+
+    /** 生效的词库版本号 */
+    @Schema(description = "生效的词库版本号")
+    private Long moderationVersion;
 
     /** 消息创建时间 */
     @Schema(description = "消息创建时间")

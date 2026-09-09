@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://polaris.local/schema/workflow-event.schema.json",
+  "title": "Polaris Workflow Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["eventSchemaVersion", "executionId", "sequence", "type", "timestamp", "payload"],
+  "properties": {
+    "eventSchemaVersion": { "const": "2.0" },
+    "executionId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": {
+      "enum": [
+        "EXECUTION_QUEUED", "EXECUTION_STARTED", "EXECUTION_WAITING",
+        "EXECUTION_RECOVERING", "EXECUTION_NEEDS_ATTENTION", "EXECUTION_SUCCEEDED", "EXECUTION_FAILED",
+        "EXECUTION_CANCELLED", "EXECUTION_REJECTED", "NODE_STARTED",
+        "NODE_OUTPUT", "NODE_RETRY_SCHEDULED", "NODE_SUCCEEDED", "NODE_FAILED",
+        "NODE_SKIPPED", "APPROVAL_CREATED", "APPROVAL_DECIDED", "USAGE_RECORDED"
+      ]
+    },
+    "nodeRunId": { "type": "string", "maxLength": 64 },
+    "nodeId": { "type": "string", "maxLength": 128 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object", "additionalProperties": true }
+  }
+}

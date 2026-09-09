@@ -81,6 +81,18 @@
             <span class="user-name-text">{{ scope.row.createBy || 'admin' }}</span>
           </template>
         </el-table-column>
+        <el-table-column label="美化状态" prop="refineStatus" width="110" align="center">
+          <template #default="scope">
+            <el-tag
+              size="small"
+              effect="plain"
+              :type="refineStatusType(scope.row.refineStatus)"
+              :title="scope.row.refineError || ''"
+            >
+              {{ refineStatusLabel(scope.row.refineStatus) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" align="center" width="240" fixed="right">
           <template #default="scope">
             <el-button 
@@ -136,6 +148,15 @@
             </span>
             <span class="drawer-title">{{ cleanDialogTitle }}</span>
             <el-tag size="small" type="primary" effect="plain" class="drawer-badge">高质感数据大屏</el-tag>
+            <el-tag
+              v-if="currentReport.refineStatus"
+              size="small"
+              effect="plain"
+              :type="refineStatusType(currentReport.refineStatus)"
+              :title="currentReport.refineError || ''"
+            >
+              {{ refineStatusLabel(currentReport.refineStatus) }}
+            </el-tag>
           </div>
           <div class="drawer-actions" style="display: flex; align-items: center; gap: 12px; position: relative; z-index: 50;">
             <el-button type="primary" size="small" icon="Download" @click="handlePrint">
@@ -169,7 +190,7 @@
 
 <script>
 import * as echarts from 'echarts'
-import {delReport, listReports, refineReport, updateReport} from '@/api/ai/report'
+import {delReport, getRefineStatus, getReport, listReports, refineReportById} from '@/api/ai/report'
 import PolarisReportEngine from './report/PolarisReportEngine.vue'
 
 export default {
@@ -189,19 +210,13 @@ export default {
         reportTitle: undefined,
         agentCode: undefined
       },
-      renderEngineMode: 'engine',
       previewVisible: false,
       currentReport: {},
       reportContent: '',
       reportTitle: '',
-      reportSections: [],
-      reportStats: null,
-      hasChartData: false,
-      chartConfig: null,
-      activeChartType: 'bar',
-      reportChartInstance: null,
-      refining: false,
       refiningId: null,
+      refinePollTimer: null,
+      refinePollCancel: null,
       refinedSchema: null
     }
   },
@@ -214,10 +229,25 @@ export default {
   created() {
     this.getList()
   },
-  unmounted() {
-    this.destroyChart()
-  },
   methods: {
+    refineStatusLabel(status) {
+      const labels = {
+        NONE: '未美化',
+        RUNNING: '美化中',
+        SUCCESS: '已完成',
+        FAILED: '失败重试'
+      }
+      return labels[status] || '未美化'
+    },
+    refineStatusType(status) {
+      const types = {
+        NONE: 'info',
+        RUNNING: 'warning',
+        SUCCESS: 'success',
+        FAILED: 'danger'
+      }
+      return types[status] || 'info'
+    },
     handleOpenDEADemo() {
       this.currentReport = {
         id: 'DEA-2026-DEMO',
@@ -329,6 +359,10 @@ export default {
       this.handleQuery()
     },
     handleDelete(row) {
+      if (this.refiningId === row.id) {
+        this.clearRefinePollTimer()
+        this.refiningId = null
+      }
       this.$confirm(`确认要删除标题为"${row.reportTitle}"的分析报告吗？`, '警告', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
@@ -349,111 +383,136 @@ export default {
     async handlePreview(row) {
       if (this.refiningId !== null) return
 
-      this.currentReport = row
-      this.refinedSchema = null
-      this.parseAndInitReportData(row.reportContent)
-
-      // 1. 若当前报告已存在持久化的美化结果 (refinedSchema 字段非空)，直接快速呈现
-      if (row.refinedSchema) {
-        try {
-          let schema = typeof row.refinedSchema === 'object' ? row.refinedSchema : JSON.parse(row.refinedSchema)
-          this.applyRefinedSchema(schema)
-          this.previewVisible = true
-          if (this.hasChartData) {
-            this.$nextTick(() => {
-              this.initReportChart()
-            })
-          }
-          return
-        } catch (e) {
-          console.warn('解析已保存的美化字段失败，重新触发 AI 智能美化:', e)
-        }
-      }
-
-      // 2. 若未生成过美化数据，则数据栏显示“AI美化中...”，调用大模型美化并持久化写回数据库
+      this.clearRefinePollTimer()
       this.refiningId = row.id
-
-      this.$notify({
-        title: 'AI 深度重塑美化中...',
-        message: `正在为您智能提炼分析《${row.reportTitle || '报告'}》，构建结构化看板与图表...`,
-        type: 'info',
-        duration: 3500
-      })
+      this.currentReport = {...row}
+      this.refinedSchema = null
+      this.reportContent = ''
+      this.previewVisible = true
 
       try {
-        if (this.reportContent) {
-          const res = await refineReport(this.reportContent)
-          if (res.code === 200 && res.data) {
-            let schema = null
-            if (typeof res.data === 'object') {
-              schema = res.data
-            } else {
-              let cleanText = String(res.data)
-              const firstBrace = cleanText.indexOf('{')
-              const lastBrace = cleanText.lastIndexOf('}')
-              if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-                cleanText = cleanText.substring(firstBrace, lastBrace + 1)
-              }
-              schema = JSON.parse(cleanText)
-            }
-
-            this.applyRefinedSchema(schema)
-
-            // 持久化保存美化结果到数据库的 refinedSchema 字段
-            const schemaStr = JSON.stringify(schema)
-            row.refinedSchema = schemaStr
-            updateReport({
-              id: row.id,
-              refinedSchema: schemaStr
-            }).catch(err => {
-              console.error('保存美化结果字段到数据库失败:', err)
-            })
-          }
+        const detailRes = await getReport(row.id)
+        if (detailRes.code !== 200 || !detailRes.data) {
+          throw new Error(detailRes.msg || '报告详情加载失败')
         }
+
+        this.currentReport = detailRes.data
+        this.parseAndInitReportData(this.currentReport.reportContent)
+
+        const cachedSchema = this.parseCachedSchema(this.currentReport)
+        if (cachedSchema && this.currentReport.refineStatus === 'SUCCESS') {
+          this.applyRefinedSchema(cachedSchema)
+          return
+        }
+
+        this.$notify({
+          title: 'AI 深度重塑美化中...',
+          message: `报告原文已打开，正在后台生成《${this.currentReport.reportTitle || '报告'}》的结构化看板。`,
+          type: 'info',
+          duration: 3500
+        })
+
+        const taskRes = await refineReportById(this.currentReport.id)
+        if (taskRes.code !== 200 || !taskRes.data) {
+          throw new Error(taskRes.msg || 'AI 美化任务创建失败')
+        }
+
+        this.applyRefineStatus(taskRes.data)
+        if (taskRes.data.status === 'SUCCESS' && taskRes.data.schema) {
+          this.applyRefinedSchema(taskRes.data.schema)
+          return
+        }
+        if (taskRes.data.status === 'FAILED') {
+          throw new Error(taskRes.data.error || 'AI 美化失败')
+        }
+        await this.pollRefineStatus(this.currentReport.id)
       } catch (err) {
-        console.warn('AI 重塑处理异常，降级展示基础图表与 Markdown 内容:', err)
+        console.warn('报告中心 AI 美化处理异常，保留原始报告展示:', err)
+        this.currentReport.refineStatus = 'FAILED'
+        this.currentReport.refineError = err.message || 'AI 美化失败'
+        this.$message.warning(`${this.currentReport.refineError}，可再次点击重试`)
       } finally {
+        this.clearRefinePollTimer()
         this.refiningId = null
-        this.previewVisible = true
+      }
+    },
 
-        if (this.hasChartData) {
-          this.$nextTick(() => {
-            this.initReportChart()
-          })
+    applyRefineStatus(statusData) {
+      if (!statusData || typeof statusData !== 'object') return
+      this.currentReport.refineStatus = statusData.status || this.currentReport.refineStatus || 'NONE'
+      this.currentReport.refineError = statusData.error || ''
+      this.currentReport.refineStartedAt = statusData.refineStartedAt || this.currentReport.refineStartedAt
+      this.currentReport.refinedAt = statusData.refinedAt || this.currentReport.refinedAt
+      this.currentReport.refineSchemaVersion = statusData.schemaVersion || this.currentReport.refineSchemaVersion
+      this.currentReport.refinePromptVersion = statusData.promptVersion || this.currentReport.refinePromptVersion
+    },
+
+    async pollRefineStatus(reportId) {
+      const startedAt = Date.now()
+      while (this.previewVisible && this.currentReport.id === reportId && Date.now() - startedAt < 90000) {
+        await new Promise(resolve => {
+          this.refinePollCancel = resolve
+          this.refinePollTimer = setTimeout(resolve, 1500)
+        })
+        this.refinePollCancel = null
+        this.refinePollTimer = null
+        if (!this.previewVisible || this.currentReport.id !== reportId) return
+
+        const statusRes = await getRefineStatus(reportId)
+        if (statusRes.code !== 200 || !statusRes.data) {
+          throw new Error(statusRes.msg || 'AI 美化状态查询失败')
         }
+        this.applyRefineStatus(statusRes.data)
+        if (statusRes.data.status === 'SUCCESS') {
+          const schema = statusRes.data.schema || this.parseCachedSchema({refinedSchema: statusRes.data.refinedSchema})
+          if (!schema) throw new Error('AI 美化结果为空或格式无效')
+          this.applyRefinedSchema(schema)
+          this.$notify({
+            title: '✨ AI 重塑美化完成',
+            message: '已生成结构化摘要、指标和行动计划看板。',
+            type: 'success',
+            duration: 3500
+          })
+          return
+        }
+        if (statusRes.data.status === 'FAILED') {
+          throw new Error(statusRes.data.error || 'AI 美化失败')
+        }
+      }
+      throw new Error('AI 美化处理超时，请稍后重试')
+    },
+
+    clearRefinePollTimer() {
+      if (this.refinePollTimer) {
+        clearTimeout(this.refinePollTimer)
+        this.refinePollTimer = null
+      }
+      if (this.refinePollCancel) {
+        this.refinePollCancel()
+        this.refinePollCancel = null
       }
     },
 
     applyRefinedSchema(schema) {
-      if (!schema) return
-      this.refinedSchema = schema
-
-      // 更新 KPI 统计卡片
-      if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
-        this.reportStats = schema.kpiCards.map(k => ({
-          label: k.label || k.title || '核心指标',
-          value: k.value || '0',
-          emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
-          color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
-        }))
+      if (schema && typeof schema === 'object') {
+        this.refinedSchema = schema
       }
+    },
 
-      // 更新 ECharts 动态数据图表
-      if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
-        const viz = schema.visualizations[0]
-        if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
-          this.hasChartData = true
-          this.chartConfig = {
-            xAxisData: viz.chartData.categories,
-            series: viz.chartData.series.map(s => ({
-              name: s.name,
-              type: viz.chartType === 'line' ? 'line' : 'bar',
-              data: s.data,
-              barMaxWidth: 30
-            })),
-            legendData: viz.chartData.series.map(s => s.name)
-          }
-        }
+    parseCachedSchema(report) {
+      if (!report || !report.refinedSchema) {
+        return null
+      }
+      try {
+        const schema = typeof report.refinedSchema === 'object'
+          ? report.refinedSchema
+          : JSON.parse(report.refinedSchema)
+        return schema && typeof schema === 'object' && !Array.isArray(schema)
+          ? schema
+          : null
+      } catch (error) {
+        console.warn('报告中心缓存的美化结果不是有效 JSON，将重新生成:', error)
+        return null
       }
     },
 
@@ -461,16 +520,12 @@ export default {
       if (!content) {
         this.reportContent = ''
         this.reportTitle = this.currentReport.reportTitle || '数据分析报告'
-        this.reportSections = []
-        this.reportStats = null
-        this.hasChartData = false
-        this.chartConfig = null
         return
       }
 
       let normalizedContent = content.replace(/\r\n/g, '\n').trim()
 
-      // 自动过滤报告最开头的 AI 客套话与闲聊前缀
+      // 只做原文规范化，不在报告中心重复解析 KPI 或生成图表。
       const firstHeadingIndex = normalizedContent.search(/^#{1,3}\s+/m)
       if (firstHeadingIndex > 0) {
         normalizedContent = normalizedContent.substring(firstHeadingIndex).trim()
@@ -478,491 +533,29 @@ export default {
         normalizedContent = normalizedContent.replace(/^(好的|收到|已为您|以下是为您|好的，已|好的，我|已成功|首先)[^\n\:]*[\:\：\n]\s*/gi, '').trim()
       }
 
-      // 清洗第一行可能重复的裸标题，避免大屏标题区与内容区重复
       const lines = normalizedContent.split('\n')
       if (lines.length > 0 && /^#{1,3}\s+/.test(lines[0])) {
         const extractedTitle = lines[0].replace(/^#{1,3}\s+/, '').replace(/[\📊\📈\🛡️\💰]/g, '').trim()
-        if (extractedTitle) {
-          this.reportTitle = extractedTitle
-        }
+        if (extractedTitle) this.reportTitle = extractedTitle
         lines.shift()
         normalizedContent = lines.join('\n').trim()
       }
 
       this.reportContent = normalizedContent
-
-      // 强力提取报告大标题
       const titleMatch = normalizedContent.match(/^#\s*([^\n]+)$/m)
-      if (titleMatch && titleMatch[1]) {
-        this.reportTitle = titleMatch[1].replace(/^[🛡️📊📑📋📝\s]+/, '').trim()
-      } else {
-        this.reportTitle = this.currentReport.reportTitle || '智能数据分析报告'
-      }
-
-      // 按二级/三级标题切割报告分段卡片
-      let cleanContent = normalizedContent.replace(/^#\s*[^\n]+\n?/, '').trim()
-
-      // 清除头部重复的报告元数据段落
-      for (let i = 0; i < 6; i++) {
-        cleanContent = cleanContent.replace(/^[\s\*\-\>]*[\*\_]*(报告生成时间|评估人|评估范围|生成时间|报告时间|报告编号|编制部门|报告作者|创建人|评估对象|评估周期)[\*\_]*\s*[\：\:][^\n]*\n?/gi, '').trim()
-      }
-
-      const rawSections = cleanContent.split(/(?=^#{2,3}\s*[^\n]+)/gm)
-      let parsedSections = rawSections
-        .map(s => s.trim())
-        .filter(s => {
-          if (!s) return false
-          if (!s.startsWith('#')) {
-            const textOnly = s.replace(/[\s\*\-\>\:\：\.\,\n]/g, '')
-            if (textOnly.length < 3) return false
-          }
-          return true
-        })
-
-      if (parsedSections.length === 0 && cleanContent.length > 0) {
-        parsedSections = [cleanContent]
-      }
-
-      this.reportSections = parsedSections
-
-      // 提取 KPI 数据卡片
-      this.reportStats = this.extractReportStats(normalizedContent)
-
-      // 解析 Markdown 表格数据生成 ECharts 可视化
-      const parsedChart = this.parseTablesForCharts(normalizedContent)
-      if (parsedChart) {
-        this.hasChartData = true
-        this.chartConfig = parsedChart
-        this.activeChartType = 'bar'
-      } else {
-        this.hasChartData = false
-        this.chartConfig = null
-      }
-    },
-
-    // 精准生成概览统计卡片数据
-    extractReportStats(content) {
-      if (!content) return null
-
-      const tables = this.extractStructuredTables(content)
-      const tableCount = tables.length
-
-      let totalRows = 0
-      tables.forEach(t => {
-        totalRows += t.length
-      })
-
-      const sectionMatches = content.match(/^#{1,3}\s*[^\n]+/gm)
-      const sectionCount = sectionMatches ? sectionMatches.length : (this.reportSections.length || 1)
-      const wordCount = content.replace(/\s+/g, '').length
-
-      return [
-        { label: '分析章节', value: sectionCount, emoji: '📚', color: 'indigo' },
-        { label: '分析字数', value: wordCount, emoji: '✍️', color: 'blue' },
-        { label: '数据表格', value: tableCount, emoji: '📊', color: 'emerald' },
-        { label: '数据行数', value: totalRows, emoji: '⚡', color: 'amber' }
-      ]
-    },
-
-    extractStructuredTables(content) {
-      const tables = this.extractStructuredTablesWithHeaders(content)
-      return tables.map(t => t.rows)
-    },
-
-    extractStructuredTablesWithHeaders(content) {
-      if (!content) return []
-
-      const lines = content.split('\n')
-      const tables = []
-      let i = 0
-
-      while (i < lines.length) {
-        let line = lines[i].trim()
-        if (line.startsWith('|') && i + 1 < lines.length) {
-          let nextLine = lines[i + 1].trim()
-          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
-            const headers = line.split('|').slice(1, -1).map(c => c.trim())
-            const tableRows = []
-            i += 2
-
-            while (i < lines.length) {
-              let dataLine = lines[i].trim()
-              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
-                const cells = dataLine.split('|').slice(1, -1).map(c => c.trim())
-                tableRows.push(cells)
-                i++
-              } else {
-                break
-              }
-            }
-            if (headers.length > 0 && tableRows.length > 0) {
-              tables.push({ headers, rows: tableRows })
-            }
-            continue
-          }
-        }
-        i++
-      }
-      return tables
-    },
-
-    // 解析数值对比表格给 ECharts
-    parseTablesForCharts(content) {
-      if (!content) return null
-
-      const tables = this.extractStructuredTablesWithHeaders(content)
-      if (!tables || tables.length === 0) return null
-
-      const validTables = tables.filter(t => {
-        if (t.headers.length < 2 || t.rows.length < 1) return false
-        let numericCellCount = 0
-        t.rows.forEach(row => {
-          row.slice(1).forEach(cell => {
-            const clean = cell.replace(/[^\d.-]/g, '')
-            if (clean !== '' && !isNaN(parseFloat(clean))) {
-              numericCellCount++
-            }
-          })
-        })
-        const totalNumCells = t.rows.length * (t.headers.length - 1)
-        const isHeaderLikeId = t.headers.some(h => /ID|序号|账号|用户名|IP|时间|日期/i.test(h))
-        return (numericCellCount / totalNumCells >= 0.35) && !isHeaderLikeId
-      })
-
-      if (validTables.length === 0) return null
-      const target = validTables[0]
-
-      const xAxisData = target.rows.map(row => row[0])
-      const seriesNames = target.headers.slice(1)
-
-      const seriesDataList = seriesNames.map((name, sIdx) => {
-        const data = target.rows.map(row => {
-          const cellVal = row[sIdx + 1] || '0'
-          const num = parseFloat(cellVal.replace(/[^\d.-]/g, ''))
-          return isNaN(num) ? 0 : num
-        })
-        return {
-          name: name,
-          type: 'bar',
-          data: data,
-          barMaxWidth: 30,
-          itemStyle: {
-            borderRadius: [4, 4, 0, 0]
-          }
-        }
-      })
-
-      return {
-        xAxisData,
-        series: seriesDataList,
-        legendData: seriesNames
-      }
-    },
-
-    initReportChart() {
-      if (!this.chartConfig) return
-      this.$nextTick(() => {
-        const chartDom = document.getElementById('pretty-report-chart')
-        if (!chartDom) return
-
-        if (this.reportChartInstance) {
-          this.reportChartInstance.dispose()
-        }
-
-        const isDark = document.documentElement.classList.contains('dark') ||
-                       document.body.classList.contains('dark') ||
-                       !!document.querySelector('.dark')
-
-        const textColor = isDark ? '#94a3b8' : '#64748b'
-        const splitLineColor = isDark ? 'rgba(255, 255, 255, 0.08)' : '#f1f5f9'
-        const axisLineColor = isDark ? 'rgba(255, 255, 255, 0.15)' : '#e2e8f0'
-
-        this.reportChartInstance = echarts.init(chartDom, isDark ? 'dark' : null)
-
-        const isPie = this.activeChartType === 'pie'
-
-        const option = {
-          backgroundColor: 'transparent',
-          tooltip: {
-            trigger: isPie ? 'item' : 'axis',
-            axisPointer: { type: 'shadow' }
-          },
-          legend: {
-            data: this.chartConfig.legendData,
-            bottom: 0,
-            icon: 'roundRect',
-            textStyle: { color: textColor }
-          },
-          grid: {
-            left: '3%',
-            right: '4%',
-            bottom: '14%',
-            top: '8%',
-            containLabel: true
-          },
-          xAxis: {
-            type: 'category',
-            data: this.chartConfig.xAxisData,
-            show: !isPie,
-            axisLabel: { show: !isPie, interval: 0, rotate: 15, color: textColor },
-            axisLine: { show: !isPie, lineStyle: { color: axisLineColor } },
-            axisTick: { show: !isPie }
-          },
-          yAxis: {
-            type: 'value',
-            show: !isPie,
-            axisLabel: { show: !isPie, color: textColor },
-            splitLine: { show: !isPie, lineStyle: { type: 'dashed', color: splitLineColor } },
-            axisTick: { show: !isPie }
-          },
-          color: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-          series: this.chartConfig.series.map(s => ({
-            ...s,
-            type: this.activeChartType
-          }))
-        }
-
-        this.reportChartInstance.setOption(option)
-        window.addEventListener('resize', this.resizeReportChart)
-      })
-    },
-
-    switchChartType() {
-      this.initReportChart()
-    },
-
-    resizeReportChart() {
-      if (this.reportChartInstance) {
-        this.reportChartInstance.resize()
-      }
-    },
-
-    destroyChart() {
-      window.removeEventListener('resize', this.resizeReportChart)
-      if (this.reportChartInstance) {
-        this.reportChartInstance.dispose()
-        this.reportChartInstance = null
-      }
+      this.reportTitle = titleMatch && titleMatch[1]
+        ? titleMatch[1].replace(/^[🛡️📊📑📋📝\s]+/, '').trim()
+        : (this.reportTitle || this.currentReport.reportTitle || '智能数据分析报告')
     },
 
     handleCloseReportModal() {
       this.previewVisible = false
+      this.clearRefinePollTimer()
     },
 
     handleDrawerClose(done) {
       this.handleCloseReportModal()
       if (done) done()
-    },
-
-    // 智能 Markdown 表格美化与状态 Badge 转化
-    parseAndFormatTables(text) {
-      if (!text) return text
-
-      const lines = text.split('\n')
-      const newLines = []
-      let i = 0
-
-      while (i < lines.length) {
-        let line = lines[i].trim()
-
-        if (line.startsWith('|') && i + 1 < lines.length) {
-          let nextLine = lines[i + 1].trim()
-
-          if (nextLine.startsWith('|') && /^[|\s-:]+$/.test(nextLine)) {
-            const rawHeaders = line.split('|').slice(1, -1).map(c => c.trim())
-            let tableHtml = '<div class="report-table-wrapper"><table class="report-table"><thead><tr>'
-            rawHeaders.forEach(th => {
-              tableHtml += `<th>${th}</th>`
-            })
-            tableHtml += '</tr></thead><tbody>'
-
-            i += 2
-
-            while (i < lines.length) {
-              let dataLine = lines[i].trim()
-              if (dataLine.startsWith('|') && dataLine.endsWith('|')) {
-                const cells = dataLine.split('|').slice(1, -1).map(c => {
-                  let cellVal = c.trim()
-                  if (cellVal === '是' || cellVal === '正常' || cellVal === '通过' || cellVal === '成功' || cellVal === '优' || cellVal === '完成') {
-                    return `<span class="report-badge badge-success">✅ ${cellVal}</span>`
-                  } else if (cellVal === '否' || cellVal === '异常' || cellVal === '失败' || cellVal === '高危' || cellVal === '危险') {
-                    return `<span class="report-badge badge-danger">❌ ${cellVal}</span>`
-                  } else if (cellVal === '未知' || cellVal === '挂起' || cellVal === '待定' || cellVal === '警告' || cellVal === '中危') {
-                    return `<span class="report-badge badge-warning">⚠️ ${cellVal}</span>`
-                  }
-                  return cellVal
-                })
-
-                tableHtml += '<tr>'
-                cells.forEach(td => {
-                  tableHtml += `<td>${td}</td>`
-                })
-                tableHtml += '</tr>'
-                i++
-              } else {
-                break
-              }
-            }
-
-            tableHtml += '</tbody></table></div>'
-            newLines.push(tableHtml)
-            continue
-          }
-        }
-
-        newLines.push(lines[i])
-        i++
-      }
-
-      return newLines.join('\n')
-    },
-
-    // Markdown 自定义轻量渲染器
-    renderMarkdown(text) {
-      if (!text) return ''
-
-      let html = this.parseAndFormatTables(text)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-
-      // 转义恢复我们的 report-table HTML
-      html = html
-        .replace(/&lt;div class=&quot;report-table-wrapper&quot;&gt;/g, '<div class="report-table-wrapper">')
-        .replace(/&lt;\/div&gt;/g, '</div>')
-        .replace(/&lt;table class=&quot;report-table&quot;&gt;/g, '<table class="report-table">')
-        .replace(/&lt;\/table&gt;/g, '</table>')
-        .replace(/&lt;thead&gt;/g, '<thead>')
-        .replace(/&lt;\/thead&gt;/g, '</thead>')
-        .replace(/&lt;tbody&gt;/g, '<tbody>')
-        .replace(/&lt;\/tbody&gt;/g, '</tbody>')
-        .replace(/&lt;tr&gt;/g, '<tr>')
-        .replace(/&lt;\/tr&gt;/g, '</tr>')
-        .replace(/&lt;th&gt;/g, '<th>')
-        .replace(/&lt;\/th&gt;/g, '</th>')
-        .replace(/&lt;td&gt;/g, '<td>')
-        .replace(/&lt;\/td&gt;/g, '</td>')
-        .replace(/&lt;span class=&quot;report-badge badge-([a-z]+)&quot;&gt;/g, '<span class="report-badge badge-$1">')
-        .replace(/&lt;\/span&gt;/g, '</span>')
-
-      // 代码块与行内代码
-      html = html.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre class="code-block-box"><code>$1</code></pre>')
-      html = html.replace(/`([^`\n]+)`/g, '<code class="inline-code-box">$1</code>')
-
-      // 标题
-      html = html.replace(/^#\s+(.+)/gm, '<h1 class="report-h1">$1</h1>')
-      html = html.replace(/^##\s+(.+)/gm, '<h2 class="report-h2">$1</h2>')
-      html = html.replace(/^###\s+(.+)/gm, '<h3 class="report-h3">$1</h3>')
-
-      // 粗体
-      html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-
-      // 分割线 (--- / *** / ___) 过滤清除，避免在页面上多余展示 --- 裸文本
-      html = html.replace(/^(?:---|[*]{3,}|_{3,})\s*$/gm, '')
-
-      // 列表
-      html = html.replace(/^\s*[-*] (.+)$/gm, '<li class="report-li">$1</li>')
-
-      // 换行处理
-      html = html.replace(/\n/g, '<br>')
-      html = html.replace(/<br>\s*(<\/?(div|table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|pre|blockquote))/gi, '$1')
-      html = html.replace(/(<\/(div|table|tr|thead|tbody|th|td|ul|ol|li|h1|h2|h3|pre|blockquote)>)\s*<br>/gi, '$1')
-
-      return html
-    },
-
-    // AI 智能重塑报告 (完全对齐 AI 对话的高稳定后端处理)
-    async handleAiRefine() {
-      if (!this.reportContent) {
-        this.$message.warning('报告内容为空，无法进行 AI 重塑')
-        return
-      }
-
-      this.refining = true
-      this.$notify({
-        title: 'AI 智能重塑中...',
-        message: 'Polaris-AI 大模型正在深度提炼报告内容，生成高管摘要、数据图表与行动计划看板',
-        type: 'info',
-        duration: 4500
-      })
-
-      try {
-        const res = await refineReport(this.reportContent)
-        if (res.code === 200 && res.data) {
-          let schema = null
-          if (typeof res.data === 'object') {
-            schema = res.data
-          } else {
-            let cleanText = String(res.data)
-            const firstBrace = cleanText.indexOf('{')
-            const lastBrace = cleanText.lastIndexOf('}')
-            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-              cleanText = cleanText.substring(firstBrace, lastBrace + 1)
-            }
-            schema = JSON.parse(cleanText)
-          }
-
-          this.refinedSchema = schema
-
-          // 1. 更新 KPI 统计卡片
-          if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
-            this.reportStats = schema.kpiCards.map(k => ({
-              label: k.label || k.title || '核心指标',
-              value: k.value || '0',
-              emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
-              color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
-            }))
-          }
-
-          // 2. 更新 ECharts 动态数据图表
-          if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
-            const viz = schema.visualizations[0]
-            if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
-              this.hasChartData = true
-              this.chartConfig = {
-                xAxisData: viz.chartData.categories,
-                series: viz.chartData.series.map(s => ({
-                  name: s.name,
-                  type: viz.chartType === 'line' ? 'line' : 'bar',
-                  data: s.data,
-                  barMaxWidth: 30
-                })),
-                legendData: viz.chartData.series.map(s => s.name)
-              }
-              this.$nextTick(() => {
-                this.initReportChart()
-              })
-            }
-          }
-
-          this.refining = false
-          this.$forceUpdate()
-
-          this.$notify({
-            title: '✨ AI 重塑美化完成',
-            message: '已成功生成高管决策摘要、核心研判与建议改进行动计划看板！',
-            type: 'success',
-            duration: 5000
-          })
-
-          // 平滑聚焦滚动到新重塑生成的关键区块
-          this.$nextTick(() => {
-            const target = document.querySelector('.executive-summary-banner') || document.querySelector('.report-action-plan-section')
-            if (target) {
-              target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-            }
-          })
-
-        } else {
-          this.refining = false
-          this.$message.error('AI 重塑异常: ' + (res.msg || '数据处理未达成'))
-        }
-      } catch (err) {
-        this.refining = false
-        console.error('AI 重塑失败', err)
-        this.$message.error('AI 重塑失败: ' + (err.message || '网络连接超时'))
-      }
     },
 
     waitForImageLoaded(img) {
@@ -1550,8 +1143,12 @@ export default {
   }
 
   .el-dialog__body {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     padding: 12px 16px 20px;
     background: #f8fafc;
+    box-sizing: border-box;
   }
 }
 
@@ -1710,8 +1307,13 @@ export default {
 
 .report-drawer-body {
   padding: 8px 6px 16px;
+  height: calc(88vh - 75px);
   max-height: calc(88vh - 75px);
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .paper-preview-box {

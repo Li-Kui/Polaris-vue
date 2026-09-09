@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformDatasourceMapper">
+
+    <resultMap type="com.polaris.platform.domain.PlatformDatasource" id="PlatformDatasourceResult">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="dsName" column="ds_name" />
+        <result property="dsType" column="ds_type" />
+        <result property="currentVersionId" column="current_version_id" />
+        <result property="configVersion" column="config_version" />
+        <result property="host" column="host" />
+        <result property="port" column="port" />
+        <result property="databaseName" column="database_name" />
+        <result property="username" column="username" />
+        <result property="password" column="password_cipher" />
+        <result property="sslEnabled" column="ssl_enabled" />
+        <result property="connectTimeoutSeconds" column="connect_timeout_seconds" />
+        <result property="queryTimeoutSeconds" column="query_timeout_seconds" />
+        <result property="verificationStatus" column="verification_status" />
+        <result property="databaseProductName" column="database_product_name" />
+        <result property="databaseProductVersion" column="database_product_version" />
+        <result property="lastTestTime" column="last_test_time" />
+        <result property="lastTestLatencyMs" column="last_test_latency_ms" />
+        <result property="lastTestErrorCode" column="last_test_error_code" />
+        <result property="status" column="status" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+        <result property="remark" column="remark" />
+    </resultMap>
+
+    <sql id="selectPlatformDatasourceVo">
+        select d.id, d.tenant_id, d.ds_name, d.ds_type, d.current_version_id,
+               d.status, d.create_by, d.create_time, d.update_by, d.update_time, d.remark,
+               v.version_no as config_version, v.host, v.port, v.database_name,
+               v.username, v.password_cipher, v.ssl_enabled,
+               v.connect_timeout_seconds, v.query_timeout_seconds,
+               v.verification_status, v.database_product_name, v.database_product_version,
+               v.last_test_time, v.last_test_latency_ms, v.last_test_error_code
+        from platform_datasource d
+        left join platform_datasource_version v on v.id = d.current_version_id
+    </sql>
+
+    <select id="selectById" parameterType="Long" resultMap="PlatformDatasourceResult">
+        <include refid="selectPlatformDatasourceVo"/>
+        where d.id = #{id}
+    </select>
+
+    <select id="selectByTenantId" parameterType="Long" resultMap="PlatformDatasourceResult">
+        <include refid="selectPlatformDatasourceVo"/>
+        where d.tenant_id = #{tenantId}
+        order by d.create_time desc
+    </select>
+
+    <select id="selectWorkflowResource" resultMap="PlatformDatasourceResult">
+        <include refid="selectPlatformDatasourceVo"/>
+        where d.id = #{id}
+        <choose>
+            <when test="tenantId != null">
+                and d.tenant_id = #{tenantId}
+            </when>
+            <otherwise>
+                and d.tenant_id is null
+            </otherwise>
+        </choose>
+        limit 1
+    </select>
+
+    <select id="selectWorkflowResources" resultMap="PlatformDatasourceResult">
+        <include refid="selectPlatformDatasourceVo"/>
+        <choose>
+            <when test="tenantId != null">
+                where d.tenant_id = #{tenantId}
+            </when>
+            <otherwise>
+                where d.tenant_id is null
+            </otherwise>
+        </choose>
+        order by d.ds_name, d.id
+    </select>
+
+    <select id="selectList" parameterType="com.polaris.platform.domain.PlatformDatasource" resultMap="PlatformDatasourceResult">
+        <include refid="selectPlatformDatasourceVo"/>
+        <where>
+            <if test="tenantId != null">AND d.tenant_id = #{tenantId}</if>
+            <if test="dsName != null and dsName != ''">
+                AND d.ds_name like concat('%', #{dsName}, '%')
+            </if>
+            <if test="dsType != null and dsType != ''">AND d.ds_type = #{dsType}</if>
+            <if test="status != null and status != ''">AND d.status = #{status}</if>
+        </where>
+        order by d.create_time desc
+    </select>
+
+    <insert id="insert" parameterType="com.polaris.platform.domain.PlatformDatasource" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_datasource(
+            tenant_id, ds_name, ds_type, status, create_by, create_time, update_by, update_time, remark
+        ) values (
+            #{tenantId}, #{dsName}, #{dsType}, #{status}, #{createBy}, sysdate(),
+            #{updateBy}, sysdate(), #{remark}
+        )
+    </insert>
+
+    <update id="update" parameterType="com.polaris.platform.domain.PlatformDatasource">
+        update platform_datasource
+        set ds_name = #{dsName}, ds_type = #{dsType}, status = #{status},
+            update_by = #{updateBy}, update_time = sysdate(), remark = #{remark}
+        where id = #{id}
+    </update>
+
+    <update id="updateCurrentVersion">
+        update platform_datasource
+        set current_version_id = #{currentVersionId}, update_by = #{updateBy}, update_time = sysdate()
+        where id = #{id}
+    </update>
+
+    <delete id="deleteById" parameterType="Long">
+        delete from platform_datasource where id = #{id}
+    </delete>
+</mapper>

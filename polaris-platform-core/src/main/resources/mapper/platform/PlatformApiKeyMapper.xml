@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformApiKeyMapper">
+    
+    <resultMap type="com.polaris.platform.domain.PlatformApiKey" id="PlatformApiKeyResult">
+        <id     property="id"           column="id"             />
+        <result property="tenantId"     column="tenant_id"      />
+        <result property="keyPrefix"    column="key_prefix"     />
+        <result property="keyName"      column="key_name"       />
+        <result property="permissions"  column="permissions"    />
+        <result property="rateLimit"    column="rate_limit"     />
+        <result property="status"       column="status"         />
+        <result property="expireTime"   column="expire_time"    />
+        <result property="lastUsedTime" column="last_used_time" />
+        <result property="createBy"     column="create_by"      />
+        <result property="createTime"   column="create_time"    />
+        <result property="updateBy"     column="update_by"      />
+        <result property="updateTime"   column="update_time"    />
+    </resultMap>
+
+    <sql id="selectPlatformApiKeyVo">
+        select id, tenant_id, key_prefix, key_name, permissions, rate_limit, status, expire_time, last_used_time, create_by, create_time, update_by, update_time
+        from platform_api_key
+    </sql>
+
+    <select id="selectById" parameterType="Long" resultMap="PlatformApiKeyResult">
+        <include refid="selectPlatformApiKeyVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectAuthApiKeyByHash" parameterType="String" resultMap="PlatformApiKeyResult">
+        select k.id, k.tenant_id, k.key_prefix, k.key_name, k.permissions, k.rate_limit, k.status,
+               k.expire_time, k.last_used_time, k.create_by, k.create_time, k.update_by, k.update_time
+        from platform_api_key k
+        inner join platform_tenant t on t.tenant_id = k.tenant_id
+        where k.api_key = #{apiKeyHash}
+          and t.status = '0'
+    </select>
+
+    <select id="selectByTenantId" parameterType="Long" resultMap="PlatformApiKeyResult">
+        <include refid="selectPlatformApiKeyVo"/>
+        where tenant_id = #{tenantId}
+        order by create_time desc
+    </select>
+
+    <insert id="insert" parameterType="com.polaris.platform.domain.PlatformApiKey" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_api_key(
+            <if test="tenantId != null">tenant_id,</if>
+            <if test="apiKeyHash != null and apiKeyHash != ''">api_key,</if>
+            <if test="keyPrefix != null and keyPrefix != ''">key_prefix,</if>
+            <if test="keyName != null and keyName != ''">key_name,</if>
+            <if test="permissions != null">permissions,</if>
+            <if test="rateLimit != null">rate_limit,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="expireTime != null">expire_time,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            create_time
+        )values(
+            <if test="tenantId != null">#{tenantId},</if>
+            <if test="apiKeyHash != null and apiKeyHash != ''">#{apiKeyHash},</if>
+            <if test="keyPrefix != null and keyPrefix != ''">#{keyPrefix},</if>
+            <if test="keyName != null and keyName != ''">#{keyName},</if>
+            <if test="permissions != null">#{permissions},</if>
+            <if test="rateLimit != null">#{rateLimit},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="expireTime != null">#{expireTime},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            sysdate()
+        )
+    </insert>
+
+    <update id="update" parameterType="com.polaris.platform.domain.PlatformApiKey">
+        update platform_api_key
+        <set>
+            <if test="keyName != null and keyName != ''">key_name = #{keyName},</if>
+            <if test="permissions != null">permissions = #{permissions},</if>
+            <if test="rateLimit != null">rate_limit = #{rateLimit},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="expireTime != null">expire_time = #{expireTime},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteById" parameterType="Long">
+        delete from platform_api_key where id = #{id}
+    </delete>
+
+    <update id="updateLastUsedTime" parameterType="Long">
+        update platform_api_key
+        set last_used_time = sysdate()
+        where id = #{id}
+    </update>
+
+</mapper>

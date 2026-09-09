@@ -6,10 +6,12 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build:prod": "vite build",
-    "build:stage": "vite build --mode staging",
-    "preview": "vite preview"
+    "docs:build": "vitepress build ../polaris-docs/docs --outDir public/platform/docs",
+    "dev": "npm run docs:build && vite",
+    "build:prod": "npm run docs:build && vite build",
+    "build:stage": "npm run docs:build && vite build --mode staging",
+    "preview": "vite preview",
+    "test:workflow": "node --test tests/*.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -48,7 +50,8 @@
     "unplugin-vue-setup-extend-plus": "1.0.1",
     "vite": "6.4.1",
     "vite-plugin-compression": "0.5.1",
-    "vite-plugin-svg-icons": "2.0.1"
+    "vite-plugin-svg-icons": "2.0.1",
+    "vitepress": "^1.6.4"
   },
   "overrides": {
     "quill": "2.0.2"

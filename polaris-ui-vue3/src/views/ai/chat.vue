@@ -414,28 +414,39 @@
                         </div>
                       </div>
                       
-                      <!-- 成功大图卡片 -->
+                      <!-- 成功多图/单图卡片 -->
                       <div v-else-if="task.status === '1'" class="image-success-card">
-                        <el-image 
-                          :src="resolveImageUrl(task.imageUrl)" 
-                          :preview-src-list="[resolveImageUrl(task.imageUrl)]" 
-                          fit="contain" 
-                          class="generated-img-view"
-                          preview-teleported
-                        >
-                          <template #placeholder>
-                            <div class="image-slot-loading">
-                              <el-icon class="is-loading"><loading /></el-icon>加载图片中...
+                        <div class="chat-img-grid" :class="'chat-grid-' + Math.min(getChatTaskImages(task.imageUrl).length, 4)">
+                          <div
+                            v-for="(subUrl, imgIdx) in getChatTaskImages(task.imageUrl)"
+                            :key="imgIdx"
+                            class="chat-img-grid-item"
+                          >
+                            <el-image 
+                              :src="resolveImageUrl(subUrl)" 
+                              :preview-src-list="getResolvedChatImages(task.imageUrl)" 
+                              :initial-index="imgIdx"
+                              fit="cover" 
+                              class="generated-img-view"
+                              preview-teleported
+                            >
+                              <template #placeholder>
+                                <div class="image-slot-loading">
+                                  <el-icon class="is-loading"><loading /></el-icon>加载中...
+                                </div>
+                              </template>
+                            </el-image>
+                            <div class="img-hover-actions">
+                              <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(subUrl))" />
                             </div>
-                          </template>
-                        </el-image>
-                        <!-- 耗时 Badge -->
-                        <div class="elapsed-badge" v-if="task.elapsedTime">
-                          <el-icon><clock /></el-icon>
-                          <span>生成耗时: {{ task.elapsedTime }}s</span>
+                          </div>
                         </div>
-                        <div class="img-hover-actions">
-                          <el-button circle size="small" icon="Download" title="下载图片" @click="handleDownload(resolveImageUrl(task.imageUrl))" />
+                        <!-- 底部栏：耗时与重新生成按钮 -->
+                        <div class="chat-card-footer">
+                          <div class="elapsed-badge" v-if="task.elapsedTime">
+                            <el-icon><clock /></el-icon>
+                            <span>生成耗时: {{ task.elapsedTime }}s</span>
+                          </div>
                           <el-button round size="small" icon="Refresh" title="重新生成" class="btn-img-regenerate" @click="handleRegenerate(task, msg, index)">重新生成</el-button>
                         </div>
                       </div>
@@ -513,7 +524,7 @@
                         v-for="source in msg.searchSources"
                         :key="source.index || source.url"
                         class="search-source-item"
-                        :href="source.url"
+                        :href="safeSourceUrl(source.url)"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -525,6 +536,30 @@
                       </a>
                     </div>
                   </div>
+
+                  <!-- 自动关联识别挂载文档标签 -->
+                  <div v-if="msg.attachedDocs && msg.attachedDocs.length" class="attached-docs-panel">
+                    <div class="attached-docs-title">
+                      <el-icon><document /></el-icon>
+                      <span>已自动挂载参考文档（{{ msg.attachedDocs.length }}）</span>
+                    </div>
+                    <div class="attached-docs-tags">
+                      <el-tag
+                        v-for="doc in msg.attachedDocs"
+                        :key="doc.docId || doc.docName"
+                        size="small"
+                        type="success"
+                        effect="light"
+                        class="attached-doc-tag"
+                      >
+                        <el-icon style="margin-right: 3px;"><paperclip /></el-icon>
+                        {{ doc.docName }}
+                        <span v-if="doc.matchType === 'MENTION'" class="doc-match-type">(提及)</span>
+                        <span v-else-if="doc.confidence" class="doc-match-type">({{ Math.round(doc.confidence * 100) }}%)</span>
+                      </el-tag>
+                    </div>
+                  </div>
+
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
                     <div class="report-card-body">
@@ -796,8 +831,11 @@
                     :class="['popper-selector-item', { 'is-active': !selectedKbId }]"
                     @click="selectedKbId = null; handleModelOrKbChange(); showKbPopover = false"
                   >
-                    <el-icon class="item-icon"><folder-delete /></el-icon>
-                    <span class="item-name">不挂载任何知识库</span>
+                    <el-icon class="item-icon" style="color: #409eff;"><magic-stick /></el-icon>
+                    <div class="item-text-group">
+                      <span class="item-name">✨ 智能自动识别挂载 (推荐)</span>
+                      <span class="item-desc">自动根据对话与输入识别相关文档</span>
+                    </div>
                     <el-icon v-if="!selectedKbId" class="check-icon"><check /></el-icon>
                   </div>
                   <div
@@ -807,7 +845,10 @@
                     @click="selectedKbId = item.id; handleModelOrKbChange(); showKbPopover = false"
                   >
                     <el-icon class="item-icon"><collection /></el-icon>
-                    <span class="item-name">{{ item.name }}</span>
+                    <div class="item-text-group">
+                      <span class="item-name">{{ item.name }}</span>
+                      <span class="item-desc">全量固定绑定此知识库</span>
+                    </div>
                     <el-icon v-if="selectedKbId === item.id" class="check-icon"><check /></el-icon>
                   </div>
                 </div>
@@ -985,9 +1026,6 @@
               <span class="toolbar-report-id">NO. {{ currentReportId }}</span>
             </div>
             <div class="toolbar-right">
-              <el-button class="toolbar-btn" size="small" type="warning" plain :loading="aiRefining" @click="handleAiRefineReport">
-                <el-icon v-if="!aiRefining"><magic-stick /></el-icon> ✨ AI 深度重塑美化
-              </el-button>
               <el-button class="toolbar-btn" size="small" type="primary" plain @click="handleSaveReportToDb">
                 <el-icon><folder-add /></el-icon> 保存至云端
               </el-button>
@@ -1039,127 +1077,12 @@
         </transition>
 
         <div id="report-print-area" class="report-preview-page">
-          <div class="report-paper">
-            <!-- 页眉装饰条 -->
-            <div class="paper-header-v2">
-              <div class="header-gradient-bar"></div>
-              <div class="header-info-row">
-                <span class="confidential-tag-v2">
-                  <el-icon><lock /></el-icon> 内部报告 · AI 智能分析
-                </span>
-                <span class="report-serial-v2">编号：AI-REP-{{ currentReportId }}</span>
-              </div>
-            </div>
-
-            <!-- 标题区 -->
-            <div class="paper-title-area-v2">
-              <div class="paper-badge-v2">
-                <el-icon><notebook /></el-icon>
-                <span>ANALYSIS REPORT</span>
-              </div>
-              <h1 class="paper-title-v2">{{ reportTitle }}</h1>
-              <div class="paper-meta-v2">
-                <div class="meta-item">
-                  <el-icon><user /></el-icon>
-                  <span>生成人：admin</span>
-                </div>
-                <div class="meta-item">
-                  <el-icon><calendar /></el-icon>
-                  <span>生成时间：{{ formatReportTime() }}</span>
-                </div>
-                <div class="meta-item">
-                  <el-icon><chat-dot-round /></el-icon>
-                  <span>会话来源：{{ currentUserName }} 的分析请求</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 统计概览卡片 -->
-            <div v-if="reportStats" class="report-stats-row">
-              <div v-for="(stat, idx) in reportStats" :key="idx" class="stat-card" :class="'stat-card-' + stat.color">
-                <div class="stat-icon-box">
-                  <span class="stat-emoji">{{ stat.emoji }}</span>
-                </div>
-                <div class="stat-info">
-                  <span class="stat-value">{{ stat.value }}</span>
-                  <span class="stat-label">{{ stat.label }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 精美分隔线 -->
-            <div class="paper-divider-v2">
-              <span class="divider-dot"></span>
-              <span class="divider-dot"></span>
-              <span class="divider-dot"></span>
-            </div>
-
-            <!-- ECharts 可视化数据图表 -->
-            <div v-if="hasChartData" class="report-chart-section-v2">
-              <div class="chart-section-header">
-                <div class="chart-section-title">
-                  <span class="section-icon-wrapper">
-                    <el-icon><trend-charts /></el-icon>
-                  </span>
-                  <span>数据可视化分析</span>
-                </div>
-                <div class="chart-type-switcher">
-                  <el-radio-group v-if="chartConfig && chartConfig.mode !== 'pie'" v-model="activeChartType" size="small" @change="switchChartType">
-                    <el-radio-button label="bar"><el-icon><histogram /></el-icon> 柱状图</el-radio-button>
-                    <el-radio-button label="line"><el-icon><data-line /></el-icon> 折线图</el-radio-button>
-                  </el-radio-group>
-                  <span v-else class="chart-type-badge">
-                    <el-icon><pie-chart /></el-icon> 分布统计
-                  </span>
-                </div>
-              </div>
-              <div id="pretty-report-chart" class="pretty-chart-box-v2"></div>
-            </div>
-
-            <!-- AI 智能提炼的高管极简摘要 Banner -->
-            <div v-if="refinedSchema && refinedSchema.executiveSummary" class="executive-summary-banner" style="margin-bottom: 20px; background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 8px;">
-              <div class="summary-header" style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #0369a1; font-size: 15px; margin-bottom: 8px;">
-                <el-icon><opportunity /></el-icon>
-                <span>高管极简摘要与决策建议 (Executive Summary)</span>
-              </div>
-              <div class="summary-body" style="color: #334155; font-size: 14px; line-height: 1.6;">
-                {{ refinedSchema.executiveSummary }}
-              </div>
-            </div>
-
-            <!-- 正文内容卡片化分段展示 -->
-            <div class="paper-content-v2-container">
-              <div v-for="(section, idx) in reportSections" :key="idx" class="report-content-card">
-                <div class="markdown-body" v-html="renderMarkdown(section)"></div>
-              </div>
-            </div>
-
-            <!-- AI 智能提取的行动计划看板 (Action Plan) -->
-            <div v-if="refinedSchema && refinedSchema.actionPlan && refinedSchema.actionPlan.length > 0" class="report-action-plan-section" style="margin-top: 25px; background: #fafafa; border: 1px solid #f0f0f0; padding: 20px; border-radius: 8px;">
-              <div class="action-plan-header" style="display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">
-                <el-icon style="color: #10b981;"><checked /></el-icon>
-                <span>建议改进与行动计划看板 (Action Plan)</span>
-              </div>
-              <el-table :data="refinedSchema.actionPlan" border stripe style="width: 100%;">
-                <el-table-column label="优先级" prop="priority" width="100" align="center">
-                  <template #default="scope">
-                    <el-tag :type="scope.row.priority === 'P1' ? 'danger' : (scope.row.priority === 'P2' ? 'warning' : 'info')" effect="dark" size="small">
-                      {{ scope.row.priority }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="改进措施 / 行动建议" prop="action" min-width="220" />
-                <el-table-column label="建议责任部门/人" prop="owner" width="160" align="center" />
-              </el-table>
-            </div>
-
-            <!-- 页脚 -->
-            <div class="paper-footer-v2">
-              <div class="footer-gradient-line"></div>
-              <p class="footer-disclaimer">本报告由 AI 大模型内容引擎分析生成，仅供参考，不构成最终决策依据</p>
-              <p class="footer-brand">Powered by <strong>Polaris-AI</strong> · {{ formatReportTime() }}</p>
-            </div>
-          </div>
+          <PolarisReportEngine
+            :report-title="reportTitle"
+            :meta-info="{ author: currentUserName, date: formatReportTime(), code: currentReportId }"
+            :structured-schema="refinedSchema"
+            :content="reportContent"
+          />
         </div>
       </div>
     </transition>
@@ -1195,7 +1118,7 @@
 
 <script>
 import * as echarts from 'echarts'
-import {getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 import {
   createConversation,
   deleteConversation,
@@ -1208,12 +1131,24 @@ import {
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {listAvailableModel} from '@/api/ai/model'
-import {listActiveWorkflows} from '@/api/ai/workflow'
-import {refineReport, saveReport} from '@/api/ai/report'
+import {
+  cancelWorkflowExecution,
+  listActiveWorkflows,
+  listPendingWorkflowApprovals,
+  streamWorkflowApproval,
+  streamWorkflowExecution
+} from '@/api/ai/workflow'
+import {getRefineStatus, refineReportById, saveReport} from '@/api/ai/report'
+import PolarisReportEngine from './report/PolarisReportEngine.vue'
 import request from '@/utils/request'
+import {sanitizeUrl} from '@/utils/safeUrl'
+import {parseImageUrlList} from '@/utils/aiImage'
 
 export default {
   name: 'AiChat',
+  components: {
+    PolarisReportEngine
+  },
   data() {
     return {
       // 知识库选项与当前选择
@@ -1228,7 +1163,8 @@ export default {
       workflows: [],
       agents: [],
       toolDictionary: {},
-      currentWorkflowThreadId: null,
+      currentWorkflowExecutionId: null,
+      workflowAbortController: null,
       showModelPopover: false,
       showKbPopover: false,
       showWorkflowPopover: false,
@@ -1258,8 +1194,8 @@ export default {
       attachments: [],
       uploadingAttachment: false,
       uploadingCount: 0,
-      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/common/upload",
-      uploadHeaders: { Authorization: "Bearer " + getToken() },
+      uploadUrl: (import.meta.env.VITE_APP_BASE_API || '') + "/ai/attachment/upload-private",
+      uploadHeaders: getAuthHeaders(),
       activePolls: {},
       taskStateMap: {},
       // 报告预览相关
@@ -1416,6 +1352,13 @@ export default {
       }
       const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
       return baseUrl + url
+    },
+    getChatTaskImages(raw) {
+      return parseImageUrlList(raw)
+    },
+    getResolvedChatImages(raw) {
+      const list = parseImageUrlList(raw)
+      return list.map(u => this.resolveImageUrl(u))
     },
     parseTaskInfos(content) {
       if (!content) return [];
@@ -1719,6 +1662,136 @@ export default {
       };
       return map[toolName] || toolName;
     },
+    handleWorkflowEvent(message, event, envelope) {
+      const payload = envelope.payload || {}
+      const nodeCode = envelope.nodeId || ''
+      if (envelope.executionId) {
+        message.executionId = envelope.executionId
+        message.workflowExecutionId = envelope.executionId
+        this.currentWorkflowExecutionId = envelope.executionId
+      }
+      const steps = message.workflowSteps || []
+      let step = nodeCode ? steps.find(item => item.code === nodeCode) : null
+
+      if (event === 'execution_started' || event === 'execution_resumed') {
+        message.loading = false
+        message.streaming = true
+      } else if (event === 'node_start') {
+        if (!step) {
+          step = {
+            code: nodeCode,
+            name: payload.nodeName || nodeCode,
+            status: 'running',
+            content: '',
+            thinking: ''
+          }
+          steps.push(step)
+        } else {
+          step.status = 'running'
+        }
+        message.content = ''
+        message.statusMsg = `智能体「${step.name}」正在处理...`
+      } else if (event === 'node_tool') {
+        if (step) step.activeTool = payload.toolName || ''
+        message.statusMsg = `正在调用工具: ${this.translateToolName(payload.toolName || '')}`
+      } else if (event === 'status') {
+        message.statusMsg = payload.message || ''
+      } else if (event === 'search_sources') {
+        message.searchQuery = payload.query || ''
+        message.searchSourceCount = payload.count || (payload.sources || []).length
+        message.searchSources = payload.sources || []
+      } else if (event === 'node_thinking') {
+        if (step) step.thinking = (step.thinking || '') + (payload.text || '')
+      } else if (event === 'node_chunk') {
+        const chunk = payload.text || ''
+        if (step) step.content = (step.content || '') + chunk
+        message.content = step ? step.content : (message.content || '') + chunk
+      } else if (event === 'node_route') {
+        if (step) step.route = payload.route || ''
+      } else if (event === 'node_done') {
+        if (step) {
+          step.status = 'success'
+          step.activeTool = null
+        }
+        message.statusMsg = ''
+      } else if (event === 'node_error') {
+        if (step) {
+          step.status = 'error'
+          step.content = (step.content || '') + `\n\n节点异常: ${payload.message || '执行异常'}`
+        }
+      } else if (event === 'node_interrupt') {
+        if (step) step.status = 'paused'
+        message.workflowSteps = steps
+        message.statusMsg = ''
+        message.requireApproval = true
+        message.executionId = envelope.executionId
+        message.workflowExecutionId = envelope.executionId
+        message.approvalId = payload.approvalId
+        message.currentNodeCode = nodeCode
+        message.approved = null
+        message.approvalFeedback = ''
+        message.streaming = false
+        this.isStreaming = false
+        this.workflowAbortController = null
+      } else if (event === 'workflow_done') {
+        message.content = payload.result || message.content
+        message.requireApproval = false
+        message.streaming = false
+        message.statusMsg = ''
+        this.isStreaming = false
+        this.currentWorkflowExecutionId = null
+        this.workflowAbortController = null
+        this.loadConvList()
+      } else if (event === 'workflow_rejected') {
+        message.requireApproval = false
+        message.streaming = false
+        message.statusMsg = '工作流已驳回'
+        this.isStreaming = false
+        this.currentWorkflowExecutionId = null
+        this.workflowAbortController = null
+      } else if (event === 'error') {
+        throw new Error(payload.message || '工作流执行失败')
+      }
+      message.workflowSteps = steps
+      this.$nextTick(() => this.scrollToBottom())
+    },
+
+    async restorePendingWorkflowApprovals() {
+      if (!this.currentConvId || !this.messages.length) return
+      try {
+        const res = await listPendingWorkflowApprovals()
+        const pending = (res.data || []).filter(item =>
+          Number(item.conversation_id ?? item.conversationId) === Number(this.currentConvId))
+        for (const approval of pending) {
+          const executionId = approval.execution_id || approval.executionId
+          let message = this.messages.find(item =>
+            item.role === 'assistant' && item.workflowExecutionId === executionId)
+          if (!message) {
+            message = {
+              role: 'assistant',
+              content: '工作流已挂起，正在等待人工审核确认。',
+              workflowExecutionId: executionId,
+              loading: false,
+              streaming: false,
+              error: null,
+              workflowSteps: []
+            }
+            this.messages.push(message)
+          }
+          if (message) {
+            message.workflowExecutionId = executionId
+            message.executionId = executionId
+            message.approvalId = approval.approval_id || approval.approvalId
+            message.currentNodeCode = approval.node_instance_id || approval.nodeInstanceId
+            message.requireApproval = true
+            message.approved = null
+            message.approvalFeedback = ''
+          }
+        }
+      } catch (error) {
+        console.warn('恢复待审批工作流失败', error)
+      }
+    },
     generateUuid() {
       return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
         var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
@@ -1728,174 +1801,38 @@ export default {
 
     async submitApproval(message, approve) {
       const feedback = (message.approvalFeedback || '').trim()
+      const submittedApprovalId = message.approvalId
+      const workflowController = new AbortController()
+      this.workflowAbortController = workflowController
+      this.currentWorkflowExecutionId = message.executionId
+      this.isStreaming = true
       message.status = 'resuming'
-      
-      const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
-      const url = `${baseUrl}/ai/workflow/resume?workflowCode=${message.workflowCode}&threadId=${message.threadId}&conversationId=${this.currentConvId}`
-      const token = getToken()
-      
+      message.streaming = true
+
       try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({
-            approve: approve,
-            feedback: feedback
-          })
-        })
-        
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || `HTTP ${response.status}`)
+        await streamWorkflowApproval(
+          message.executionId,
+          message.approvalId,
+          { approve, feedback },
+          (event, envelope) => this.handleWorkflowEvent(message, event, envelope),
+          workflowController.signal
+        )
+        if (message.approvalId === submittedApprovalId) {
+          message.approved = approve
+          message.approvalTime = new Date().toLocaleTimeString()
         }
-        
-        message.approved = approve
-        message.approvalTime = new Date().toLocaleTimeString()
         message.status = ''
-        
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder('utf-8')
-        let buffer = ''
-        let currentEvent = ''
-        
-        this.isStreaming = true
-        message.streaming = true
-        
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop()
-          
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              currentEvent = line.slice(6).trim()
-            } else if (line.startsWith('data:')) {
-              let data = ''
-              if (line.startsWith('data: ')) {
-                data = line.slice(6)
-              } else {
-                data = line.slice(5)
-              }
-              const event = currentEvent || 'message'
-              
-              if (event === 'node_start') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const nodeName = parts[1] || nodeCode
-                steps.push({
-                  code: nodeCode,
-                  name: nodeName,
-                  status: 'running',
-                  content: '',
-                  thinking: ''
-                })
-                message.workflowSteps = steps
-                message.content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
-                message.statusMsg = `智能体「${nodeName}」正在处理...`
-              } else if (event === 'node_tool') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const toolName = parts[1] || ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.activeTool = toolName
-                }
-                message.workflowSteps = steps
-                message.statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
-              } else if (event === 'node_thinking') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.thinking = (step.thinking || '') + chunk
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_chunk') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.content = (step.content || '') + chunk
-                }
-                const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
-                const isJson = step && step.content && step.content.trim().startsWith('{');
-                if (!isRouter && !isJson) {
-                  message.content = step ? step.content : (message.content + chunk)
-                } else {
-                  message.content = ''
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_done') {
-                const steps = message.workflowSteps || []
-                const nodeCode = data.trim()
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'success'
-                  step.activeTool = null
-                }
-                message.workflowSteps = steps
-                message.statusMsg = ''
-              } else if (event === 'node_error') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const errMsg = parts[1] || '执行异常'
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'error'
-                  step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
-                }
-                message.workflowSteps = steps
-              } else if (event === 'node_interrupt') {
-                const steps = message.workflowSteps || []
-                const parts = data.split('|')
-                const nodeCode = parts[0]
-                const step = steps.find(s => s.code === nodeCode)
-                if (step) {
-                  step.status = 'paused'
-                }
-                message.workflowSteps = steps
-                message.statusMsg = ''
-                message.requireApproval = true
-                message.currentNodeCode = nodeCode
-                message.approved = null
-                message.approvalFeedback = ''
-                
-                this.isStreaming = false
-                message.streaming = false
-                if (reader) {
-                  reader.cancel()
-                }
-                return
-              } else if (event === 'workflow_done') {
-                message.streaming = false
-                this.isStreaming = false
-                this.loadConvList()
-                return
-              } else if (event === 'error') {
-                throw new Error(data.trim() || '工作流执行失败')
-              }
-            }
-          }
-        }
       } catch (err) {
-        console.error('恢复审批流失败', err)
-        this.$message.error('流式恢复失败：' + err.message)
-        message.status = 'error'
+        if (err.name !== 'AbortError') {
+          this.$message.error('流式恢复失败：' + err.message)
+          message.status = 'error'
+        }
+      } finally {
         this.isStreaming = false
         message.streaming = false
+        if (this.workflowAbortController === workflowController) {
+          this.workflowAbortController = null
+        }
       }
     },
 
@@ -2024,19 +1961,12 @@ export default {
 
     async loadToolDictionary() {
       try {
-        const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
-        const token = getToken()
-        const response = await fetch(`${baseUrl}/ai/agent/tools/dictionary`, {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer ' + token
-          }
+        const res = await request({
+          url: '/ai/agent/tools/dictionary',
+          method: 'get'
         })
-        if (response.ok) {
-          const res = await response.json()
-          if (res.code === 200 && res.data) {
-            this.toolDictionary = res.data
-          }
+        if (res.code === 200 && res.data) {
+          this.toolDictionary = res.data
         }
       } catch (err) {
         console.error('加载工具翻译字典失败:', err)
@@ -2092,7 +2022,7 @@ export default {
       return found ? found.name : '选择 AI 模型';
     },
     getSelectedKbLabel() {
-      if (!this.selectedKbId) return '关联知识库';
+      if (!this.selectedKbId) return '✨ 智能挂载中';
       const found = this.knowledgeBases.find(k => k.id === this.selectedKbId);
       return found ? found.name : '已关联知识库';
     },
@@ -2145,12 +2075,14 @@ export default {
           this.messages = (res.data || []).map(m => ({
             role: m.role,
             content: m.content,
+            workflowExecutionId: m.workflowExecutionId || null,
             fileName: m.fileName || null,
             fileUrl: m.fileUrl || null,
             loading: false,
             streaming: false,
             error: null
           }))
+          await this.restorePendingWorkflowApprovals()
           this.$nextTick(() => {
             this.scrollToBottom()
             this.focusInput()
@@ -2314,31 +2246,40 @@ export default {
       const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
       
       const isWorkflowMode = !!this.selectedWorkflowCode
-      let url = ''
-      if (isWorkflowMode) {
-        const threadId = this.currentWorkflowThreadId || this.generateUuid()
-        this.currentWorkflowThreadId = threadId
-        url = `${baseUrl}/ai/workflow/stream?workflowCode=${this.selectedWorkflowCode}&message=${encodeURIComponent(text)}&threadId=${threadId}&conversationId=${this.currentConvId}`
-        if (attachedFiles.length > 0) {
-          const fileUrls = attachedFiles.map(f => f.url).join(',')
-          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
-        }
-      } else {
-        url = `${baseUrl}/ai/chat/stream?conversationId=${this.currentConvId}&message=${encodeURIComponent(text)}&enableSearch=${enableSearchParam}`
-        if (this.selectedAgentCode) {
-          url += `&agentCode=${encodeURIComponent(this.selectedAgentCode)}`
-        }
-        if (attachedFiles.length > 0) {
-          const fileUrls = attachedFiles.map(f => f.url).join(',')
-          url += `&fileUrl=${encodeURIComponent(fileUrls)}`
-        }
-      }
-      const token = getToken()
-
       try {
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: { Authorization: 'Bearer ' + token }
+        if (isWorkflowMode) {
+          const workflowController = new AbortController()
+          this.workflowAbortController = workflowController
+          this.messages[aiIndex].loading = false
+          this.messages[aiIndex].streaming = true
+          await streamWorkflowExecution({
+            workflowCode: this.selectedWorkflowCode,
+            message: text,
+            conversationId: this.currentConvId,
+            fileUrl: attachedFiles.map(file => file.url).join(',') || null,
+            attachmentTokens: attachedFiles.map(file => file.token || file.url).filter(Boolean),
+            testRun: false
+          }, (event, envelope) => {
+            this.handleWorkflowEvent(this.messages[aiIndex], event, envelope)
+          }, workflowController.signal)
+          return
+        }
+
+        const payload = {
+          conversationId: this.currentConvId,
+          message: text,
+          enableSearch: enableSearchParam,
+          agentCode: this.selectedAgentCode || null,
+          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean)
+        }
+
+        const response = await fetch(`${baseUrl}/ai/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json;charset=UTF-8',
+            ...getAuthHeaders()
+          },
+          body: JSON.stringify(payload)
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -2373,162 +2314,65 @@ export default {
               }
               const event = this.sseEventBuffer || 'message'
 
-              if (isWorkflowMode) {
-                // --- 智能体工作流模式专属解析 ---
-                if (event === 'node_start') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const nodeName = parts[1] || nodeCode
-                  steps.push({
-                    code: nodeCode,
-                    name: nodeName,
-                    status: 'running',
-                    content: '',
-                    thinking: ''
-                  })
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].content = '' // 新节点开始时重置主消息区内容，只展示当前节点的流式回复
-                  this.messages[aiIndex].statusMsg = `智能体「${nodeName}」正在处理...`
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_tool') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const toolName = parts[1] || ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.activeTool = toolName
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = `智能体「${step ? step.name : nodeCode}」正在调用工具: ${toolName}`
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_thinking') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.thinking = (step.thinking || '') + chunk
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_chunk') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const chunk = parts[1] ? parts[1].replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.content = (step.content || '') + chunk
-                  }
-                  const isRouter = nodeCode.toLowerCase().includes('router') || nodeCode.toLowerCase().includes('decision');
-                  const isJson = step && step.content && step.content.trim().startsWith('{');
-                  if (!isRouter && !isJson) {
-                    this.messages[aiIndex].content = step ? step.content : (cur.content + chunk)
-                  } else {
-                    this.messages[aiIndex].content = ''
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_done') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const nodeCode = data.trim()
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'success'
-                    step.activeTool = null
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = ''
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_error') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const errMsg = parts[1] || '执行异常'
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'error'
-                    step.content = (step.content || '') + `\n\n❌ 节点异常: ${errMsg}`
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'node_interrupt') {
-                  const cur = this.messages[aiIndex]
-                  const steps = cur.workflowSteps || []
-                  const parts = data.split('|')
-                  const nodeCode = parts[0]
-                  const step = steps.find(s => s.code === nodeCode)
-                  if (step) {
-                    step.status = 'paused'
-                  }
-                  this.messages[aiIndex].workflowSteps = steps
-                  this.messages[aiIndex].statusMsg = ''
-                  this.messages[aiIndex].requireApproval = true
-                  this.messages[aiIndex].threadId = this.currentWorkflowThreadId
-                  this.messages[aiIndex].workflowCode = this.selectedWorkflowCode
-                  this.messages[aiIndex].currentNodeCode = nodeCode
-                  this.messages[aiIndex].approved = null
-                  this.messages[aiIndex].approvalFeedback = ''
-
-                  this.isStreaming = false
-                  this.messages[aiIndex].streaming = false
-                  this.currentWorkflowThreadId = null // 重置，下次新发时新起
-                  if (this.currentReader) {
-                    this.currentReader.cancel()
-                  }
-                  this.currentReader = null
-                  return
-                } else if (event === 'workflow_done') {
-                  this.messages[aiIndex].streaming = false
-                  this.isStreaming = false
-                  this.currentReader = null
-                  this.loadConvList()
-                  return
-                } else if (event === 'error') {
-                  throw new Error(data.trim() || '工作流执行失败')
+              if (event === 'message') {
+                const cur = this.messages[aiIndex]
+                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                this.messages[aiIndex].content = cur.content + processedData
+                this.$nextTick(() => this.scrollToBottom())
+              } else if (event === 'reasoning') {
+                const cur = this.messages[aiIndex]
+                const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
+                this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
+                this.$nextTick(() => this.scrollToBottom())
+              } else if (event === 'status') {
+                this.messages[aiIndex].statusMsg = data || ''
+              } else if (event === 'moderation_blocked') {
+                let blockInfo = {}
+                try {
+                  blockInfo = JSON.parse(data || '{}')
+                } catch (e) {
+                  blockInfo = { message: data }
                 }
-              } else {
-                // --- 常规聊天问答模式 ---
-                if (event === 'message') {
-                  const cur = this.messages[aiIndex]
-                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  this.messages[aiIndex].content = cur.content + processedData
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'reasoning') {
-                  const cur = this.messages[aiIndex]
-                  const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                  this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
-                  this.$nextTick(() => this.scrollToBottom())
-                } else if (event === 'status') {
-                  this.messages[aiIndex].statusMsg = data || ''
-                } else if (event === 'search_sources') {
-                  try {
-                    const payload = JSON.parse(data || '{}')
-                    this.messages[aiIndex].searchQuery = payload.query || ''
-                    this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
-                    this.messages[aiIndex].searchSources = payload.sources || []
-                    this.$nextTick(() => this.scrollToBottom())
-                  } catch (err) {
-                    console.warn('解析联网搜索来源失败', err)
-                  }
-                } else if (event === 'done') {
-                  this.messages[aiIndex].streaming = false
-                  this.isStreaming = false
-                  this.currentReader = null
-                  this.loadConvList()
-                  return
-                } else if (event === 'error') {
-                  throw new Error(data.trim() || 'AI 服务异常')
+                const warnMsg = blockInfo.message || '内容触发安全策略，已为您终止输出'
+                this.$message.warning(warnMsg)
+                const cur = this.messages[aiIndex]
+                if (cur.content) {
+                  cur.content = cur.content + '\n\n' + `【已拦截：${warnMsg}】`
+                } else {
+                  cur.content = `【已拦截：${warnMsg}】`
                 }
+                cur.loading = false
+                cur.streaming = false
+                this.isStreaming = false
+                this.currentReader = null
+                this.loadConvList()
+                return
+              } else if (event === 'search_sources') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  this.messages[aiIndex].searchQuery = payload.query || ''
+                  this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
+                  this.messages[aiIndex].searchSources = payload.sources || []
+                  this.$nextTick(() => this.scrollToBottom())
+                } catch (err) {
+                  console.warn('解析联网搜索来源失败', err)
+                }
+              } else if (event === 'doc_recognized') {
+                try {
+                  const docs = JSON.parse(data || '[]')
+                  this.messages[aiIndex].attachedDocs = docs
+                  this.$nextTick(() => this.scrollToBottom())
+                } catch (err) {
+                  console.warn('解析自动识别挂载文档失败', err)
+                }
+              } else if (event === 'done') {
+                this.messages[aiIndex].streaming = false
+                this.isStreaming = false
+                this.currentReader = null
+                this.loadConvList()
+                return
+              } else if (event === 'error') {
+                throw new Error(data.trim() || 'AI 服务异常')
               }
             } else if (line.trim() === '') {
               this.sseEventBuffer = null
@@ -2574,6 +2418,9 @@ export default {
         return url
       }
     },
+    safeSourceUrl(url) {
+      return sanitizeUrl(url, { allowMailto: false, allowRelative: false })
+    },
 
     isActiveStatus(statusMsg) {
       return !!statusMsg && !statusMsg.startsWith('已搜索') && !statusMsg.startsWith('未搜索')
@@ -2599,6 +2446,14 @@ export default {
     },
 
     abortStream() {
+      if (this.workflowAbortController) {
+        this.workflowAbortController.abort()
+        this.workflowAbortController = null
+        if (this.currentWorkflowExecutionId) {
+          cancelWorkflowExecution(this.currentWorkflowExecutionId).catch(() => {})
+          this.currentWorkflowExecutionId = null
+        }
+      }
       if (this.currentReader) {
         try {
           this.currentReader.cancel()
@@ -2677,7 +2532,9 @@ export default {
           const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
           href = baseUrl + url
         }
-        return `<a href="${href}" target="_blank" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
+        href = sanitizeUrl(href)
+        if (!href) return text
+        return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="markdown-link" style="color: #3b82f6; font-weight: 600; text-decoration: underline; margin: 0 4px;">${text}</a>`
       })
 
       // 7. 无序列表与有序列表（支持任意缩进空格，避免源码外露）
@@ -2896,7 +2753,7 @@ export default {
       let normalizedContent = content ? content.replace(/\r\n/g, '\n').trim() : ''
 
       // 自动过滤报告第一个 Markdown 标题 (# 或 ##) 之前的所有 AI 客套与过程说明段落
-      const firstHeadingIndex = normalizedContent.search(/^#{1,3}\s+/m)
+      const firstHeadingIndex = normalizedContent.search(/^#{1,3}(?=\s|[^#\s])/m)
       if (firstHeadingIndex > 0) {
         normalizedContent = normalizedContent.substring(firstHeadingIndex).trim()
       } else {
@@ -2915,7 +2772,8 @@ export default {
         this.reportTitle = currentConv ? currentConv.title : '智能数据分析报告'
       }
 
-      this.currentReportId = Math.random().toString(36).substring(2, 10).toUpperCase()
+      // 尚未归档时不伪造数据库 ID；真正的报告 ID 在首次保存或美化时由后端返回。
+      this.currentReportId = ''
 
       // 3. 超强容错正文拆分逻辑（支持 ##一、/ ## 1. / ### 各种二级、三级标题格式）
       if (normalizedContent) {
@@ -2927,8 +2785,8 @@ export default {
           cleanContent = cleanContent.replace(/^[\s\*\-\>]*[\*\_]*(报告生成时间|评估人|评估范围|生成时间|报告时间|报告编号|编制部门|报告作者|创建人|评估对象|评估周期)[\*\_]*\s*[\：\:][^\n]*\n?/gi, '').trim()
         }
 
-        // 使用宽泛正则拆分章节：匹配行首的 ## 或 ### 标题
-        const rawSections = cleanContent.split(/(?=^#{2,3}\s*[^\n]+)/gm)
+        // 兼容标准 Markdown 和模型常见的无空格标题：##标题、###📊标题
+        const rawSections = cleanContent.split(/(?=^#{2,3}(?=\s|[^#\s])[^\n]*)/gm)
         let parsedSections = rawSections
           .map(s => s.trim())
           .filter(s => {
@@ -2968,8 +2826,15 @@ export default {
 
       // 4. 精准提取指标卡片
       this.reportStats = this.extractReportStats(normalizedContent)
+      this.refinedSchema = null
+      if (this.reportRefineTimer) {
+        clearTimeout(this.reportRefineTimer)
+        this.reportRefineTimer = null
+      }
 
       this.reportVisible = true
+      // 点击“查看报告”即进入深度重塑，完成后直接展示精美报告。
+      this.$nextTick(() => this.handleAiRefineReport())
 
       // 5. 解析表格数据并初始化图表
       const parsed = this.parseTablesForCharts(normalizedContent)
@@ -3095,6 +2960,10 @@ export default {
         this.reportChartInstance.dispose()
         this.reportChartInstance = null
       }
+      if (this.reportRefineTimer) {
+        clearTimeout(this.reportRefineTimer)
+        this.reportRefineTimer = null
+      }
       this.reportVisible = false
     },
 
@@ -3146,33 +3015,68 @@ export default {
       }
     },
 
+    async ensureReportArchived() {
+      if (this.currentReportId && /^\d+$/.test(String(this.currentReportId))) {
+        return Number(this.currentReportId)
+      }
+      if (!this.reportContent) {
+        throw new Error('报告内容为空')
+      }
+      const currentConv = (this.conversations || []).find(c => c.id === this.currentConvId)
+      const agentCodeToSave = this.selectedAgentCode || (currentConv && currentConv.agentCode) || 'POLARIS-ANALYST'
+      const res = await saveReport({
+        reportCode: 'CHAT-' + Date.now(),
+        reportTitle: this.reportTitle || 'AI 智能分析报告',
+        conversationId: this.currentConvId,
+        agentCode: agentCodeToSave,
+        reportContent: this.reportContent,
+        reportStats: JSON.stringify(this.reportStats || [])
+      })
+      if (!res || res.code !== 200 || !res.data || !res.data.id) {
+        throw new Error((res && res.msg) || '报告归档失败')
+      }
+      this.currentReportId = res.data.id
+      return Number(res.data.id)
+    },
+
     async handleSaveReportToDb() {
       if (!this.reportContent) {
         this.$message.warning('无法保存，报告内容为空')
         return
       }
       try {
-        const currentConv = (this.conversations || []).find(c => c.id === this.currentConvId)
-        const agentCodeToSave = this.selectedAgentCode || (currentConv && currentConv.agentCode) || 'POLARIS-ANALYST'
-        const payload = {
-          reportCode: 'REP-' + (this.currentReportId || Date.now()),
-          reportTitle: this.reportTitle || 'AI 智能分析报告',
-          conversationId: this.currentConvId,
-          agentCode: agentCodeToSave,
-          reportContent: this.reportContent,
-          reportStats: JSON.stringify(this.reportStats || []),
-          createTime: new Date().toISOString().replace('T', ' ').substring(0, 19)
-        }
-        const res = await saveReport(payload)
-        if (res.code === 200 || res.data) {
-          this.$message.success('报告已成功保存归档至数据库！可在“报告中心”随时查阅。')
-        } else {
-          this.$message.error(res.msg || '保存报告失败')
-        }
+        await this.ensureReportArchived()
+        this.$message.success('报告已成功保存归档至数据库！可在“报告中心”随时查阅。')
       } catch (err) {
         console.error('保存报告失败', err)
         this.$message.error('保存报告出现异常：' + (err.message || '网络连接超时'))
       }
+    },
+
+    async pollChatRefineStatus(reportId) {
+      const startedAt = Date.now()
+      while (this.reportVisible && String(this.currentReportId) === String(reportId) && Date.now() - startedAt < 90000) {
+        await new Promise(resolve => {
+          this.reportRefineTimer = setTimeout(() => {
+            this.reportRefineTimer = null
+            resolve()
+          }, 1500)
+        })
+        if (!this.reportVisible) return
+        const res = await getRefineStatus(reportId)
+        if (!res || res.code !== 200 || !res.data) {
+          throw new Error((res && res.msg) || 'AI 美化状态查询失败')
+        }
+        if (res.data.status === 'SUCCESS') {
+          if (!res.data.schema) throw new Error('AI 美化结果为空')
+          this.refinedSchema = res.data.schema
+          return
+        }
+        if (res.data.status === 'FAILED') {
+          throw new Error(res.data.error || 'AI 美化失败')
+        }
+      }
+      throw new Error('AI 美化超时，请稍后在报告中心重试')
     },
 
     async handleAiRefineReport() {
@@ -3180,88 +3084,41 @@ export default {
         this.$message.warning('报告内容为空，无法美化')
         return
       }
+      if (this.aiRefining) return
       this.aiRefining = true
       this.aiRefineStep = 1
       this.aiRefinementInProgress = true
-
-      // 动态推进思考步骤看板
       const t1 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 2 }, 1500)
       const t2 = setTimeout(() => { if (this.aiRefinementInProgress) this.aiRefineStep = 3 }, 3500)
 
       try {
-        const res = await refineReport(this.reportContent)
-        if (res.code === 200 && res.data) {
-          let schema = null
-          if (typeof res.data === 'object') {
-            schema = res.data
-          } else {
-            let cleanText = String(res.data)
-            const firstBrace = cleanText.indexOf('{')
-            const lastBrace = cleanText.lastIndexOf('}')
-            if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-              cleanText = cleanText.substring(firstBrace, lastBrace + 1)
-            }
-            schema = JSON.parse(cleanText)
-          }
-
-          console.log('>>> [原生对象解析成功]:', schema)
-          this.refinedSchema = schema
-          this.aiRefineStep = 4 // 完成所有步骤
-
-          if (schema.kpiCards && Array.isArray(schema.kpiCards) && schema.kpiCards.length > 0) {
-            this.reportStats = schema.kpiCards.map(k => ({
-              label: k.label || k.title,
-              value: k.value || '0',
-              emoji: k.status === 'danger' ? '🚨' : (k.status === 'warning' ? '⚠️' : '📊'),
-              color: k.status === 'danger' ? 'rose' : (k.status === 'warning' ? 'amber' : 'indigo')
-            }))
-          }
-
-          if (schema.visualizations && Array.isArray(schema.visualizations) && schema.visualizations.length > 0) {
-            const viz = schema.visualizations[0]
-            if (viz.chartData && viz.chartData.categories && viz.chartData.series) {
-              this.hasChartData = true
-              this.chartConfig = {
-                xAxisData: viz.chartData.categories,
-                series: viz.chartData.series.map(s => ({
-                  name: s.name,
-                  type: viz.chartType === 'line' ? 'line' : 'bar',
-                  data: s.data,
-                  barMaxWidth: 30
-                })),
-                legendData: viz.chartData.series.map(s => s.name)
-              }
-              this.$nextTick(() => {
-                this.initReportChart()
-              })
-            }
-          }
-
-          setTimeout(() => {
-            this.aiRefining = false
-            this.aiRefinementInProgress = false
-            this.$forceUpdate()
-            this.$message.success('✨ AI 已成功重塑分析报告！提炼高管摘要与可视化图表。')
-          }, 600)
-
-        } else {
-          this.aiRefining = false
-          this.aiRefinementInProgress = false
-          this.$message.error(res.msg || 'AI 美化重塑失败')
+        const reportId = await this.ensureReportArchived()
+        const taskRes = await refineReportById(reportId)
+        if (!taskRes || taskRes.code !== 200 || !taskRes.data) {
+          throw new Error((taskRes && taskRes.msg) || 'AI 美化任务创建失败')
         }
+        if (taskRes.data.status === 'SUCCESS' && taskRes.data.schema) {
+          this.refinedSchema = taskRes.data.schema
+        } else if (taskRes.data.status === 'FAILED') {
+          throw new Error(taskRes.data.error || 'AI 美化失败')
+        } else {
+          await this.pollChatRefineStatus(reportId)
+        }
+        this.aiRefineStep = 4
+        this.$message.success('✨ AI 已成功重塑分析报告，结果已同步至报告中心。')
       } catch (err) {
-        this.aiRefining = false
-        this.aiRefinementInProgress = false
         console.error('AI 重塑报告失败', err)
-        this.$message.error('AI 重塑报告失败，请稍后重试')
+        this.$message.error(err.message || 'AI 重塑报告失败，请稍后重试')
       } finally {
         clearTimeout(t1)
         clearTimeout(t2)
+        this.aiRefining = false
+        this.aiRefinementInProgress = false
       }
     },
 
     handleDownloadHtmlReport() {
-      const reportElement = document.querySelector('#report-print-area .report-paper')
+      const reportElement = document.getElementById('report-print-area')
       if (!reportElement) {
         this.$message.warning('报告渲染失败')
         return
@@ -3521,9 +3378,12 @@ export default {
         if (!this.attachments) {
           this.attachments = []
         }
+        const token = (res.data && res.data.token) ? res.data.token : (res.token || '')
+        const url = res.url || token || ''
         this.attachments.push({
           name: file.name,
-          url: res.url
+          url: url,
+          token: token
         })
         this.$message.success(`文件 "${file.name}" 上传成功`)
       } else {
@@ -3792,10 +3652,39 @@ export default {
 .image-success-card {
   position: relative;
   width: 320px;
-  height: 320px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-img-grid {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+}
+.chat-grid-1 { grid-template-columns: 1fr; aspect-ratio: 1; }
+.chat-grid-2 { grid-template-columns: 1fr 1fr; height: 160px; }
+.chat-grid-3, .chat-grid-4 { grid-template-columns: 1fr 1fr; height: 320px; }
+
+.chat-img-grid-item {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
+
+.chat-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.03);
+}
+
+:global(.theme-dark) .chat-card-footer {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .generated-img-view {
@@ -3803,26 +3692,30 @@ export default {
   height: 100%;
   transition: transform 0.3s ease;
   cursor: zoom-in;
-  object-fit: contain;
+  object-fit: cover;
 }
 
-.image-success-card:hover .generated-img-view {
-  transform: scale(1.02);
+.chat-img-grid-item:hover .generated-img-view {
+  transform: scale(1.03);
 }
 
 .img-hover-actions {
   position: absolute;
   bottom: -40px;
   left: 0; right: 0;
-  height: 40px;
+  height: 36px;
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 12px;
-  gap: 8px;
+  padding: 0 8px;
+  gap: 6px;
   transition: bottom 0.2s ease;
   z-index: 2;
+}
+
+.chat-img-grid-item:hover .img-hover-actions {
+  bottom: 0;
 }
 
 /* 蒙层内的下载/刷新按钮：固定使用深色玻璃质感配色，不随亮暗主题切换，
@@ -5558,6 +5451,20 @@ export default {
   white-space: nowrap;
 }
 
+.item-text-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.item-desc {
+  font-size: 11px;
+  color: var(--polaris-text-sub);
+  font-weight: normal;
+}
+
 .popper-selector-item .check-icon {
   font-size: 13px;
   font-weight: bold;
@@ -5756,20 +5663,20 @@ export default {
 /* ========== 📄 通用精美报告预览局部面板 (不遮挡侧边栏) ========== */
 .pretty-report-panel-local {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   z-index: 90;
   background: var(--polaris-bg);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
   box-shadow: -4px 0 30px rgba(0, 0, 0, 0.05);
 }
 
 /* — 精致工具栏 — */
 .report-toolbar-v2 {
+  flex: 0 0 auto;
   background: var(--polaris-card-bg);
   backdrop-filter: blur(25px);
   -webkit-backdrop-filter: blur(25px);
@@ -5778,8 +5685,8 @@ export default {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04) !important;
   z-index: 10;
   position: relative;
+  box-sizing: border-box;
   padding: 10px 20px;
-  max-width: 900px;
   width: calc(100% - 64px);
   margin: 16px auto 0;
 }
@@ -5789,7 +5696,6 @@ export default {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  max-width: 900px;
   margin: 0 auto;
   box-sizing: border-box;
 }
@@ -5941,8 +5847,12 @@ export default {
 .report-preview-page {
   background: var(--polaris-bg) !important;
   padding: 16px 32px 32px;
+  overflow-x: hidden;
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  box-sizing: border-box;
+  overscroll-behavior: contain;
 }
 
 /* — 报告仿真纸张设计 — */
@@ -7045,6 +6955,193 @@ export default {
 }
 </style>
 
+<!-- 对话首页主题兼容：使用 html.dark 作为真实主题来源，避免侧栏及主按钮在浅色背景中失去对比度 -->
+<style>
+/* 两种主题共用的按钮轮廓、交互与键盘焦点 */
+.ai-chat-wrapper .btn-new-chat,
+.ai-chat-wrapper .btn-batch-toggle,
+.ai-chat-wrapper .btn-start-chat {
+  opacity: 1 !important;
+}
+
+.ai-chat-wrapper .btn-new-chat:focus-visible,
+.ai-chat-wrapper .btn-batch-toggle:focus-visible,
+.ai-chat-wrapper .btn-start-chat:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.24) !important;
+  outline-offset: 2px;
+}
+
+/* 极光浅色模式 */
+html:not(.dark) .ai-chat-wrapper .sidebar {
+  background: rgba(255, 255, 255, 0.82) !important;
+  border-right-color: rgba(15, 23, 42, 0.09) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .sidebar-header {
+  border-bottom-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-new-chat {
+  --el-button-bg-color: #ffffff;
+  --el-button-border-color: rgba(79, 70, 229, 0.34);
+  --el-button-text-color: #3730a3;
+  --el-button-hover-bg-color: #eef2ff;
+  --el-button-hover-border-color: #4f46e5;
+  --el-button-hover-text-color: #4338ca;
+  background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%) !important;
+  border-color: rgba(79, 70, 229, 0.34) !important;
+  color: #3730a3 !important;
+  box-shadow: 0 3px 10px rgba(79, 70, 229, 0.10) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-new-chat:hover:not(:disabled) {
+  background: #eef2ff !important;
+  border-color: #4f46e5 !important;
+  color: #4338ca !important;
+  box-shadow: 0 5px 14px rgba(79, 70, 229, 0.18) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle {
+  --el-button-bg-color: #ffffff;
+  --el-button-border-color: rgba(15, 23, 42, 0.16);
+  --el-button-text-color: #475569;
+  background: #ffffff !important;
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  color: #475569 !important;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.07) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle:hover:not(:disabled) {
+  background: #eef2ff !important;
+  border-color: #4f46e5 !important;
+  color: #4338ca !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .welcome-setup-card {
+  background: rgba(255, 255, 255, 0.86) !important;
+  border-color: rgba(79, 70, 229, 0.12) !important;
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.14) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .welcome-setup-card .el-select__wrapper {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(15, 23, 42, 0.12) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-start-chat {
+  --el-button-bg-color: #4f46e5;
+  --el-button-border-color: #4f46e5;
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: #4338ca;
+  --el-button-hover-border-color: #4338ca;
+  --el-button-hover-text-color: #ffffff;
+  background-color: #4f46e5 !important;
+  background-image: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+  border-color: #4f46e5 !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.28) !important;
+}
+
+html:not(.dark) .ai-chat-wrapper .btn-start-chat:hover:not(:disabled) {
+  background-color: #4338ca !important;
+  background-image: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%) !important;
+  border-color: #4338ca !important;
+  box-shadow: 0 10px 26px rgba(79, 70, 229, 0.36) !important;
+}
+
+/* 深空暗色模式 */
+html.dark .ai-chat-wrapper .sidebar {
+  background: rgba(8, 15, 30, 0.78) !important;
+  border-right-color: rgba(148, 163, 184, 0.14) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat {
+  --el-button-bg-color: rgba(56, 189, 248, 0.12);
+  --el-button-border-color: rgba(56, 189, 248, 0.44);
+  --el-button-text-color: #e0f2fe;
+  background: rgba(56, 189, 248, 0.12) !important;
+  border-color: rgba(56, 189, 248, 0.44) !important;
+  color: #e0f2fe !important;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.16) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.20) !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 6px 18px rgba(56, 189, 248, 0.24) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-batch-toggle {
+  --el-button-bg-color: rgba(15, 23, 42, 0.80);
+  --el-button-border-color: rgba(148, 163, 184, 0.28);
+  --el-button-text-color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.80) !important;
+  border-color: rgba(148, 163, 184, 0.28) !important;
+  color: #cbd5e1 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-batch-toggle:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.16) !important;
+  border-color: #38bdf8 !important;
+  color: #e0f2fe !important;
+}
+
+html.dark .ai-chat-wrapper .welcome-setup-card .el-select__wrapper {
+  background-color: rgba(15, 23, 42, 0.78) !important;
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-start-chat {
+  --el-button-bg-color: #38bdf8;
+  --el-button-border-color: #38bdf8;
+  --el-button-text-color: #08111f;
+  --el-button-hover-bg-color: #7dd3fc;
+  --el-button-hover-border-color: #7dd3fc;
+  --el-button-hover-text-color: #08111f;
+  background-color: #38bdf8 !important;
+  background-image: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%) !important;
+  border-color: #38bdf8 !important;
+  color: #08111f !important;
+  box-shadow: 0 8px 24px rgba(56, 189, 248, 0.30) !important;
+}
+
+html.dark .ai-chat-wrapper .btn-start-chat:hover:not(:disabled) {
+  background-color: #7dd3fc !important;
+  background-image: linear-gradient(135deg, #7dd3fc 0%, #a5b4fc 100%) !important;
+  border-color: #7dd3fc !important;
+  box-shadow: 0 10px 28px rgba(56, 189, 248, 0.42) !important;
+}
+
+/* 禁用状态仍保留按钮边界，避免功能不可用时整块消失 */
+html:not(.dark) .ai-chat-wrapper .btn-new-chat.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-new-chat:disabled,
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-batch-toggle:disabled,
+html:not(.dark) .ai-chat-wrapper .btn-start-chat.is-disabled,
+html:not(.dark) .ai-chat-wrapper .btn-start-chat:disabled {
+  background: #eef2f7 !important;
+  border-color: rgba(100, 116, 139, 0.24) !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  opacity: 0.72 !important;
+}
+
+html.dark .ai-chat-wrapper .btn-new-chat.is-disabled,
+html.dark .ai-chat-wrapper .btn-new-chat:disabled,
+html.dark .ai-chat-wrapper .btn-batch-toggle.is-disabled,
+html.dark .ai-chat-wrapper .btn-batch-toggle:disabled,
+html.dark .ai-chat-wrapper .btn-start-chat.is-disabled,
+html.dark .ai-chat-wrapper .btn-start-chat:disabled {
+  background: rgba(30, 41, 59, 0.88) !important;
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  color: #94a3b8 !important;
+  box-shadow: none !important;
+  opacity: 0.76 !important;
+}
+</style>
+
 <!-- 打印专用全局样式，确保导出/打印 PDF 时仅渲染报告主体并隐藏系统侧边栏、顶部导航与工具栏 -->
 <style>
 @media print {
@@ -7106,5 +7203,36 @@ export default {
     size: A4 portrait;
     margin: 10mm;
   }
+}
+
+/* 自动关联挂载文档面板样式 */
+.attached-docs-panel {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: rgba(103, 194, 58, 0.08);
+  border: 1px dashed rgba(103, 194, 58, 0.3);
+  border-radius: 8px;
+}
+.attached-docs-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #67c23a;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.attached-docs-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attached-doc-tag {
+  border-radius: 6px;
+}
+.doc-match-type {
+  opacity: 0.75;
+  margin-left: 3px;
+  font-size: 11px;
 }
 </style>

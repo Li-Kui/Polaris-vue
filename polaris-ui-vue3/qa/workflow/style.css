@@ -1,0 +1,19 @@
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  padding: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: var(--el-bg-color-page, #f2f4f8);
+  color: var(--el-text-color-primary);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+html.dark {
+  color-scheme: dark;
+}

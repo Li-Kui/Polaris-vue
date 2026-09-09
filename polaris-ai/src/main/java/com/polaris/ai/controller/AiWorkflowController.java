@@ -1,267 +1,519 @@
 package com.polaris.ai.controller;
 
-import com.polaris.ai.domain.AiWorkflow;
-import com.polaris.ai.service.IAiWorkflowService;
-import com.polaris.ai.workflow.langgraph.LangGraph4jEngine;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.workflow.application.*;
+import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
+import com.polaris.ai.workflow.runtime.WorkflowEventStreamService;
+import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.common.annotation.ApiGroup;
-import com.polaris.common.annotation.Log;
 import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.controller.BaseController;
 import com.polaris.common.core.domain.ResultData;
-import com.polaris.common.core.page.Page;
-import com.polaris.common.enums.BusinessType;
-import com.polaris.common.utils.SecurityUtils;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.context.SecurityContextHolder;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/**
- * AI智能体工作流控制器
- * 提供工作流配置获取、CRUD 管理与 SSE 流式执行端点
- *
- * @author polaris
- */
-@Slf4j
-@Tag(name = "AI智能体工作流")
+/** 工作流草稿、校验、发布和执行的共享接口。 */
+@Tag(name = "AI工作流")
 @ApiGroup(ApiVersionConstants.VERSION_2_0_0)
 @RestController
 @RequestMapping("/ai/workflow")
 public class AiWorkflowController extends BaseController {
 
-    @Autowired
-    private IAiWorkflowService workflowService;
+    private final WorkflowDefinitionApplicationFacade workflowFacade;
+    private final WorkflowApprovalApplicationFacade approvalFacade;
+    private final WorkflowExecutionApplicationFacade executionFacade;
+    private final WorkflowResourceBindingApplicationFacade resourceBindingFacade;
+    private final WorkflowResourceCatalogApplicationFacade resourceCatalogFacade;
+    private final WorkflowNodeSchemaApplicationFacade nodeSchemaFacade;
+    private final WorkflowNodeTestApplicationFacade nodeTestFacade;
+    private final WorkflowEventStreamService eventStreamService;
+    private final WorkflowTriggerApplicationFacade triggerFacade;
+    private final WorkflowArtifactApplicationFacade artifactFacade;
+    private final ObjectMapper objectMapper;
 
-    @Autowired
-    private LangGraph4jEngine langGraph4jEngine;
-
-    @Autowired(required = false)
-    @Qualifier("workflowTaskExecutor")
-    private TaskExecutor taskExecutor;
-
-    /**
-     * 条件分页查询工作流配置列表（管理后台使用）
-     * GET /ai/workflow/list
-     */
-    @Operation(summary = "条件分页查询工作流列表")
-    @GetMapping("/list")
-    public ResultData<Page<AiWorkflow>> list(AiWorkflow workflow) {
-        startPage();
-        List<AiWorkflow> list = workflowService.selectWorkflowList(workflow);
-        return ok(getDataPage(list));
+    public AiWorkflowController(
+            WorkflowDefinitionApplicationFacade workflowFacade,
+            WorkflowApprovalApplicationFacade approvalFacade,
+            WorkflowExecutionApplicationFacade executionFacade,
+            WorkflowResourceBindingApplicationFacade resourceBindingFacade,
+            WorkflowResourceCatalogApplicationFacade resourceCatalogFacade,
+            WorkflowNodeSchemaApplicationFacade nodeSchemaFacade,
+            WorkflowNodeTestApplicationFacade nodeTestFacade,
+            WorkflowEventStreamService eventStreamService,
+            WorkflowTriggerApplicationFacade triggerFacade,
+            WorkflowArtifactApplicationFacade artifactFacade,
+            ObjectMapper objectMapper) {
+        this.workflowFacade = workflowFacade;
+        this.approvalFacade = approvalFacade;
+        this.executionFacade = executionFacade;
+        this.resourceBindingFacade = resourceBindingFacade;
+        this.resourceCatalogFacade = resourceCatalogFacade;
+        this.nodeSchemaFacade = nodeSchemaFacade;
+        this.nodeTestFacade = nodeTestFacade;
+        this.eventStreamService = eventStreamService;
+        this.triggerFacade = triggerFacade;
+        this.artifactFacade = artifactFacade;
+        this.objectMapper = objectMapper;
     }
 
-    /**
-     * 获取所有启用的工作流列表（前端聊天页面选用下拉框使用）
-     * GET /ai/workflow/list/active
-     */
-    @Operation(summary = "获取所有启用的工作流列表")
-    @GetMapping("/list/active")
-    public ResultData<List<AiWorkflow>> listActive() {
-        List<AiWorkflow> list = workflowService.listActiveWorkflows();
-        return ok(list);
+    @Operation(summary = "查询工作流定义")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions")
+    public ResultData<List<WorkflowDefinitionView>> listDefinitions() {
+        return ok(workflowFacade.listDefinitions());
     }
 
-    /**
-     * 获取工作流详细信息
-     * GET /ai/workflow/{id}
-     */
-    @Operation(summary = "获取工作流详情")
-    @GetMapping("/{id}")
-    public ResultData getInfo(@PathVariable Long id) {
-        return ok(workflowService.getById(id));
+    @Operation(summary = "创建工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions")
+    public ResultData<WorkflowDefinitionView> createDraft(
+            @RequestBody WorkflowDraftCommand command) {
+        return ok(workflowFacade.createDraft(command));
     }
 
-    /**
-     * 新增工作流配置
-     * POST /ai/workflow
-     */
-    @Operation(summary = "新增工作流配置")
-    @Log(title = "工作流管理", businessType = BusinessType.INSERT)
-    @PostMapping
-    public ResultData add(@RequestBody AiWorkflow workflow) {
-        workflow.setCreateBy(SecurityUtils.getUsername());
-        return toAjaxResult(workflowService.save(workflow));
+    @Operation(summary = "查询工作流定义详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}")
+    public ResultData<WorkflowDefinitionView> getDefinition(@PathVariable Long definitionId) {
+        return ok(workflowFacade.getDefinition(definitionId));
     }
 
-    /**
-     * 修改工作流配置
-     * PUT /ai/workflow
-     */
-    @Operation(summary = "修改工作流配置")
-    @Log(title = "工作流管理", businessType = BusinessType.UPDATE)
-    @PutMapping
-    public ResultData edit(@RequestBody AiWorkflow workflow) {
-        workflow.setUpdateBy(SecurityUtils.getUsername());
-        // 工作流配置变更时清除拓扑缓存
-        if (workflow.getGraphJson() != null) {
-            langGraph4jEngine.invalidateTopologyCache(workflow.getWorkflowCode());
-        }
-        return toAjaxResult(workflowService.updateById(workflow));
+    @Operation(summary = "保存工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PutMapping("/definitions/{definitionId}/draft")
+    public ResultData<WorkflowDefinitionView> updateDraft(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowDraftCommand command) {
+        return ok(workflowFacade.updateDraft(definitionId, command));
     }
 
-    /**
-     * 逻辑删除工作流配置
-     * DELETE /ai/workflow/{id}
-     */
-    @Operation(summary = "删除工作流配置")
-    @Log(title = "工作流管理", businessType = BusinessType.DELETE)
-    @DeleteMapping("/{id}")
-    public ResultData remove(@PathVariable Long id) {
-        return toAjaxResult(workflowService.removeById(id));
+    @Operation(summary = "校验并编译工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit() or @workflowAccess.canDebug()")
+    @PostMapping("/definitions/{definitionId}/validate")
+    public ResultData<WorkflowCompilationResult> validateDraft(@PathVariable Long definitionId) {
+        return ok(workflowFacade.validateDraft(definitionId));
     }
 
-    /**
-     * 流式执行指定智能体工作流（LangGraph4j 图引擎）
-     * GET /ai/workflow/stream?workflowCode=xxx&message=yyy&threadId=zzz
-     *
-     * @param workflowCode 工作流编码
-     * @param message      用户输入的提示词
-     * @param threadId     线程ID（可选，用于 Checkpoint 追踪）
-     * @return SseEmitter 实例
-     */
-    @Operation(summary = "流式执行智能体工作流")
-    @GetMapping(value = "/stream", produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter runWorkflowStream(
-            @RequestParam String workflowCode,
-            @RequestParam String message,
-            @RequestParam(required = false) String fileUrl,
-            @RequestParam(required = false) String threadId,
-            @RequestParam(required = false) Long conversationId) {
-
-        Long userId = SecurityUtils.getUserId();
-        SseEmitter emitter = new SseEmitter(0L);
-        final SecurityContext securityContext = SecurityContextHolder.getContext();
-
-        Runnable task = () -> {
-            try {
-                SecurityContextHolder.setContext(securityContext);
-                if (fileUrl != null && !fileUrl.trim().isEmpty()) {
-                    com.polaris.ai.utils.ChatContextHolder.setFileUrl(fileUrl);
-                }
-                langGraph4jEngine.run(workflowCode, message, threadId, securityContext, emitter, conversationId, userId);
-            } finally {
-                com.polaris.ai.utils.ChatContextHolder.clear();
-                SecurityContextHolder.clearContext();
-            }
-        };
-
-        // 优先使用 Spring TaskExecutor，降级使用裸线程
-        if (taskExecutor != null) {
-            taskExecutor.execute(task);
-        } else {
-            new Thread(task).start();
-        }
-
-        return emitter;
+    @Operation(summary = "发布不可变工作流版本")
+    @PreAuthorize("@workflowAccess.canPublish()")
+    @PostMapping("/definitions/{definitionId}/publish")
+    public ResultData<WorkflowPublishResult> publish(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowPublishCommand command) {
+        return ok(workflowFacade.publish(definitionId, command));
     }
 
-    @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
-
-    /**
-     * 获取工作流的 Mermaid 拓扑图
-     * GET /ai/workflow/graph?workflowCode=xxx
-     *
-     * @param workflowCode 工作流编码
-     * @return Mermaid 格式的图定义字符串
-     */
-    @Operation(summary = "获取工作流拓扑可视化")
-    @GetMapping("/graph")
-    public ResultData<String> getGraph(@RequestParam String workflowCode) {
-        String mermaid = langGraph4jEngine.generateMermaid(workflowCode);
-        return ok(mermaid);
+    @Operation(summary = "查询工作流发布版本")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/versions")
+    public ResultData<List<WorkflowPublishedVersionView>> listVersions(
+            @PathVariable Long definitionId) {
+        return ok(workflowFacade.listVersions(definitionId));
     }
 
-    /**
-     * 根据实时提供的 graphJson 草稿生成 Mermaid 拓扑图，并触发安全与环路校验
-     * POST /ai/workflow/preview-mermaid
-     */
-    @Operation(summary = "预览工作流实时 Mermaid 拓扑图")
-    @PostMapping("/preview-mermaid")
-    public ResultData<String> previewMermaid(@RequestBody java.util.Map<String, String> body) {
-        String graphJson = body.get("graphJson");
-        if (graphJson == null || graphJson.trim().isEmpty()) {
-            return ok("graph TD\n  START((Start)) --> END((End))");
-        }
-        try {
-            com.polaris.ai.workflow.langgraph.GraphTopology topology = 
-                new com.fasterxml.jackson.databind.ObjectMapper().readValue(graphJson, com.polaris.ai.workflow.langgraph.GraphTopology.class);
-            
-            // 触发安全和环路检查
-            topology.validate();
-            
-            String mermaid = langGraph4jEngine.buildMermaid(topology);
-            return ok(mermaid);
-        } catch (IllegalArgumentException e) {
-            log.error(">>> 拓扑排序校验失败", e);
-            // 将拓扑排序校验报错优雅显示在预览界面中
-            return ok("graph TD\n  ERROR[\"配置异常: " + e.getMessage().replace("\"", "\\\"") + "\"]");
-        } catch (Exception e) {
-            log.error(">>> 实时生成预览 Mermaid 失败", e);
-            return ok("graph TD\n  ERROR[\"拓扑格式损坏，无法渲染图表\"]");
-        }
+    @Operation(summary = "查询工作流发布版本详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/versions/{versionId}")
+    public ResultData<WorkflowPublishedVersionDetailView> getVersion(
+            @PathVariable Long definitionId,
+            @PathVariable String versionId) {
+        return ok(workflowFacade.getVersion(definitionId, versionId));
     }
 
-    /**
-     * 审批流恢复流式执行接口
-     * POST /ai/workflow/resume
-     *
-     * @param workflowCode 工作流编码
-     * @param threadId     会话线程ID
-     * @param resumeInput  包含审批操作等数据（如 approve: true/false, feedback: "xxx"）
-     * @return SseEmitter 实例
-     */
-    @Operation(summary = "恢复被挂起的工作流执行")
-    @PostMapping(value = "/resume", produces = "text/event-stream;charset=UTF-8")
-    public SseEmitter resumeWorkflow(
-            @RequestParam String workflowCode,
-            @RequestParam String threadId,
-            @RequestParam(required = false) Long conversationId,
-            @RequestBody java.util.Map<String, Object> resumeInput) {
+    @Operation(summary = "将发布版本恢复为工作流草稿")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions/{definitionId}/versions/{versionId}/rollback")
+    public ResultData<WorkflowDefinitionView> rollbackDraft(
+            @PathVariable Long definitionId,
+            @PathVariable String versionId,
+            @RequestBody WorkflowRollbackCommand command) {
+        return ok(workflowFacade.rollbackDraft(definitionId, versionId, command));
+    }
 
-        Long userId = SecurityUtils.getUserId();
-        SseEmitter emitter = new SseEmitter(0L);
+    @Operation(summary = "克隆工作流定义")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/definitions/{definitionId}/clone")
+    public ResultData<WorkflowDefinitionView> cloneDefinition(
+            @PathVariable Long definitionId,
+            @RequestBody WorkflowCloneCommand command) {
+        return ok(workflowFacade.cloneDefinition(definitionId, command));
+    }
 
-        // 并发乐观锁校验：只有当 status = 'paused' (挂起) 时，才可以通过更新状态成功获取锁
-        int updated = jdbcTemplate.update(
-                "UPDATE ai_graph_checkpoint SET status = 'running', update_time = NOW() " +
-                "WHERE thread_id = ? AND status = 'paused'", threadId);
+    @Operation(summary = "查询工作流可用节点描述")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/node-descriptors")
+    public ResultData<List<Map<String, Object>>> listNodeDescriptors() {
+        return ok(workflowFacade.listNodeDescriptors().stream()
+                .map(this::nodeDescriptorView).toList());
+    }
 
-        if (updated <= 0) {
-            try {
-                emitter.send(SseEmitter.event().name("error").data("当前会话已在处理或不处于挂起审批状态"));
-            } catch (Exception ignored) {}
-            emitter.complete();
-            return emitter;
-        }
+    @Operation(summary = "解析工作流草稿节点有效 Schema")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/definitions/{definitionId}/node-schemas")
+    public ResultData<List<Map<String, Object>>> resolveNodeSchemas(
+            @PathVariable Long definitionId,
+            @RequestParam(defaultValue = "PROD") String environment) {
+        return ok(nodeSchemaFacade.resolve(definitionId, environment).stream()
+                .map(this::resolvedNodeSchemaView).toList());
+    }
 
-        final SecurityContext securityContext = SecurityContextHolder.getContext();
+    @Operation(summary = "创建单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/definitions/{definitionId}/nodes/{nodeId}/tests")
+    public ResultData<Map<String, Object>> createNodeTest(
+            @PathVariable Long definitionId,
+            @PathVariable String nodeId,
+            @RequestBody(required = false) WorkflowNodeTestCommand command) {
+        return ok(nodeTestView(nodeTestFacade.create(definitionId, nodeId, command)));
+    }
 
-        Runnable task = () -> {
-            try {
-                SecurityContextHolder.setContext(securityContext);
-                langGraph4jEngine.resume(workflowCode, threadId, resumeInput, securityContext, emitter, conversationId, userId);
-            } finally {
-                SecurityContextHolder.clearContext();
-            }
-        };
+    @Operation(summary = "查询单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @GetMapping("/node-tests/{testRunId}")
+    public ResultData<Map<String, Object>> getNodeTest(@PathVariable String testRunId) {
+        return ok(nodeTestView(nodeTestFacade.get(testRunId)));
+    }
 
-        if (taskExecutor != null) {
-            taskExecutor.execute(task);
-        } else {
-            new Thread(task).start();
-        }
+    @Operation(summary = "取消单节点隔离试运行任务")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/node-tests/{testRunId}/cancel")
+    public ResultData<Map<String, Object>> cancelNodeTest(@PathVariable String testRunId) {
+        return ok(nodeTestView(nodeTestFacade.cancel(testRunId)));
+    }
 
-        return emitter;
+    @Operation(summary = "从成功的单节点试运行推导样本 Schema")
+    @PreAuthorize("@workflowAccess.canDebug()")
+    @PostMapping("/node-tests/{testRunId}/inferred-schema")
+    public ResultData<Map<String, Object>> inferNodeTestSchema(
+            @PathVariable String testRunId) {
+        WorkflowInferredSchemaResult result = nodeTestFacade.inferSchema(testRunId);
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("testRunId", result.testRunId());
+        view.put("definitionId", result.definitionId());
+        view.put("draftRevision", result.draftRevision());
+        view.put("nodeId", result.nodeId());
+        view.put("schema", plainJson(result.schema()));
+        view.put("inferredAt", result.inferredAt());
+        view.put("sampleCount", result.sampleCount());
+        view.put("nodeConfigHash", result.nodeConfigHash());
+        view.put("schemaSourceVersion", result.schemaSourceVersion());
+        view.put("diagnostics", result.diagnostics());
+        return ok(view);
+    }
+
+    @Operation(summary = "启动工作流持久化执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions")
+    public ResultData<WorkflowExecutionView> startExecution(
+            @RequestBody WorkflowExecutionStartCommand command) {
+        return ok(executionFacade.start(command));
+    }
+
+    @Operation(summary = "按工作流编码启动持久化执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions/by-code")
+    public ResultData<WorkflowExecutionView> startExecutionByCode(
+            @RequestBody WorkflowExecutionByCodeCommand command) {
+        return ok(executionFacade.startByCode(command));
+    }
+
+    @Operation(summary = "查询工作流执行列表")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions")
+    public ResultData<List<WorkflowExecutionView>> listExecutions(
+            @RequestParam(required = false) Long definitionId,
+            @RequestParam(required = false) String status) {
+        return ok(executionFacade.list(definitionId, status));
+    }
+
+    @Operation(summary = "查询工作流执行详情")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}")
+    public ResultData<WorkflowExecutionView> getExecution(@PathVariable String executionId) {
+        return ok(executionFacade.get(executionId));
+    }
+
+    @Operation(summary = "查询工作流节点运行记录")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/node-runs")
+    public ResultData<List<WorkflowNodeRunView>> listNodeRuns(
+            @PathVariable String executionId) {
+        return ok(executionFacade.listNodeRuns(executionId));
+    }
+
+    @Operation(summary = "查询工作流执行产物")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/artifacts")
+    public ResultData<List<WorkflowArtifactView>> listArtifacts(
+            @PathVariable String executionId) {
+        return ok(artifactFacade.list(executionId));
+    }
+
+    @Operation(summary = "下载工作流执行产物")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/artifacts/{artifactId}/content")
+    public void downloadArtifact(
+            @PathVariable String executionId,
+            @PathVariable String artifactId,
+            HttpServletResponse response) throws java.io.IOException {
+        WorkflowArtifactContent artifact = artifactFacade.load(executionId, artifactId);
+        byte[] content = artifact.content();
+        response.setContentType(artifact.mimeType());
+        response.setContentLength(content.length);
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setHeader("Cache-Control", "private, no-store, max-age=0");
+        response.setHeader("Pragma", "no-cache");
+        String encodedName = URLEncoder.encode(
+                artifact.fileName(), StandardCharsets.UTF_8).replace("+", "%20");
+        response.setHeader("Content-Disposition",
+                "attachment; filename*=UTF-8''" + encodedName);
+        response.getOutputStream().write(content);
+        response.flushBuffer();
+    }
+
+    @Operation(summary = "重放工作流执行事件")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/executions/{executionId}/events")
+    public ResultData<List<WorkflowExecutionEventView>> listEvents(
+            @PathVariable String executionId,
+            @RequestParam(defaultValue = "0") long afterSequence,
+            @RequestParam(defaultValue = "200") int limit) {
+        return ok(executionFacade.listEvents(executionId, afterSequence, limit));
+    }
+
+    @Operation(summary = "SSE观察工作流持久化事件")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping(value = "/executions/{executionId}/events/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamEvents(
+            @PathVariable String executionId,
+            @RequestParam(defaultValue = "0") long afterSequence) {
+        return eventStreamService.subscribe(executionId, afterSequence);
+    }
+
+    @Operation(summary = "取消工作流执行")
+    @PreAuthorize("@workflowAccess.canCancel()")
+    @PostMapping("/executions/{executionId}/cancel")
+    public ResultData<WorkflowExecutionView> cancelExecution(
+            @PathVariable String executionId) {
+        return ok(executionFacade.cancel(executionId));
+    }
+
+    @Operation(summary = "安全重试工作流执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/executions/{executionId}/retry")
+    public ResultData<WorkflowExecutionView> retryExecution(
+            @PathVariable String executionId,
+            @RequestBody(required = false) WorkflowExecutionRetryCommand command) {
+        return ok(executionFacade.retry(executionId, command));
+    }
+
+    @Operation(summary = "查询工作流审批箱")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @GetMapping("/approvals")
+    public ResultData<List<WorkflowApprovalTaskView>> listApprovals(
+            @RequestParam(required = false) String status) {
+        return ok(approvalFacade.list(status));
+    }
+
+    @Operation(summary = "查询工作流审批详情")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @GetMapping("/approvals/{approvalInstanceId}")
+    public ResultData<WorkflowApprovalTaskView> getApproval(
+            @PathVariable String approvalInstanceId) {
+        return ok(approvalFacade.get(approvalInstanceId));
+    }
+
+    @Operation(summary = "处理工作流审批任务")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @PostMapping("/approvals/{approvalInstanceId}/decision")
+    public ResultData<WorkflowApprovalTaskView> decideApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalDecisionCommand command) {
+        return ok(approvalFacade.decide(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "修复人工审批配置异常并恢复执行")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/repair")
+    public ResultData<WorkflowApprovalTaskView> repairApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalRepairCommand command) {
+        return ok(approvalFacade.repair(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "重新指派当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/reassign")
+    public ResultData<WorkflowApprovalTaskView> reassignApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalReassignCommand command) {
+        return ok(approvalFacade.reassign(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "作废并重新发起当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canAdmin()")
+    @PostMapping("/approvals/{approvalInstanceId}/restart-stage")
+    public ResultData<WorkflowApprovalTaskView> restartApprovalStage(
+            @PathVariable String approvalInstanceId,
+            @RequestBody WorkflowApprovalRestartStageCommand command) {
+        return ok(approvalFacade.restartStage(approvalInstanceId, command));
+    }
+
+    @Operation(summary = "催办当前人工审批级别")
+    @PreAuthorize("@workflowAccess.canApprove()")
+    @PostMapping("/approvals/{approvalInstanceId}/remind")
+    public ResultData<WorkflowApprovalTaskView> remindApproval(
+            @PathVariable String approvalInstanceId,
+            @RequestBody(required = false) WorkflowApprovalRemindCommand command) {
+        return ok(approvalFacade.remind(approvalInstanceId,
+                command == null ? new WorkflowApprovalRemindCommand(null, null, null) : command));
+    }
+
+    @Operation(summary = "查询人工审批可选人员、角色和部门")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/approvals/directory")
+    public ResultData<List<com.polaris.ai.workflow.spi.WorkflowApprovalDirectoryEntry>>
+            listApprovalDirectory(@RequestParam(required = false) String keyword) {
+        return ok(approvalFacade.listDirectory(keyword));
+    }
+
+    @Operation(summary = "查询工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/resource-bindings")
+    public ResultData<List<WorkflowResourceBindingView>> listResourceBindings(
+            @RequestParam(required = false) Long definitionId,
+            @RequestParam(required = false) String environment) {
+        return ok(resourceBindingFacade.list(definitionId, environment));
+    }
+
+    @Operation(summary = "查询工作流可用的现有资源")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/resources")
+    public ResultData<List<WorkflowResourceOption>> listResources(
+            @RequestParam String kind,
+            @RequestParam(required = false) String environment) {
+        return ok(resourceCatalogFacade.list(kind, environment));
+    }
+
+    @Operation(summary = "保存工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/resource-bindings")
+    public ResultData<WorkflowResourceBindingView> saveResourceBinding(
+            @RequestBody WorkflowResourceBindingCommand command) {
+        return ok(resourceBindingFacade.save(command));
+    }
+
+    @Operation(summary = "停用工作流资源绑定")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/resource-bindings/{bindingId}/disable")
+    public ResultData<WorkflowResourceBindingView> disableResourceBinding(
+            @PathVariable Long bindingId) {
+        return ok(resourceBindingFacade.disable(bindingId));
+    }
+
+    @Operation(summary = "查询工作流触发器")
+    @PreAuthorize("@workflowAccess.canRead()")
+    @GetMapping("/triggers")
+    public ResultData<List<WorkflowTriggerView>> listTriggers(
+            @RequestParam(required = false) Long definitionId) {
+        return ok(triggerFacade.list(definitionId));
+    }
+
+    @Operation(summary = "创建工作流触发器")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PostMapping("/triggers")
+    public ResultData<WorkflowTriggerView> createTrigger(
+            @RequestBody WorkflowTriggerCommand command) {
+        return ok(triggerFacade.create(command));
+    }
+
+    @Operation(summary = "启停工作流触发器")
+    @PreAuthorize("@workflowAccess.canEdit()")
+    @PutMapping("/triggers/{triggerId}/status")
+    public ResultData<WorkflowTriggerView> updateTriggerStatus(
+            @PathVariable String triggerId,
+            @RequestBody WorkflowTriggerStatusCommand command) {
+        return ok(triggerFacade.updateStatus(triggerId, command));
+    }
+
+    @Operation(summary = "调用工作流触发器")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @PostMapping("/triggers/{triggerId}/invoke")
+    public ResultData<WorkflowExecutionView> invokeTrigger(
+            @PathVariable String triggerId,
+            @RequestBody(required = false) WorkflowTriggerInvocationCommand command) {
+        return ok(triggerFacade.invoke(triggerId, command));
+    }
+
+    private Map<String, Object> nodeDescriptorView(WorkflowNodeDescriptor descriptor) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("type", descriptor.type());
+        view.put("handlerVersion", descriptor.handlerVersion());
+        view.put("displayName", descriptor.displayName());
+        view.put("category", descriptor.category());
+        view.put("configSchema", plainJson(descriptor.configSchema()));
+        view.put("inputSchema", plainJson(descriptor.inputSchema()));
+        view.put("outputSchema", plainJson(descriptor.outputSchema()));
+        view.put("sideEffect", descriptor.sideEffect().name());
+        view.put("requiredResourceKinds", descriptor.requiredResourceKinds());
+        view.put("capabilities", descriptor.capabilities().stream()
+                .map(Enum::name).toList());
+        return view;
+    }
+
+    private Map<String, Object> resolvedNodeSchemaView(
+            WorkflowResolvedNodeSchemaView schema) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("nodeId", schema.nodeId());
+        view.put("nodeType", schema.nodeType());
+        view.put("handlerVersion", schema.handlerVersion());
+        view.put("inputSchema", plainJson(schema.inputSchema()));
+        view.put("outputSchema", plainJson(schema.outputSchema()));
+        view.put("source", schema.source());
+        view.put("sourceVersion", schema.sourceVersion());
+        view.put("fieldSources", schema.fieldSources());
+        view.put("diagnostics", schema.diagnostics());
+        return view;
+    }
+
+    private Map<String, Object> nodeTestView(WorkflowNodeTestResult result) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("testRunId", result.testRunId());
+        view.put("definitionId", result.definitionId());
+        view.put("draftRevision", result.draftRevision());
+        view.put("nodeId", result.nodeId());
+        view.put("nodeType", result.nodeType());
+        view.put("handlerVersion", result.handlerVersion());
+        view.put("environment", result.environment());
+        view.put("mode", result.mode());
+        view.put("status", result.status());
+        view.put("sideEffect", result.sideEffect());
+        view.put("input", plainJson(result.input()));
+        view.put("output", plainJson(result.output()));
+        view.put("usage", result.usage());
+        view.put("schemaSource", result.schemaSource());
+        view.put("schemaSourceVersion", result.schemaSourceVersion());
+        view.put("schemaDiagnostics", result.schemaDiagnostics());
+        view.put("errorCode", result.errorCode());
+        view.put("errorMessage", result.errorMessage());
+        view.put("durationMs", result.durationMs());
+        return view;
+    }
+
+    private Object plainJson(JsonNode value) {
+        return value == null ? null : objectMapper.convertValue(value, Object.class);
     }
 }
-

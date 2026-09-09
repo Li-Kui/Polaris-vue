@@ -1,5 +1,5 @@
 import request from '@/utils/request'
-import {getToken} from '@/utils/auth'
+import {getAuthHeaders} from '@/utils/auth'
 
 /**
  * 归档保存分析报告
@@ -55,7 +55,29 @@ export function updateReport(data) {
 }
 
 /**
- * AI 智能体美化重塑报告 (同步后备)
+ * 报告中心按报告 ID 美化并缓存结果
+ */
+export function refineReportById(id) {
+  return request({
+    url: '/ai/report/' + id + '/refine',
+    method: 'post',
+    timeout: 15000
+  })
+}
+
+/**
+ * 查询报告中心美化任务状态
+ */
+export function getRefineStatus(id) {
+  return request({
+    url: '/ai/report/' + id + '/refine-status',
+    method: 'get',
+    timeout: 15000
+  })
+}
+
+/**
+ * AI 智能体美化重塑报告 (同步后备，供其他调用方兼容)
  */
 export function refineReport(content) {
   return request({
@@ -78,7 +100,7 @@ export async function refineReportStream(content, { onChunk, onComplete, onError
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
-        'Authorization': 'Bearer ' + getToken()
+        ...getAuthHeaders()
       },
       body: JSON.stringify({ content })
     })
@@ -113,4 +135,3 @@ export async function refineReportStream(content, { onChunk, onComplete, onError
     else throw err
   }
 }
-

@@ -27,11 +27,20 @@ public class AiGraphCheckpoint extends BaseEntity {
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    @Schema(description = "会话线程ID")
-    private String threadId;
+    @Schema(description = "工作流执行ID")
+    private String executionId;
+
+    @Schema(description = "执行内单调检查点序号")
+    private Long sequenceNo;
 
     @Schema(description = "工作流编码")
     private String workflowCode;
+
+    @Schema(description = "执行用户ID")
+    private Long userId;
+
+    @Schema(description = "关联会话ID")
+    private Long conversationId;
 
     @Schema(description = "checkpoint唯一ID")
     private String checkpointId;

@@ -3,8 +3,8 @@ package com.polaris.ai.tools;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.polaris.ai.tools.base.AiAgentTool;
-import com.polaris.ai.tools.base.AiTool;
+import com.polaris.ai.tools.base.*;
+import com.polaris.ai.utils.ToolSseHolder;
 import com.polaris.common.config.PolarisConfig;
 import com.polaris.common.constant.Constants;
 import com.polaris.common.utils.DateUtils;
@@ -26,6 +26,7 @@ import org.springframework.stereotype.Component;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.concurrent.CancellationException;
 
 /**
  * AI 工具类 —— 提供在对话中生成精美 Word、Excel 文件并下载的功能
@@ -34,18 +35,20 @@ import java.io.IOException;
  */
 @Slf4j
 @Component
-@AiAgentTool("文档生成工具")
+@AiAgentTool(value = "文档生成工具", scope = ToolScope.UNIVERSAL, requirement = ToolRequirement.NONE)
 public class DocumentGenerateTools implements AiTool {
 
     /**
      * 生成 Excel 并返回可供下载的绝对链接
      */
     @Tool("根据给定的数据内容和列名生成Excel电子表格文件(.xlsx)，并返回可以直接下载的超链接。")
+    @AiToolPermission(sideEffect = ToolSideEffect.WRITE)
     public String generateExcel(
             @P("要生成的文件名，例如 '2026年销售业绩表.xlsx'，必须以 .xlsx 结尾") String fileName,
             @P("表格的主标题，将显示在表格第一行第一列（合并单元格居中），例如：'北辰AI 2026年销售业绩汇总表'") String title,
             @P("JSON格式的数据内容，必须包含 headers(列标题数组) 和 rows(数据行二维数组)。例如：{\"headers\":[\"姓名\",\"部门\",\"绩效\"],\"rows\":[[\"张三\",\"研发部\",\"A\"],[\"李四\",\"市场部\",\"B\"]]}。请确保数据结构完整。") String jsonData
     ) {
+        ToolSseHolder.ensureActive();
         log.info(">>> AI 请求生成 Excel. fileName: {}, title: {}", fileName, title);
         
         if (StringUtils.isEmpty(fileName) || !fileName.toLowerCase().endsWith(".xlsx")) {
@@ -154,6 +157,7 @@ public class DocumentGenerateTools implements AiTool {
             // 7. 写入数据行
             if (rows != null && !rows.isEmpty()) {
                 for (int r = 0; r < rows.size(); r++) {
+                    ToolSseHolder.ensureActive();
                     Row row = sheet.createRow(currentRowIndex);
                     row.setHeightInPoints(22);
                     
@@ -196,6 +200,8 @@ public class DocumentGenerateTools implements AiTool {
             log.info(">>> Excel 生成成功，相对下载路径为: {}", downloadPath);
             return "生成成功！您可以点击下载生成的 Excel 表格文件：[" + fileName + "](" + downloadPath + ")";
             
+        } catch (CancellationException e) {
+            throw e;
         } catch (Exception e) {
             log.error(">>> Excel 电子表格文件生成失败", e);
             return "生成失败，发生系统异常：" + e.getMessage();
@@ -206,6 +212,7 @@ public class DocumentGenerateTools implements AiTool {
      * 生成 Word 并返回可供下载的绝对链接
      */
     @Tool("根据指定的标题和段落内容生成Word文档(.docx)，支持大标题、二级标题、正文段落和表格的排版，并返回下载链接。")
+    @AiToolPermission(sideEffect = ToolSideEffect.WRITE)
     public String generateWord(
             @P("要生成的文件名，例如 '项目设计说明书.docx'，必须以 .docx 结尾") String fileName,
             @P("文档的大标题，将显示在Word文档的第一页顶部，例如：'北辰智能体工作流设计方案'") String title,
@@ -215,6 +222,7 @@ public class DocumentGenerateTools implements AiTool {
                "3. type='table'（表格，必须包含 headers 数组和 rows 二维数组，如: {\"headers\":[\"指标\",\"数值\"],\"rows\":[[\"访问量\",\"10万\"],[\"转化率\",\"2%\"]]}）\n" +
                "例如：[{\"type\":\"heading\",\"text\":\"一、项目背景\"},{\"type\":\"paragraph\",\"text\":\"这是一个AI驱动的管理系统...\"},{\"type\":\"table\",\"headers\":[\"姓名\",\"角色\"],\"rows\":[[\"小明\",\"项目经理\"]]}]") String contentJson
     ) {
+        ToolSseHolder.ensureActive();
         log.info(">>> AI 请求生成 Word. fileName: {}, title: {}", fileName, title);
         
         if (StringUtils.isEmpty(fileName) || !fileName.toLowerCase().endsWith(".docx")) {
@@ -329,6 +337,8 @@ public class DocumentGenerateTools implements AiTool {
             log.info(">>> Word 生成成功，相对下载路径为: {}", downloadPath);
             return "生成成功！您可以点击下载生成的 Word 文档文件：[" + fileName + "](" + downloadPath + ")";
             
+        } catch (CancellationException e) {
+            throw e;
         } catch (Exception e) {
             log.error(">>> Word 电子文档文件生成失败", e);
             return "生成失败，发生系统异常：" + e.getMessage();
@@ -343,6 +353,7 @@ public class DocumentGenerateTools implements AiTool {
      * 将 Workbook 保存到指定目录，返回相对 URL 下载地址
      */
     private String saveDocument(Workbook workbook, String originalFileName) throws IOException {
+        ToolSseHolder.ensureActive();
         String baseDir = PolarisConfig.getUploadPath();
         String datePath = DateUtils.datePath();
         String fileDir = baseDir + File.separator + datePath;
@@ -360,9 +371,17 @@ public class DocumentGenerateTools implements AiTool {
         
         String uniqueFileName = IdUtils.fastSimpleUUID() + "_" + cleanFileName + "." + extension;
         String absolutePath = fileDir + File.separator + uniqueFileName;
-        
-        try (FileOutputStream fos = new FileOutputStream(absolutePath)) {
+        File outputFile = new File(absolutePath);
+
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            ToolSseHolder.ensureActive();
             workbook.write(fos);
+            ToolSseHolder.ensureActive();
+        } catch (IOException | RuntimeException e) {
+            if (outputFile.exists() && !outputFile.delete()) {
+                log.warn(">>> 删除未完成的 Excel 文件失败: {}", absolutePath);
+            }
+            throw e;
         }
         
         return Constants.RESOURCE_PREFIX + "/upload/" + datePath + "/" + uniqueFileName;
@@ -372,6 +391,7 @@ public class DocumentGenerateTools implements AiTool {
      * 将 XWPFDocument 保存到指定目录，返回相对 URL 下载地址
      */
     private String saveDocument(XWPFDocument document, String originalFileName) throws IOException {
+        ToolSseHolder.ensureActive();
         String baseDir = PolarisConfig.getUploadPath();
         String datePath = DateUtils.datePath();
         String fileDir = baseDir + File.separator + datePath;
@@ -389,9 +409,17 @@ public class DocumentGenerateTools implements AiTool {
         
         String uniqueFileName = IdUtils.fastSimpleUUID() + "_" + cleanFileName + "." + extension;
         String absolutePath = fileDir + File.separator + uniqueFileName;
-        
-        try (FileOutputStream fos = new FileOutputStream(absolutePath)) {
+        File outputFile = new File(absolutePath);
+
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            ToolSseHolder.ensureActive();
             document.write(fos);
+            ToolSseHolder.ensureActive();
+        } catch (IOException | RuntimeException e) {
+            if (outputFile.exists() && !outputFile.delete()) {
+                log.warn(">>> 删除未完成的 Word 文件失败: {}", absolutePath);
+            }
+            throw e;
         }
         
         return Constants.RESOURCE_PREFIX + "/upload/" + datePath + "/" + uniqueFileName;

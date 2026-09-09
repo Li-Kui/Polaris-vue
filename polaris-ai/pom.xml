@@ -18,9 +18,48 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <qdrant.client.version>1.17.0</qdrant.client.version>
+        <grpc.version>1.77.0</grpc.version>
     </properties>
 
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.grpc</groupId>
+                <artifactId>grpc-bom</artifactId>
+                <version>${grpc.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
+
+        <!-- 本地敏感内容候选匹配；项目使用自带的受控种子，不引入公共运行时词库。 -->
+        <dependency>
+            <groupId>com.github.houbb</groupId>
+            <artifactId>sensitive-word</artifactId>
+            <version>${sensitive-word.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.github.houbb</groupId>
+                    <artifactId>sensitive-word-data</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.houbb</groupId>
+            <artifactId>pinyin</artifactId>
+            <version>${houbb-pinyin.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.aliyun</groupId>
+            <artifactId>green20220302</artifactId>
+            <version>${aliyun-green.version}</version>
+        </dependency>
 
 		<!-- LangChain4j 核心 -->
 		<dependency>
@@ -35,6 +74,19 @@
 		    <artifactId>langchain4j-open-ai</artifactId>
 		    <version>1.17.0</version>
 		</dependency>
+
+		<!-- Qdrant 向量存储适配（与 LangChain4j 1.17.0 对齐） -->
+		<dependency>
+		    <groupId>dev.langchain4j</groupId>
+		    <artifactId>langchain4j-qdrant</artifactId>
+		    <version>1.17.0-beta27</version>
+		</dependency>
+
+		<dependency>
+		    <groupId>io.qdrant</groupId>
+		    <artifactId>client</artifactId>
+		    <version>${qdrant.client.version}</version>
+		</dependency>
 		
 		<!-- SpringWeb模块 -->
 		<dependency>
@@ -42,6 +94,12 @@
 		    <artifactId>spring-webmvc</artifactId>
 		</dependency>
 		
+		<!-- AI核心引擎层 -->
+		<dependency>
+		    <groupId>com.polaris</groupId>
+		    <artifactId>polaris-ai-core</artifactId>
+		</dependency>
+
 		<!-- 通用工具-->
 		<dependency>
 		    <groupId>com.polaris</groupId>
@@ -61,52 +119,6 @@
 		    <version>2.0.31</version>
 		</dependency>
 
-		<!-- LangGraph4j 核心：图状态机引擎 -->
-		<dependency>
-		    <groupId>org.bsc.langgraph4j</groupId>
-		    <artifactId>langgraph4j-core</artifactId>
-		</dependency>
-
-		<!-- LangGraph4j ↔ LangChain4j 适配层 -->
-		<dependency>
-		    <groupId>org.bsc.langgraph4j</groupId>
-		    <artifactId>langgraph4j-langchain4j</artifactId>
-		    <exclusions>
-		        <exclusion>
-		            <groupId>dev.langchain4j</groupId>
-		            <artifactId>langchain4j</artifactId>
-		        </exclusion>
-		        <exclusion>
-		            <groupId>dev.langchain4j</groupId>
-		            <artifactId>langchain4j-open-ai</artifactId>
-		        </exclusion>
-		        <exclusion>
-		            <groupId>org.springframework.boot</groupId>
-		            <artifactId>spring-boot</artifactId>
-		        </exclusion>
-		        <exclusion>
-		            <groupId>org.springframework.boot</groupId>
-		            <artifactId>spring-boot-autoconfigure</artifactId>
-		        </exclusion>
-		    </exclusions>
-		</dependency>
-
-		<!-- LangGraph4j MySQL 持久化检查点存储 -->
-		<dependency>
-		    <groupId>org.bsc.langgraph4j</groupId>
-		    <artifactId>langgraph4j-mysql-saver</artifactId>
-		    <exclusions>
-		        <exclusion>
-		            <groupId>org.springframework.boot</groupId>
-		            <artifactId>spring-boot</artifactId>
-		        </exclusion>
-		        <exclusion>
-		            <groupId>org.springframework.boot</groupId>
-		            <artifactId>spring-boot-autoconfigure</artifactId>
-		        </exclusion>
-		    </exclusions>
-		</dependency>
-
 		<!-- Lombok 依赖 -->
 		<dependency>
 		    <groupId>org.projectlombok</groupId>
@@ -114,6 +126,22 @@
 		    <scope>provided</scope>
 		</dependency>
 
+		<dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-starter-test</artifactId>
+		    <scope>test</scope>
+		</dependency>
+
     </dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<version>3.5.4</version>
+			</plugin>
+		</plugins>
+	</build>
 
 </project>

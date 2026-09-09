@@ -8,11 +8,16 @@
         <result property="knowledgeBaseId" column="knowledge_base_id"/>
         <result property="name"            column="name"/>
         <result property="fileUrl"         column="file_url"/>
-        <result property="status"          column="status"/>
-        <result property="wordCount"       column="word_count"/>
-        <result property="createBy"        column="create_by"/>
-        <result property="createTime"      column="create_time"/>
-        <result property="delFlag"         column="del_flag"/>
+        <result property="status"               column="status"/>
+        <result property="wordCount"            column="word_count"/>
+        <result property="moderationStatus"     column="moderation_status"/>
+        <result property="moderationEventId"    column="moderation_event_id"/>
+        <result property="moderationVersion"    column="moderation_version"/>
+        <result property="quarantinePath"       column="quarantine_path"/>
+        <result property="quarantineExpireTime" column="quarantine_expire_time"/>
+        <result property="createBy"             column="create_by"/>
+        <result property="createTime"           column="create_time"/>
+        <result property="delFlag"              column="del_flag"/>
     </resultMap>
 
     <select id="selectDocumentList" resultMap="DocumentResult">

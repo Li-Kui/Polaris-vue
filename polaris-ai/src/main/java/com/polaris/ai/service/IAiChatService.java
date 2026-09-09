@@ -122,4 +122,13 @@ public interface IAiChatService extends IService<AiConversation>
     default void chat(Long conversationId, String userMessage, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
         chat(conversationId, userMessage, fileUrl, agentCode, enableSearch, userId, emitter);
     }
+
+    /**
+     * 发送消息并以 SSE 流式返回 AI 回复（通过 ChatStreamRequest 统一接收）
+     */
+    default void chat(com.polaris.ai.dto.ChatStreamRequest request, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+        if (request != null) {
+            chat(request.conversationId(), request.message(), null, request.agentCode(), request.enableSearch(), userId, emitter, isCancelled);
+        }
+    }
 }

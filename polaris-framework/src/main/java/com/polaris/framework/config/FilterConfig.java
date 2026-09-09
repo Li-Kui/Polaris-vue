@@ -1,18 +1,21 @@
 package com.polaris.framework.config;
 
-import java.util.HashMap;
-import java.util.Map;
+import com.polaris.common.constant.Constants;
+import com.polaris.common.filter.RefererFilter;
+import com.polaris.common.filter.RepeatableFilter;
+import com.polaris.common.filter.XssFilter;
+import com.polaris.common.utils.StringUtils;
+import com.polaris.platform.auth.ApiKeyAuthFilter;
+import com.polaris.platform.auth.PlatformJwtFilter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import com.polaris.common.constant.Constants;
-import com.polaris.common.filter.RefererFilter;
-import com.polaris.common.filter.RepeatableFilter;
-import com.polaris.common.filter.XssFilter;
-import com.polaris.common.utils.StringUtils;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Filter配置
@@ -74,6 +77,28 @@ public class FilterConfig
         registration.addUrlPatterns("/*");
         registration.setName("repeatableFilter");
         registration.setOrder(FilterRegistrationBean.LOWEST_PRECEDENCE);
+        return registration;
+    }
+
+    /**
+     * 中台JWT过滤器由Spring Security统一管理，关闭Servlet自动注册
+     */
+    @Bean
+    public FilterRegistrationBean<PlatformJwtFilter> platformJwtFilterRegistration(PlatformJwtFilter filter)
+    {
+        FilterRegistrationBean<PlatformJwtFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    /**
+     * 中台API Key过滤器由Spring Security统一管理，关闭Servlet自动注册
+     */
+    @Bean
+    public FilterRegistrationBean<ApiKeyAuthFilter> apiKeyAuthFilterRegistration(ApiKeyAuthFilter filter)
+    {
+        FilterRegistrationBean<ApiKeyAuthFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
         return registration;
     }
 

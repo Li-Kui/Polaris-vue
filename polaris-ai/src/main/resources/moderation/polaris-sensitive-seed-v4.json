@@ -1,0 +1,2510 @@
+{
+  "sourceVersion" : "polaris-sensitive-seed-v4",
+  "checksum" : "0a58a3c208deed7134d3bc9ca1e840cf7ed0dc40afc9e66d93accd9d7edc357d",
+  "generatedAt" : "2026-08-18",
+  "source" : {
+    "repository" : "https://github.com/houbb/sensitive-word",
+    "sourceVersion" : "0.29.5-enriched-v4",
+    "license" : "Apache-2.0"
+  },
+  "rules" : [ {
+    "id" : "seed-risk_word-00001",
+    "ruleType" : "RISK_WORD",
+    "content" : "赌博",
+    "normalizedContent" : "赌博",
+    "category" : "GAMBLING",
+    "weight" : 25
+  }, {
+    "id" : "seed-risk_word-00002",
+    "ruleType" : "RISK_WORD",
+    "content" : "色情",
+    "normalizedContent" : "色情",
+    "category" : "PORNOGRAPHY",
+    "weight" : 25
+  }, {
+    "id" : "seed-risk_word-00003",
+    "ruleType" : "RISK_WORD",
+    "content" : "毒品",
+    "normalizedContent" : "毒品",
+    "category" : "DRUGS",
+    "weight" : 25
+  }, {
+    "id" : "seed-risk_context-00004",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "资源",
+    "normalizedContent" : "资源",
+    "category" : "GENERAL",
+    "weight" : 10
+  }, {
+    "id" : "seed-risk_context-00005",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "加群",
+    "normalizedContent" : "加群",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00006",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "付款",
+    "normalizedContent" : "付款",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00007",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "地址",
+    "normalizedContent" : "地址",
+    "category" : "GENERAL",
+    "weight" : 25
+  }, {
+    "id" : "seed-risk_context-00008",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "购买",
+    "normalizedContent" : "购买",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00009",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "教程",
+    "normalizedContent" : "教程",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00010",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "下载链接",
+    "normalizedContent" : "下载链接",
+    "category" : "GENERAL",
+    "weight" : 15
+  }, {
+    "id" : "seed-risk_context-00011",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "交易",
+    "normalizedContent" : "交易",
+    "category" : "GENERAL",
+    "weight" : 15
+  }, {
+    "id" : "seed-risk_context-00012",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "联系方式",
+    "normalizedContent" : "联系方式",
+    "category" : "GENERAL",
+    "weight" : 45
+  }, {
+    "id" : "seed-risk_context-00013",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "微信",
+    "normalizedContent" : "微信",
+    "category" : "GENERAL",
+    "weight" : 45
+  }, {
+    "id" : "seed-safe_context-00014",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "严禁",
+    "normalizedContent" : "严禁",
+    "category" : "GENERAL",
+    "weight" : -40
+  }, {
+    "id" : "seed-safe_context-00015",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "警方",
+    "normalizedContent" : "警方",
+    "category" : "GENERAL",
+    "weight" : -25
+  }, {
+    "id" : "seed-safe_context-00016",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "打击",
+    "normalizedContent" : "打击",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00017",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "禁毒",
+    "normalizedContent" : "禁毒",
+    "category" : "DRUGS",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00018",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "研究",
+    "normalizedContent" : "研究",
+    "category" : "GENERAL",
+    "weight" : -25
+  }, {
+    "id" : "seed-safe_context-00019",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "治理",
+    "normalizedContent" : "治理",
+    "category" : "GENERAL",
+    "weight" : -25
+  }, {
+    "id" : "seed-safe_context-00020",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "杀毒软件",
+    "normalizedContent" : "杀毒软件",
+    "category" : "DRUGS",
+    "weight" : -40
+  }, {
+    "id" : "seed-safe_context-00021",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "法律",
+    "normalizedContent" : "法律",
+    "category" : "GENERAL",
+    "weight" : -25
+  }, {
+    "id" : "seed-safe_context-00022",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "赌博罪",
+    "normalizedContent" : "赌博罪",
+    "category" : "GAMBLING",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00023",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "宣传如何",
+    "normalizedContent" : "宣传如何",
+    "category" : "GENERAL",
+    "weight" : -30
+  }, {
+    "id" : "seed-safe_context-00024",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "如何识别",
+    "normalizedContent" : "如何识别",
+    "category" : "GENERAL",
+    "weight" : -30
+  }, {
+    "id" : "seed-safe_context-00025",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "防范宣传",
+    "normalizedContent" : "防范宣传",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-allow_term-00026",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国刑法",
+    "normalizedContent" : "中华人民共和国刑法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-risk_word-00027",
+    "ruleType" : "RISK_WORD",
+    "content" : "法轮功",
+    "normalizedContent" : "法轮功",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00028",
+    "ruleType" : "RISK_WORD",
+    "content" : "法仑功",
+    "normalizedContent" : "法仑功",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00029",
+    "ruleType" : "RISK_WORD",
+    "content" : "发轮功",
+    "normalizedContent" : "发轮功",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00030",
+    "ruleType" : "RISK_WORD",
+    "content" : "法沦功",
+    "normalizedContent" : "法沦功",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00031",
+    "ruleType" : "RISK_WORD",
+    "content" : "法轮大法",
+    "normalizedContent" : "法轮大法",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00032",
+    "ruleType" : "RISK_WORD",
+    "content" : "李洪志",
+    "normalizedContent" : "李洪志",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00033",
+    "ruleType" : "RISK_WORD",
+    "content" : "转法轮",
+    "normalizedContent" : "转法轮",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00034",
+    "ruleType" : "RISK_WORD",
+    "content" : "大纪元",
+    "normalizedContent" : "大纪元",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00035",
+    "ruleType" : "RISK_WORD",
+    "content" : "新唐人",
+    "normalizedContent" : "新唐人",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00036",
+    "ruleType" : "RISK_WORD",
+    "content" : "明慧网",
+    "normalizedContent" : "明慧网",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00037",
+    "ruleType" : "RISK_WORD",
+    "content" : "退党保平安",
+    "normalizedContent" : "退党保平安",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00038",
+    "ruleType" : "RISK_WORD",
+    "content" : "九评共产党",
+    "normalizedContent" : "九评共产党",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00039",
+    "ruleType" : "RISK_WORD",
+    "content" : "全能神",
+    "normalizedContent" : "全能神",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00040",
+    "ruleType" : "RISK_WORD",
+    "content" : "全能神教",
+    "normalizedContent" : "全能神教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00041",
+    "ruleType" : "RISK_WORD",
+    "content" : "东方闪电",
+    "normalizedContent" : "东方闪电",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00042",
+    "ruleType" : "RISK_WORD",
+    "content" : "门徒会",
+    "normalizedContent" : "门徒会",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00043",
+    "ruleType" : "RISK_WORD",
+    "content" : "主神教",
+    "normalizedContent" : "主神教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00044",
+    "ruleType" : "RISK_WORD",
+    "content" : "三班仆人派",
+    "normalizedContent" : "三班仆人派",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00045",
+    "ruleType" : "RISK_WORD",
+    "content" : "被立王",
+    "normalizedContent" : "被立王",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00046",
+    "ruleType" : "RISK_WORD",
+    "content" : "灵灵教",
+    "normalizedContent" : "灵灵教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00047",
+    "ruleType" : "RISK_WORD",
+    "content" : "华藏宗门",
+    "normalizedContent" : "华藏宗门",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00048",
+    "ruleType" : "RISK_WORD",
+    "content" : "观音法门",
+    "normalizedContent" : "观音法门",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00049",
+    "ruleType" : "RISK_WORD",
+    "content" : "统一教",
+    "normalizedContent" : "统一教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00050",
+    "ruleType" : "RISK_WORD",
+    "content" : "奥姆真理教",
+    "normalizedContent" : "奥姆真理教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00051",
+    "ruleType" : "RISK_WORD",
+    "content" : "呼喊派",
+    "normalizedContent" : "呼喊派",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00052",
+    "ruleType" : "RISK_WORD",
+    "content" : "常受主派",
+    "normalizedContent" : "常受主派",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00053",
+    "ruleType" : "RISK_WORD",
+    "content" : "血水圣灵",
+    "normalizedContent" : "血水圣灵",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00054",
+    "ruleType" : "RISK_WORD",
+    "content" : "实际神",
+    "normalizedContent" : "实际神",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00055",
+    "ruleType" : "RISK_WORD",
+    "content" : "冷水教",
+    "normalizedContent" : "冷水教",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00056",
+    "ruleType" : "RISK_WORD",
+    "content" : "圆顿法门",
+    "normalizedContent" : "圆顿法门",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00057",
+    "ruleType" : "RISK_WORD",
+    "content" : "天父的儿女",
+    "normalizedContent" : "天父的儿女",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00058",
+    "ruleType" : "RISK_WORD",
+    "content" : "达赖喇嘛",
+    "normalizedContent" : "达赖喇嘛",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00059",
+    "ruleType" : "RISK_WORD",
+    "content" : "藏独",
+    "normalizedContent" : "藏独",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00060",
+    "ruleType" : "RISK_WORD",
+    "content" : "西藏独立",
+    "normalizedContent" : "西藏独立",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00061",
+    "ruleType" : "RISK_WORD",
+    "content" : "疆独",
+    "normalizedContent" : "疆独",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00062",
+    "ruleType" : "RISK_WORD",
+    "content" : "东突厥斯坦",
+    "normalizedContent" : "东突厥斯坦",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00063",
+    "ruleType" : "RISK_WORD",
+    "content" : "东突",
+    "normalizedContent" : "东突",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00064",
+    "ruleType" : "RISK_WORD",
+    "content" : "港独",
+    "normalizedContent" : "港独",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00065",
+    "ruleType" : "RISK_WORD",
+    "content" : "香港独立",
+    "normalizedContent" : "香港独立",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00066",
+    "ruleType" : "RISK_WORD",
+    "content" : "台独",
+    "normalizedContent" : "台独",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00067",
+    "ruleType" : "RISK_WORD",
+    "content" : "台湾独立",
+    "normalizedContent" : "台湾独立",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00068",
+    "ruleType" : "RISK_WORD",
+    "content" : "颠覆国家政权",
+    "normalizedContent" : "颠覆国家政权",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00069",
+    "ruleType" : "RISK_WORD",
+    "content" : "分裂国家",
+    "normalizedContent" : "分裂国家",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00070",
+    "ruleType" : "RISK_WORD",
+    "content" : "推翻政府",
+    "normalizedContent" : "推翻政府",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00071",
+    "ruleType" : "RISK_WORD",
+    "content" : "茉莉花革命",
+    "normalizedContent" : "茉莉花革命",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00072",
+    "ruleType" : "RISK_WORD",
+    "content" : "六四事件",
+    "normalizedContent" : "六四事件",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00073",
+    "ruleType" : "RISK_WORD",
+    "content" : "天安门事件",
+    "normalizedContent" : "天安门事件",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00074",
+    "ruleType" : "RISK_WORD",
+    "content" : "八平方",
+    "normalizedContent" : "八平方",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00075",
+    "ruleType" : "RISK_WORD",
+    "content" : "占领中环",
+    "normalizedContent" : "占领中环",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00076",
+    "ruleType" : "RISK_WORD",
+    "content" : "时代革命",
+    "normalizedContent" : "时代革命",
+    "category" : "POLITICS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00077",
+    "ruleType" : "RISK_WORD",
+    "content" : "自制炸弹",
+    "normalizedContent" : "自制炸弹",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00078",
+    "ruleType" : "RISK_WORD",
+    "content" : "制造炸药",
+    "normalizedContent" : "制造炸药",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00079",
+    "ruleType" : "RISK_WORD",
+    "content" : "雷管引爆",
+    "normalizedContent" : "雷管引爆",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00080",
+    "ruleType" : "RISK_WORD",
+    "content" : "黑火药配方",
+    "normalizedContent" : "黑火药配方",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00081",
+    "ruleType" : "RISK_WORD",
+    "content" : "TNT炸药",
+    "normalizedContent" : "tnt炸药",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00082",
+    "ruleType" : "RISK_WORD",
+    "content" : "定时炸弹",
+    "normalizedContent" : "定时炸弹",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00083",
+    "ruleType" : "RISK_WORD",
+    "content" : "自杀式袭击",
+    "normalizedContent" : "自杀式袭击",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00084",
+    "ruleType" : "RISK_WORD",
+    "content" : "恐怖袭击",
+    "normalizedContent" : "恐怖袭击",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00085",
+    "ruleType" : "RISK_WORD",
+    "content" : "圣战组织",
+    "normalizedContent" : "圣战组织",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00086",
+    "ruleType" : "RISK_WORD",
+    "content" : "伊斯兰国",
+    "normalizedContent" : "伊斯兰国",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00087",
+    "ruleType" : "RISK_WORD",
+    "content" : "基地组织",
+    "normalizedContent" : "基地组织",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00088",
+    "ruleType" : "RISK_WORD",
+    "content" : "买凶杀人",
+    "normalizedContent" : "买凶杀人",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00089",
+    "ruleType" : "RISK_WORD",
+    "content" : "职业杀手",
+    "normalizedContent" : "职业杀手",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00090",
+    "ruleType" : "RISK_WORD",
+    "content" : "暗网雇凶",
+    "normalizedContent" : "暗网雇凶",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00091",
+    "ruleType" : "RISK_WORD",
+    "content" : "枪支买卖",
+    "normalizedContent" : "枪支买卖",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00092",
+    "ruleType" : "RISK_WORD",
+    "content" : "手枪出售",
+    "normalizedContent" : "手枪出售",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00093",
+    "ruleType" : "RISK_WORD",
+    "content" : "步枪购买",
+    "normalizedContent" : "步枪购买",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00094",
+    "ruleType" : "RISK_WORD",
+    "content" : "阻击步枪",
+    "normalizedContent" : "阻击步枪",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00095",
+    "ruleType" : "RISK_WORD",
+    "content" : "狙击枪",
+    "normalizedContent" : "狙击枪",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00096",
+    "ruleType" : "RISK_WORD",
+    "content" : "猎枪改装",
+    "normalizedContent" : "猎枪改装",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00097",
+    "ruleType" : "RISK_WORD",
+    "content" : "仿真枪买卖",
+    "normalizedContent" : "仿真枪买卖",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00098",
+    "ruleType" : "RISK_WORD",
+    "content" : "左轮手枪",
+    "normalizedContent" : "左轮手枪",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00099",
+    "ruleType" : "RISK_WORD",
+    "content" : "消音器制作",
+    "normalizedContent" : "消音器制作",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00100",
+    "ruleType" : "RISK_WORD",
+    "content" : "弩弓管制",
+    "normalizedContent" : "弩弓管制",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00101",
+    "ruleType" : "RISK_WORD",
+    "content" : "剧毒化学品",
+    "normalizedContent" : "剧毒化学品",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00102",
+    "ruleType" : "RISK_WORD",
+    "content" : "氰化钾",
+    "normalizedContent" : "氰化钾",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00103",
+    "ruleType" : "RISK_WORD",
+    "content" : "氰化钠",
+    "normalizedContent" : "氰化钠",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00104",
+    "ruleType" : "RISK_WORD",
+    "content" : "蓖麻毒素",
+    "normalizedContent" : "蓖麻毒素",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00105",
+    "ruleType" : "RISK_WORD",
+    "content" : "铊中毒",
+    "normalizedContent" : "铊中毒",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00106",
+    "ruleType" : "RISK_WORD",
+    "content" : "炭疽杆菌",
+    "normalizedContent" : "炭疽杆菌",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00107",
+    "ruleType" : "RISK_WORD",
+    "content" : "沙林毒气",
+    "normalizedContent" : "沙林毒气",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00108",
+    "ruleType" : "RISK_WORD",
+    "content" : "VX毒剂",
+    "normalizedContent" : "vx毒剂",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00109",
+    "ruleType" : "RISK_WORD",
+    "content" : "人肉炸弹",
+    "normalizedContent" : "人肉炸弹",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00110",
+    "ruleType" : "RISK_WORD",
+    "content" : "自残教程",
+    "normalizedContent" : "自残教程",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00111",
+    "ruleType" : "RISK_WORD",
+    "content" : "自杀群",
+    "normalizedContent" : "自杀群",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00112",
+    "ruleType" : "RISK_WORD",
+    "content" : "相约自杀",
+    "normalizedContent" : "相约自杀",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00113",
+    "ruleType" : "RISK_WORD",
+    "content" : "割腕方法",
+    "normalizedContent" : "割腕方法",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00114",
+    "ruleType" : "RISK_WORD",
+    "content" : "跳楼教程",
+    "normalizedContent" : "跳楼教程",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00115",
+    "ruleType" : "RISK_WORD",
+    "content" : "杀人方法",
+    "normalizedContent" : "杀人方法",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00116",
+    "ruleType" : "RISK_WORD",
+    "content" : "毁尸灭迹",
+    "normalizedContent" : "毁尸灭迹",
+    "category" : "VIOLENCE",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00117",
+    "ruleType" : "RISK_WORD",
+    "content" : "海洛因",
+    "normalizedContent" : "海洛因",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00118",
+    "ruleType" : "RISK_WORD",
+    "content" : "白粉买卖",
+    "normalizedContent" : "白粉买卖",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00119",
+    "ruleType" : "RISK_WORD",
+    "content" : "冰毒",
+    "normalizedContent" : "冰毒",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00120",
+    "ruleType" : "RISK_WORD",
+    "content" : "甲基苯丙胺",
+    "normalizedContent" : "甲基苯丙胺",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00121",
+    "ruleType" : "RISK_WORD",
+    "content" : "麻古",
+    "normalizedContent" : "麻古",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00122",
+    "ruleType" : "RISK_WORD",
+    "content" : "摇头丸",
+    "normalizedContent" : "摇头丸",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00123",
+    "ruleType" : "RISK_WORD",
+    "content" : "K粉",
+    "normalizedContent" : "k粉",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00124",
+    "ruleType" : "RISK_WORD",
+    "content" : "氯胺酮",
+    "normalizedContent" : "氯胺酮",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00125",
+    "ruleType" : "RISK_WORD",
+    "content" : "可卡因",
+    "normalizedContent" : "可卡因",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00126",
+    "ruleType" : "RISK_WORD",
+    "content" : "大麻叶",
+    "normalizedContent" : "大麻叶",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00127",
+    "ruleType" : "RISK_WORD",
+    "content" : "大麻烟",
+    "normalizedContent" : "大麻烟",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00128",
+    "ruleType" : "RISK_WORD",
+    "content" : "神仙水",
+    "normalizedContent" : "神仙水",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00129",
+    "ruleType" : "RISK_WORD",
+    "content" : "红冰",
+    "normalizedContent" : "红冰",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00130",
+    "ruleType" : "RISK_WORD",
+    "content" : "咔哇潮饮",
+    "normalizedContent" : "咔哇潮饮",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00131",
+    "ruleType" : "RISK_WORD",
+    "content" : "笑气吸食",
+    "normalizedContent" : "笑气吸食",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00132",
+    "ruleType" : "RISK_WORD",
+    "content" : "芬太尼透皮贴",
+    "normalizedContent" : "芬太尼透皮贴",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00133",
+    "ruleType" : "RISK_WORD",
+    "content" : "杜冷丁注射液",
+    "normalizedContent" : "杜冷丁注射液",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00134",
+    "ruleType" : "RISK_WORD",
+    "content" : "美沙酮口服液",
+    "normalizedContent" : "美沙酮口服液",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00135",
+    "ruleType" : "RISK_WORD",
+    "content" : "三唑仑",
+    "normalizedContent" : "三唑仑",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00136",
+    "ruleType" : "RISK_WORD",
+    "content" : "迷魂药",
+    "normalizedContent" : "迷魂药",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00137",
+    "ruleType" : "RISK_WORD",
+    "content" : "听话水",
+    "normalizedContent" : "听话水",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00138",
+    "ruleType" : "RISK_WORD",
+    "content" : "乖乖水",
+    "normalizedContent" : "乖乖水",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00139",
+    "ruleType" : "RISK_WORD",
+    "content" : "失忆水",
+    "normalizedContent" : "失忆水",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00140",
+    "ruleType" : "RISK_WORD",
+    "content" : "GHB迷药",
+    "normalizedContent" : "ghb迷药",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00141",
+    "ruleType" : "RISK_WORD",
+    "content" : "迷奸药",
+    "normalizedContent" : "迷奸药",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00142",
+    "ruleType" : "RISK_WORD",
+    "content" : "催情粉",
+    "normalizedContent" : "催情粉",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00143",
+    "ruleType" : "RISK_WORD",
+    "content" : "制毒教程",
+    "normalizedContent" : "制毒教程",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00144",
+    "ruleType" : "RISK_WORD",
+    "content" : "麻黄碱提炼",
+    "normalizedContent" : "麻黄碱提炼",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00145",
+    "ruleType" : "RISK_WORD",
+    "content" : "毒品原植物",
+    "normalizedContent" : "毒品原植物",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00146",
+    "ruleType" : "RISK_WORD",
+    "content" : "罂粟种子",
+    "normalizedContent" : "罂粟种子",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00147",
+    "ruleType" : "RISK_WORD",
+    "content" : "古柯叶",
+    "normalizedContent" : "古柯叶",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00148",
+    "ruleType" : "RISK_WORD",
+    "content" : "毒品交易",
+    "normalizedContent" : "毒品交易",
+    "category" : "DRUGS",
+    "weight" : 75
+  }, {
+    "id" : "seed-risk_word-00149",
+    "ruleType" : "RISK_WORD",
+    "content" : "地下赌场",
+    "normalizedContent" : "地下赌场",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00150",
+    "ruleType" : "RISK_WORD",
+    "content" : "境外赌场",
+    "normalizedContent" : "境外赌场",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00151",
+    "ruleType" : "RISK_WORD",
+    "content" : "网络赌球",
+    "normalizedContent" : "网络赌球",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00152",
+    "ruleType" : "RISK_WORD",
+    "content" : "皇冠开户",
+    "normalizedContent" : "皇冠开户",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00153",
+    "ruleType" : "RISK_WORD",
+    "content" : "太阳城开户",
+    "normalizedContent" : "太阳城开户",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00154",
+    "ruleType" : "RISK_WORD",
+    "content" : "百家乐作弊",
+    "normalizedContent" : "百家乐作弊",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00155",
+    "ruleType" : "RISK_WORD",
+    "content" : "百家乐透视",
+    "normalizedContent" : "百家乐透视",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00156",
+    "ruleType" : "RISK_WORD",
+    "content" : "六合彩特码",
+    "normalizedContent" : "六合彩特码",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00157",
+    "ruleType" : "RISK_WORD",
+    "content" : "时时彩计划",
+    "normalizedContent" : "时时彩计划",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00158",
+    "ruleType" : "RISK_WORD",
+    "content" : "时时彩稳赚",
+    "normalizedContent" : "时时彩稳赚",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00159",
+    "ruleType" : "RISK_WORD",
+    "content" : "时时彩漏洞",
+    "normalizedContent" : "时时彩漏洞",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00160",
+    "ruleType" : "RISK_WORD",
+    "content" : "北京赛车pk10",
+    "normalizedContent" : "北京赛车pk10",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00161",
+    "ruleType" : "RISK_WORD",
+    "content" : "幸运飞艇群",
+    "normalizedContent" : "幸运飞艇群",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00162",
+    "ruleType" : "RISK_WORD",
+    "content" : "快三计划",
+    "normalizedContent" : "快三计划",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00163",
+    "ruleType" : "RISK_WORD",
+    "content" : "真人视讯赌博",
+    "normalizedContent" : "真人视讯赌博",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00164",
+    "ruleType" : "RISK_WORD",
+    "content" : "线上娱乐城",
+    "normalizedContent" : "线上娱乐城",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00165",
+    "ruleType" : "RISK_WORD",
+    "content" : "澳门威尼斯人线上",
+    "normalizedContent" : "澳门威尼斯人线上",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00166",
+    "ruleType" : "RISK_WORD",
+    "content" : "金沙娱乐城",
+    "normalizedContent" : "金沙娱乐城",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00167",
+    "ruleType" : "RISK_WORD",
+    "content" : "万博体育",
+    "normalizedContent" : "万博体育",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00168",
+    "ruleType" : "RISK_WORD",
+    "content" : "开云体育",
+    "normalizedContent" : "开云体育",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00169",
+    "ruleType" : "RISK_WORD",
+    "content" : "外围下注",
+    "normalizedContent" : "外围下注",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00170",
+    "ruleType" : "RISK_WORD",
+    "content" : "赌博赔率",
+    "normalizedContent" : "赌博赔率",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00171",
+    "ruleType" : "RISK_WORD",
+    "content" : "百家乐刷水",
+    "normalizedContent" : "百家乐刷水",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00172",
+    "ruleType" : "RISK_WORD",
+    "content" : "对冲套利",
+    "normalizedContent" : "对冲套利",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00173",
+    "ruleType" : "RISK_WORD",
+    "content" : "扎金花作弊器",
+    "normalizedContent" : "扎金花作弊器",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00174",
+    "ruleType" : "RISK_WORD",
+    "content" : "斗牛作弊透视",
+    "normalizedContent" : "斗牛作弊透视",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00175",
+    "ruleType" : "RISK_WORD",
+    "content" : "麻将透视挂",
+    "normalizedContent" : "麻将透视挂",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00176",
+    "ruleType" : "RISK_WORD",
+    "content" : "德州扑克外挂",
+    "normalizedContent" : "德州扑克外挂",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00177",
+    "ruleType" : "RISK_WORD",
+    "content" : "炸金花透视",
+    "normalizedContent" : "炸金花透视",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00178",
+    "ruleType" : "RISK_WORD",
+    "content" : "赌资结算",
+    "normalizedContent" : "赌资结算",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00179",
+    "ruleType" : "RISK_WORD",
+    "content" : "赌博返点",
+    "normalizedContent" : "赌博返点",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00180",
+    "ruleType" : "RISK_WORD",
+    "content" : "菠菜代理",
+    "normalizedContent" : "菠菜代理",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00181",
+    "ruleType" : "RISK_WORD",
+    "content" : "博彩平台源码",
+    "normalizedContent" : "博彩平台源码",
+    "category" : "GAMBLING",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00182",
+    "ruleType" : "RISK_WORD",
+    "content" : "黄色网站",
+    "normalizedContent" : "黄色网站",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00183",
+    "ruleType" : "RISK_WORD",
+    "content" : "成人论坛",
+    "normalizedContent" : "成人论坛",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00184",
+    "ruleType" : "RISK_WORD",
+    "content" : "成人电影",
+    "normalizedContent" : "成人电影",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00185",
+    "ruleType" : "RISK_WORD",
+    "content" : "色情直播",
+    "normalizedContent" : "色情直播",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00186",
+    "ruleType" : "RISK_WORD",
+    "content" : "黄播平台",
+    "normalizedContent" : "黄播平台",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00187",
+    "ruleType" : "RISK_WORD",
+    "content" : "裸聊敲诈",
+    "normalizedContent" : "裸聊敲诈",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00188",
+    "ruleType" : "RISK_WORD",
+    "content" : "招嫖信息",
+    "normalizedContent" : "招嫖信息",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00189",
+    "ruleType" : "RISK_WORD",
+    "content" : "上门服务全套",
+    "normalizedContent" : "上门服务全套",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00190",
+    "ruleType" : "RISK_WORD",
+    "content" : "同城约炮",
+    "normalizedContent" : "同城约炮",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00191",
+    "ruleType" : "RISK_WORD",
+    "content" : "包养女大学生",
+    "normalizedContent" : "包养女大学生",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00192",
+    "ruleType" : "RISK_WORD",
+    "content" : "外围女预约",
+    "normalizedContent" : "外围女预约",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00193",
+    "ruleType" : "RISK_WORD",
+    "content" : "援交妹",
+    "normalizedContent" : "援交妹",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00194",
+    "ruleType" : "RISK_WORD",
+    "content" : "高端外围",
+    "normalizedContent" : "高端外围",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00195",
+    "ruleType" : "RISK_WORD",
+    "content" : "兼职约啪",
+    "normalizedContent" : "兼职约啪",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00196",
+    "ruleType" : "RISK_WORD",
+    "content" : "酒店招嫖",
+    "normalizedContent" : "酒店招嫖",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00197",
+    "ruleType" : "RISK_WORD",
+    "content" : "偷拍视频",
+    "normalizedContent" : "偷拍视频",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00198",
+    "ruleType" : "RISK_WORD",
+    "content" : "厕所偷拍",
+    "normalizedContent" : "厕所偷拍",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00199",
+    "ruleType" : "RISK_WORD",
+    "content" : "更衣室偷拍",
+    "normalizedContent" : "更衣室偷拍",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00200",
+    "ruleType" : "RISK_WORD",
+    "content" : "针孔摄像偷窥",
+    "normalizedContent" : "针孔摄像偷窥",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00201",
+    "ruleType" : "RISK_WORD",
+    "content" : "原味内裤出售",
+    "normalizedContent" : "原味内裤出售",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00202",
+    "ruleType" : "RISK_WORD",
+    "content" : "原味丝袜",
+    "normalizedContent" : "原味丝袜",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00203",
+    "ruleType" : "RISK_WORD",
+    "content" : "无码破解",
+    "normalizedContent" : "无码破解",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00204",
+    "ruleType" : "RISK_WORD",
+    "content" : "幼女视频",
+    "normalizedContent" : "幼女视频",
+    "category" : "PORNOGRAPHY",
+    "weight" : 80
+  }, {
+    "id" : "seed-risk_word-00205",
+    "ruleType" : "RISK_WORD",
+    "content" : "儿童色情",
+    "normalizedContent" : "儿童色情",
+    "category" : "PORNOGRAPHY",
+    "weight" : 80
+  }, {
+    "id" : "seed-risk_word-00206",
+    "ruleType" : "RISK_WORD",
+    "content" : "乱伦小说",
+    "normalizedContent" : "乱伦小说",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00207",
+    "ruleType" : "RISK_WORD",
+    "content" : "迷奸视频",
+    "normalizedContent" : "迷奸视频",
+    "category" : "PORNOGRAPHY",
+    "weight" : 80
+  }, {
+    "id" : "seed-risk_word-00208",
+    "ruleType" : "RISK_WORD",
+    "content" : "群交派对",
+    "normalizedContent" : "群交派对",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00209",
+    "ruleType" : "RISK_WORD",
+    "content" : "性奴调教",
+    "normalizedContent" : "性奴调教",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00210",
+    "ruleType" : "RISK_WORD",
+    "content" : "SM重口",
+    "normalizedContent" : "sm重口",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00211",
+    "ruleType" : "RISK_WORD",
+    "content" : "换妻俱乐部",
+    "normalizedContent" : "换妻俱乐部",
+    "category" : "PORNOGRAPHY",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00212",
+    "ruleType" : "RISK_WORD",
+    "content" : "刷单兼职",
+    "normalizedContent" : "刷单兼职",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00213",
+    "ruleType" : "RISK_WORD",
+    "content" : "刷单返利",
+    "normalizedContent" : "刷单返利",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00214",
+    "ruleType" : "RISK_WORD",
+    "content" : "手工活兼职骗局",
+    "normalizedContent" : "手工活兼职骗局",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00215",
+    "ruleType" : "RISK_WORD",
+    "content" : "兼职点赞赚钱",
+    "normalizedContent" : "兼职点赞赚钱",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00216",
+    "ruleType" : "RISK_WORD",
+    "content" : "杀猪盘诈骗",
+    "normalizedContent" : "杀猪盘诈骗",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00217",
+    "ruleType" : "RISK_WORD",
+    "content" : "冒充公检法诈骗",
+    "normalizedContent" : "冒充公检法诈骗",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00218",
+    "ruleType" : "RISK_WORD",
+    "content" : "注销校园贷",
+    "normalizedContent" : "注销校园贷",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00219",
+    "ruleType" : "RISK_WORD",
+    "content" : "理财退费骗局",
+    "normalizedContent" : "理财退费骗局",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00220",
+    "ruleType" : "RISK_WORD",
+    "content" : "虚假中奖",
+    "normalizedContent" : "虚假中奖",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00221",
+    "ruleType" : "RISK_WORD",
+    "content" : "代办高额信用卡",
+    "normalizedContent" : "代办高额信用卡",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00222",
+    "ruleType" : "RISK_WORD",
+    "content" : "白户包过信用卡",
+    "normalizedContent" : "白户包过信用卡",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00223",
+    "ruleType" : "RISK_WORD",
+    "content" : "代开增值税发票",
+    "normalizedContent" : "代开增值税发票",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00224",
+    "ruleType" : "RISK_WORD",
+    "content" : "代开普通发票",
+    "normalizedContent" : "代开普通发票",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00225",
+    "ruleType" : "RISK_WORD",
+    "content" : "办假证",
+    "normalizedContent" : "办假证",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00226",
+    "ruleType" : "RISK_WORD",
+    "content" : "办假毕业证",
+    "normalizedContent" : "办假毕业证",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00227",
+    "ruleType" : "RISK_WORD",
+    "content" : "办假身份证",
+    "normalizedContent" : "办假身份证",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00228",
+    "ruleType" : "RISK_WORD",
+    "content" : "刻假公章",
+    "normalizedContent" : "刻假公章",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00229",
+    "ruleType" : "RISK_WORD",
+    "content" : "伪造公文",
+    "normalizedContent" : "伪造公文",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00230",
+    "ruleType" : "RISK_WORD",
+    "content" : "克隆银行卡",
+    "normalizedContent" : "克隆银行卡",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00231",
+    "ruleType" : "RISK_WORD",
+    "content" : "银行卡洗钱",
+    "normalizedContent" : "银行卡洗钱",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00232",
+    "ruleType" : "RISK_WORD",
+    "content" : "跑分兼职",
+    "normalizedContent" : "跑分兼职",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00233",
+    "ruleType" : "RISK_WORD",
+    "content" : "跑分洗钱平台",
+    "normalizedContent" : "跑分洗钱平台",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00234",
+    "ruleType" : "RISK_WORD",
+    "content" : "买卖银行卡",
+    "normalizedContent" : "买卖银行卡",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00235",
+    "ruleType" : "RISK_WORD",
+    "content" : "四件套买卖",
+    "normalizedContent" : "四件套买卖",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00236",
+    "ruleType" : "RISK_WORD",
+    "content" : "对公账户出售",
+    "normalizedContent" : "对公账户出售",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00237",
+    "ruleType" : "RISK_WORD",
+    "content" : "免实名手机卡",
+    "normalizedContent" : "免实名手机卡",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00238",
+    "ruleType" : "RISK_WORD",
+    "content" : "接码平台",
+    "normalizedContent" : "接码平台",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00239",
+    "ruleType" : "RISK_WORD",
+    "content" : "短信轰炸机",
+    "normalizedContent" : "短信轰炸机",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00240",
+    "ruleType" : "RISK_WORD",
+    "content" : "电话轰炸软件",
+    "normalizedContent" : "电话轰炸软件",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00241",
+    "ruleType" : "RISK_WORD",
+    "content" : "呼死你软件",
+    "normalizedContent" : "呼死你软件",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00242",
+    "ruleType" : "RISK_WORD",
+    "content" : "DDoS攻击接单",
+    "normalizedContent" : "ddos攻击接单",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00243",
+    "ruleType" : "RISK_WORD",
+    "content" : "流量攻击平台",
+    "normalizedContent" : "流量攻击平台",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00244",
+    "ruleType" : "RISK_WORD",
+    "content" : "木马免杀制作",
+    "normalizedContent" : "木马免杀制作",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00245",
+    "ruleType" : "RISK_WORD",
+    "content" : "盗号木马",
+    "normalizedContent" : "盗号木马",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00246",
+    "ruleType" : "RISK_WORD",
+    "content" : "钓鱼网站源码",
+    "normalizedContent" : "钓鱼网站源码",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00247",
+    "ruleType" : "RISK_WORD",
+    "content" : "暗网数据售卖",
+    "normalizedContent" : "暗网数据售卖",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00248",
+    "ruleType" : "RISK_WORD",
+    "content" : "公民个人信息买卖",
+    "normalizedContent" : "公民个人信息买卖",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00249",
+    "ruleType" : "RISK_WORD",
+    "content" : "开房记录查询",
+    "normalizedContent" : "开房记录查询",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00250",
+    "ruleType" : "RISK_WORD",
+    "content" : "手机定位找人",
+    "normalizedContent" : "手机定位找人",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00251",
+    "ruleType" : "RISK_WORD",
+    "content" : "黑客破解密码",
+    "normalizedContent" : "黑客破解密码",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00252",
+    "ruleType" : "RISK_WORD",
+    "content" : "修改征信记录",
+    "normalizedContent" : "修改征信记录",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00253",
+    "ruleType" : "RISK_WORD",
+    "content" : "花呗套现",
+    "normalizedContent" : "花呗套现",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00254",
+    "ruleType" : "RISK_WORD",
+    "content" : "信用卡套现",
+    "normalizedContent" : "信用卡套现",
+    "category" : "FRAUD",
+    "weight" : 40
+  }, {
+    "id" : "seed-risk_word-00255",
+    "ruleType" : "RISK_WORD",
+    "content" : "操你妈",
+    "normalizedContent" : "操你妈",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00256",
+    "ruleType" : "RISK_WORD",
+    "content" : "草泥马",
+    "normalizedContent" : "草泥马",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00257",
+    "ruleType" : "RISK_WORD",
+    "content" : "傻逼",
+    "normalizedContent" : "傻逼",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00258",
+    "ruleType" : "RISK_WORD",
+    "content" : "弱智脑残",
+    "normalizedContent" : "弱智脑残",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00259",
+    "ruleType" : "RISK_WORD",
+    "content" : "全家死光",
+    "normalizedContent" : "全家死光",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00260",
+    "ruleType" : "RISK_WORD",
+    "content" : "去死吧你",
+    "normalizedContent" : "去死吧你",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00261",
+    "ruleType" : "RISK_WORD",
+    "content" : "杂种生养的",
+    "normalizedContent" : "杂种生养的",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00262",
+    "ruleType" : "RISK_WORD",
+    "content" : "狗娘养的",
+    "normalizedContent" : "狗娘养的",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00263",
+    "ruleType" : "RISK_WORD",
+    "content" : "死全家",
+    "normalizedContent" : "死全家",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00264",
+    "ruleType" : "RISK_WORD",
+    "content" : "婊子养的",
+    "normalizedContent" : "婊子养的",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00265",
+    "ruleType" : "RISK_WORD",
+    "content" : "贱人贱货",
+    "normalizedContent" : "贱人贱货",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00266",
+    "ruleType" : "RISK_WORD",
+    "content" : "nmsl",
+    "normalizedContent" : "nmsl",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00267",
+    "ruleType" : "RISK_WORD",
+    "content" : "cnm",
+    "normalizedContent" : "cnm",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00268",
+    "ruleType" : "RISK_WORD",
+    "content" : "日你大爷",
+    "normalizedContent" : "日你大爷",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00269",
+    "ruleType" : "RISK_WORD",
+    "content" : "生儿子没屁眼",
+    "normalizedContent" : "生儿子没屁眼",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00270",
+    "ruleType" : "RISK_WORD",
+    "content" : "孤儿一个",
+    "normalizedContent" : "孤儿一个",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00271",
+    "ruleType" : "RISK_WORD",
+    "content" : "废物点心",
+    "normalizedContent" : "废物点心",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00272",
+    "ruleType" : "RISK_WORD",
+    "content" : "下地狱去",
+    "normalizedContent" : "下地狱去",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_word-00273",
+    "ruleType" : "RISK_WORD",
+    "content" : "出门被车撞死",
+    "normalizedContent" : "出门被车撞死",
+    "category" : "ABUSE",
+    "weight" : 35
+  }, {
+    "id" : "seed-risk_context-00274",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "联系我",
+    "normalizedContent" : "联系我",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00275",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "私信我",
+    "normalizedContent" : "私信我",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00276",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "加我微信",
+    "normalizedContent" : "加我微信",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00277",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "加我QQ",
+    "normalizedContent" : "加我qq",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00278",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "加好友聊",
+    "normalizedContent" : "加好友聊",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00279",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "扫码进群",
+    "normalizedContent" : "扫码进群",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00280",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "扫码下载",
+    "normalizedContent" : "扫码下载",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00281",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "看个人主页",
+    "normalizedContent" : "看个人主页",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00282",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "点击下方链接",
+    "normalizedContent" : "点击下方链接",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00283",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "复制链接到浏览器",
+    "normalizedContent" : "复制链接到浏览器",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00284",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "一手货源",
+    "normalizedContent" : "一手货源",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00285",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "货到付款",
+    "normalizedContent" : "货到付款",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00286",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "包邮发货",
+    "normalizedContent" : "包邮发货",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00287",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "货真价实",
+    "normalizedContent" : "货真价实",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00288",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "诚信卖家",
+    "normalizedContent" : "诚信卖家",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00289",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "有需要联系",
+    "normalizedContent" : "有需要联系",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00290",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "低价出",
+    "normalizedContent" : "低价出",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00291",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "包教包会",
+    "normalizedContent" : "包教包会",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00292",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "提供渠道",
+    "normalizedContent" : "提供渠道",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00293",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "内幕消息",
+    "normalizedContent" : "内幕消息",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00294",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "稳赚不赔",
+    "normalizedContent" : "稳赚不赔",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00295",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "带你上车",
+    "normalizedContent" : "带你上车",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00296",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "日赚几百",
+    "normalizedContent" : "日赚几百",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00297",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "无需押金",
+    "normalizedContent" : "无需押金",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00298",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "Telegram",
+    "normalizedContent" : "telegram",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00299",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "电报群",
+    "normalizedContent" : "电报群",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00300",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "飞机号",
+    "normalizedContent" : "飞机号",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00301",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "Potato群",
+    "normalizedContent" : "potato群",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-risk_context-00302",
+    "ruleType" : "RISK_CONTEXT",
+    "content" : "暗网地址",
+    "normalizedContent" : "暗网地址",
+    "category" : "GENERAL",
+    "weight" : 20
+  }, {
+    "id" : "seed-safe_context-00303",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "坚决抵制",
+    "normalizedContent" : "坚决抵制",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00304",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "依法打击",
+    "normalizedContent" : "依法打击",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00305",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "严厉惩处",
+    "normalizedContent" : "严厉惩处",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00306",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "严厉打击",
+    "normalizedContent" : "严厉打击",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00307",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "依法查处",
+    "normalizedContent" : "依法查处",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00308",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "专项治理",
+    "normalizedContent" : "专项治理",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00309",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "防范警示",
+    "normalizedContent" : "防范警示",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00310",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "反诈宣传",
+    "normalizedContent" : "反诈宣传",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00311",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "防范诈骗",
+    "normalizedContent" : "防范诈骗",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00312",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "普法教育",
+    "normalizedContent" : "普法教育",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00313",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "普法宣传",
+    "normalizedContent" : "普法宣传",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00314",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "法律科普",
+    "normalizedContent" : "法律科普",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00315",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "案例分析",
+    "normalizedContent" : "案例分析",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00316",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "警示案例",
+    "normalizedContent" : "警示案例",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00317",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "公安通报",
+    "normalizedContent" : "公安通报",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00318",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "警方提示",
+    "normalizedContent" : "警方提示",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00319",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "网警提醒",
+    "normalizedContent" : "网警提醒",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00320",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "最高人民法院",
+    "normalizedContent" : "最高人民法院",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00321",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "最高人民检察院",
+    "normalizedContent" : "最高人民检察院",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00322",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "公安部通报",
+    "normalizedContent" : "公安部通报",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00323",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "禁毒大队",
+    "normalizedContent" : "禁毒大队",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00324",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "禁毒教育基地",
+    "normalizedContent" : "禁毒教育基地",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00325",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "反邪教协会",
+    "normalizedContent" : "反邪教协会",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00326",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "拒绝毒品",
+    "normalizedContent" : "拒绝毒品",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00327",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "远离赌博",
+    "normalizedContent" : "远离赌博",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00328",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "拒绝黄赌毒",
+    "normalizedContent" : "拒绝黄赌毒",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00329",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "扫黄打非",
+    "normalizedContent" : "扫黄打非",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00330",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "清朗行动",
+    "normalizedContent" : "清朗行动",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00331",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "网络安全宣传周",
+    "normalizedContent" : "网络安全宣传周",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00332",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "防范网络诈骗指南",
+    "normalizedContent" : "防范网络诈骗指南",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00333",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "防范电信诈骗",
+    "normalizedContent" : "防范电信诈骗",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00334",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "学术探讨",
+    "normalizedContent" : "学术探讨",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00335",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "科研分析",
+    "normalizedContent" : "科研分析",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00336",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "论文综述",
+    "normalizedContent" : "论文综述",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00337",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "合规审计",
+    "normalizedContent" : "合规审计",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00338",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "安全巡检",
+    "normalizedContent" : "安全巡检",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00339",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "漏洞修复",
+    "normalizedContent" : "漏洞修复",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-safe_context-00340",
+    "ruleType" : "SAFE_CONTEXT",
+    "content" : "安全防护",
+    "normalizedContent" : "安全防护",
+    "category" : "GENERAL",
+    "weight" : -35
+  }, {
+    "id" : "seed-allow_term-00341",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国宪法",
+    "normalizedContent" : "中华人民共和国宪法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00342",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国民法典",
+    "normalizedContent" : "中华人民共和国民法典",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00343",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国网络安全法",
+    "normalizedContent" : "中华人民共和国网络安全法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00344",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国数据安全法",
+    "normalizedContent" : "中华人民共和国数据安全法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00345",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国个人信息保护法",
+    "normalizedContent" : "中华人民共和国个人信息保护法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00346",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国反电信网络诈骗法",
+    "normalizedContent" : "中华人民共和国反电信网络诈骗法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00347",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国治安管理处罚法",
+    "normalizedContent" : "中华人民共和国治安管理处罚法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00348",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "中华人民共和国禁毒法",
+    "normalizedContent" : "中华人民共和国禁毒法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00349",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "国家安全法",
+    "normalizedContent" : "国家安全法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00350",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "反恐怖主义法",
+    "normalizedContent" : "反恐怖主义法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00351",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "网络信息内容生态治理规定",
+    "normalizedContent" : "网络信息内容生态治理规定",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00352",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "生成式人工智能服务管理暂行办法",
+    "normalizedContent" : "生成式人工智能服务管理暂行办法",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00353",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "最高人民法院关于审理走私毒品案件定罪量刑标准等问题的解释",
+    "normalizedContent" : "最高人民法院关于审理走私毒品案件定罪量刑标准等问题的解释",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00354",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "杀毒软件防护机制",
+    "normalizedContent" : "杀毒软件防护机制",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00355",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "安全防御系统",
+    "normalizedContent" : "安全防御系统",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00356",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "网络流量清洗",
+    "normalizedContent" : "网络流量清洗",
+    "category" : "GENERAL",
+    "weight" : 0
+  }, {
+    "id" : "seed-allow_term-00357",
+    "ruleType" : "ALLOW_TERM",
+    "content" : "防火墙安全策略",
+    "normalizedContent" : "防火墙安全策略",
+    "category" : "GENERAL",
+    "weight" : 0
+  } ]
+}

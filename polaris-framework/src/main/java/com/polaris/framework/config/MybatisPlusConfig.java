@@ -5,13 +5,15 @@ import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.BlockAttackInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.OptimisticLockerInnerInterceptor;
 import com.baomidou.mybatisplus.extension.plugins.inner.PaginationInnerInterceptor;
+import com.baomidou.mybatisplus.extension.plugins.inner.TenantLineInnerInterceptor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /**
- * @author k
- * @date 2026/6/26
+ * MyBatis-Plus 配置类
+ * 
+ * @author polaris
  */
 @EnableTransactionManagement(proxyTargetClass = true)
 @Configuration
@@ -20,11 +22,15 @@ public class MybatisPlusConfig {
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
-        // 分页插件
+        
+        // 1. 多租户插件（必须置于分页插件之前）
+        interceptor.addInnerInterceptor(new TenantLineInnerInterceptor(new PlatformTenantLineHandler()));
+
+        // 2. 分页插件
         interceptor.addInnerInterceptor(paginationInnerInterceptor());
-        // 乐观锁插件
+        // 3. 乐观锁插件
         interceptor.addInnerInterceptor(optimisticLockerInnerInterceptor());
-        // 阻断插件
+        // 4. 阻断插件
         interceptor.addInnerInterceptor(blockAttackInnerInterceptor());
         return interceptor;
     }

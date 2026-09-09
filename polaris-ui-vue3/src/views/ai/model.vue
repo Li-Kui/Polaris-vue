@@ -174,12 +174,14 @@
                     <el-tag v-if="item.enableSearch === '1'" effect="plain" size="small" type="success" class="tech-pill">
                       联网搜索
                     </el-tag>
-                    <el-tag v-if="item.deptId" effect="plain" size="small" type="primary" class="tech-pill">
-                      {{ getDeptName(item.deptId) }}
-                    </el-tag>
-                    <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
-                      全局共享
-                    </el-tag>
+                    <template v-if="!isPlatform">
+                      <el-tag v-if="item.deptId" effect="plain" size="small" type="primary" class="tech-pill">
+                        {{ getDeptName(item.deptId) }}
+                      </el-tag>
+                      <el-tag v-else effect="plain" size="small" type="info" class="tech-pill">
+                        全局共享
+                      </el-tag>
+                    </template>
                     <template v-if="item.modelType === 'IMAGE'">
                       <el-tag
                         v-for="cap in jsonToArray(item.imageCapabilities)"
@@ -368,35 +370,72 @@
               <el-input v-model="form.name" placeholder="例如：DeepSeek官方对话、阿里云通用向量"/>
             </el-form-item>
             
+            <el-form-item label="连接方式" prop="accessMode">
+              <el-radio-group v-model="form.accessMode">
+                <el-radio label="direct">🔗 直连厂商</el-radio>
+                <el-radio label="relay">🔀 中转站</el-radio>
+              </el-radio-group>
+              <div v-if="form.accessMode === 'relay'" style="font-size: 12px; color: #909399; margin-top: 4px;">
+                💡 中转站模式下，提供商请选择中转站背后实际对接的厂商
+              </div>
+            </el-form-item>
+
             <el-form-item label="提供商" prop="provider">
               <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%;">
                 <el-option label="DeepSeek" value="deepseek"/>
                 <el-option label="阿里云通义" value="dashscope"/>
                 <el-option label="OpenAI" value="openai"/>
-                <el-option label="Ollama (本地部署)" value="ollama"/>
+                <el-option v-if="form.accessMode !== 'relay'" label="Ollama (本地部署)" value="ollama"/>
                 <el-option label="火山引擎 Ark" value="ark"/>
               </el-select>
             </el-form-item>
 
-            <el-form-item label="模型名称 (Model Identifier)" prop="modelName">
-              <el-input v-model="form.modelName" placeholder="例如：deepseek-chat、text-embedding-v3"/>
-            </el-form-item>
-
             <el-form-item label="API Key" prop="apiKey">
-              <el-input v-model="form.apiKey" placeholder="输入大模型 API Key（脱敏存储）" show-password/>
+              <el-input v-model="form.apiKey" placeholder="输入 API Key（脱敏存储）" show-password/>
             </el-form-item>
 
             <el-form-item label="API Base URL">
-              <el-input v-model="form.baseUrl" placeholder="不填使用官方默认。Ollama 必须填写：http://localhost:11434"/>
+              <el-input v-model="form.baseUrl" :placeholder="form.provider === 'ollama' ? 'http://localhost:11434' : '不填则使用官方默认地址'"/>
             </el-form-item>
 
-            <el-form-item label="归属部门">
+            <el-form-item label="模型名称" prop="modelName">
+              <div style="display: flex; gap: 8px; width: 100%;">
+                <el-select
+                  v-model="form.modelName"
+                  filterable
+                  allow-create
+                  default-first-option
+                  clearable
+                  :placeholder="remoteModelList.length > 0 ? '从列表选择或手动输入' : '手动输入或点右侧获取'"
+                  style="flex: 1;"
+                >
+                  <el-option
+                    v-for="m in remoteModelList"
+                    :key="m"
+                    :label="m"
+                    :value="m"
+                  />
+                </el-select>
+                <el-button
+                  :icon="Connection"
+                  :loading="fetchingModels"
+                  :disabled="!canFetchModels"
+                  @click="handleFetchModels"
+                  class="action-btn-primary"
+                  style="flex-shrink: 0;"
+                >
+                  {{ fetchingModels ? '获取中...' : '获取模型' }}
+                </el-button>
+              </div>
+            </el-form-item>
+
+            <el-form-item v-if="!isPlatform" label="归属部门">
               <el-tree-select
                 v-model="form.deptId"
                 :data="deptOptions"
                 :props="{ value: 'id', label: 'label', children: 'children' }"
                 value-key="id"
-                placeholder="请选择所属部门（留空表示全局共享模型）"
+                placeholder="留空表示全局共享模型"
                 clearable
                 check-strictly
                 style="width: 100%;"
@@ -479,6 +518,11 @@
                 </el-form-item>
               </el-col>
               <el-col :span="12" style="margin-top: 10px;">
+                <el-form-item label="在途并发上限" prop="maxConcurrency">
+                  <el-input-number v-model="form.maxConcurrency" :min="1" :max="50" placeholder="留空则按厂商默认" style="width: 100%;" />
+                </el-form-item>
+              </el-col>
+              <el-col v-if="form.modelType !== 'EMBEDDING'" :span="12" style="margin-top: 10px;">
                 <el-form-item label="设为默认模型" prop="isDefault">
                   <el-radio-group v-model="form.isDefault">
                     <el-radio label="1">是</el-radio>
@@ -498,9 +542,62 @@
               </el-col>
 
               <!-- 联网搜索 Key 配置（联级显示） -->
-              <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
+              <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
                 <el-form-item label="联网搜索 Key" prop="searchKey">
                   <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
+                </el-form-item>
+              </el-col>
+            </el-row>
+          </div>
+
+          <!-- 属性面板：向量模型参数（仅 EMBEDDING 类型显示） -->
+          <div v-if="form.modelType === 'EMBEDDING'" class="pane-card card-space-margin">
+            <div class="pane-card-header">
+              <span class="header-dot teal-dot"></span>
+              <h5>向量模型参数</h5>
+            </div>
+            <el-row :gutter="20">
+              <el-col :span="12">
+                <el-form-item label="输出维度" prop="embeddingDimension">
+                  <el-input-number
+                    v-model="form.embeddingDimension"
+                    :min="1"
+                    :max="65536"
+                    controls-position="right"
+                    placeholder="例如 1024"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="维度模式" prop="embeddingDimensionMode">
+                  <el-select v-model="form.embeddingDimensionMode" style="width: 100%;">
+                    <el-option label="使用模型默认维度" value="MODEL_DEFAULT" />
+                    <el-option label="向提供商请求指定维度" value="REQUEST" />
+                  </el-select>
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="最大输入 Token" prop="embeddingMaxInputTokens">
+                  <el-input-number
+                    v-model="form.embeddingMaxInputTokens"
+                    :min="1"
+                    :max="1000000"
+                    controls-position="right"
+                    placeholder="留空则不校验"
+                    style="width: 100%;"
+                  />
+                </el-form-item>
+              </el-col>
+              <el-col :span="12">
+                <el-form-item label="批量分片数" prop="embeddingBatchSize">
+                  <el-input-number
+                    v-model="form.embeddingBatchSize"
+                    :min="1"
+                    :max="2048"
+                    controls-position="right"
+                    style="width: 100%;"
+                  />
                 </el-form-item>
               </el-col>
             </el-row>
@@ -577,6 +674,7 @@
 import {
   addModel,
   delModel,
+  fetchRemoteModels,
   getModel,
   listModel,
   setDefaultChat,
@@ -585,6 +683,7 @@ import {
   updateModel
 } from '@/api/ai/model'
 import {deptTreeSelect} from '@/api/system/user'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 import {
   ChatDotRound,
   ChatLineRound,
@@ -614,7 +713,24 @@ export default {
     Delete,
     DocumentCopy
   },
+  watch: {
+    // 提供商变更时清空已拉取的模型列表（不同提供商模型不同，需重新拉取）
+    'form.provider'() {
+      this.remoteModelList = [];
+    }
+  },
   computed: {
+    isPlatform() {
+      return this.isPlatformMode();
+    },
+    // 是否可以点击获取模型按钮：提供商必填 + (API Key 必填 || Ollama 无需 Key) + (OpenAI 中转必须填 URL)
+    canFetchModels() {
+      if (!this.form.provider) return false;
+      if (this.form.provider === 'ollama') return true;
+      // 中转站模式或 OpenAI 提供商必须填写 baseUrl
+      if ((this.form.accessMode === 'relay' || this.form.provider === 'openai') && !this.form.baseUrl) return false;
+      return !!this.form.apiKey;
+    },
     enabledToolsArray: {
       get() {
         if (!this.form || !this.form.enabledTools) return [];
@@ -651,6 +767,10 @@ export default {
     return {
       // 视图模式 card: 三维星图, table: 经典表格, edit: 独立整屏配置工作台
       viewMode: 'card',
+      // 远程拉取的可用模型名称列表
+      remoteModelList: [],
+      // 模型列表拉取中 loading 状态
+      fetchingModels: false,
       // 部门树选项
       deptOptions: [],
       // 遮罩层
@@ -702,16 +822,22 @@ export default {
           { required: true, message: '提供商不能为空', trigger: 'change' }
         ],
         modelName: [
-          { required: true, message: '模型名称不能为空', trigger: 'blur' }
+          { required: true, message: '模型名称不能为空', trigger: 'change' }
         ]
       }
     }
   },
   created() {
     this.getList()
-    this.getDeptTree()
+    // 仅在管理后台模式下查询部门树，中台模式下无需查询后台部门
+    if (!this.isPlatformMode()) {
+      this.getDeptTree()
+    }
   },
   methods: {
+    isPlatformMode() {
+      return this.$route && isPlatformConsolePath(this.$route.path)
+    },
     isEmbeddingModel(modelName) {
       if (!modelName) return false
       return modelName.toLowerCase().includes('embed')
@@ -773,7 +899,9 @@ export default {
     /** 查询部门下拉树结构 */
     getDeptTree() {
       deptTreeSelect().then(response => {
-        this.deptOptions = response.data
+        this.deptOptions = response.data || []
+      }).catch(() => {
+        this.deptOptions = []
       })
     },
     // 递归获取部门名称
@@ -801,6 +929,7 @@ export default {
       this.form = {
         id: undefined,
         name: undefined,
+        accessMode: 'direct',
         provider: 'deepseek',
         modelName: undefined,
         apiKey: undefined,
@@ -815,14 +944,20 @@ export default {
         searchKey: undefined,
         deptId: undefined,
         modelType: 'CHAT',
+        embeddingDimension: undefined,
+        embeddingDimensionMode: 'MODEL_DEFAULT',
+        embeddingMaxInputTokens: undefined,
+        embeddingBatchSize: 16,
         enabledTools: undefined,
         defaultImageSize: '1024x1024',
         imageCapabilities: undefined,
         modelFeatures: undefined,
         modelDescription: undefined,
         isDefault: '0',
+        maxConcurrency: undefined,
         status: '1'
       }
+      this.remoteModelList = []
       this.resetForm('form')
     },
     /** 搜索按钮操作 */
@@ -844,6 +979,28 @@ export default {
       this.reset()
       this.viewMode = 'edit'
       this.title = '添加 AI 模型配置'
+    },
+    /** 拉取远程可用模型列表 */
+    handleFetchModels() {
+      this.fetchingModels = true
+      fetchRemoteModels({
+        provider: this.form.provider,
+        apiKey: this.form.apiKey,
+        baseUrl: this.form.baseUrl,
+        accessMode: this.form.accessMode
+      }).then(res => {
+        if (res.code === 200 && res.data && res.data.length > 0) {
+          this.remoteModelList = res.data
+          this.$modal.msgSuccess(`成功获取 ${res.data.length} 个可用模型`)
+        } else {
+          this.$modal.msgWarning(res.msg || '未获取到模型列表，请检查 API Key 或网络连接')
+        }
+      }).catch(err => {
+        console.error(err)
+        this.$modal.msgError('获取模型列表失败：' + (err.message || '请检查 API Key 和 Base URL'))
+      }).finally(() => {
+        this.fetchingModels = false
+      })
     },
     /** 修改按钮操作 */
     handleUpdate(row) {
@@ -868,6 +1025,9 @@ export default {
             this.form.imageCapabilities = null;
             this.form.modelFeatures = null;
             this.form.modelDescription = null;
+          }
+          if (this.isPlatform) {
+            this.form.deptId = undefined;
           }
           if (this.form.id != null) {
             updateModel(this.form).then(() => {
@@ -1684,7 +1844,7 @@ html body .pane-card {
 }
 
 .editor-left-pane {
-  width: 360px;
+  width: 420px;
   flex-shrink: 0;
 }
 

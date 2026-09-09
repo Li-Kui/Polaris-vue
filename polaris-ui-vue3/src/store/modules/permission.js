@@ -4,6 +4,7 @@ import {getRouters} from '@/api/menu'
 import Layout from '@/layout/index'
 import ParentView from '@/components/ParentView'
 import InnerLink from '@/layout/components/InnerLink'
+import {resolveViewModule} from '@/utils/routeView'
 
 // 匹配views里面所有的.vue文件
 const modules = import.meta.glob('./../../views/**/*.vue')
@@ -70,7 +71,13 @@ function filterAsyncRouter(asyncRouterMap, lastRouter = false, type = false) {
       } else if (route.component === 'InnerLink') {
         route.component = InnerLink
       } else {
-        route.component = loadView(route.component)
+        const componentName = route.component
+        const component = loadView(componentName)
+        if (!component) {
+          console.error(`[Router] 无法加载菜单组件 "${componentName}"（路由 "${route.path}"），已跳过该无效路由`)
+          return false
+        }
+        route.component = component
       }
     }
     if (route.children != null && route.children && route.children.length) {
@@ -78,6 +85,10 @@ function filterAsyncRouter(asyncRouterMap, lastRouter = false, type = false) {
     } else {
       delete route['children']
       delete route['redirect']
+    }
+    if (!route.component && !route.children) {
+      console.error(`[Router] 路由 "${route.path}" 缺少组件或子路由，已跳过该无效路由`)
+      return false
     }
     return true
   })
@@ -114,14 +125,8 @@ export function filterDynamicRoutes(routes) {
 }
 
 export const loadView = (view) => {
-  let res
-  for (const path in modules) {
-    const dir = path.split('views/')[1].split('.vue')[0]
-    if (dir === view) {
-      res = () => modules[path]()
-    }
-  }
-  return res
+  const viewModule = resolveViewModule(view, modules)
+  return viewModule ? () => viewModule() : undefined
 }
 
 export default usePermissionStore

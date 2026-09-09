@@ -51,3 +51,7 @@ nbdist/
 !*/build/*.xml
 
 .DS_Store
+
+*/src/test/
+
+.codex-audits

@@ -67,3 +67,11 @@ export function rebuildDocument(id) {
     method: 'post'
   })
 }
+
+// 重建整个知识库向量索引
+export function rebuildKnowledge(id) {
+  return request({
+    url: `/ai/knowledge/${id}/rebuild`,
+    method: 'post'
+  })
+}

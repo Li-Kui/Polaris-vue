@@ -1,0 +1,9 @@
+package com.polaris.ai.safety.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.polaris.ai.safety.model.PrivateAttachment;
+import org.apache.ibatis.annotations.Mapper;
+
+@Mapper
+public interface PrivateAttachmentMapper extends BaseMapper<PrivateAttachment> {
+}

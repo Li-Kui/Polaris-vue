@@ -1,7 +1,10 @@
 package com.polaris.ai.mapper;
 
+import com.baomidou.mybatisplus.annotation.InterceptorIgnore;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiModelConfig;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -12,6 +15,39 @@ import java.util.List;
  */
 public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
 {
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config WHERE id = #{id} AND del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "LIMIT 1", "</script>"})
+    AiModelConfig selectWorkflowResource(
+            @Param("tenantId") Long tenantId, @Param("id") Long id);
+
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config WHERE del_flag = '0' AND model_type = 'CHAT'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "ORDER BY name, id",
+            "</script>"})
+    List<AiModelConfig> selectWorkflowResources(@Param("tenantId") Long tenantId);
+
+    /**
+     * 按模型名称查询当前工作流作用域内优先级最高的聊天模型。
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select({"<script>",
+            "SELECT * FROM ai_model_config",
+            "WHERE model_name = #{modelName} AND model_type = 'CHAT'",
+            "AND status = '1' AND del_flag = '0'",
+            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
+            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
+            "ORDER BY is_default DESC, id DESC",
+            "LIMIT 1", "</script>"})
+    AiModelConfig selectWorkflowResourceByModelName(
+            @Param("tenantId") Long tenantId, @Param("modelName") String modelName);
+
     /**
      * 查询模型配置列表
      */
@@ -21,6 +57,14 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
      * 查询当前用户可用的模型列表（系统共享 + 指定部门独享）
      */
     List<AiModelConfig> selectAvailableModelConfigs(
+            @org.apache.ibatis.annotations.Param("deptId") Long deptId,
+            @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
+
+    /**
+     * 查询当前用户可用的指定类型模型。
+     */
+    List<AiModelConfig> selectAvailableModelConfigsByType(
+            @org.apache.ibatis.annotations.Param("modelType") String modelType,
             @org.apache.ibatis.annotations.Param("deptId") Long deptId,
             @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
 

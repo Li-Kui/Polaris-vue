@@ -1,0 +1,13 @@
+{
+  "name": "polaris-docs",
+  "version": "1.0.0",
+  "description": "北辰 AI 中台开放平台开发者文档",
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}

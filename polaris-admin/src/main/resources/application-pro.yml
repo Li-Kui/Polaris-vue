@@ -20,7 +20,8 @@ spring:
         druid:
             # 主库数据源
             master:
-                url: jdbc:mysql://172.31.61.41:3306/ry-vue?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
+                # 强制数据库会话使用东八区，保证 SQL NOW() 与应用写入时间处于同一时区
+                url: jdbc:mysql://172.31.61.41:3306/polaris_pro?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&connectionTimeZone=%2B08:00&forceConnectionTimeZoneToSession=true
                 username: root
                 password: 123456
             # 从库数据源
@@ -100,12 +101,26 @@ spring:
 
 #兜底的AI配置
 ai:
+    moderation:
+        enabled: true
+        seed-location: classpath:moderation/polaris-sensitive-seed-v3.json
+        snapshot-poll-ms: 60000
+        audit-retention-days: 90
+        candidate-observation-threshold: 3
+        provider:
+            type: none
+            access-key-id:
+            access-key-secret:
+            endpoint: green-cip.cn-shanghai.aliyuncs.com
+            service: comment_detection_pro
+            timeout-ms: 1500
+            estimated-cost-per-call: 0.01
     model:
         # ── 当前启用的提供商 ────────────────────────────────────────
         # 可选值: dashscope | openai | deepseek | ollama
         provider: deepseek
         # ── API Key（dashscope / openai / deepseek 需要）────────────
-        api-key: sk-388e29a91e1c4fdb8f5653c6b9cf9d1d
+        api-key: ${AI_MODEL_API_KEY:}
         # ── 模型名称 ────────────────────────────────────────────────
         # dashscope : qwen-turbo（快/便宜）| qwen-plus（均衡）| qwen-max（最强）
         # openai    : gpt-4o-mini | gpt-4o
@@ -120,3 +135,53 @@ ai:
         max-history-messages: 20
         # ── 系统提示词（支持自定义 AI 角色与行为）───────────────────
         system-prompt: 你是一个专业、友好的 AI 助手，请用中文回答问题。
+    workflow:
+        max-concurrent-per-user: 3
+        max-pending-approvals-per-user: 20
+        lease-seconds: 90
+        heartbeat-ms: 30000
+        retention-days: 30
+        approval-expire-days: 7
+        maintenance-ms: 3600000
+        enabled: true
+        write-nodes-enabled: false
+        code-node-enabled: false
+        agent-read-only-tools-enabled: true
+        agent-max-tool-calls: 5
+        agent-max-tool-result-chars: 20000
+        worker-enabled: true
+        accepting-new-executions: true
+        worker-batch-size: 10
+        tenant-concurrency: 20
+        workflow-concurrency: 10
+        principal-concurrency: 5
+        allowed-tenant-ids: []
+        executor:
+            core-pool-size: 4
+            max-pool-size: 16
+            queue-capacity: 100
+        node-executor:
+            core-pool-size: 8
+            max-pool-size: 32
+            queue-capacity: 100
+
+    # RAG 向量存储配置
+    vector-store:
+        # memory: 启动后重建内存索引；qdrant: 使用持久化 Qdrant collection
+        type: qdrant
+        # auto: memory 重建、qdrant 跳过；首次迁移到 Qdrant 可临时改为 always
+        rebuild-on-startup: auto
+        qdrant:
+            host: localhost
+            # Qdrant gRPC 端口，不是 REST 端口 6333
+            port: 6334
+            use-tls: false
+            api-key: 123456
+            collection-name: polaris_knowledge
+            # 必须与当前 Embedding 模型输出维度一致；text-embedding-v3 默认 1024
+            dimension: 1024
+            on-disk: true
+            initialize-schema: true
+            create-payload-indexes: true
+            payload-text-key: text_segment
+            timeout: 10s
