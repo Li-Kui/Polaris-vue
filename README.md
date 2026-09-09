@@ -22,7 +22,7 @@
 
 - **管理后台体验**：[http://beichen-ai.tech](http://8.163.1.222:9000)
 - **默认管理员账号**：`admin` / `admin123` （或 `test` / `123456`）
-- **AI 开放中台控制台**：`/platform/login`
+- **AI 开放中台控制台**：`/platform/login` 中台测试编码\账号\密码 test\test\123456
 - **中台开发者文档中心**：`/platform/docs/` （内置交互式接口文档与多语言 SDK 示例）
 
 ---
