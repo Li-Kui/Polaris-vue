@@ -40,10 +40,13 @@ export function updateWorkflowDraft(definitionId, definitionJson, expectedRevisi
   })
 }
 
-export function validateWorkflowDraft(definitionId) {
+export function validateWorkflowDraft(definitionId, definitionJson) {
   return request({
-    url: `/ai/workflow/definitions/${definitionId}/validate`,
+    url: definitionId
+      ? `/ai/workflow/definitions/${definitionId}/validate`
+      : '/ai/workflow/definitions/validate',
     method: 'post',
+    data: definitionJson ? {definitionJson} : undefined,
     headers: { repeatSubmit: false }
   })
 }
