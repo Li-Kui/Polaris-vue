@@ -1120,6 +1120,7 @@
 import * as echarts from 'echarts'
 import {getAuthHeaders} from '@/utils/auth'
 import {
+  cancelChatGeneration,
   createConversation,
   deleteConversation,
   deleteConversationsBatch,
@@ -1165,6 +1166,7 @@ export default {
       toolDictionary: {},
       currentWorkflowExecutionId: null,
       workflowAbortController: null,
+      chatAbortController: null,
       showModelPopover: false,
       showKbPopover: false,
       showWorkflowPopover: false,
@@ -1185,6 +1187,7 @@ export default {
       batchDeleting: false,
       messages: [],
       loadingMessages: false,
+      messageLoadVersion: 0,
       inputText: '',
       inputFocused: false,
       isStreaming: false,
@@ -1756,15 +1759,15 @@ export default {
       this.$nextTick(() => this.scrollToBottom())
     },
 
-    async restorePendingWorkflowApprovals() {
-      if (!this.currentConvId || !this.messages.length) return
+    async restorePendingWorkflowApprovals(conversationId = this.currentConvId, targetMessages = this.messages) {
+      if (!conversationId || !targetMessages.length) return
       try {
         const res = await listPendingWorkflowApprovals()
         const pending = (res.data || []).filter(item =>
-          Number(item.conversation_id ?? item.conversationId) === Number(this.currentConvId))
+          Number(item.conversation_id ?? item.conversationId) === Number(conversationId))
         for (const approval of pending) {
           const executionId = approval.execution_id || approval.executionId
-          let message = this.messages.find(item =>
+          let message = targetMessages.find(item =>
             item.role === 'assistant' && item.workflowExecutionId === executionId)
           if (!message) {
             message = {
@@ -1776,7 +1779,7 @@ export default {
               error: null,
               workflowSteps: []
             }
-            this.messages.push(message)
+            targetMessages.push(message)
           }
           if (message) {
             message.workflowExecutionId = executionId
@@ -1979,6 +1982,7 @@ export default {
       try {
         const res = await createConversation(this.selectedModelConfigId, this.selectedKbId)
         if (res.code === 200) {
+          ++this.messageLoadVersion
           this.currentConvId = res.data.id
           this.messages = []
           await this.loadConvList()
@@ -1999,6 +2003,7 @@ export default {
     },
 
     async selectConversation(id) {
+      const loadVersion = ++this.messageLoadVersion
       this.currentConvId = id
       const c = this.conversations.find(conv => conv.id === id)
       if (c) {
@@ -2010,7 +2015,7 @@ export default {
         this.selectedAgentCode = ''
         this.selectedWorkflowCode = ''
       }
-      await this.loadMessageList(id)
+      await this.loadMessageList(id, loadVersion)
     },
 
     getSelectedModelLabel() {
@@ -2066,15 +2071,16 @@ export default {
       this.handleWebSearchChange(this.enableWebSearch)
     },
 
-    async loadMessageList(convId) {
+    async loadMessageList(convId, loadVersion = ++this.messageLoadVersion) {
       this.loadingMessages = true
       this.messages = []
       try {
         const res = await listMessages(convId)
         if (res.code === 200) {
-          this.messages = (res.data || []).map(m => ({
+          const loadedMessages = (res.data || []).map(m => ({
             role: m.role,
             content: m.content,
+            reasoningContent: m.reasoningContent || '',
             workflowExecutionId: m.workflowExecutionId || null,
             fileName: m.fileName || null,
             fileUrl: m.fileUrl || null,
@@ -2082,16 +2088,24 @@ export default {
             streaming: false,
             error: null
           }))
-          await this.restorePendingWorkflowApprovals()
+          await this.restorePendingWorkflowApprovals(convId, loadedMessages)
+          if (loadVersion !== this.messageLoadVersion || Number(this.currentConvId) !== Number(convId)) {
+            return
+          }
+          this.messages = loadedMessages
           this.$nextTick(() => {
-            this.scrollToBottom()
+            this.scrollToBottom(true)
             this.focusInput()
           })
         }
       } catch (error) {
-        this.$message.error('加载消息失败')
+        if (loadVersion === this.messageLoadVersion) {
+          this.$message.error('加载消息失败')
+        }
       } finally {
-        this.loadingMessages = false
+        if (loadVersion === this.messageLoadVersion) {
+          this.loadingMessages = false
+        }
       }
     },
 
@@ -2133,6 +2147,7 @@ export default {
         if (res.code === 200) {
           this.stopPollingByConversation(id) // 定向销毁被删除会话关联的所有生图轮询定时器
           if (this.currentConvId === id) {
+            ++this.messageLoadVersion
             this.currentConvId = null
             this.messages = []
           }
@@ -2188,6 +2203,7 @@ export default {
 
           // 如果当前选择的会话被删除了，清空消息主视图
           if (this.selectedConvIds.includes(this.currentConvId)) {
+            ++this.messageLoadVersion
             this.currentConvId = null
             this.messages = []
           }
@@ -2240,7 +2256,7 @@ export default {
       // 追加 AI loading 占位
       const aiIndex = this.messages.length
       this.messages.push({ role: 'assistant', content: '', reasoningContent: '', loading: true, streaming: false, error: null })
-      this.$nextTick(() => this.scrollToBottom())
+      this.$nextTick(() => this.scrollToBottom(true))
 
       const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
       const enableSearchParam = this.enableWebSearch && this.currentModelSupportsSearch
@@ -2273,17 +2289,21 @@ export default {
           attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean)
         }
 
+        const chatController = new AbortController()
+        this.chatAbortController = chatController
         const response = await fetch(`${baseUrl}/ai/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json;charset=UTF-8',
             ...getAuthHeaders()
           },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: chatController.signal
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
+        if (!response.body) throw new Error('浏览器未提供可读取的响应流')
         const reader = response.body.getReader()
         this.currentReader = reader
         const decoder = new TextDecoder('utf-8')
@@ -2380,24 +2400,43 @@ export default {
           }
         }
 
+        if (!chatController.signal.aborted) {
+          throw new Error('连接已中断，未收到完成信号')
+        }
+
       } catch (e) {
         if (e.name === 'AbortError') return
         const errMsg = e.message || '服务异常，请重试'
         this.messages[aiIndex].role = 'assistant'
-        this.messages[aiIndex].content = ''
         this.messages[aiIndex].loading = false
         this.messages[aiIndex].streaming = false
         this.messages[aiIndex].error = errMsg
         this.$message.error('AI 响应失败：' + errMsg)
       } finally {
+        const currentMessage = this.messages[aiIndex]
+        if (currentMessage) {
+          currentMessage.loading = false
+          currentMessage.streaming = false
+          currentMessage.statusMsg = ''
+        }
         this.isStreaming = false
         this.currentReader = null
+        this.chatAbortController = null
         this.$nextTick(() => this.focusInput())
       }
     },
 
-    handleStopMessage() {
-      this.abortStream()
+    async handleStopMessage() {
+      const conversationId = this.currentConvId
+      const stoppingChat = !!this.chatAbortController
+      if (stoppingChat && conversationId) {
+        this.abortStream(false)
+        // 保持停止按钮，直到服务端释放当前会话。
+        this.isStreaming = true
+        await cancelChatGeneration(conversationId).catch(() => {})
+      } else {
+        this.abortStream()
+      }
       this.isStreaming = false
       if (this.messages.length > 0) {
         const lastMsg = this.messages[this.messages.length - 1]
@@ -2445,7 +2484,15 @@ export default {
         .join('\n')
     },
 
-    abortStream() {
+    abortStream(notifyServer = true) {
+      const conversationId = this.currentConvId
+      if (this.chatAbortController) {
+        this.chatAbortController.abort()
+        this.chatAbortController = null
+        if (notifyServer && conversationId) {
+          cancelChatGeneration(conversationId).catch(() => {})
+        }
+      }
       if (this.workflowAbortController) {
         this.workflowAbortController.abort()
         this.workflowAbortController = null
@@ -2456,7 +2503,9 @@ export default {
       }
       if (this.currentReader) {
         try {
-          this.currentReader.cancel()
+          // ReadableStream.cancel() 返回 Promise；停止 fetch 后它可能异步拒绝，
+          // 必须显式吞掉预期的 AbortError，避免产生未处理的 Promise rejection。
+          Promise.resolve(this.currentReader.cancel()).catch(() => {})
         } catch (_) {}
         this.currentReader = null
       }
@@ -3287,9 +3336,13 @@ export default {
     // ──────────────────────────────────────────
     // 工具
     // ──────────────────────────────────────────
-    scrollToBottom() {
+    scrollToBottom(force = false) {
       const el = this.$refs.messagesAreaRef
-      if (el) el.scrollTop = el.scrollHeight
+      if (!el) return
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      if (force || distanceFromBottom < 120) {
+        el.scrollTop = el.scrollHeight
+      }
     },
 
     focusInput() {

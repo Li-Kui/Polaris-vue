@@ -88,6 +88,12 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      */
     AiConversation selectConversationById(@Param("id") Long id, @Param("userId") Long userId);
 
+    /**
+     * 从给定会话 ID 中筛选出当前用户实际拥有且未删除的会话。
+     * 删除消息前必须使用该结果，避免仅凭可枚举的会话 ID 删除他人消息。
+     */
+    List<Long> selectOwnedConversationIds(@Param("ids") List<Long> ids, @Param("userId") Long userId);
+
     // ================================================================
     //  消息相关操作
     // ================================================================

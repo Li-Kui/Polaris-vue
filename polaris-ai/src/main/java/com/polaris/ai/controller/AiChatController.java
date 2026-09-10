@@ -15,9 +15,12 @@ import com.polaris.common.enums.BusinessType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -43,6 +46,10 @@ import java.util.List;
 public class AiChatController extends BaseController {
     @Autowired
     private IAiChatService aiChatService;
+
+    @Autowired
+    @Qualifier("aiTaskExecutor")
+    private TaskExecutor aiTaskExecutor;
 
     /**
      * 跳转到 AI 对话主页面
@@ -159,6 +166,14 @@ public class AiChatController extends BaseController {
         return ok();
     }
 
+    @Operation(summary = "取消当前会话正在生成的普通 AI 回复")
+    @PostMapping("/conversations/{id}/cancel")
+    @ResponseBody
+    public ResultData cancelChat(@PathVariable Long id) {
+        Long userId = CallerUtils.getUserId();
+        return ok(aiChatService.cancelChat(id, userId));
+    }
+
     /**
      * 获取指定会话的消息历史
      * GET /ai/chat/conversations/{id}/messages
@@ -233,8 +248,8 @@ public class AiChatController extends BaseController {
         final SecurityContext context = SecurityContextHolder.getContext();
         final CallerContext callerCtx = CallerContextHolder.get();
 
-        // 新线程异步执行，当前 Tomcat 线程立即返回 emitter，不阻塞线程池
-        new Thread(() -> {
+        // 使用受控 AI 线程池异步执行，避免每个请求创建一个无界原生线程
+        aiTaskExecutor.execute(() -> {
             try {
                 // 将安全上下文与调用者上下文绑定到子线程
                 SecurityContextHolder.setContext(context);
@@ -251,7 +266,7 @@ public class AiChatController extends BaseController {
                 // 执行完成后清除上下文，避免对线程造成污染
                 SecurityContextHolder.clearContext();
             }
-        }).start();
+        });
         return emitter;
     }
 
@@ -261,7 +276,7 @@ public class AiChatController extends BaseController {
     @Operation(summary = "流式发送消息并获取回复 (POST)")
     @PostMapping(value = "/stream", produces = "text/event-stream;charset=UTF-8")
     @ResponseBody
-    public SseEmitter streamPost(@RequestBody com.polaris.ai.dto.ChatStreamRequest request) {
+    public SseEmitter streamPost(@Validated @RequestBody com.polaris.ai.dto.ChatStreamRequest request) {
         SseEmitter emitter = new SseEmitter(180_000L);
         java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
         emitter.onCompletion(() -> isCancelled.set(true));
@@ -289,7 +304,7 @@ public class AiChatController extends BaseController {
         final SecurityContext context = SecurityContextHolder.getContext();
         final CallerContext callerCtx = CallerContextHolder.get();
 
-        new Thread(() -> {
+        aiTaskExecutor.execute(() -> {
             try {
                 SecurityContextHolder.setContext(context);
                 if (callerCtx != null) {
@@ -302,7 +317,7 @@ public class AiChatController extends BaseController {
                 CallerContextHolder.clear();
                 SecurityContextHolder.clearContext();
             }
-        }).start();
+        });
         return emitter;
     }
 }

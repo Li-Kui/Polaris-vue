@@ -22,6 +22,8 @@ public class ModeratedResponseHandler {
     private final SseSender sseSender;
     private final AtomicBoolean isCancelled;
     private final Consumer<AiMessage> onCompleteConsumer;
+    private final StringBuilder directAnswer = new StringBuilder();
+    private final StringBuilder directReasoning = new StringBuilder();
 
     private boolean firstTokenSent = false;
     private Long conversationId;
@@ -88,6 +90,9 @@ public class ModeratedResponseHandler {
     }
 
     public void onComplete(Integer totalTokens) {
+        if (isCancelled.get()) {
+            return;
+        }
         if (answerSession != null && answerSession.blocked()) {
             return;
         }
@@ -114,8 +119,8 @@ public class ModeratedResponseHandler {
             return;
         }
 
-        String finalApproved = answerSession != null ? answerSession.approvedText() : "";
-        String finalReasoning = reasoningSession != null ? reasoningSession.approvedText() : "";
+        String finalApproved = answerSession != null ? answerSession.approvedText() : directAnswer.toString();
+        String finalReasoning = reasoningSession != null ? reasoningSession.approvedText() : directReasoning.toString();
 
         if (onCompleteConsumer != null) {
             AiMessage msg = new AiMessage();
@@ -170,6 +175,9 @@ public class ModeratedResponseHandler {
                 sseSender.send("status", "");
             }
         }
+        if (answerSession == null) {
+            directAnswer.append(chunk);
+        }
         String escaped = chunk.replace("\n", "__SSE_NEWLINE__");
         if (sseSender != null) {
             sseSender.send("message", escaped);
@@ -179,6 +187,9 @@ public class ModeratedResponseHandler {
     private void sendDirectReasoning(String chunk) {
         if (chunk == null || chunk.isEmpty()) {
             return;
+        }
+        if (reasoningSession == null) {
+            directReasoning.append(chunk);
         }
         String escaped = chunk.replace("\n", "__SSE_NEWLINE__");
         if (sseSender != null) {

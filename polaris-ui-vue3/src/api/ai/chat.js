@@ -60,6 +60,16 @@ export function listMessages(conversationId) {
   })
 }
 
+// 取消当前会话正在生成的普通 AI 回复
+export function cancelChatGeneration(conversationId) {
+  return request({
+    url: `/ai/chat/conversations/${conversationId}/cancel`,
+    method: 'post',
+    timeout: 2000,
+    headers: { repeatSubmit: false }
+  })
+}
+
 // 获取已启用的智能体列表
 export function listActiveAgents() {
   return request({

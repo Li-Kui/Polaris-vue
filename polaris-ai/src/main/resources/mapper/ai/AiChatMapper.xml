@@ -79,6 +79,17 @@
         WHERE id = #{id} AND user_id = #{userId} AND del_flag = '0'
     </select>
 
+    <select id="selectOwnedConversationIds" resultType="java.lang.Long">
+        SELECT id
+        FROM ai_conversation
+        WHERE user_id = #{userId}
+          AND del_flag = '0'
+          AND id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
     <insert id="insertMessage" parameterType="com.polaris.ai.domain.AiMessage"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ai_message(conversation_id, workflow_execution_id, role, content, reasoning_content, tokens, file_url, file_name, file_content, attachment_tokens, moderation_status, moderation_event_id, moderation_version, create_time)
@@ -86,10 +97,14 @@
     </insert>
 
     <select id="selectMessagesByConversationId" resultMap="MessageResult">
-        SELECT * FROM ai_message
-        WHERE conversation_id = #{conversationId}
+        SELECT *
+        FROM (
+            SELECT * FROM ai_message
+            WHERE conversation_id = #{conversationId}
+            ORDER BY id DESC
+            LIMIT 100
+        ) latest_messages
         ORDER BY id ASC
-        LIMIT 100
     </select>
 
     <select id="selectLatestUserMessageWithImage" resultMap="MessageResult">
