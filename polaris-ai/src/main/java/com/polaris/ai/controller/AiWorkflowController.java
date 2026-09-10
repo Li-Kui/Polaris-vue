@@ -102,8 +102,20 @@ public class AiWorkflowController extends BaseController {
     @Operation(summary = "校验并编译工作流草稿")
     @PreAuthorize("@workflowAccess.canEdit() or @workflowAccess.canDebug()")
     @PostMapping("/definitions/{definitionId}/validate")
-    public ResultData<WorkflowCompilationResult> validateDraft(@PathVariable Long definitionId) {
-        return ok(workflowFacade.validateDraft(definitionId));
+    public ResultData<WorkflowCompilationResult> validateDraft(
+            @PathVariable Long definitionId,
+            @RequestBody(required = false) WorkflowDraftCommand command) {
+        return ok(command == null
+                ? workflowFacade.validateDraft(definitionId)
+                : workflowFacade.validateDraft(definitionId, command.definitionJson()));
+    }
+
+    @Operation(summary = "校验未保存的工作流定义")
+    @PreAuthorize("@workflowAccess.canEdit() or @workflowAccess.canDebug()")
+    @PostMapping("/definitions/validate")
+    public ResultData<WorkflowCompilationResult> validateDefinition(
+            @RequestBody WorkflowDraftCommand command) {
+        return ok(workflowFacade.validateDraft(command.definitionJson()));
     }
 
     @Operation(summary = "发布不可变工作流版本")

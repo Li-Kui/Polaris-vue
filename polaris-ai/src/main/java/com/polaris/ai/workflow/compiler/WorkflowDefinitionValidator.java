@@ -168,6 +168,7 @@ public class WorkflowDefinitionValidator {
                         path + ".onError", "写节点不能使用SKIP错误策略"));
             }
             validateRetry(node, path, diagnostics);
+            validateParallel(node, path, diagnostics);
             validateLoop(node, definition.getPolicies(), path, diagnostics);
             validateJoin(node, path, diagnostics);
             validateDurableControlNode(node, definition.getPolicies(), path, diagnostics);
@@ -183,6 +184,36 @@ public class WorkflowDefinitionValidator {
             validateResources(node, descriptor, path, diagnostics);
         }
         return result;
+    }
+
+    private void validateParallel(
+            WorkflowDefinitionSpec.Node node,
+            String path,
+            List<WorkflowDiagnostic> diagnostics) {
+        if (!"parallel".equals(node.getType()) || node.getConfig() == null) return;
+        JsonNode branches = node.getConfig().path("branches");
+        Set<String> keys = new LinkedHashSet<>();
+        Set<String> names = new LinkedHashSet<>();
+        Set<String> results = new LinkedHashSet<>();
+        for (int index = 0; index < branches.size(); index++) {
+            JsonNode branch = branches.get(index);
+            String branchPath = path + ".config.branches[" + index + "]";
+            String key = branch.path("key").asText();
+            String name = branch.path("name").asText().trim();
+            String resultNodeId = branch.path("resultNodeId").asText();
+            if (!isBlank(key) && !keys.add(key)) {
+                diagnostics.add(error("PARALLEL_BRANCH_KEY_DUPLICATE", node.getId(),
+                        branchPath + ".key", "并行任务组的分支标识不能重复"));
+            }
+            if (!isBlank(name) && !names.add(name)) {
+                diagnostics.add(error("PARALLEL_BRANCH_NAME_DUPLICATE", node.getId(),
+                        branchPath + ".name", "并行任务组的分支名称不能重复"));
+            }
+            if (!isBlank(resultNodeId) && !results.add(resultNodeId)) {
+                diagnostics.add(error("PARALLEL_RESULT_NODE_DUPLICATE", node.getId(),
+                        branchPath + ".resultNodeId", "每条并行分支必须使用独立的结果节点"));
+            }
+        }
     }
 
     private void validateStructuredOutput(
@@ -815,8 +846,152 @@ public class WorkflowDefinitionValidator {
                     reverse.getOrDefault(entry.getKey(), List.of()).size(), diagnostics);
         }
         validateLoopScopes(definition, nodes, diagnostics);
+        validateParallelScopes(definition, nodes, diagnostics);
         validateReachability(nodes.keySet(), compensationTargets, adjacency, reverse, diagnostics);
         validateAcyclicWithoutLoopEdges(edges, validIds, diagnostics);
+    }
+
+    private void validateParallelScopes(
+            WorkflowDefinitionSpec definition,
+            Map<String, WorkflowDefinitionSpec.Node> nodes,
+            List<WorkflowDiagnostic> diagnostics) {
+        for (WorkflowDefinitionSpec.Node parallel : nodes.values()) {
+            if (!"parallel".equals(parallel.getType()) || parallel.getConfig() == null
+                    || parallel.getConfig().path("version").asInt(1) < 2) continue;
+            List<WorkflowDefinitionSpec.Edge> outgoing = definition.getEdges().stream()
+                    .filter(edge -> parallel.getId().equals(edge.getSource())).toList();
+            WorkflowDefinitionSpec.Edge completed = outgoing.stream()
+                    .filter(edge -> "NORMAL".equals(edge.getKind())
+                            && "completed".equals(edge.getSourcePort()))
+                    .findFirst().orElse(null);
+            String completedTarget = completed == null ? null : completed.getTarget();
+            Map<String, String> nodeOwners = new LinkedHashMap<>();
+            for (JsonNode branch : parallel.getConfig().path("branches")) {
+                String key = branch.path("key").asText();
+                String name = branch.path("name").asText(key);
+                String resultNodeId = branch.path("resultNodeId").asText();
+                WorkflowDefinitionSpec.Edge entry = outgoing.stream()
+                        .filter(edge -> "PARALLEL".equals(edge.getKind())
+                                && key.equals(edge.getSourcePort()))
+                        .findFirst().orElse(null);
+                if (entry == null) continue;
+                if (!nodes.containsKey(entry.getTarget())
+                        || parallel.getId().equals(entry.getTarget())) {
+                    diagnostics.add(error("PARALLEL_ENTRY_INVALID", parallel.getId(), "$.edges",
+                            "分支“" + name + "”必须从一个普通任务节点开始，不能直接结束流程"));
+                    continue;
+                }
+                if (resultNodeId.isBlank()) continue;
+                if (!nodes.containsKey(resultNodeId)
+                        || parallel.getId().equals(resultNodeId)) {
+                    diagnostics.add(error("PARALLEL_RESULT_NODE_INVALID", parallel.getId(),
+                            "$.nodes[" + parallel.getId() + "].config.branches",
+                            "分支“" + name + "”的结果节点不存在或选择无效"));
+                    continue;
+                }
+                String returnPort = "parallel-return:" + key;
+                long returns = definition.getEdges().stream().filter(edge ->
+                        resultNodeId.equals(edge.getSource())
+                                && parallel.getId().equals(edge.getTarget())
+                                && "NORMAL".equals(edge.getKind())
+                                && returnPort.equals(edge.getTargetPort())).count();
+                if (returns != 1) {
+                    diagnostics.add(error("PARALLEL_RETURN_INVALID", parallel.getId(), "$.edges",
+                            "分支“" + name + "”必须且只能通过系统返回路径结束"));
+                }
+                if (!reachableWithinParallel(entry.getTarget(), resultNodeId,
+                        parallel.getId(), completedTarget, definition.getEdges())) {
+                    diagnostics.add(error("PARALLEL_RESULT_UNREACHABLE", parallel.getId(),
+                            "$.nodes[" + parallel.getId() + "].config.branches",
+                            "分支“" + name + "”的结果节点必须位于该分支路径中"));
+                    continue;
+                }
+                Set<String> scope = parallelScopeNodeIds(entry.getTarget(), resultNodeId,
+                        parallel.getId(), completedTarget, definition.getEdges());
+                for (String scopeNodeId : scope) {
+                    String owner = nodeOwners.putIfAbsent(scopeNodeId, key);
+                    if (owner != null && !owner.equals(key)) {
+                        WorkflowDefinitionSpec.Node sharedNode = nodes.get(scopeNodeId);
+                        diagnostics.add(error("PARALLEL_SCOPE_OVERLAP", parallel.getId(), "$.edges",
+                                "并行分支不能共享节点：“" + (sharedNode == null
+                                        ? scopeNodeId : sharedNode.getName()) + "”"));
+                    }
+                    if (resultNodeId.equals(scopeNodeId)) continue;
+                    List<WorkflowDefinitionSpec.Edge> forward = definition.getEdges().stream()
+                            .filter(edge -> scopeNodeId.equals(edge.getSource())
+                                    && !isSystemReturnEdge(edge)).toList();
+                    boolean invalid = forward.isEmpty() || forward.stream().anyMatch(edge ->
+                            Objects.equals(edge.getTarget(), completedTarget)
+                                    || "__end__".equals(edge.getTarget())
+                                    || parallel.getId().equals(edge.getTarget())
+                                    || !reachableWithinParallel(edge.getTarget(), resultNodeId,
+                                    parallel.getId(), completedTarget, definition.getEdges()));
+                    if (invalid) {
+                        diagnostics.add(error("PARALLEL_BRANCH_ESCAPE", parallel.getId(), "$.edges",
+                                "分支“" + name + "”中的每条路径都必须汇入所选结果节点"));
+                    }
+                }
+                boolean externalIncoming = definition.getEdges().stream().anyMatch(edge ->
+                        scope.contains(edge.getTarget())
+                                && !scope.contains(edge.getSource())
+                                && !(parallel.getId().equals(edge.getSource())
+                                && "PARALLEL".equals(edge.getKind())
+                                && key.equals(edge.getSourcePort())
+                                && entry.getTarget().equals(edge.getTarget())));
+                if (externalIncoming) {
+                    diagnostics.add(error("PARALLEL_SCOPE_EXTERNAL_INCOMING", parallel.getId(),
+                            "$.edges", "分支“" + name
+                                    + "”包含已接入其他路径的节点，请为任务线使用独立节点"));
+                }
+                boolean resultHasExtraExit = definition.getEdges().stream().anyMatch(edge ->
+                        resultNodeId.equals(edge.getSource())
+                                && !(parallel.getId().equals(edge.getTarget())
+                                && returnPort.equals(edge.getTargetPort())));
+                if (resultHasExtraExit) {
+                    diagnostics.add(error("PARALLEL_RESULT_EXTRA_EXIT", parallel.getId(), "$.edges",
+                            "分支“" + name + "”的结果节点不能再连接其他节点"));
+                }
+            }
+        }
+    }
+
+    private Set<String> parallelScopeNodeIds(
+            String start, String target, String parallelNodeId, String completedTarget,
+            List<WorkflowDefinitionSpec.Edge> edges) {
+        Set<String> visited = new LinkedHashSet<>();
+        Deque<String> pending = new ArrayDeque<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (current == null || "__end__".equals(current)
+                    || Objects.equals(current, completedTarget)
+                    || parallelNodeId.equals(current) || !visited.add(current)) continue;
+            if (target.equals(current)) continue;
+            edges.stream().filter(edge -> current.equals(edge.getSource())
+                    && !isSystemReturnEdge(edge))
+                    .forEach(edge -> pending.addLast(edge.getTarget()));
+        }
+        return visited;
+    }
+
+    private boolean reachableWithinParallel(
+            String start, String target, String parallelNodeId, String completedTarget,
+            List<WorkflowDefinitionSpec.Edge> edges) {
+        if (Objects.equals(start, target)) return true;
+        Set<String> visited = new HashSet<>();
+        Deque<String> pending = new ArrayDeque<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (!visited.add(current) || parallelNodeId.equals(current)
+                    || Objects.equals(current, completedTarget) || "__end__".equals(current)) continue;
+            for (WorkflowDefinitionSpec.Edge edge : edges) {
+                if (!current.equals(edge.getSource()) || isSystemReturnEdge(edge)) continue;
+                if (target.equals(edge.getTarget())) return true;
+                pending.addLast(edge.getTarget());
+            }
+        }
+        return false;
     }
 
     private void validateLoopScopes(
@@ -1054,10 +1229,22 @@ public class WorkflowDefinitionValidator {
             return;
         }
         if ("parallel".equals(node.getType())) {
-            if (outgoing.size() < 2 || outgoing.stream()
-                    .anyMatch(item -> !"PARALLEL".equals(item.getKind()))) {
+            Set<String> configured = new LinkedHashSet<>();
+            node.getConfig().path("branches").forEach(branch ->
+                    configured.add(branch.path("key").asText()));
+            List<WorkflowDefinitionSpec.Edge> branchEdges = outgoing.stream()
+                    .filter(item -> "PARALLEL".equals(item.getKind())).toList();
+            List<WorkflowDefinitionSpec.Edge> completedEdges = outgoing.stream()
+                    .filter(item -> "NORMAL".equals(item.getKind())
+                            && "completed".equals(item.getSourcePort())).toList();
+            Set<String> ports = branchEdges.stream()
+                    .map(WorkflowDefinitionSpec.Edge::getSourcePort)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            if (configured.size() < 2 || branchEdges.size() != configured.size()
+                    || !ports.equals(configured) || completedEdges.size() != 1
+                    || outgoing.size() != branchEdges.size() + 1) {
                 diagnostics.add(error("PARALLEL_BRANCH_INVALID", node.getId(), path,
-                        "并行节点至少需要两个PARALLEL出口"));
+                        "每个并行分支都必须连接一个入口，并且必须连接唯一的“全部完成”出口"));
             }
             return;
         }
@@ -1257,7 +1444,7 @@ public class WorkflowDefinitionValidator {
             indegree.put(id, 0);
         }
         for (WorkflowDefinitionSpec.Edge edge : edges) {
-            if (edge == null || "LOOP".equals(edge.getKind())
+            if (edge == null || "LOOP".equals(edge.getKind()) || isSystemReturnEdge(edge)
                     || !allIds.contains(edge.getSource()) || !allIds.contains(edge.getTarget())) {
                 continue;
             }
@@ -1282,6 +1469,12 @@ public class WorkflowDefinitionValidator {
             diagnostics.add(error("UNCONTROLLED_CYCLE", null, "$.edges",
                     "普通、条件或并行连线形成了未受LOOP节点控制的环"));
         }
+    }
+
+    private boolean isSystemReturnEdge(WorkflowDefinitionSpec.Edge edge) {
+        if (edge == null || edge.getTargetPort() == null) return false;
+        return "loop-return".equals(edge.getTargetPort())
+                || edge.getTargetPort().startsWith("parallel-return:");
     }
 
     private void validateOutputBindings(

@@ -180,6 +180,27 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     }
 
     @Override
+    public WorkflowCompilationResult validateDraft(Long definitionId, String definitionJson) {
+        requireEnabled();
+        WorkflowDefinition definition = requireDefinition(definitionId);
+        return compiler.compile(requireDefinitionJson(definitionJson),
+                "draft:" + definition.getId() + ":preview");
+    }
+
+    @Override
+    public WorkflowCompilationResult validateDraft(String definitionJson) {
+        requireEnabled();
+        return compiler.compile(requireDefinitionJson(definitionJson), "draft:preview");
+    }
+
+    private String requireDefinitionJson(String definitionJson) {
+        if (definitionJson == null || definitionJson.isBlank()) {
+            throw new ServiceException("工作流定义不能为空");
+        }
+        return definitionJson;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkflowPublishResult publish(Long definitionId, WorkflowPublishCommand command) {
         requireEnabled();

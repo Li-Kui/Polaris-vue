@@ -47,6 +47,7 @@ public class WorkflowExecutionPlan {
         private String source;
         private String sourcePort;
         private String target;
+        private String targetPort;
         private String kind;
         private JsonNode expressionAst;
         private Integer priority;

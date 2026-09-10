@@ -298,6 +298,7 @@ public class WorkflowDefinitionCompiler {
         result.setSource(edge.getSource());
         result.setSourcePort(edge.getSourcePort());
         result.setTarget(edge.getTarget());
+        result.setTargetPort(edge.getTargetPort());
         result.setKind(edge.getKind());
         result.setPriority(priority(edge));
         result.setDefaultEdge(Boolean.TRUE.equals(edge.getDefaultEdge()));

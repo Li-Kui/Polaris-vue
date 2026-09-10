@@ -1327,6 +1327,10 @@ public class WorkflowExecutionEngine {
             }
             if (selected.isEmpty() && fallback != null) selected.add(fallback);
         } else if ("parallel".equals(node.getType())) {
+            if (node.getConfig().path("version").asInt(1) >= 2) {
+                enqueueV2Parallel(node, token, edges, state);
+                return;
+            }
             selected.addAll(edges);
         } else if ("llm_classifier".equals(node.getType())) {
             String branch = state.getOutputs().getOrDefault(
@@ -1392,6 +1396,131 @@ public class WorkflowExecutionEngine {
         state.getPending().add(new WorkflowRuntimeState.Token(nodeId, branchPath));
         String key = nodeId + "@" + branchPath;
         state.getArrivals().merge(key, 1, Integer::sum);
+    }
+
+    void enqueueV2Parallel(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.Token token,
+            List<WorkflowExecutionPlan.PlanEdge> edges,
+            WorkflowRuntimeState state) {
+        String parentPath = parallelParentPath(node.getId(), token.getBranchPath());
+        String instanceKey = node.getId() + "@" + parentPath;
+        WorkflowRuntimeState.ParallelState parallel = state.getParallels().computeIfAbsent(
+                instanceKey, ignored -> initializeParallel(node, parentPath, instanceKey));
+        if (parallel.isCompleted()) return;
+
+        String branchKey = parallelBranchKey(node.getId(), token.getBranchPath());
+        if (branchKey != null) {
+            collectParallelResult(node, token, branchKey, state, parallel);
+        } else if (!parallel.isStarted()) {
+            parallel.setStarted(true);
+            for (JsonNode branch : node.getConfig().path("branches")) {
+                String key = branch.path("key").asText();
+                WorkflowExecutionPlan.PlanEdge branchEdge = edges.stream()
+                        .filter(edge -> "PARALLEL".equals(edge.getKind())
+                                && key.equals(edge.getSourcePort()))
+                        .findFirst().orElse(null);
+                if (branchEdge == null) {
+                    throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                            "并行任务组分支缺少入口：" + key, false);
+                }
+                enqueue(state, branchEdge.getTarget(),
+                        appendParallelPath(parentPath, node.getId(), key));
+            }
+        }
+
+        int total = node.getConfig().path("branches").size();
+        if (parallel.getCompletedBranches().size() < total) return;
+        parallel.setCompleted(true);
+        ObjectNode summary = parallelSummary(node, parallel);
+        storeOutput(state, node.getId(), parentPath, summary);
+        WorkflowExecutionPlan.PlanEdge completedEdge = edges.stream()
+                .filter(edge -> "NORMAL".equals(edge.getKind())
+                        && "completed".equals(edge.getSourcePort()))
+                .findFirst().orElse(null);
+        if (completedEdge == null) {
+            throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                    "并行任务组缺少“全部完成”出口", false);
+        }
+        enqueue(state, completedEdge.getTarget(), parentPath);
+    }
+
+    private WorkflowRuntimeState.ParallelState initializeParallel(
+            WorkflowExecutionPlan.PlanNode node, String parentPath, String instanceKey) {
+        WorkflowRuntimeState.ParallelState parallel = new WorkflowRuntimeState.ParallelState();
+        parallel.setNodeId(node.getId());
+        parallel.setInstanceKey(instanceKey);
+        parallel.setParentBranchPath(parentPath);
+        return parallel;
+    }
+
+    private void collectParallelResult(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.Token token,
+            String branchKey,
+            WorkflowRuntimeState state,
+            WorkflowRuntimeState.ParallelState parallel) {
+        JsonNode configuredBranch = null;
+        for (JsonNode branch : node.getConfig().path("branches")) {
+            if (branchKey.equals(branch.path("key").asText())) {
+                configuredBranch = branch;
+                break;
+            }
+        }
+        if (configuredBranch == null) {
+            throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                    "并行任务组收到未知分支结果：" + branchKey, false);
+        }
+        if (!parallel.getCompletedBranches().add(branchKey)) return;
+        String resultNodeId = configuredBranch.path("resultNodeId").asText();
+        JsonNode result = state.getInstanceOutputs().getOrDefault(
+                resultNodeId + "@" + token.getBranchPath(), NullNode.instance);
+        parallel.getResults().put(branchKey, result.deepCopy());
+    }
+
+    private ObjectNode parallelSummary(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.ParallelState parallel) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        summary.put("completed", true);
+        summary.put("completionMode", node.getConfig().path("completionMode")
+                .asText("ALL_SUCCEEDED"));
+        summary.put("totalBranches", node.getConfig().path("branches").size());
+        summary.put("successCount", parallel.getCompletedBranches().size());
+        summary.put("failureCount", 0);
+        ObjectNode results = summary.putObject("results");
+        for (JsonNode branch : node.getConfig().path("branches")) {
+            String key = branch.path("key").asText();
+            results.set(key, parallel.getResults().getOrDefault(
+                    key, NullNode.instance).deepCopy());
+        }
+        return summary;
+    }
+
+    private String appendParallelPath(String parentPath, String nodeId, String branchKey) {
+        String base = parentPath == null || parentPath.isBlank() ? "root" : parentPath;
+        return base + "/" + nodeId + "@" + branchKey;
+    }
+
+    private String parallelParentPath(String nodeId, String branchPath) {
+        String path = branchPath == null || branchPath.isBlank() ? "root" : branchPath;
+        String marker = "/" + nodeId + "@";
+        int markerIndex = path.lastIndexOf(marker);
+        if (markerIndex < 0 || path.indexOf('/', markerIndex + marker.length()) >= 0) {
+            return path;
+        }
+        return path.substring(0, markerIndex);
+    }
+
+    private String parallelBranchKey(String nodeId, String branchPath) {
+        String path = branchPath == null ? "" : branchPath;
+        String marker = "/" + nodeId + "@";
+        int markerIndex = path.lastIndexOf(marker);
+        if (markerIndex < 0) return null;
+        int start = markerIndex + marker.length();
+        if (path.indexOf('/', start) >= 0) return null;
+        String branchKey = path.substring(start);
+        return branchKey.isBlank() ? null : branchKey;
     }
 
     void enqueueV2Loop(
@@ -1651,6 +1780,9 @@ public class WorkflowExecutionEngine {
                 if (restored.getLoops() == null) {
                     restored.setLoops(new LinkedHashMap<>());
                 }
+                if (restored.getParallels() == null) {
+                    restored.setParallels(new LinkedHashMap<>());
+                }
                 return restored;
             } catch (Exception e) {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
@@ -1759,7 +1891,10 @@ public class WorkflowExecutionEngine {
     private Map<String, Integer> incomingCounts(WorkflowExecutionPlan plan) {
         Map<String, Integer> result = new HashMap<>();
         plan.getEdges().stream()
-                .filter(edge -> !"LOOP".equals(edge.getKind()))
+                .filter(edge -> !"LOOP".equals(edge.getKind())
+                        && !"loop-return".equals(edge.getTargetPort())
+                        && !String.valueOf(edge.getTargetPort())
+                        .startsWith("parallel-return:"))
                 .forEach(edge -> result.merge(edge.getTarget(), 1, Integer::sum));
         return result;
     }

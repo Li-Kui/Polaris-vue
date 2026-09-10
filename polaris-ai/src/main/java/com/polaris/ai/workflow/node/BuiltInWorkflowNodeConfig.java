@@ -1570,7 +1570,8 @@ public class BuiltInWorkflowNodeConfig {
 
     @Bean
     public WorkflowNodeHandler parallelWorkflowNodeHandler() {
-        return passThrough("parallel", "并行分支", "control", emptyConfigSchema());
+        return passThrough("parallel", "并行任务组", "control",
+                parallelConfigSchema(), parallelOutputSchema());
     }
 
     @Bean
@@ -1673,6 +1674,48 @@ public class BuiltInWorkflowNodeConfig {
                 .putArray("enum").add("ANY").add("ALL").add("N_OF_M");
         properties.putObject("requiredBranches").put("type", "integer")
                 .put("minimum", 1).put("maximum", 100);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private ObjectNode parallelConfigSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        schema.putArray("required").add("version").add("completionMode").add("branches");
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("version").put("type", "integer")
+                .putArray("enum").add(2);
+        properties.putObject("completionMode").put("type", "string")
+                .putArray("enum").add("ALL_SUCCEEDED");
+        ObjectNode branches = properties.putObject("branches");
+        branches.put("type", "array").put("minItems", 2).put("maxItems", 20);
+        ObjectNode branch = branches.putObject("items");
+        branch.put("type", "object").put("additionalProperties", false);
+        branch.putArray("required").add("key").add("name").add("resultNodeId");
+        ObjectNode branchProperties = branch.putObject("properties");
+        branchProperties.putObject("key").put("type", "string")
+                .put("pattern", "^[A-Za-z][A-Za-z0-9_.-]{0,63}$");
+        branchProperties.putObject("name").put("type", "string")
+                .put("minLength", 1).put("maxLength", 128);
+        branchProperties.putObject("resultNodeId").put("type", "string")
+                .put("minLength", 1).put("maxLength", 128);
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    private ObjectNode parallelOutputSchema() {
+        ObjectNode schema = JsonNodeFactory.instance.objectNode();
+        schema.put("type", "object");
+        ObjectNode properties = schema.putObject("properties");
+        properties.putObject("completed").put("type", "boolean");
+        properties.putObject("completionMode").put("type", "string");
+        properties.putObject("totalBranches").put("type", "integer");
+        properties.putObject("successCount").put("type", "integer");
+        properties.putObject("failureCount").put("type", "integer");
+        properties.putObject("results").put("type", "object");
+        schema.putArray("required").add("completed").add("completionMode")
+                .add("totalBranches").add("successCount").add("failureCount")
+                .add("results");
         schema.put("additionalProperties", false);
         return schema;
     }
