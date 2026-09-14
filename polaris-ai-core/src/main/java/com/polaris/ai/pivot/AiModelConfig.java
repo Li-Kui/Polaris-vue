@@ -1,13 +1,9 @@
 package com.polaris.ai.pivot;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
-import java.util.List;
 
 /**
  * AI 模型配置类
@@ -27,11 +23,6 @@ public class AiModelConfig
     public StreamingChatModel streamingChatModel(AiModelFactory factory)
     {
         log.info(">>> 注册 StreamingChatModel 动态热切换代理 Bean");
-        return new StreamingChatModel() {
-            @Override
-            public void chat(List<ChatMessage> messages, StreamingChatResponseHandler handler) {
-                factory.getDefaultStreamingModel().chat(messages, handler);
-            }
-        };
+        return new HotSwappableStreamingChatModel(factory::getDefaultStreamingModel);
     }
 }

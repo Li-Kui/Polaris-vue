@@ -24,6 +24,8 @@ public class ModeratedResponseHandler {
     private final Consumer<AiMessage> onCompleteConsumer;
     private final StringBuilder directAnswer = new StringBuilder();
     private final StringBuilder directReasoning = new StringBuilder();
+    /** 保证完成、异常熔断和晚到片段只会有一个终态。 */
+    private final AtomicBoolean terminal = new AtomicBoolean(false);
 
     private boolean firstTokenSent = false;
     private Long conversationId;
@@ -46,7 +48,8 @@ public class ModeratedResponseHandler {
     }
 
     public void onToken(String token) {
-        if (isCancelled.get() || (answerSession != null && answerSession.blocked())) {
+        if (terminal.get() || isCancelled.get()
+                || (answerSession != null && answerSession.blocked())) {
             return;
         }
 
@@ -63,12 +66,13 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlocked();
         }
     }
 
     public void onThinking(String thinking) {
-        if (isCancelled.get() || (reasoningSession != null && reasoningSession.blocked())) {
+        if (terminal.get() || isCancelled.get()
+                || (reasoningSession != null && reasoningSession.blocked())) {
             return;
         }
 
@@ -85,15 +89,20 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlocked();
         }
     }
 
     public void onComplete(Integer totalTokens) {
         if (isCancelled.get()) {
+            terminal.compareAndSet(false, true);
             return;
         }
         if (answerSession != null && answerSession.blocked()) {
+            terminal.compareAndSet(false, true);
+            return;
+        }
+        if (!terminal.compareAndSet(false, true)) {
             return;
         }
 
@@ -115,7 +124,7 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlockedAfterTerminalClaimed();
             return;
         }
 
@@ -140,7 +149,14 @@ public class ModeratedResponseHandler {
         }
     }
 
-    private void handleBlocked(ModerationBlockedException e) {
+    private void handleBlocked() {
+        if (!terminal.compareAndSet(false, true)) {
+            return;
+        }
+        handleBlockedAfterTerminalClaimed();
+    }
+
+    private void handleBlockedAfterTerminalClaimed() {
         isCancelled.set(true);
         log.warn("AI 输出流触发安全策略已被熔断截断");
 

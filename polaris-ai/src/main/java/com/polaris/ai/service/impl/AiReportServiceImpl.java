@@ -3,6 +3,7 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiReport;
@@ -29,9 +30,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * AI 分析报告服务层实现类
@@ -605,10 +609,12 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
             StringBuilder resultBuffer = new StringBuilder();
             CountDownLatch latch = new CountDownLatch(1);
+            AtomicReference<Throwable> streamError = new AtomicReference<>();
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
 
-            streamingModel.chat(messages, new StreamingChatResponseHandler() {
+            CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
+                    streamingModel, messages, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
                     if (partialResponse != null) {
@@ -623,14 +629,27 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
                 @Override
                 public void onError(Throwable error) {
-                    log.error(">>> [AiReportService] 流式生成异常: {}", error.getMessage());
+                    logReportStreamError(error);
+                    streamError.set(error);
                     latch.countDown();
                 }
             });
 
-            boolean finished = latch.await(60, TimeUnit.SECONDS);
+            boolean finished;
+            try {
+                finished = latch.await(60, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                call.cancel();
+                return java.util.Collections.emptyMap();
+            }
             if (!finished) {
                 log.warn(">>> [AiReportService] AI 重塑超时");
+                call.cancel();
+                return java.util.Collections.emptyMap();
+            }
+            if (streamError.get() != null) {
+                return java.util.Collections.emptyMap();
             }
 
             String response = resultBuffer.toString();
@@ -701,14 +720,30 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
 
-            streamingModel.chat(messages, new StreamingChatResponseHandler() {
+            AtomicReference<CancellableStreamingChatCall> callRef = new AtomicReference<>();
+            AtomicBoolean streamClosed = new AtomicBoolean(false);
+            emitter.onTimeout(() -> {
+                streamClosed.set(true);
+                cancelReportStream(callRef, emitter);
+            });
+            emitter.onError(ignored -> {
+                streamClosed.set(true);
+                cancelReportStream(callRef, null);
+            });
+            emitter.onCompletion(() -> {
+                streamClosed.set(true);
+                cancelReportStream(callRef, null);
+            });
+
+            CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
+                    streamingModel, messages, new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
                     if (partialResponse != null) {
                         try {
                             emitter.send(partialResponse);
                         } catch (Exception e) {
-                            log.warn(">>> [AiReportService] SSE 发送片段失败: {}", e.getMessage());
+                            throw new IllegalStateException("报告流式片段发送失败", e);
                         }
                     }
                 }
@@ -725,15 +760,46 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
                 @Override
                 public void onError(Throwable error) {
-                    log.error(">>> [AiReportService] 流式生成异常: {}", error.getMessage());
+                    logReportStreamError(error);
                     emitter.completeWithError(error);
                 }
             });
+            callRef.set(call);
+            if (streamClosed.get() && !call.isTerminated()) {
+                call.cancel();
+            }
         } catch (Exception e) {
             log.error(">>> [AiReportService] AI 重塑报告 SSE 启动失败: {}", e.getMessage(), e);
             emitter.completeWithError(e);
         }
         return emitter;
+    }
+
+    /** 取消报告模型订阅；超时场景同时主动结束 SSE 连接。 */
+    private void cancelReportStream(
+            AtomicReference<CancellableStreamingChatCall> callRef,
+            SseEmitter emitter)
+    {
+        CancellableStreamingChatCall call = callRef.get();
+        if (call != null && !call.isTerminated()) {
+            call.cancel();
+        }
+        if (emitter != null) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    /** 正常取消仅记录调试信息，真实模型异常继续按错误级别记录。 */
+    private void logReportStreamError(Throwable error)
+    {
+        if (error instanceof CancellationException) {
+            log.debug(">>> [AiReportService] 报告模型流已取消");
+        } else {
+            log.error(">>> [AiReportService] 流式生成异常: {}", error.getMessage(), error);
+        }
     }
 
 }

@@ -110,6 +110,15 @@ public interface IAiChatService extends IService<AiConversation>
     boolean cancelChat(Long conversationId, Long userId);
 
     /**
+     * 响应 SSE 断开、超时或异常，取消与本次标记匹配的活动模型流。
+     */
+    default void cancelStream(
+            Long conversationId,
+            java.util.concurrent.atomic.AtomicBoolean cancellation) {
+        if (cancellation != null) cancellation.set(true);
+    }
+
+    /**
      * 发送消息并以 SSE 流式返回 AI 回复
      * 方法内部异步执行，通过 SseEmitter 逐 token 推送给前端
      * 对话结束后自动将完整回复持久化到数据库

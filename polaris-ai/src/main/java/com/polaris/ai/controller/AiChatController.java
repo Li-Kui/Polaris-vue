@@ -220,15 +220,15 @@ public class AiChatController extends BaseController {
                              @RequestParam(required = false, defaultValue = "false") Boolean enableSearch) {
         SseEmitter emitter = new SseEmitter(180_000L);
         java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
-        emitter.onCompletion(() -> isCancelled.set(true));
+        emitter.onCompletion(() -> aiChatService.cancelStream(conversationId, isCancelled));
         emitter.onTimeout(() -> {
-            isCancelled.set(true);
+            aiChatService.cancelStream(conversationId, isCancelled);
             try {
                 emitter.complete();
             } catch (Exception ignored) {
             }
         });
-        emitter.onError(e -> isCancelled.set(true));
+        emitter.onError(e -> aiChatService.cancelStream(conversationId, isCancelled));
 
         Long userId = CallerUtils.getUserId();
 
@@ -279,15 +279,15 @@ public class AiChatController extends BaseController {
     public SseEmitter streamPost(@Validated @RequestBody com.polaris.ai.dto.ChatStreamRequest request) {
         SseEmitter emitter = new SseEmitter(180_000L);
         java.util.concurrent.atomic.AtomicBoolean isCancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
-        emitter.onCompletion(() -> isCancelled.set(true));
+        emitter.onCompletion(() -> aiChatService.cancelStream(request.conversationId(), isCancelled));
         emitter.onTimeout(() -> {
-            isCancelled.set(true);
+            aiChatService.cancelStream(request.conversationId(), isCancelled);
             try {
                 emitter.complete();
             } catch (Exception ignored) {
             }
         });
-        emitter.onError(e -> isCancelled.set(true));
+        emitter.onError(e -> aiChatService.cancelStream(request.conversationId(), isCancelled));
 
         Long userId = CallerUtils.getUserId();
 

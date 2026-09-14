@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.chat.AiAssistant;
+import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.domain.AiAgent;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
@@ -37,6 +38,7 @@ import org.springframework.security.core.context.SecurityContext;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** 通过带版本工作流 SPI 实现的模型和知识库适配器。 */
@@ -840,28 +842,34 @@ public class WorkflowAiNodeConfig {
         StringBuilder output = new StringBuilder();
         AtomicReference<Throwable> error = new AtomicReference<>();
         AtomicReference<ChatResponse> completed = new AtomicReference<>();
+        AtomicBoolean terminal = new AtomicBoolean(false);
         CountDownLatch latch = new CountDownLatch(1);
         StreamingChatResponseHandler handler = new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(String value) {
+                if (terminal.get()) return;
                 context.cancellation().throwIfCancellationRequested();
                 if (value != null) output.append(value);
             }
 
             @Override
             public void onCompleteResponse(ChatResponse response) {
+                if (!terminal.compareAndSet(false, true)) return;
                 completed.set(response);
                 latch.countDown();
             }
 
             @Override
             public void onError(Throwable throwable) {
+                if (!terminal.compareAndSet(false, true)) return;
                 error.set(throwable);
                 latch.countDown();
             }
         };
+        CancellableStreamingChatCall cancellableCall = null;
         if (tools == null || tools.isEmpty()) {
-            model.chat(messages, handler);
+            // 无工具调用时使用 1.20 响应式接口，以便超时后真正取消底层订阅。
+            cancellableCall = CancellableStreamingChatCall.start(model, messages, handler);
         } else {
             AiAssistant assistant = AiServices.builder(AiAssistant.class)
                     .streamingChatModel(model)
@@ -869,11 +877,23 @@ public class WorkflowAiNodeConfig {
                     .build();
             TokenStream stream = assistant.chat(messages);
             stream.onPartialResponse(handler::onPartialResponse)
+                    .beforeToolExecution(ignored ->
+                            context.cancellation().throwIfCancellationRequested())
                     .onCompleteResponse(handler::onCompleteResponse)
                     .onError(handler::onError)
                     .start();
         }
-        if (!latch.await(waitSeconds, TimeUnit.SECONDS)) {
+        boolean finished;
+        try {
+            finished = latch.await(waitSeconds, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            terminal.set(true);
+            if (cancellableCall != null) cancellableCall.cancel();
+            throw e;
+        }
+        if (!finished) {
+            terminal.set(true);
+            if (cancellableCall != null) cancellableCall.cancel();
             throw new IllegalStateException("大模型响应超时");
         }
         if (error.get() != null) {
