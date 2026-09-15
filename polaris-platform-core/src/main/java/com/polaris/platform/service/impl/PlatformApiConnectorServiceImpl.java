@@ -2,7 +2,6 @@ package com.polaris.platform.service.impl;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.polaris.ai.workflow.spi.WorkflowResourceUsageInspector;
 import com.polaris.common.exception.ServiceException;
 import com.polaris.platform.connector.ApiConnectorExecutor;
@@ -18,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Locale;
@@ -288,7 +288,7 @@ public class PlatformApiConnectorServiceImpl implements IPlatformApiConnectorSer
             throw new ServiceException("响应 Schema 必须是 JSON 对象");
         }
         JsonNode type = schema.get("type");
-        if (type != null && !type.isTextual() && !type.isArray()) {
+        if (type != null && !type.isString() && !type.isArray()) {
             throw new ServiceException("响应 Schema 的 type 必须是字符串或字符串数组");
         }
         String value = schema.toString();

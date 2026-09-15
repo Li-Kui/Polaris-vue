@@ -1,8 +1,5 @@
 package com.polaris.ai.safety.provider;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.safety.config.ModerationProviderProperties;
 import com.polaris.ai.safety.dto.ProviderResult;
 import com.polaris.ai.safety.model.ModerationPolicy;
@@ -10,6 +7,9 @@ import com.polaris.ai.safety.model.ModerationScene;
 import com.polaris.ai.safety.model.ProviderDecision;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -100,7 +100,7 @@ public final class ProviderUsageGuard {
         JsonNode tree;
         try {
             tree = objectMapper.readTree(json);
-        } catch (JsonProcessingException malformedJson) {
+        } catch (JacksonException malformedJson) {
             return new CacheLookup(CacheOutcome.REDIS_UNAVAILABLE, Optional.empty());
         }
         try {
@@ -116,7 +116,7 @@ public final class ProviderUsageGuard {
                     cached.riskScore(), cached.categories(), cached.providerRequestId(),
                     cached.latencyMs());
             return new CacheLookup(CacheOutcome.HIT, Optional.of(result));
-        } catch (RuntimeException | JsonProcessingException invalidValue) {
+        } catch (RuntimeException invalidValue) {
             return new CacheLookup(CacheOutcome.MISS, Optional.empty());
         }
     }
@@ -134,7 +134,7 @@ public final class ProviderUsageGuard {
                     result.provider(), result.decision(), result.riskScore(),
                     result.categories(), result.providerRequestId(), result.latencyMs());
             store.put(key, objectMapper.writeValueAsString(cached), CACHE_TTL);
-        } catch (RuntimeException | JsonProcessingException ignored) {
+        } catch (RuntimeException ignored) {
             // The completed provider result remains usable; a cache write cannot undo it.
         }
     }
@@ -161,8 +161,7 @@ public final class ProviderUsageGuard {
         if (tree == null || !tree.isObject() || tree.size() != CACHE_FIELDS.size()) {
             return false;
         }
-        Set<String> fields = new HashSet<>();
-        tree.fieldNames().forEachRemaining(fields::add);
+        Set<String> fields = new HashSet<>(tree.propertyNames());
         return fields.equals(CACHE_FIELDS)
                 && tree.get("categories") != null && tree.get("categories").isArray();
     }

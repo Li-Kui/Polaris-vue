@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.core.context.TenantSystemCallerContext;
@@ -12,6 +10,8 @@ import com.polaris.ai.workflow.domain.WorkflowTrigger;
 import com.polaris.ai.workflow.mapper.WorkflowTriggerMapper;
 import com.polaris.common.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -125,7 +125,7 @@ public class WorkflowExternalEventService implements WorkflowExternalEventApplic
     private boolean matches(WorkflowTrigger trigger, String eventType) {
         try {
             return eventType.equals(objectMapper.readTree(trigger.getConfigJson())
-                    .path("eventType").asText());
+                    .path("eventType").asString());
         } catch (Exception e) {
             return false;
         }

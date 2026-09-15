@@ -1,8 +1,8 @@
 package com.polaris.ai.workflow.compiler;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 /** 受限且确定性的工作流条件语言解析器。 */
 public class WorkflowExpressionParser {
@@ -101,7 +101,7 @@ public class WorkflowExpressionParser {
                 }
                 case STRING -> {
                     advance();
-                    return literal(JsonNodeFactory.instance.textNode(value.text));
+                    return literal(JsonNodeFactory.instance.stringNode(value.text));
                 }
                 case NUMBER -> {
                     advance();

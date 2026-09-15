@@ -1,10 +1,11 @@
 package com.polaris.platform.controller.openApi;
 
-import com.polaris.ai.chat.AiAssistant;
+import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.constant.ApiVersionConstants;
@@ -19,8 +20,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
-import dev.langchain4j.service.AiServices;
-import dev.langchain4j.service.TokenStream;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -36,8 +37,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 中台标准开放 API 接口（兼容 OpenAI 标准协议规范）
@@ -99,6 +103,7 @@ public class PlatformOpenApiController {
         try {
             reservation = tokenQuotaService.reserve(tenantId, estimateReservationTokens(request));
         } catch (TokenQuotaExceededException e) {
+            AiObservability.recordTerminal("rate_limited");
             response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
             return AjaxResult.error(HttpStatus.TOO_MANY_REQUESTS.value(), e.getMessage());
         } catch (TokenQuotaUnavailableException e) {
@@ -121,61 +126,104 @@ public class PlatformOpenApiController {
     private SseEmitter handleStreamingChat(OpenAiChatRequest request, TokenReservation reservation) {
         SseEmitter emitter = new SseEmitter(180000L);
         AtomicBoolean finalized = new AtomicBoolean(false);
+        AtomicBoolean streamClosed = new AtomicBoolean(false);
+        AtomicReference<CancellableStreamingChatCall> callRef = new AtomicReference<>();
         // 模型回调可能由第三方线程执行，配额操作只使用显式传入的预占记录
         Runnable releaseReservation = () -> {
             if (finalized.compareAndSet(false, true)) {
                 tokenQuotaService.release(reservation);
             }
         };
+        Runnable cancelStream = () -> {
+            CancellableStreamingChatCall call = callRef.get();
+            if (call != null && !call.isTerminated()) {
+                call.cancel();
+            }
+        };
+        emitter.onTimeout(() -> {
+            if (streamClosed.compareAndSet(false, true)) {
+                AiObservability.recordTerminal("timeout");
+                cancelStream.run();
+                releaseReservation.run();
+                emitter.complete();
+            }
+        });
+        emitter.onError(ignored -> {
+            if (streamClosed.compareAndSet(false, true)) {
+                cancelStream.run();
+                releaseReservation.run();
+            }
+        });
+        emitter.onCompletion(() -> {
+            if (streamClosed.compareAndSet(false, true)) {
+                cancelStream.run();
+                releaseReservation.run();
+            }
+        });
         CompletableFuture.runAsync(() -> {
             try {
                 StreamingChatModel model = aiModelFactory.getDefaultStreamingModel();
                 if (model == null) {
+                    streamClosed.set(true);
                     releaseReservation.run();
                     emitter.send(SseEmitter.event().data("{\"error\":\"未配置默认对话模型\"}"));
                     emitter.complete();
                     return;
                 }
 
-                AiAssistant assistant = AiServices.builder(AiAssistant.class)
-                        .streamingChatModel(model)
-                        .build();
-
                 List<ChatMessage> chatMessages = convertMessages(request.getMessages());
                 StringBuilder fullResponse = new StringBuilder();
 
-                TokenStream tokenStream = assistant.chat(chatMessages);
-                tokenStream
-                        .onPartialResponse(token -> {
-                            try {
-                                fullResponse.append(token);
-                                Map<String, Object> chunk = buildChunk(request.getModel(), token);
-                                emitter.send(SseEmitter.event().data(chunk));
-                            } catch (IOException e) {
+                CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
+                        model, chatMessages, new StreamingChatResponseHandler() {
+                    @Override
+                    public void onPartialResponse(String token) {
+                        if (streamClosed.get()) return;
+                        try {
+                            fullResponse.append(token);
+                            Map<String, Object> chunk = buildChunk(request.getModel(), token);
+                            emitter.send(SseEmitter.event().data(chunk));
+                        } catch (IOException e) {
+                            if (streamClosed.compareAndSet(false, true)) {
+                                cancelStream.run();
+                                releaseReservation.run();
                                 emitter.completeWithError(e);
                             }
-                        })
-                        .onCompleteResponse(response -> {
-                            try {
-                                int tokenEstimate = estimateActualTokens(request, fullResponse.length());
-                                if (finalized.compareAndSet(false, true)) {
-                                    completeReservation(reservation, tokenEstimate);
-                                }
-                                emitter.send(SseEmitter.event().data("[DONE]"));
-                                emitter.complete();
-                            } catch (IOException e) {
-                                emitter.completeWithError(e);
-                            }
-                        })
-                        .onError(error -> {
-                            releaseReservation.run();
-                            emitter.completeWithError(error);
-                        })
-                        .start();
+                        }
+                    }
 
+                    @Override
+                    public void onCompleteResponse(ChatResponse response) {
+                        if (!streamClosed.compareAndSet(false, true)) return;
+                        try {
+                            int actualTokens = resolveActualTokens(
+                                    response, request, fullResponse.length());
+                            if (finalized.compareAndSet(false, true)) {
+                                completeReservation(reservation, actualTokens);
+                            }
+                            emitter.send(SseEmitter.event().data("[DONE]"));
+                            emitter.complete();
+                        } catch (IOException e) {
+                            emitter.completeWithError(e);
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable error) {
+                        if (!streamClosed.compareAndSet(false, true)) return;
+                        releaseReservation.run();
+                        emitter.completeWithError(error);
+                    }
+                }, aiTaskExecutor);
+                callRef.set(call);
+                if (streamClosed.get() && !call.isTerminated()) {
+                    call.cancel();
+                }
             } catch (Exception e) {
-                releaseReservation.run();
-                emitter.completeWithError(e);
+                if (streamClosed.compareAndSet(false, true)) {
+                    releaseReservation.run();
+                    emitter.completeWithError(e);
+                }
             }
         }, aiTaskExecutor);
         return emitter;
@@ -190,31 +238,48 @@ public class PlatformOpenApiController {
             return err;
         }
 
-        AiAssistant assistant = AiServices.builder(AiAssistant.class)
-                .streamingChatModel(model)
-                .build();
-
         List<ChatMessage> chatMessages = convertMessages(request.getMessages());
-        CompletableFuture<String> future = new CompletableFuture<>();
+        CompletableFuture<ChatResponse> future = new CompletableFuture<>();
         StringBuilder fullResponse = new StringBuilder();
 
-        TokenStream tokenStream = assistant.chat(chatMessages);
-        tokenStream
-                .onPartialResponse(fullResponse::append)
-                .onCompleteResponse(response -> future.complete(fullResponse.toString()))
-                .onError(future::completeExceptionally)
-                .start();
+        CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
+                model, chatMessages, new StreamingChatResponseHandler() {
+            @Override
+            public void onPartialResponse(String partialResponse) {
+                fullResponse.append(partialResponse);
+            }
 
-        String answerText = "";
+            @Override
+            public void onCompleteResponse(ChatResponse completeResponse) {
+                future.complete(completeResponse);
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                future.completeExceptionally(error);
+            }
+        }, aiTaskExecutor);
+
+        ChatResponse chatResponse;
         try {
-            answerText = future.get(120, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            log.error("阻塞请求获取回复超时或失败", e);
-            answerText = fullResponse.toString();
+            chatResponse = future.get(120, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            call.cancel();
+            throw new IllegalStateException("阻塞请求已中断", e);
+        } catch (TimeoutException e) {
+            AiObservability.recordTerminal("timeout");
+            call.cancel();
+            throw new IllegalStateException("阻塞请求获取回复超时", e);
+        } catch (ExecutionException e) {
+            call.cancel();
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            throw new IllegalStateException("阻塞请求获取回复失败: " + cause.getMessage(), cause);
         }
 
-        int tokenEstimate = estimateActualTokens(request, answerText.length());
-        completeReservation(reservation, tokenEstimate);
+        String answerText = fullResponse.toString();
+        int actualTokens = resolveActualTokens(chatResponse, request, answerText.length());
+        completeReservation(reservation, actualTokens);
 
         Map<String, Object> responseData = new LinkedHashMap<>();
         responseData.put("id", "chatcmpl-" + UUID.randomUUID().toString());
@@ -233,7 +298,11 @@ public class PlatformOpenApiController {
         responseData.put("choices", List.of(choice));
 
         Map<String, Object> usage = new HashMap<>();
-        usage.put("total_tokens", tokenEstimate);
+        if (chatResponse != null && chatResponse.tokenUsage() != null) {
+            putIfNotNull(usage, "prompt_tokens", chatResponse.tokenUsage().inputTokenCount());
+            putIfNotNull(usage, "completion_tokens", chatResponse.tokenUsage().outputTokenCount());
+        }
+        usage.put("total_tokens", actualTokens);
         responseData.put("usage", usage);
 
         return responseData;
@@ -258,6 +327,23 @@ public class PlatformOpenApiController {
         long outputTokens = (long) Math.ceil(responseLength / 2.0);
         long total = estimateMessageTokens(request.getMessages()) + outputTokens;
         return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, total));
+    }
+
+    /** 优先采用供应商返回的真实 Token；供应商缺失统计时才使用字符数估算。 */
+    private int resolveActualTokens(
+            ChatResponse response, OpenAiChatRequest request, int responseLength) {
+        if (response != null && response.tokenUsage() != null
+                && response.tokenUsage().totalTokenCount() != null
+                && response.tokenUsage().totalTokenCount() > 0) {
+            return response.tokenUsage().totalTokenCount();
+        }
+        return estimateActualTokens(request, responseLength);
+    }
+
+    private void putIfNotNull(Map<String, Object> target, String key, Integer value) {
+        if (value != null) {
+            target.put(key, value);
+        }
     }
 
     private int estimateMessageTokens(List<OpenAiMessage> messages) {

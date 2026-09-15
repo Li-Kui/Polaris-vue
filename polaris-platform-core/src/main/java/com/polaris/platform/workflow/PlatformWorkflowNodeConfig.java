@@ -2,11 +2,6 @@ package com.polaris.platform.workflow;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.application.WorkflowResourceOption;
 import com.polaris.ai.workflow.spi.*;
 import com.polaris.platform.connector.*;
@@ -20,6 +15,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -226,7 +226,7 @@ public class PlatformWorkflowNodeConfig {
                             List.of("外部数据源尚未绑定，当前使用节点契约"));
                 }
                 String sql = context.config() == null
-                        ? null : context.config().path("sql").asText(null);
+                        ? null : context.config().path("sql").asString(null);
                 if (sql == null || sql.isBlank()) {
                     return new ResolvedNodeSchema(
                             context.declaredInputSchema(), context.declaredOutputSchema(),
@@ -293,7 +293,7 @@ public class PlatformWorkflowNodeConfig {
                 context.cancellation().throwIfCancellationRequested();
                 PlatformDatasource datasource = (PlatformDatasource) firstResource(
                         context, "DATASOURCE").handle();
-                String sql = context.config().path("sql").asText();
+                String sql = context.config().path("sql").asString();
                 int maxRows = context.config().path("maxRows").asInt(100);
                 int queryTimeoutSeconds = context.config().path("queryTimeoutSeconds").asInt(10);
                 Map<String, Object> parameters = context.input() != null
@@ -341,13 +341,13 @@ public class PlatformWorkflowNodeConfig {
                 PlatformApiConnector connector = (PlatformApiConnector) firstResource(
                         context, "API_CONNECTOR").handle();
                 String methodName = getOnly ? "GET"
-                        : context.config().path("method").asText("POST").toUpperCase();
+                        : context.config().path("method").asString("POST").toUpperCase();
                 if (!Set.of("POST", "PUT", "PATCH", "DELETE").contains(methodName)
                         && !getOnly) {
                     throw new IllegalArgumentException("HTTP写请求仅允许POST、PUT、PATCH或DELETE");
                 }
                 HttpMethod method = HttpMethod.valueOf(methodName);
-                String path = context.config().path("path").asText("");
+                String path = context.config().path("path").asString("");
                 Map<String, String> query = queryParams(context.input());
                 Object body = getOnly ? null : context.input();
                 ResponseEntity<String> response = executor.execute(
@@ -537,8 +537,8 @@ public class PlatformWorkflowNodeConfig {
         Map<String, String> result = new LinkedHashMap<>();
         JsonNode query = input == null ? null : input.get("query");
         if (query != null && query.isObject()) {
-            query.fields().forEachRemaining(field ->
-                    result.put(field.getKey(), field.getValue().asText()));
+            query.properties().forEach(field ->
+                    result.put(field.getKey(), field.getValue().asString()));
         }
         return result;
     }

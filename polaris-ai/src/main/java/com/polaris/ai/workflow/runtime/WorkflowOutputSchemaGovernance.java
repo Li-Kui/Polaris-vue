@@ -1,9 +1,10 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -12,7 +13,7 @@ import java.util.*;
 /** 用户确认的正式输出 Schema 的限制、摘要和兼容性检查。 */
 public final class WorkflowOutputSchemaGovernance {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builderWithJackson2Defaults().build();
 
     private WorkflowOutputSchemaGovernance() {
     }
@@ -91,7 +92,7 @@ public final class WorkflowOutputSchemaGovernance {
             JsonNode baseProperties = base.path("properties");
             JsonNode overrideProperties = override.path("properties");
             if (baseProperties.isObject() && overrideProperties.isObject()) {
-                baseProperties.fields().forEachRemaining(field -> {
+                baseProperties.properties().forEach(field -> {
                     if (overrideProperties.has(field.getKey())) {
                         compare(field.getValue(), overrideProperties.path(field.getKey()),
                                 path + "." + field.getKey(), diagnostics);
@@ -107,9 +108,9 @@ public final class WorkflowOutputSchemaGovernance {
 
     private static Set<String> types(JsonNode node) {
         Set<String> result = new LinkedHashSet<>();
-        if (node.isTextual()) result.add(node.asText());
+        if (node.isString()) result.add(node.asString());
         if (node.isArray()) node.forEach(item -> {
-            if (item.isTextual()) result.add(item.asText());
+            if (item.isString()) result.add(item.asString());
         });
         return result;
     }
@@ -117,7 +118,7 @@ public final class WorkflowOutputSchemaGovernance {
     private static Set<String> textValues(JsonNode node) {
         Set<String> result = new LinkedHashSet<>();
         if (node.isArray()) node.forEach(item -> {
-            if (item.isTextual()) result.add(item.asText());
+            if (item.isString()) result.add(item.asString());
         });
         return result;
     }
@@ -135,7 +136,7 @@ public final class WorkflowOutputSchemaGovernance {
         }
         ObjectNode result = OBJECT_MAPPER.createObjectNode();
         Map<String, JsonNode> fields = new TreeMap<>();
-        Iterator<Map.Entry<String, JsonNode>> iterator = node.fields();
+        Iterator<Map.Entry<String, JsonNode>> iterator = node.properties().iterator();
         while (iterator.hasNext()) {
             Map.Entry<String, JsonNode> field = iterator.next();
             fields.put(field.getKey(), field.getValue());

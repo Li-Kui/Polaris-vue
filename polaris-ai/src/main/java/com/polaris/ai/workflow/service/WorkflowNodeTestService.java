@@ -1,9 +1,5 @@
 package com.polaris.ai.workflow.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.*;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.compiler.WorkflowDefinitionCompiler;
@@ -24,6 +20,10 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.lang.management.ManagementFactory;
 import java.math.BigDecimal;
@@ -260,7 +260,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         if (envelope == null) throw new ServiceException("试运行恢复载荷不存在或已损坏");
         boolean versioned = envelope.path("payloadVersion").asInt(0) == 1;
         JsonNode input = versioned ? envelope.get("input") : envelope;
-        String mode = versioned ? envelope.path("mode").asText("NODE")
+        String mode = versioned ? envelope.path("mode").asString("NODE")
                 : record.getTestMode() == null ? "NODE" : record.getTestMode();
         CallerContext previous = CallerContextHolder.get();
         try {
@@ -448,7 +448,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         contextRoot.set("input", prepared.input());
         ObjectNode outputs = contextRoot.putObject("nodes");
         contextRoot.putObject("env").put("name", prepared.environment());
-        contextRoot.with("env").put("production", "PROD".equals(prepared.environment()));
+        contextRoot.withObject("env").put("production", "PROD".equals(prepared.environment()));
         ObjectNode execution = contextRoot.putObject("execution");
         execution.put("id", "node-test:" + testRunId);
         execution.put("workflowCode", prepared.definition().workflowCode());
@@ -531,7 +531,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                 }
                 outputs.putObject(current.getId()).set("output",
                         finalOutput == null
-                                ? com.fasterxml.jackson.databind.node.NullNode.instance
+                                ? tools.jackson.databind.node.NullNode.instance
                                 : finalOutput);
             }
             return new WorkflowNodeTestResult(
@@ -966,8 +966,8 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private String safeMessage(Throwable error) {
         String value = error == null || error.getMessage() == null
                 ? "节点试运行失败" : error.getMessage();
-        JsonNode redacted = dataRedactor.redact(objectMapper.getNodeFactory().textNode(value));
-        String result = redacted == null ? "节点试运行失败" : redacted.asText();
+        JsonNode redacted = dataRedactor.redact(objectMapper.getNodeFactory().stringNode(value));
+        String result = redacted == null ? "节点试运行失败" : redacted.asString();
         result = result.replaceAll(
                 "(?i)(api[-_ ]?key|authorization|password|token)\\s*[:=]\\s*[^,;\\s]+",
                 "$1=[REDACTED]");

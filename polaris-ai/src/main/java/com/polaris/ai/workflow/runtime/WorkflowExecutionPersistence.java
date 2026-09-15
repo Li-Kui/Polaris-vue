@@ -1,6 +1,5 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.application.WorkflowTaskSignal;
 import com.polaris.ai.workflow.application.WorkflowTimerSignal;
 import com.polaris.ai.workflow.domain.*;
@@ -10,6 +9,7 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.Date;

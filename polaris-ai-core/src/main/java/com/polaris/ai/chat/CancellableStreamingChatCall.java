@@ -7,6 +7,8 @@ import dev.langchain4j.model.chat.response.*;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -20,13 +22,19 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class CancellableStreamingChatCall
 {
     private final StreamingChatResponseHandler handler;
+    private final Executor callbackExecutor;
+    private final ConcurrentLinkedQueue<Runnable> callbackQueue = new ConcurrentLinkedQueue<>();
+    private final AtomicBoolean callbackRunning = new AtomicBoolean(false);
     private final AtomicReference<Flow.Subscription> subscription = new AtomicReference<>();
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
+    private final AtomicBoolean sourceTerminal = new AtomicBoolean(false);
     private final AtomicBoolean terminal = new AtomicBoolean(false);
 
-    private CancellableStreamingChatCall(StreamingChatResponseHandler handler)
+    private CancellableStreamingChatCall(
+            StreamingChatResponseHandler handler, Executor callbackExecutor)
     {
         this.handler = Objects.requireNonNull(handler, "handler");
+        this.callbackExecutor = callbackExecutor == null ? Runnable::run : callbackExecutor;
     }
 
     public static CancellableStreamingChatCall start(
@@ -34,12 +42,42 @@ public final class CancellableStreamingChatCall
             List<ChatMessage> messages,
             StreamingChatResponseHandler handler)
     {
+        return start(model, messages, handler, null);
+    }
+
+    /**
+     * 启动可取消模型流，并按原始顺序把回调卸载到指定业务线程池。
+     */
+    public static CancellableStreamingChatCall start(
+            StreamingChatModel model,
+            List<ChatMessage> messages,
+            StreamingChatResponseHandler handler,
+            Executor callbackExecutor)
+    {
         Objects.requireNonNull(model, "model");
-        CancellableStreamingChatCall call = new CancellableStreamingChatCall(handler);
+        CancellableStreamingChatCall call = new CancellableStreamingChatCall(handler, callbackExecutor);
         try {
             model.chat(messages).subscribe(call.new ModelSubscriber());
         } catch (RuntimeException error) {
-            call.signalError(error);
+            call.sourceTerminal.set(true);
+            call.dispatch(() -> call.signalError(error));
+        }
+        return call;
+    }
+
+    /** 使用已经包含请求参数的 Publisher 启动调用，供声明式工具代理复用。 */
+    public static CancellableStreamingChatCall start(
+            Flow.Publisher<ChatModelStreamingEvent> publisher,
+            StreamingChatResponseHandler handler,
+            Executor callbackExecutor)
+    {
+        Objects.requireNonNull(publisher, "publisher");
+        CancellableStreamingChatCall call = new CancellableStreamingChatCall(handler, callbackExecutor);
+        try {
+            publisher.subscribe(call.new ModelSubscriber());
+        } catch (RuntimeException error) {
+            call.sourceTerminal.set(true);
+            call.dispatch(() -> call.signalError(error));
         }
         return call;
     }
@@ -48,8 +86,9 @@ public final class CancellableStreamingChatCall
     public void cancel()
     {
         cancelled.set(true);
+        sourceTerminal.set(true);
         cancelSubscription();
-        signalError(new CancellationException("模型流式调用已取消"));
+        dispatch(() -> signalError(new CancellationException("模型流式调用已取消")));
     }
 
     public boolean isCancelled()
@@ -84,6 +123,35 @@ public final class CancellableStreamingChatCall
         }
     }
 
+    /** 共享线程池可能并发执行任务，这里用串行队列保持模型事件原始顺序。 */
+    private void dispatch(Runnable callback)
+    {
+        callbackQueue.add(callback);
+        if (!callbackRunning.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            callbackExecutor.execute(this::drainCallbacks);
+        } catch (RuntimeException rejected) {
+            drainCallbacks();
+        }
+    }
+
+    private void drainCallbacks()
+    {
+        try {
+            Runnable callback;
+            while ((callback = callbackQueue.poll()) != null) {
+                callback.run();
+            }
+        } finally {
+            callbackRunning.set(false);
+            if (!callbackQueue.isEmpty()) {
+                dispatch(() -> { });
+            }
+        }
+    }
+
     private final class ModelSubscriber implements Flow.Subscriber<ChatModelStreamingEvent>
     {
         @Override
@@ -102,6 +170,17 @@ public final class CancellableStreamingChatCall
 
         @Override
         public void onNext(ChatModelStreamingEvent event)
+        {
+            if (sourceTerminal.get() || terminal.get() || cancelled.get()) {
+                return;
+            }
+            if (event instanceof CompleteResponse) {
+                sourceTerminal.set(true);
+            }
+            dispatch(() -> handleEvent(event));
+        }
+
+        private void handleEvent(ChatModelStreamingEvent event)
         {
             if (terminal.get() || cancelled.get()) {
                 return;
@@ -122,6 +201,7 @@ public final class CancellableStreamingChatCall
                 }
             } catch (RuntimeException error) {
                 cancelled.set(true);
+                sourceTerminal.set(true);
                 cancelSubscription();
                 signalError(error);
             }
@@ -130,14 +210,15 @@ public final class CancellableStreamingChatCall
         @Override
         public void onError(Throwable error)
         {
-            signalError(error);
+            sourceTerminal.set(true);
+            dispatch(() -> signalError(error));
         }
 
         @Override
         public void onComplete()
         {
-            if (!terminal.get()) {
-                signalError(new IllegalStateException("模型流结束但未返回完整响应"));
+            if (sourceTerminal.compareAndSet(false, true)) {
+                dispatch(() -> signalError(new IllegalStateException("模型流结束但未返回完整响应")));
             }
         }
     }

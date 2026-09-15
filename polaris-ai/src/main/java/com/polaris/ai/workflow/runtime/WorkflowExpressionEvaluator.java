@@ -1,10 +1,10 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.*;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.*;
 
 import java.math.BigDecimal;
 import java.util.Map;
@@ -31,10 +31,10 @@ public class WorkflowExpressionEvaluator {
         if (ast == null || !ast.isObject()) {
             throw new IllegalArgumentException("表达式AST无效");
         }
-        String type = ast.path("type").asText();
+        String type = ast.path("type").asString();
         return switch (type) {
             case "literal" -> ast.has("value") ? ast.get("value") : NullNode.instance;
-            case "path" -> resolvePath(context, ast.path("value").asText());
+            case "path" -> resolvePath(context, ast.path("value").asString());
             case "unary" -> evaluateUnary(ast, context);
             case "binary" -> evaluateBinary(ast, context);
             default -> throw new IllegalArgumentException("不支持的表达式AST类型: " + type);
@@ -60,7 +60,7 @@ public class WorkflowExpressionEvaluator {
     }
 
     private JsonNode evaluateUnary(JsonNode ast, JsonNode context) {
-        if (!"NOT".equals(ast.path("operator").asText())) {
+        if (!"NOT".equals(ast.path("operator").asString())) {
             throw new IllegalArgumentException("不支持的一元运算符");
         }
         JsonNode operand = evaluate(ast.get("operand"), context);
@@ -71,7 +71,7 @@ public class WorkflowExpressionEvaluator {
     }
 
     private JsonNode evaluateBinary(JsonNode ast, JsonNode context) {
-        String operator = ast.path("operator").asText();
+        String operator = ast.path("operator").asString();
         if ("AND".equals(operator) || "OR".equals(operator)) {
             JsonNode left = evaluate(ast.get("left"), context);
             if (!left.isBoolean()) {
@@ -149,8 +149,8 @@ public class WorkflowExpressionEvaluator {
         if (left.isNumber() && right.isNumber()) {
             return decimal(left).compareTo(decimal(right));
         }
-        if (left.isTextual() && right.isTextual()) {
-            return left.textValue().compareTo(right.textValue());
+        if (left.isString() && right.isString()) {
+            return left.stringValue().compareTo(right.stringValue());
         }
         throw new IllegalArgumentException("大小比较只支持数字或同类型字符串");
     }

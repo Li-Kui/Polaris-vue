@@ -137,3 +137,13 @@ aj:
     aes-status: true
     # 滑动干扰项(0/1/2)
     interference-options: 2
+
+# 运行指标仅开放必要端点，详细访问权限继续由现有安全配置控制。
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized

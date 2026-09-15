@@ -1,7 +1,5 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.domain.WorkflowConcurrencyQuota;
 import com.polaris.ai.workflow.domain.WorkflowExecution;
@@ -9,6 +7,8 @@ import com.polaris.ai.workflow.mapper.WorkflowConcurrencyQuotaMapper;
 import com.polaris.ai.workflow.mapper.WorkflowExecutionMapper;
 import com.polaris.common.exception.ServiceException;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Comparator;

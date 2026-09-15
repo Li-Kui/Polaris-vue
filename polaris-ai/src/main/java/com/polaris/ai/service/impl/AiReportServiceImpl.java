@@ -2,12 +2,12 @@ package com.polaris.ai.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiReport;
 import com.polaris.ai.domain.AiReportRef;
+import com.polaris.ai.dto.RefinedReportOutput;
 import com.polaris.ai.mapper.AiReportMapper;
 import com.polaris.ai.pivot.AiModelFactory;
 import com.polaris.ai.service.IAiReportService;
@@ -16,14 +16,19 @@ import com.polaris.common.exception.ServiceException;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ResponseFormat;
+import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.service.output.JsonSchemas;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -64,7 +69,8 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     @Qualifier("threadPoolTaskExecutor")
     private TaskExecutor refineTaskExecutor;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     public AiReportRef saveReport(AiReport report) {
@@ -612,9 +618,10 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             AtomicReference<Throwable> streamError = new AtomicReference<>();
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
+            ChatRequest chatRequest = structuredReportRequest(messages);
 
             CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
-                    streamingModel, messages, new StreamingChatResponseHandler() {
+                    streamingModel.chat(chatRequest), new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
                     if (partialResponse != null) {
@@ -633,7 +640,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
                     streamError.set(error);
                     latch.countDown();
                 }
-            });
+            }, null);
 
             boolean finished;
             try {
@@ -654,24 +661,19 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
 
             String response = resultBuffer.toString();
             if (!response.trim().isEmpty()) {
-                String cleanJson = response.trim();
-                if (cleanJson.contains("```")) {
-                    cleanJson = cleanJson.replaceAll("```json", "").replaceAll("```", "");
-                }
-                int firstBrace = cleanJson.indexOf("{");
-                int lastBrace = cleanJson.lastIndexOf("}");
-                if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-                    cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
-                }
-
                 try {
-                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
-                    java.util.Map jsonMap = om.readValue(cleanJson, java.util.Map.class);
-                    log.info(">>> [AiReportService] 重塑成功并完成 Jackson Map 结构化转换！");
-                    return jsonMap;
+                    RefinedReportOutput structured = objectMapper.readValue(
+                            response.trim(), RefinedReportOutput.class);
+                    Map<String, Object> result = objectMapper.convertValue(
+                            structured, Map.class);
+                    validateRefinedSchema(result);
+                    log.info(">>> [AiReportService] 报告 DTO 结构化输出解析成功");
+                    return result;
                 } catch (Exception parseErr) {
-                    log.warn(">>> [AiReportService] Jackson 转 Map 降级: {}", parseErr.getMessage());
-                    return cleanJson.trim();
+                    // 个别 OpenAI 兼容供应商可能忽略 JSON Schema，保留旧清洗逻辑作为降级路径。
+                    log.warn(">>> [AiReportService] DTO 解析失败，进入 JSON 清洗降级: {}",
+                            parseErr.getMessage());
+                    return parseLegacyRefinedReport(response);
                 }
             }
         } catch (Exception e) {
@@ -719,6 +721,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
                     "请仅输出紧凑标准的 JSON 格式，所有字符串值必须是纯净的中文或英文显示文本，绝不要包含 Markdown 标记或原始字段名。";
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
+            ChatRequest chatRequest = structuredReportRequest(messages);
 
             AtomicReference<CancellableStreamingChatCall> callRef = new AtomicReference<>();
             AtomicBoolean streamClosed = new AtomicBoolean(false);
@@ -736,7 +739,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             });
 
             CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
-                    streamingModel, messages, new StreamingChatResponseHandler() {
+                    streamingModel.chat(chatRequest), new StreamingChatResponseHandler() {
                 @Override
                 public void onPartialResponse(String partialResponse) {
                     if (partialResponse != null) {
@@ -763,7 +766,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
                     logReportStreamError(error);
                     emitter.completeWithError(error);
                 }
-            });
+            }, refineTaskExecutor);
             callRef.set(call);
             if (streamClosed.get() && !call.isTerminated()) {
                 call.cancel();
@@ -799,6 +802,42 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             log.debug(">>> [AiReportService] 报告模型流已取消");
         } else {
             log.error(">>> [AiReportService] 流式生成异常: {}", error.getMessage(), error);
+        }
+    }
+
+    /** 使用 LangChain4j JSON Schema 约束模型输出，DTO 是主路径。 */
+    private ChatRequest structuredReportRequest(List<ChatMessage> messages)
+    {
+        var jsonSchema = JsonSchemas.jsonSchemaFrom(RefinedReportOutput.class)
+                .orElseThrow(() -> new IllegalStateException("无法生成报告结构化输出 Schema"));
+        ResponseFormat responseFormat = ResponseFormat.builder()
+                .type(ResponseFormatType.JSON)
+                .jsonSchema(jsonSchema)
+                .build();
+        return ChatRequest.builder()
+                .messages(messages)
+                .responseFormat(responseFormat)
+                .build();
+    }
+
+    /** 兼容不支持 JSON Schema 的旧供应商响应，仅作为降级路径。 */
+    private Map<String, Object> parseLegacyRefinedReport(String response)
+    {
+        String cleanJson = response == null ? "" : response.trim();
+        if (cleanJson.contains("```")) {
+            cleanJson = cleanJson.replace("```json", "").replace("```", "");
+        }
+        int firstBrace = cleanJson.indexOf("{");
+        int lastBrace = cleanJson.lastIndexOf("}");
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
+        }
+        try {
+            Map<String, Object> result = objectMapper.readValue(cleanJson, Map.class);
+            validateRefinedSchema(result);
+            return result;
+        } catch (Exception e) {
+            throw new ServiceException("AI 返回的美化结果不是有效结构化报告", HttpStatus.ERROR);
         }
     }
 

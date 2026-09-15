@@ -4,6 +4,9 @@ import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
+import com.polaris.ai.observability.AiObservability;
+import com.polaris.ai.observability.ObservedEmbeddingModel;
+import com.polaris.ai.observability.ObservedStreamingChatModel;
 import com.polaris.ai.service.IAiModelConfigService;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -11,13 +14,14 @@ import dev.langchain4j.model.image.ImageModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiImageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 
@@ -39,6 +43,8 @@ public class AiModelFactory
     private static final String DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
     // 工作流快照可能持续产生新指纹，限制缓存数量可避免实例长期累积。
     private static final int MAX_WORKFLOW_CHAT_CACHE_SIZE = 128;
+    // 工作流定义较长时间未再次执行时，惰性清理对应的快照模型。
+    private static final long WORKFLOW_CHAT_CACHE_IDLE_MILLIS = Duration.ofMinutes(30).toMillis();
     // 模型实例缓存，避免频繁从数据库查询及构建
     private final Map<String, StreamingChatModel> chatCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> embeddingCache = new ConcurrentHashMap<>();
@@ -54,11 +60,14 @@ public class AiModelFactory
     // 仅记录工作流快照模型，普通配置模型不参与容量淘汰。
     private final Set<String> workflowChatCacheKeys = ConcurrentHashMap.newKeySet();
     private final ConcurrentLinkedDeque<String> workflowChatCacheOrder = new ConcurrentLinkedDeque<>();
+    private final Map<String, Long> workflowChatLastAccess = new ConcurrentHashMap<>();
 
     @Autowired
     private IAiModelConfigService modelConfigService;
     @Autowired
     private AiModelProperties fileProps;
+    @Autowired
+    private AiObservability observability;
 
     /**
      * 清空全部大模型与向量模型缓存（模型配置增删改时调用）
@@ -75,6 +84,7 @@ public class AiModelFactory
         defaultImageCache.clear();
         workflowChatCacheKeys.clear();
         workflowChatCacheOrder.clear();
+        workflowChatLastAccess.clear();
     }
 
     /**
@@ -88,6 +98,7 @@ public class AiModelFactory
                 || key.startsWith(workflowChatPrefix));
         workflowChatCacheKeys.removeIf(key -> key.startsWith(workflowChatPrefix));
         workflowChatCacheOrder.removeIf(key -> key.startsWith(workflowChatPrefix));
+        workflowChatLastAccess.keySet().removeIf(key -> key.startsWith(workflowChatPrefix));
         embeddingCache.remove("embed_" + configId);
         imageCache.remove("image_" + configId);
         configCache.remove(configId);
@@ -176,8 +187,8 @@ public class AiModelFactory
             }
 
             if (cachedModel == null) {
-                cachedModel = getFallbackChatModel();
-                defaultChatCache.put(cacheKey, cachedModel);
+                cachedModel = new ObservedStreamingChatModel(
+                        getFallbackChatModel(), fileProps.getProvider(), fileProps.getModelName());
             }
         }
         return cachedModel;
@@ -279,8 +290,8 @@ public class AiModelFactory
             }
 
             if (cachedModel == null) {
-                cachedModel = getFallbackEmbeddingModel();
-                defaultEmbeddingCache.put(cacheKey, cachedModel);
+                cachedModel = new ObservedEmbeddingModel(
+                        getFallbackEmbeddingModel(), fileProps.getProvider(), "fallback-embedding");
             }
         }
         return cachedModel;
@@ -458,34 +469,41 @@ public class AiModelFactory
     private StreamingChatModel getChatModelInstance(
             AiModelConfig config, String cacheKey, Duration requestTimeout)
     {
-        return chatCache.computeIfAbsent(cacheKey, key -> {
-            log.info(">>> 动态构建聊天模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
-            String provider = config.getProvider().toLowerCase();
-            
-            int maxTokens = config.getMaxTokens() != null ? config.getMaxTokens() : 2048;
-            double temperature = config.getTemperature() != null ? config.getTemperature() : 0.7;
-            Map<String, String> customHeaders = getCustomHeaders(config);
+        return chatCache.computeIfAbsent(cacheKey, key -> new ObservedStreamingChatModel(
+                buildStreamingChatModel(config, requestTimeout),
+                config.getProvider(), config.getModelName()));
+    }
 
-            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
-            if (config.isRelay()) {
-                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建聊天模型");
-                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
-                        ? config.getBaseUrl().trim() : null;
-                if (relayUrl == null) {
-                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
-                }
-                return buildOpenAiStreamingModel(
-                        relayUrl,
-                        config.getApiKey(),
-                        config.getModelName(),
-                        maxTokens,
-                        temperature,
-                        timeoutOrDefault(requestTimeout, 120),
-                        customHeaders,
-                        "1".equals(config.getEnableThinking()));
+    private StreamingChatModel buildStreamingChatModel(
+            AiModelConfig config, Duration requestTimeout)
+    {
+        log.info(">>> 动态构建聊天模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
+        String provider = config.getProvider().toLowerCase();
+
+        int maxTokens = config.getMaxTokens() != null ? config.getMaxTokens() : 2048;
+        double temperature = config.getTemperature() != null ? config.getTemperature() : 0.7;
+        Map<String, String> customHeaders = getCustomHeaders(config);
+
+        // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+        if (config.isRelay()) {
+            log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建聊天模型");
+            String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                    ? config.getBaseUrl().trim() : null;
+            if (relayUrl == null) {
+                throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
             }
+            return buildOpenAiStreamingModel(
+                    relayUrl,
+                    config.getApiKey(),
+                    config.getModelName(),
+                    maxTokens,
+                    temperature,
+                    timeoutOrDefault(requestTimeout, 120),
+                    customHeaders,
+                    "1".equals(config.getEnableThinking()));
+        }
 
-            switch (provider) {
+        switch (provider) {
                 case "dashscope":
                     String dashscopeUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : DASHSCOPE_BASE_URL;
@@ -547,10 +565,27 @@ public class AiModelFactory
                             customHeaders,
                             "1".equals(config.getEnableThinking()));
 
-                default:
-                    throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
-            }
-        });
+            default:
+                throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
+        }
+    }
+
+    /** 注册缓存实例数指标，便于及时发现配置快照异常增长。 */
+    @PostConstruct
+    public void bindCacheMetrics()
+    {
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "chat", chatCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "embedding", embeddingCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "image", imageCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "config", configCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_chat", defaultChatCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_embedding", defaultEmbeddingCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_image", defaultImageCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "workflow_chat", workflowChatCacheKeys::size);
     }
 
     private Duration timeoutOrDefault(Duration requestTimeout, long defaultSeconds)
@@ -589,13 +624,16 @@ public class AiModelFactory
         return builder.build();
     }
 
-    /** 按创建顺序淘汰最早的工作流快照模型，已返回给执行中的实例不受影响。 */
+    /** 按空闲时间和创建顺序淘汰工作流快照模型，已返回给执行中的实例不受影响。 */
     private synchronized void recordWorkflowChatCacheKey(String cacheKey)
     {
         // 配置刷新可能恰好发生在模型构建与登记之间，此时不再登记已被清除的实例。
         if (!chatCache.containsKey(cacheKey)) {
             return;
         }
+        long now = System.currentTimeMillis();
+        workflowChatLastAccess.put(cacheKey, now);
+        evictIdleWorkflowChatModels(now, cacheKey);
         if (!workflowChatCacheKeys.add(cacheKey)) {
             return;
         }
@@ -607,6 +645,53 @@ public class AiModelFactory
             }
             if (workflowChatCacheKeys.remove(oldestKey)) {
                 chatCache.remove(oldestKey);
+                workflowChatLastAccess.remove(oldestKey);
+            }
+        }
+    }
+
+    /** 惰性清理空闲快照，当前刚访问的键不参与本次清理。 */
+    private void evictIdleWorkflowChatModels(long now, String currentKey)
+    {
+        workflowChatLastAccess.forEach((key, lastAccess) -> {
+            if (!key.equals(currentKey)
+                    && now - lastAccess >= WORKFLOW_CHAT_CACHE_IDLE_MILLIS
+                    && workflowChatCacheKeys.remove(key)) {
+                Object idleModel = chatCache.remove(key);
+                workflowChatLastAccess.remove(key);
+                workflowChatCacheOrder.remove(key);
+                if (idleModel != null) {
+                    closeDistinctModels(List.of(idleModel));
+                }
+            }
+        });
+    }
+
+    /** 应用停止后统一释放未来可能实现 AutoCloseable 的模型客户端。 */
+    @PreDestroy
+    public synchronized void destroy()
+    {
+        List<Object> cachedModels = new ArrayList<>();
+        cachedModels.addAll(chatCache.values());
+        cachedModels.addAll(embeddingCache.values());
+        cachedModels.addAll(imageCache.values());
+        cachedModels.addAll(defaultChatCache.values());
+        cachedModels.addAll(defaultEmbeddingCache.values());
+        cachedModels.addAll(defaultImageCache.values());
+        clearCache();
+        closeDistinctModels(cachedModels);
+    }
+
+    private void closeDistinctModels(Collection<?> models)
+    {
+        Set<Object> closed = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object model : models) {
+            if (model instanceof AutoCloseable closeable && closed.add(model)) {
+                try {
+                    closeable.close();
+                } catch (Exception e) {
+                    log.warn(">>> 释放模型客户端失败: {}", model.getClass().getName(), e);
+                }
             }
         }
     }
@@ -626,23 +711,29 @@ public class AiModelFactory
     private EmbeddingModel getEmbeddingModelInstance(AiModelConfig config)
     {
         String cacheKey = "embed_" + config.getId();
-        return embeddingCache.computeIfAbsent(cacheKey, key -> {
-            log.info(">>> 动态构建向量模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
-            String provider = config.getProvider().toLowerCase();
-            String apiKey = config.getApiKey();
+        return embeddingCache.computeIfAbsent(cacheKey, key -> new ObservedEmbeddingModel(
+                buildEmbeddingModel(config), config.getProvider(), config.getModelName()));
+    }
 
-            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
-            if (config.isRelay()) {
-                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建向量模型");
-                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
-                        ? config.getBaseUrl().trim() : null;
-                if (relayUrl == null) {
-                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
-                }
-                return buildOpenAiEmbeddingModel(config, relayUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
+    private EmbeddingModel buildEmbeddingModel(AiModelConfig config)
+    {
+        log.info(">>> 动态构建向量模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
+        String provider = config.getProvider().toLowerCase();
+        String apiKey = config.getApiKey();
+
+        // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+        if (config.isRelay()) {
+            log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建向量模型");
+            String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                    ? config.getBaseUrl().trim() : null;
+            if (relayUrl == null) {
+                throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
             }
+            return buildOpenAiEmbeddingModel(
+                    config, relayUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
+        }
 
-            switch (provider) {
+        switch (provider) {
                 case "dashscope":
                     String dashscopeEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -674,10 +765,9 @@ public class AiModelFactory
                     return buildOpenAiEmbeddingModel(
                             config, arkEmbedUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
 
-                default:
-                    throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
-            }
-        });
+            default:
+                throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
+        }
     }
 
     private EmbeddingModel buildOpenAiEmbeddingModel(

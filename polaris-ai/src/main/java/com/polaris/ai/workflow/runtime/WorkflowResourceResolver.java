@@ -1,7 +1,5 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import com.polaris.ai.workflow.domain.WorkflowResourceBinding;
 import com.polaris.ai.workflow.mapper.WorkflowResourceBindingMapper;
@@ -11,6 +9,8 @@ import com.polaris.ai.workflow.spi.WorkflowResourceProvider;
 import com.polaris.ai.workflow.spi.WorkflowResourceRequest;
 import com.polaris.common.exception.ServiceException;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -147,7 +147,7 @@ public class WorkflowResourceResolver {
                             environment,
                             reference.getKind(),
                             reference.getKey(),
-                            item.path("resourceId").asText(),
+                            item.path("resourceId").asString(),
                             principalType,
                             principalId,
                             item.has("resourceVersion")

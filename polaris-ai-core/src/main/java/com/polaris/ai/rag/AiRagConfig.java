@@ -1,5 +1,6 @@
 package com.polaris.ai.rag;
 
+import com.polaris.ai.observability.ObservedEmbeddingStore;
 import com.polaris.ai.pivot.AiModelFactory;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -72,10 +73,11 @@ public class AiRagConfig
     {
         AiVectorStoreProperties.QdrantProperties qdrant = properties.getQdrant();
         log.info(">>> 初始化 Qdrant 向量数据库, collection={}", qdrant.getCollectionName());
-        return QdrantEmbeddingStore.builder()
+        EmbeddingStore<TextSegment> store = QdrantEmbeddingStore.builder()
                 .client(client)
                 .collectionName(qdrant.getCollectionName())
                 .payloadTextKey(qdrant.getPayloadTextKey())
                 .build();
+        return new ObservedEmbeddingStore<>(store, qdrant.getCollectionName());
     }
 }

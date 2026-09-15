@@ -56,6 +56,10 @@
             <artifactId>client</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <dependency>
             <groupId>com.polaris</groupId>
             <artifactId>polaris-common</artifactId>
         </dependency>

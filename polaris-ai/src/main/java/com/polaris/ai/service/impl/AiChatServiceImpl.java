@@ -5,12 +5,14 @@ import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.attachment.MultimodalMediaHelper;
 import com.polaris.ai.chat.AiAssistant;
 import com.polaris.ai.chat.CancellableStreamingChatCall;
+import com.polaris.ai.chat.CancellableStreamingChatModel;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.rag.AiVectorStoreResolver;
@@ -30,10 +32,13 @@ import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -101,6 +106,13 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     @Autowired
     private AiVectorStoreResolver vectorStoreResolver;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    @Qualifier("aiTaskExecutor")
+    private TaskExecutor aiTaskExecutor;
+
     @Autowired(required = false)
     private com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService;
 
@@ -121,8 +133,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     /** 会话级防重互锁容器（保证单个会话同时只有一个流式推送在进行） */
     private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.atomic.AtomicBoolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
-    /** 仅记录可取消的响应式模型流；带工具的 TokenStream 仍通过取消探针协作终止。 */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, CancellableStreamingChatCall> ACTIVE_STREAM_CALLS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 记录当前模型流的取消动作，同时覆盖普通对话、工具调用和知识库检索。 */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, Runnable> ACTIVE_STREAM_CANCEL_ACTIONS = new java.util.concurrent.ConcurrentHashMap<>();
 
     // ----------------------------------------------------------------
     // 会话管理
@@ -246,9 +258,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             return false;
         }
         cancellation.set(true);
-        CancellableStreamingChatCall activeCall = ACTIVE_STREAM_CALLS.remove(conversationId);
-        if (activeCall != null) {
-            activeCall.cancel();
+        AiObservability.recordTerminal("cancelled");
+        Runnable cancelAction = ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId);
+        if (cancelAction != null) {
+            cancelAction.run();
         }
         // 使用 value 条件删除，防止旧流的完成回调误删随后启动的新流。
         ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
@@ -262,9 +275,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (conversationId == null || cancellation == null) return;
         cancellation.set(true);
         if (!ACTIVE_CONVERSATIONS.remove(conversationId, cancellation)) return;
-        CancellableStreamingChatCall activeCall = ACTIVE_STREAM_CALLS.remove(conversationId);
-        if (activeCall != null) {
-            activeCall.cancel();
+        AiObservability.recordTerminal("cancelled");
+        Runnable cancelAction = ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId);
+        if (cancelAction != null) {
+            cancelAction.run();
         }
     }
 
@@ -485,7 +499,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     accessibleKnowledgeBaseId);
             if (recResult != null && recResult.isHasRecognizedDocs()) {
                 try {
-                    String jsonDocs = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(recResult.getRecognizedDocs());
+                    String jsonDocs = objectMapper.writeValueAsString(recResult.getRecognizedDocs());
                     sseHelper.sendSse(emitter, "doc_recognized", jsonDocs);
                     log.info(">>> [AiChatService] 自动识别挂载文档推送 SSE: {}", jsonDocs);
                 } catch (Exception e) {
@@ -663,7 +677,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 // LangChain4j 可能在取消或网络异常后继续投递晚到回调，终态只允许处理一次。
                 java.util.concurrent.atomic.AtomicBoolean terminalCallbackHandled =
                         new java.util.concurrent.atomic.AtomicBoolean(false);
-                java.util.concurrent.atomic.AtomicReference<CancellableStreamingChatCall> activeCallRef =
+                java.util.concurrent.atomic.AtomicReference<Runnable> activeCallRef =
                         new java.util.concurrent.atomic.AtomicReference<>();
                 java.util.function.Consumer<String> partialResponse = token -> {
                     throwIfChatCancelled(cancellation);
@@ -742,17 +756,23 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                 public void onError(Throwable error) {
                                     streamError.accept(error);
                                 }
-                            });
-                    activeCallRef.set(activeCall);
-                    ACTIVE_STREAM_CALLS.put(conversationId, activeCall);
+                            }, aiTaskExecutor);
+                    Runnable cancelAction = activeCall::cancel;
+                    activeCallRef.set(cancelAction);
+                    ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
                     if (terminalCallbackHandled.get() || cancellation.get()) {
-                        ACTIVE_STREAM_CALLS.remove(conversationId, activeCall);
+                        ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId, cancelAction);
                         if (!activeCall.isTerminated()) activeCall.cancel();
                     }
                 } else {
-                    // 只有工具或知识库检索场景才构建声明式代理，减少普通对话的请求级对象创建。
+                    // 声明式代理的每一轮模型请求都通过可取消装饰器，客户端断开时立即取消底层订阅。
+                    CancellableStreamingChatModel cancellableModel =
+                            new CancellableStreamingChatModel(targetChatModel, aiTaskExecutor);
+                    Runnable cancelAction = cancellableModel::cancel;
+                    activeCallRef.set(cancelAction);
+                    ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
                     AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
-                            .streamingChatModel(targetChatModel)
+                            .streamingChatModel(cancellableModel)
                             .tools(tools);
                     if (contentRetriever != null) {
                         builder.contentRetriever(contentRetriever);
@@ -798,10 +818,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     /** 按调用实例清理可取消流，避免旧回调移除同一会话随后创建的新流。 */
     private void clearActiveChatCall(
             Long conversationId,
-            java.util.concurrent.atomic.AtomicReference<CancellableStreamingChatCall> activeCallRef) {
-        CancellableStreamingChatCall activeCall = activeCallRef.get();
-        if (activeCall != null) {
-            ACTIVE_STREAM_CALLS.remove(conversationId, activeCall);
+            java.util.concurrent.atomic.AtomicReference<Runnable> activeCallRef) {
+        Runnable cancelAction = activeCallRef.get();
+        if (cancelAction != null) {
+            ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId, cancelAction);
         }
     }
 

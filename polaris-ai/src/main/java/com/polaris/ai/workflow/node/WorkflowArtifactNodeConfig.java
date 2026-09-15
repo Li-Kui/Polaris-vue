@@ -1,14 +1,14 @@
 package com.polaris.ai.workflow.node;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.application.WorkflowArtifactView;
 import com.polaris.ai.workflow.service.WorkflowArtifactService;
 import com.polaris.ai.workflow.spi.*;
 import com.polaris.common.exception.ServiceException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Set;
 
@@ -117,8 +117,8 @@ public class WorkflowArtifactNodeConfig {
             JsonNode content = requireContent(context);
             WorkflowArtifactView artifact = artifactService.storeNodeArtifact(
                     context.tenantId(), context.executionId(), context.nodeRunId(), content,
-                    context.config().path("format").asText("JSON"),
-                    context.config().path("fileNameTemplate").asText("工作流产物-{{date}}"),
+                    context.config().path("format").asString("JSON"),
+                    context.config().path("fileNameTemplate").asString("工作流产物-{{date}}"),
                     retentionDays(context.config()));
             ObjectNode metadata = JsonNodeFactory.instance.objectNode();
             metadata.put("artifactId", artifact.artifactId());
@@ -144,9 +144,9 @@ public class WorkflowArtifactNodeConfig {
             JsonNode content = requireContent(context);
             WorkflowArtifactService.PreparedArtifact artifact =
                     artifactService.previewNodeArtifact(
-                            content, context.config().path("format").asText("JSON"),
+                            content, context.config().path("format").asString("JSON"),
                             context.config().path("fileNameTemplate")
-                                    .asText("工作流产物-{{date}}"));
+                                    .asString("工作流产物-{{date}}"));
             ObjectNode metadata = JsonNodeFactory.instance.objectNode();
             metadata.put("fileName", artifact.fileName());
             metadata.put("mediaType", artifact.mediaType());
@@ -167,7 +167,7 @@ public class WorkflowArtifactNodeConfig {
         }
 
         private int retentionDays(JsonNode config) {
-            return "DAYS".equals(config.path("retentionMode").asText("EXECUTION"))
+            return "DAYS".equals(config.path("retentionMode").asString("EXECUTION"))
                     ? config.path("retentionDays").asInt(30) : 30;
         }
     }

@@ -2,9 +2,6 @@ package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
@@ -21,6 +18,9 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.*;
 
@@ -196,13 +196,13 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 .filter(node -> "approval".equals(node.getType()))
                 .map(WorkflowExecutionPlan.PlanNode::getId)
                 .collect(java.util.stream.Collectors.toSet());
-        Iterator<Map.Entry<String, JsonNode>> fields = requested.fields();
+        Iterator<Map.Entry<String, JsonNode>> fields = requested.properties().iterator();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> field = fields.next();
             if (!approvalNodeIds.contains(field.getKey())) {
                 throw new ServiceException("审批结果模拟包含未知节点：" + field.getKey());
             }
-            String result = field.getValue().asText("").toUpperCase(Locale.ROOT);
+            String result = field.getValue().asString("").toUpperCase(Locale.ROOT);
             if (!Set.of("APPROVED", "REJECTED", "EXPIRED").contains(result)) {
                 throw new ServiceException("审批模拟结果只能是 APPROVED、REJECTED 或 EXPIRED");
             }
@@ -210,7 +210,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                     .filter(item -> field.getKey().equals(item.getId()))
                     .findFirst().orElseThrow();
             boolean branched = "BRANCH".equalsIgnoreCase(
-                    node.getConfig().path("resultPolicy").path("mode").asText());
+                    node.getConfig().path("resultPolicy").path("mode").asString());
             if (!branched && !"APPROVED".equals(result)) {
                 throw new ServiceException("等待通过型审批节点只能模拟通过：" + node.getId());
             }

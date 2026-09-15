@@ -1,8 +1,5 @@
 package com.polaris.ai.workflow.compiler;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.contract.WorkflowErrorCategory;
 import com.polaris.ai.workflow.contract.WorkflowErrorCode;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
@@ -14,6 +11,9 @@ import com.polaris.ai.workflow.runtime.WorkflowOutputSchemaGovernance;
 import com.polaris.ai.workflow.runtime.WorkflowStructuredOutput;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Instant;
 import java.util.*;
@@ -175,7 +175,7 @@ public class WorkflowDefinitionValidator {
             if ("sub_workflow".equals(node.getType()) && node.getConfig() != null
                     && definition.getMetadata() != null
                     && java.util.Objects.equals(definition.getMetadata().getCode(),
-                    node.getConfig().path("workflowCode").asText())) {
+                    node.getConfig().path("workflowCode").asString())) {
                 diagnostics.add(error("SUB_WORKFLOW_DIRECT_RECURSION", nodeId,
                         path + ".config.workflowCode",
                         "子工作流不能直接引用当前工作流"));
@@ -198,9 +198,9 @@ public class WorkflowDefinitionValidator {
         for (int index = 0; index < branches.size(); index++) {
             JsonNode branch = branches.get(index);
             String branchPath = path + ".config.branches[" + index + "]";
-            String key = branch.path("key").asText();
-            String name = branch.path("name").asText().trim();
-            String resultNodeId = branch.path("resultNodeId").asText();
+            String key = branch.path("key").asString();
+            String name = branch.path("name").asString().trim();
+            String resultNodeId = branch.path("resultNodeId").asString();
             if (!isBlank(key) && !keys.add(key)) {
                 diagnostics.add(error("PARALLEL_BRANCH_KEY_DUPLICATE", node.getId(),
                         branchPath + ".key", "并行任务组的分支标识不能重复"));
@@ -234,7 +234,7 @@ public class WorkflowDefinitionValidator {
             WorkflowDefinitionSpec.Node node, String path,
             List<WorkflowDiagnostic> diagnostics) {
         if (!"agent".equals(node.getType()) || node.getConfig() == null) return;
-        boolean hasTask = !node.getConfig().path("task").asText("").trim().isEmpty();
+        boolean hasTask = !node.getConfig().path("task").asString("").trim().isEmpty();
         boolean hasInput = node.getInputMapping() != null && !node.getInputMapping().isEmpty();
         if (!hasTask && !hasInput) {
             diagnostics.add(error("AGENT_TASK_OR_INPUT_REQUIRED", node.getId(),
@@ -249,7 +249,7 @@ public class WorkflowDefinitionValidator {
             List<WorkflowDiagnostic> diagnostics) {
         if (!"approval".equals(node.getType()) || node.getConfig() == null) return;
         JsonNode config = node.getConfig();
-        if (!"2.0".equals(config.path("configVersion").asText())) {
+        if (!"2.0".equals(config.path("configVersion").asString())) {
             diagnostics.add(error("APPROVAL_CONFIG_VERSION_INVALID", node.getId(),
                     path + ".config.configVersion", "审批节点仅支持当前配置版本 2.0"));
             return;
@@ -265,13 +265,13 @@ public class WorkflowDefinitionValidator {
         for (int index = 0; index < stages.size(); index++) {
             JsonNode stage = stages.get(index);
             String stagePath = path + ".config.stages[" + index + "]";
-            String stageId = stage.path("id").asText();
+            String stageId = stage.path("id").asString();
             if (!stageId.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}")
                     || !stageIds.add(stageId)) {
                 diagnostics.add(error("APPROVAL_STAGE_ID_INVALID", node.getId(),
                         stagePath + ".id", "审批级别标识不能为空、重复或格式无效"));
             }
-            String name = stage.path("name").asText().trim();
+            String name = stage.path("name").asString().trim();
             if (name.isEmpty() || name.length() > 128) {
                 diagnostics.add(error("APPROVAL_STAGE_NAME_INVALID", node.getId(),
                         stagePath + ".name", "审批级别名称不能为空且不能超过128个字符"));
@@ -284,7 +284,7 @@ public class WorkflowDefinitionValidator {
                 Set<String> selectedTargets = new HashSet<>();
                 for (int targetIndex = 0; targetIndex < targets.size(); targetIndex++) {
                     JsonNode target = targets.get(targetIndex);
-                    String type = target.path("type").asText();
+                    String type = target.path("type").asString();
                     if (!Set.of("USER", "ROLE", "DEPARTMENT").contains(type)
                             || !target.path("ids").isArray()
                             || target.path("ids").isEmpty()) {
@@ -294,7 +294,7 @@ public class WorkflowDefinitionValidator {
                         continue;
                     }
                     for (JsonNode id : target.path("ids")) {
-                        String value = id.asText("").trim();
+                        String value = id.asString("").trim();
                         if (value.isEmpty() || !selectedTargets.add(type + ":" + value)) {
                             diagnostics.add(error("APPROVAL_TARGET_DUPLICATE", node.getId(),
                                     stagePath + ".targets[" + targetIndex + "].ids",
@@ -304,7 +304,7 @@ public class WorkflowDefinitionValidator {
                 }
             }
             JsonNode policy = stage.path("decisionPolicy");
-            String mode = policy.path("mode").asText();
+            String mode = policy.path("mode").asString();
             if (!Set.of("ANY", "ALL", "N_OF_M").contains(mode)) {
                 diagnostics.add(error("APPROVAL_POLICY_INVALID", node.getId(),
                         stagePath + ".decisionPolicy.mode", "多人审批方式无效"));
@@ -322,7 +322,7 @@ public class WorkflowDefinitionValidator {
                         stagePath + ".fallbackTargets", "备用审批人配置格式无效"));
             }
         }
-        String resultMode = config.path("resultPolicy").path("mode").asText("SIMPLE");
+        String resultMode = config.path("resultPolicy").path("mode").asString("SIMPLE");
         if (!Set.of("SIMPLE", "BRANCH").contains(resultMode)) {
             diagnostics.add(error("APPROVAL_RESULT_MODE_INVALID", node.getId(),
                     path + ".config.resultPolicy.mode", "审批结果处理只能是直接结束或结果分支"));
@@ -331,7 +331,7 @@ public class WorkflowDefinitionValidator {
                 path + ".config.deadline", diagnostics);
         JsonNode expiration = config.path("expirationPolicy");
         if (!expiration.isMissingNode()
-                && "REASSIGN".equals(expiration.path("action").asText())
+                && "REASSIGN".equals(expiration.path("action").asString())
                 && (!expiration.path("targets").isArray()
                 || expiration.path("targets").isEmpty())) {
             diagnostics.add(error("APPROVAL_ESCALATION_TARGET_REQUIRED", node.getId(),
@@ -349,7 +349,7 @@ public class WorkflowDefinitionValidator {
                     path + ".config.content", "请配置审批标题和审批单内容"));
             return;
         }
-        String title = content.path("titleTemplate").asText().trim();
+        String title = content.path("titleTemplate").asString().trim();
         if (title.isEmpty() || title.length() > 200) {
             diagnostics.add(error("APPROVAL_TITLE_INVALID", node.getId(),
                     path + ".config.content.titleTemplate",
@@ -358,7 +358,7 @@ public class WorkflowDefinitionValidator {
             validateApprovalTemplate(node, title,
                     path + ".config.content.titleTemplate", diagnostics);
         }
-        String description = content.path("descriptionTemplate").asText("");
+        String description = content.path("descriptionTemplate").asString("");
         if (description.length() > 2000) {
             diagnostics.add(error("APPROVAL_DESCRIPTION_INVALID", node.getId(),
                     path + ".config.content.descriptionTemplate",
@@ -377,8 +377,8 @@ public class WorkflowDefinitionValidator {
         for (int index = 0; index < fields.size(); index++) {
             JsonNode field = fields.get(index);
             String fieldPath = path + ".config.content.fields[" + index + "]";
-            String key = field.path("key").asText().trim();
-            String label = field.path("label").asText().trim();
+            String key = field.path("key").asString().trim();
+            String label = field.path("label").asString().trim();
             if (!key.matches("[A-Za-z][A-Za-z0-9_.-]{0,63}") || !keys.add(key)) {
                 diagnostics.add(error("APPROVAL_FIELD_KEY_INVALID", node.getId(),
                         fieldPath + ".key", "字段标识不能为空、重复或格式无效"));
@@ -389,15 +389,15 @@ public class WorkflowDefinitionValidator {
             }
             JsonNode source = field.path("source");
             boolean expression = source.hasNonNull("expression")
-                    && !source.path("expression").asText().isBlank();
+                    && !source.path("expression").asString().isBlank();
             boolean value = source.has("value");
             if (expression == value) {
                 diagnostics.add(error("APPROVAL_FIELD_SOURCE_INVALID", node.getId(),
                         fieldPath + ".source", "字段来源必须在上游字段和固定值中选择一种"));
             } else if (expression) {
                 try {
-                    JsonNode ast = expressionParser.parse(source.path("expression").asText());
-                    if (!"path".equals(ast.path("type").asText())) {
+                    JsonNode ast = expressionParser.parse(source.path("expression").asString());
+                    if (!"path".equals(ast.path("type").asString())) {
                         throw new IllegalArgumentException("只允许选择变量路径");
                     }
                 } catch (IllegalArgumentException ex) {
@@ -405,12 +405,12 @@ public class WorkflowDefinitionValidator {
                             fieldPath + ".source.expression", ex.getMessage()));
                 }
             }
-            if ("CUSTOM".equals(field.path("mask").asText())
-                    && field.path("maskPattern").asText().isBlank()) {
+            if ("CUSTOM".equals(field.path("mask").asString())
+                    && field.path("maskPattern").asString().isBlank()) {
                 diagnostics.add(error("APPROVAL_CUSTOM_MASK_REQUIRED", node.getId(),
                         fieldPath + ".maskPattern", "自定义脱敏必须填写规则"));
-            } else if ("CUSTOM".equals(field.path("mask").asText())
-                    && !field.path("maskPattern").asText().matches("[#*]{1,256}")) {
+            } else if ("CUSTOM".equals(field.path("mask").asString())
+                    && !field.path("maskPattern").asString().matches("[#*]{1,256}")) {
                 diagnostics.add(error("APPROVAL_CUSTOM_MASK_INVALID", node.getId(),
                         fieldPath + ".maskPattern", "自定义脱敏规则只能使用 #（保留）和 *（隐藏）"));
             }
@@ -433,7 +433,7 @@ public class WorkflowDefinitionValidator {
             String expression = template.substring(cursor + 2, end).trim();
             try {
                 JsonNode ast = expressionParser.parse(expression);
-                if (!"path".equals(ast.path("type").asText())) {
+                if (!"path".equals(ast.path("type").asString())) {
                     throw new IllegalArgumentException("模板变量只允许使用变量路径");
                 }
             } catch (IllegalArgumentException ex) {
@@ -451,7 +451,7 @@ public class WorkflowDefinitionValidator {
             List<WorkflowDiagnostic> diagnostics) {
         if (!deadline.isObject() || deadline.isEmpty()) return;
         long duration = deadline.path("duration").asLong(0);
-        String unit = deadline.path("unit").asText();
+        String unit = deadline.path("unit").asString();
         long maximum = switch (unit) {
             case "MINUTE" -> 365L * 1440L;
             case "HOUR" -> 365L * 24L;
@@ -551,7 +551,7 @@ public class WorkflowDefinitionValidator {
         if (node.getConfig() == null || node.getConfig().path("version").asInt(1) < 2) {
             return;
         }
-        String mode = node.getConfig().path("mode").asText();
+        String mode = node.getConfig().path("mode").asString();
         if (!Set.of("FOR_EACH", "REPEAT").contains(mode)) {
             diagnostics.add(error("LOOP_MODE_INVALID", node.getId(), path + ".config.mode",
                     "请选择逐项处理数据或重复执行任务"));
@@ -565,7 +565,7 @@ public class WorkflowDefinitionValidator {
             }
         }
         if ("REPEAT".equals(mode)) {
-            String repeatMode = node.getConfig().path("repeatMode").asText();
+            String repeatMode = node.getConfig().path("repeatMode").asString();
             if (!Set.of("COUNT", "UNTIL").contains(repeatMode)) {
                 diagnostics.add(error("LOOP_REPEAT_MODE_INVALID", node.getId(),
                         path + ".config.repeatMode", "请选择按次数或满足条件时停止"));
@@ -578,7 +578,7 @@ public class WorkflowDefinitionValidator {
                             path + ".config.count", "执行次数必须大于0且不能超过安全上限"));
                 }
             } else {
-                String expression = node.getConfig().path("stopCondition").asText();
+                String expression = node.getConfig().path("stopCondition").asString();
                 if (isBlank(expression)) {
                     diagnostics.add(error("LOOP_STOP_CONDITION_REQUIRED", node.getId(),
                             path + ".config.stopCondition", "请设置循环停止条件"));
@@ -592,21 +592,21 @@ public class WorkflowDefinitionValidator {
                 }
             }
         }
-        String resultMode = node.getConfig().path("resultMode").asText("LAST");
+        String resultMode = node.getConfig().path("resultMode").asString("LAST");
         if (!Set.of("COLLECT", "LAST", "NONE").contains(resultMode)) {
             diagnostics.add(error("LOOP_RESULT_MODE_INVALID", node.getId(),
                     path + ".config.resultMode", "循环结果处理方式无效"));
         }
-        if (isBlank(node.getConfig().path("resultNodeId").asText())) {
+        if (isBlank(node.getConfig().path("resultNodeId").asString())) {
             diagnostics.add(error("LOOP_RESULT_NODE_REQUIRED", node.getId(),
                     path + ".config.resultNodeId", "请选择代表本轮完成的循环体节点"));
         }
-        String itemErrorPolicy = node.getConfig().path("itemErrorPolicy").asText("FAIL");
+        String itemErrorPolicy = node.getConfig().path("itemErrorPolicy").asString("FAIL");
         if (!Set.of("FAIL", "SKIP", "COLLECT").contains(itemErrorPolicy)) {
             diagnostics.add(error("LOOP_ERROR_POLICY_INVALID", node.getId(),
                     path + ".config.itemErrorPolicy", "循环项失败处理方式无效"));
         }
-        String emptyPolicy = node.getConfig().path("emptyPolicy").asText("COMPLETE");
+        String emptyPolicy = node.getConfig().path("emptyPolicy").asString("COMPLETE");
         if (!Set.of("COMPLETE", "FAIL").contains(emptyPolicy)) {
             diagnostics.add(error("LOOP_EMPTY_POLICY_INVALID", node.getId(),
                     path + ".config.emptyPolicy", "空数据处理方式无效"));
@@ -620,7 +620,7 @@ public class WorkflowDefinitionValidator {
             return;
         }
         String mode = node.getConfig() == null
-                ? null : node.getConfig().path("mode").asText(null);
+                ? null : node.getConfig().path("mode").asString(null);
         if (mode == null || !Set.of("ANY", "ALL", "N_OF_M").contains(mode)) {
             diagnostics.add(error("JOIN_MODE_INVALID", node.getId(),
                     path + ".config.mode", "汇聚节点模式必须明确配置为ANY、ALL或N_OF_M"));
@@ -645,9 +645,9 @@ public class WorkflowDefinitionValidator {
         JsonNode config = node.getConfig();
         JsonNode schedule = config.path("schedule");
         JsonNode source = schedule.path("source");
-        String mode = schedule.path("kind").asText();
-        String sourceType = source.path("kind").asText();
-        if (!"2.0".equals(config.path("configVersion").asText())) {
+        String mode = schedule.path("kind").asString();
+        String sourceType = source.path("kind").asString();
+        if (!"2.0".equals(config.path("configVersion").asString())) {
             diagnostics.add(error("WAIT_CONFIG_VERSION_INVALID", node.getId(),
                     path + ".config.configVersion", "等待节点仅支持当前配置版本 2.0"));
             return;
@@ -867,9 +867,9 @@ public class WorkflowDefinitionValidator {
             String completedTarget = completed == null ? null : completed.getTarget();
             Map<String, String> nodeOwners = new LinkedHashMap<>();
             for (JsonNode branch : parallel.getConfig().path("branches")) {
-                String key = branch.path("key").asText();
-                String name = branch.path("name").asText(key);
-                String resultNodeId = branch.path("resultNodeId").asText();
+                String key = branch.path("key").asString();
+                String name = branch.path("name").asString(key);
+                String resultNodeId = branch.path("resultNodeId").asString();
                 WorkflowDefinitionSpec.Edge entry = outgoing.stream()
                         .filter(edge -> "PARALLEL".equals(edge.getKind())
                                 && key.equals(edge.getSourcePort()))
@@ -1014,7 +1014,7 @@ public class WorkflowDefinitionValidator {
                         "$.nodes[" + loop.getId() + "]",
                         "“每次执行”和“全部完成”不能进入同一个节点"));
             }
-            String resultNodeId = loop.getConfig().path("resultNodeId").asText();
+            String resultNodeId = loop.getConfig().path("resultNodeId").asString();
             if (resultNodeId.isBlank()) continue;
             if (!nodes.containsKey(resultNodeId) || loop.getId().equals(resultNodeId)) {
                 diagnostics.add(error("LOOP_RESULT_NODE_INVALID", loop.getId(),
@@ -1077,7 +1077,7 @@ public class WorkflowDefinitionValidator {
                     .map(node -> descriptors.find(node.getType(), node.getTypeVersion()).orElse(null))
                     .filter(Objects::nonNull)
                     .anyMatch(descriptor -> "WRITE".equals(descriptor.sideEffect().name()));
-            if (containsWrite && !"FAIL".equals(loop.getConfig().path("itemErrorPolicy").asText("FAIL"))) {
+            if (containsWrite && !"FAIL".equals(loop.getConfig().path("itemErrorPolicy").asString("FAIL"))) {
                 diagnostics.add(error("LOOP_WRITE_CONTINUE_UNSAFE", loop.getId(),
                         "$.nodes[" + loop.getId() + "].config.itemErrorPolicy",
                         "循环体包含写操作时必须在单项失败后停止，避免产生部分写入"));
@@ -1150,7 +1150,7 @@ public class WorkflowDefinitionValidator {
                     "汇聚节点至少需要两个入口"));
             return;
         }
-        if ("N_OF_M".equals(node.getConfig().path("mode").asText())) {
+        if ("N_OF_M".equals(node.getConfig().path("mode").asString())) {
             int required = node.getConfig().path("requiredBranches").asInt(0);
             if (required > incomingCount) {
                 diagnostics.add(error("JOIN_THRESHOLD_INVALID", node.getId(),
@@ -1231,7 +1231,7 @@ public class WorkflowDefinitionValidator {
         if ("parallel".equals(node.getType())) {
             Set<String> configured = new LinkedHashSet<>();
             node.getConfig().path("branches").forEach(branch ->
-                    configured.add(branch.path("key").asText()));
+                    configured.add(branch.path("key").asString()));
             List<WorkflowDefinitionSpec.Edge> branchEdges = outgoing.stream()
                     .filter(item -> "PARALLEL".equals(item.getKind())).toList();
             List<WorkflowDefinitionSpec.Edge> completedEdges = outgoing.stream()
@@ -1255,8 +1255,8 @@ public class WorkflowDefinitionValidator {
             boolean duplicateLabel = false;
             if (node.getConfig() != null) {
                 for (JsonNode item : node.getConfig().path("branches")) {
-                    String slug = item.path("slug").asText();
-                    String label = item.path("label").asText(slug).trim();
+                    String slug = item.path("slug").asString();
+                    String label = item.path("label").asString(slug).trim();
                     if (!configured.add(slug)) duplicateSlug = true;
                     if (!labels.add(label)) duplicateLabel = true;
                 }
@@ -1267,12 +1267,12 @@ public class WorkflowDefinitionValidator {
                                 : "分类名称不能重复"));
             }
             String fallbackSlug = node.getConfig() == null ? ""
-                    : node.getConfig().path("fallbackSlug").asText();
+                    : node.getConfig().path("fallbackSlug").asString();
             if (fallbackSlug.isBlank() && !configured.isEmpty()) {
                 fallbackSlug = configured.stream().reduce((first, second) -> second).orElse("");
             }
             String strategy = node.getConfig() == null ? "FALLBACK"
-                    : node.getConfig().path("invalidResponseStrategy").asText("FALLBACK");
+                    : node.getConfig().path("invalidResponseStrategy").asString("FALLBACK");
             if (("FALLBACK".equals(strategy) || !fallbackSlug.isBlank())
                     && !configured.contains(fallbackSlug)) {
                 diagnostics.add(error("CLASSIFIER_FALLBACK_INVALID", node.getId(), path,
@@ -1292,7 +1292,7 @@ public class WorkflowDefinitionValidator {
         }
         if ("approval".equals(node.getType()) && node.getConfig() != null) {
             String resultMode = node.getConfig().path("resultPolicy")
-                    .path("mode").asText("SIMPLE");
+                    .path("mode").asString("SIMPLE");
             if ("BRANCH".equals(resultMode)) {
                 Set<String> ports = new HashSet<>();
                 outgoing.forEach(edge -> ports.add(edge.getSourcePort()));
@@ -1310,7 +1310,7 @@ public class WorkflowDefinitionValidator {
             return;
         }
         if ("sub_workflow".equals(node.getType())) {
-            String mode = node.getConfig().path("resultMode").asText("STOP");
+            String mode = node.getConfig().path("resultMode").asString("STOP");
             Set<String> expected = "DETAILED".equals(mode) ? Set.of("completed", "rejected", "failed")
                     : "BRANCH".equals(mode) ? Set.of("completed", "incomplete") : Set.of("completed");
             Set<String> actual = new HashSet<>();

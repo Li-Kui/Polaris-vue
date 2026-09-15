@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.application.WorkflowArtifactApplicationFacade;
 import com.polaris.ai.workflow.application.WorkflowArtifactContent;
 import com.polaris.ai.workflow.application.WorkflowArtifactView;
@@ -17,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -178,8 +178,8 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
         try {
             JsonNode redacted = dataRedactor.redact(value);
             if ("TEXT".equals(format)) {
-                content = (redacted != null && redacted.isTextual()
-                        ? redacted.asText() : objectMapper.writerWithDefaultPrettyPrinter()
+                content = (redacted != null && redacted.isString()
+                        ? redacted.asString() : objectMapper.writerWithDefaultPrettyPrinter()
                         .writeValueAsString(redacted)).getBytes(StandardCharsets.UTF_8);
             } else {
                 content = objectMapper.writerWithDefaultPrettyPrinter()

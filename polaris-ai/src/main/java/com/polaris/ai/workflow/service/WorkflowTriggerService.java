@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.config.WorkflowProperties;
@@ -16,6 +14,8 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
@@ -168,19 +168,19 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
 
     private void validateConfig(String type, JsonNode config) {
         if ("SCHEDULE".equals(type)) {
-            String cron = config.path("cron").asText();
+            String cron = config.path("cron").asString();
             try {
                 CronExpression.parse(cron);
-                ZoneId.of(config.path("timezone").asText("Asia/Shanghai"));
+                ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
             } catch (Exception e) {
                 throw new ServiceException("定时触发器cron或时区无效");
             }
         } else if ("WEBHOOK".equals(type)) {
-            String method = config.path("method").asText("POST");
+            String method = config.path("method").asString("POST");
             if (!"POST".equalsIgnoreCase(method)) {
                 throw new ServiceException("Webhook触发器仅允许POST");
             }
-        } else if (!config.path("eventType").asText()
+        } else if (!config.path("eventType").asString()
                 .matches("[A-Za-z][A-Za-z0-9_.-]{0,127}")) {
             throw new ServiceException("事件触发器eventType格式无效");
         }
@@ -188,8 +188,8 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
 
     private Date nextFireTime(JsonNode config, Date after) {
         try {
-            ZoneId zone = ZoneId.of(config.path("timezone").asText("Asia/Shanghai"));
-            ZonedDateTime next = CronExpression.parse(config.path("cron").asText())
+            ZoneId zone = ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
+            ZonedDateTime next = CronExpression.parse(config.path("cron").asString())
                     .next(ZonedDateTime.ofInstant(after.toInstant(), zone));
             if (next == null) throw new ServiceException("定时触发器没有可计算的下次运行时间");
             return Date.from(next.toInstant());
@@ -201,7 +201,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
     }
 
     private void validateNoSecrets(JsonNode value) {
-        value.fields().forEachRemaining(field -> {
+        value.properties().forEach(field -> {
             String normalizedKey = field.getKey().toLowerCase(Locale.ROOT)
                     .replace("-", "").replace("_", "");
             if (SECRET_KEYS.stream().anyMatch(normalizedKey::contains)) {

@@ -1,9 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import com.polaris.ai.workflow.domain.WorkflowDefinition;
@@ -12,6 +9,9 @@ import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowVersionMapper;
 import com.polaris.common.exception.ServiceException;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.*;
 
@@ -88,7 +88,7 @@ public class WorkflowSubWorkflowService {
         if (!ancestors.add(version.getDefinitionId())) throw new ServiceException("子工作流存在循环调用");
         try {
             for (var node : plan(version).getNodes()) if ("sub_workflow".equals(node.getType())) {
-                assertDependencies(node.getConfig().path("workflowVersionId").asText(), tenant, ancestors, depth + 1, visited);
+                assertDependencies(node.getConfig().path("workflowVersionId").asString(), tenant, ancestors, depth + 1, visited);
             }
         } finally { ancestors.remove(version.getDefinitionId()); }
     }
@@ -99,7 +99,7 @@ public class WorkflowSubWorkflowService {
             if (!Objects.equals(version.getContentHash(), plan.getContentHash()))
                 throw new ServiceException("子工作流版本校验失败");
             return plan;
-        } catch (java.io.IOException e) { throw new ServiceException("子工作流执行计划无效"); }
+        } catch (RuntimeException e) { throw new ServiceException("子工作流执行计划无效"); }
     }
 
     public Set<Long> parentIds(String code, Long tenant) {
@@ -113,9 +113,10 @@ public class WorkflowSubWorkflowService {
         ObjectNode schema = mapper.createObjectNode().put("type", "object");
         var props = schema.putObject("properties");
         // 未完成出口没有业务结果；成功时由子流程本身和父节点共同校验。
-        ObjectNode resultSchema = result != null && result.isObject() ? result.deepCopy() : mapper.createObjectNode();
-        if (resultSchema.path("type").isTextual()) {
-            String type = resultSchema.path("type").asText();
+        ObjectNode resultSchema = result != null && result.isObject()
+                ? (ObjectNode) result.deepCopy() : mapper.createObjectNode();
+        if (resultSchema.path("type").isString()) {
+            String type = resultSchema.path("type").asString();
             resultSchema.putArray("type").add(type).add("null");
         }
         props.set("result", resultSchema);
@@ -146,8 +147,8 @@ public class WorkflowSubWorkflowService {
     }
 
     private JsonNode pathSchema(WorkflowExecutionPlan plan, JsonNode ast) {
-        if (!"path".equals(ast.path("type").asText())) return mapper.createObjectNode();
-        String path = ast.path("value").asText();
+        if (!"path".equals(ast.path("type").asString())) return mapper.createObjectNode();
+        String path = ast.path("value").asString();
         JsonNode root;
         if (path.equals("$.input") || path.startsWith("$.input.")) {
             root = plan.getInputs(); path = path.substring(7);
@@ -182,7 +183,7 @@ public class WorkflowSubWorkflowService {
         for (JsonNode value : values) {
             types.add(value.isNull() ? "null" : value.isObject() ? "object" : value.isArray() ? "array"
                     : value.isBoolean() ? "boolean" : value.isIntegralNumber() ? "integer" : value.isNumber() ? "number" : "string");
-            if (value.isObject()) value.fields().forEachRemaining(e -> fields.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).add(e.getValue()));
+            if (value.isObject()) value.properties().forEach(e -> fields.computeIfAbsent(e.getKey(), k -> new ArrayList<>()).add(e.getValue()));
             if (value.isArray()) value.forEach(items::add);
         }
         if (types.contains("number")) types.remove("integer");

@@ -2,6 +2,7 @@ package com.polaris.common.annotation;
 
 import com.fasterxml.jackson.annotation.JacksonAnnotationsInside;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.polaris.common.config.serializer.SensitiveJackson3Serializer;
 import com.polaris.common.config.serializer.SensitiveJsonSerializer;
 import com.polaris.common.enums.DesensitizedType;
 
@@ -19,6 +20,7 @@ import java.lang.annotation.Target;
 @Target({ ElementType.FIELD, ElementType.METHOD })
 @JacksonAnnotationsInside
 @JsonSerialize(using = SensitiveJsonSerializer.class)
+@tools.jackson.databind.annotation.JsonSerialize(using = SensitiveJackson3Serializer.class)
 public @interface Sensitive
 {
     DesensitizedType desensitizedType();

@@ -1,6 +1,7 @@
 package com.polaris.ai.safety.stream;
 
 import com.polaris.ai.domain.AiMessage;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.safety.exception.ModerationBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -158,6 +159,7 @@ public class ModeratedResponseHandler {
 
     private void handleBlockedAfterTerminalClaimed() {
         isCancelled.set(true);
+        AiObservability.recordTerminal("content_filtered");
         log.warn("AI 输出流触发安全策略已被熔断截断");
 
         if (sseSender != null) {

@@ -2,13 +2,14 @@ package com.polaris.platform.dto;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.common.core.domain.BaseEntity;
 import com.polaris.platform.domain.PlatformApiConnector;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -23,7 +24,7 @@ import java.util.Set;
 @Schema(description = "API 连接器安全响应")
 public class ApiConnectorResponse extends BaseEntity {
     private static final long serialVersionUID = 1L;
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.shared();
     private static final Set<String> SENSITIVE_HEADERS = Set.of(
             "authorization", "proxy-authorization", "cookie", "set-cookie");
 

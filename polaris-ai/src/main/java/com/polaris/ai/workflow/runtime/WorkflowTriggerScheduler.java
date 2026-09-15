@@ -1,7 +1,5 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.core.context.SystemCallerContext;
@@ -17,6 +15,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
@@ -83,8 +83,8 @@ public class WorkflowTriggerScheduler {
     }
 
     private Date calculateNext(JsonNode config, Date after) {
-        ZoneId zone = ZoneId.of(config.path("timezone").asText("Asia/Shanghai"));
-        ZonedDateTime next = CronExpression.parse(config.path("cron").asText())
+        ZoneId zone = ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
+        ZonedDateTime next = CronExpression.parse(config.path("cron").asString())
                 .next(ZonedDateTime.ofInstant(after.toInstant(), zone));
         if (next == null) throw new IllegalStateException("无法计算下次触发时间");
         return Date.from(next.toInstant());

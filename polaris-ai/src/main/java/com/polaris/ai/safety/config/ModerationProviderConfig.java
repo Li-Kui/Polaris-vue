@@ -1,7 +1,6 @@
 package com.polaris.ai.safety.config;
 
 import com.aliyun.teaopenapi.models.Config;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.safety.provider.*;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -9,6 +8,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import tools.jackson.databind.ObjectMapper;
 
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -61,10 +61,11 @@ public class ModerationProviderConfig {
     public ProviderUsageGuard providerUsageGuard(
             @Qualifier("moderationProviderStringRedisTemplate")
             StringRedisTemplate redisTemplate,
-            ModerationProviderProperties properties) {
+            ModerationProviderProperties properties,
+            ObjectMapper objectMapper) {
         return new ProviderUsageGuard(
                 new ProviderUsageGuard.RedisProviderStateStore(redisTemplate),
-                new ObjectMapper(), properties, Clock.systemUTC());
+                objectMapper, properties, Clock.systemUTC());
     }
 
     @Bean

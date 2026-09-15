@@ -1,11 +1,11 @@
 package com.polaris.ai.workflow.security;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.TextNode;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.node.StringNode;
 
 import java.util.List;
 import java.util.Locale;
@@ -40,7 +40,7 @@ public class WorkflowDataRedactor {
             ObjectNode result = ((ObjectNode) value).deepCopy();
             for (Map.Entry<String, JsonNode> field : List.copyOf(result.properties())) {
                 result.set(field.getKey(), isSensitiveKey(field.getKey())
-                        ? TextNode.valueOf(MASK) : redact(field.getValue()));
+                        ? StringNode.valueOf(MASK) : redact(field.getValue()));
             }
             return result;
         }
@@ -51,8 +51,8 @@ public class WorkflowDataRedactor {
             }
             return result;
         }
-        if (value.isTextual()) {
-            return TextNode.valueOf(redactQuerySecrets(value.textValue()));
+        if (value.isString()) {
+            return StringNode.valueOf(redactQuerySecrets(value.stringValue()));
         }
         return value.deepCopy();
     }

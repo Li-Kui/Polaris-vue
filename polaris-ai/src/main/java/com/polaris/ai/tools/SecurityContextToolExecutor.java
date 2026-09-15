@@ -3,6 +3,7 @@ package com.polaris.ai.tools;
 import com.polaris.ai.context.SecurityCallerContext;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.tools.base.*;
 import com.polaris.ai.utils.SearchKeyHolder;
 import com.polaris.ai.utils.ToolSseHolder;
@@ -458,6 +459,7 @@ public class SecurityContextToolExecutor {
             RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
             String toolName = request == null ? "unknown" : request.name();
             int callNo = 0;
+            long observationStartedAt = System.nanoTime();
             try {
                 try {
                     ensureNotCancelled();
@@ -553,7 +555,13 @@ public class SecurityContextToolExecutor {
                     toolCallTracker.succeeded(
                             toolName, callNo, elapsedMs(startedAt), truncated);
                 }
+                AiObservability.recordTool(
+                        toolName, elapsedMs(observationStartedAt), "success", "none");
                 return result;
+            } catch (RuntimeException | Error e) {
+                AiObservability.recordTool(
+                        toolName, elapsedMs(observationStartedAt), "failure", failureCode(e));
+                throw e;
             } finally {
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
                 ToolSseHolder.clear();
@@ -610,6 +618,9 @@ public class SecurityContextToolExecutor {
             if (error instanceof CancellationException
                     || Thread.currentThread().isInterrupted()) {
                 return "CANCELLED";
+            }
+            if (error.getMessage() != null && error.getMessage().contains("上限")) {
+                return "RATE_LIMITED";
             }
             if (error instanceof SecurityException) return "PERMISSION_DENIED";
             return "TOOL_EXECUTION_FAILED";
