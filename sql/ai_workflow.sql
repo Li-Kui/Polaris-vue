@@ -609,7 +609,38 @@ CREATE TABLE IF NOT EXISTS `ai_workflow_outbox` (
   CONSTRAINT `chk_wf_outbox_status` CHECK (`publish_status` IN ('PENDING','PUBLISHING','PUBLISHED','FAILED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流事务消息发件箱';
 
+-- 系统工作流的 tenant_id 为 NULL，与工作流定义、版本及执行表保持一致。
+ALTER TABLE `ai_workflow_trigger`
+    MODIFY COLUMN `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID，系统工作流为空';
 
+-- Quartz 到点后先写入可靠批次，再异步创建工作流执行。
+CREATE TABLE IF NOT EXISTS `ai_workflow_trigger_fire` (
+                                                          `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '触发批次主键',
+                                                          `tenant_id` bigint(20) DEFAULT NULL COMMENT '租户ID，系统工作流为空',
+                                                          `fire_id` varchar(64) NOT NULL COMMENT '公开触发批次ID',
+                                                          `trigger_id` varchar(64) NOT NULL COMMENT '工作流触发器ID',
+                                                          `scheduled_time` datetime(3) NOT NULL COMMENT '本批次应触发时间，与应用数据库时区配置一致',
+                                                          `fire_status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING待派发、DISPATCHING派发中、DISPATCHED已派发、FAILED待重试、CANCELLED已取消、DEAD终止重试',
+                                                          `attempt_count` int(11) NOT NULL DEFAULT '0' COMMENT '派发尝试次数',
+                                                          `claimed_by` varchar(96) DEFAULT NULL COMMENT '当前派发者',
+                                                          `claim_until` datetime DEFAULT NULL COMMENT '派发租约到期时间',
+                                                          `next_retry_time` datetime DEFAULT NULL COMMENT '下次重试时间',
+                                                          `execution_id` varchar(64) DEFAULT NULL COMMENT '已创建的工作流执行ID',
+                                                          `error_message` varchar(500) DEFAULT NULL COMMENT '脱敏失败摘要',
+                                                          `dispatched_time` datetime DEFAULT NULL COMMENT '派发成功时间',
+                                                          `create_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                                                          `update_time` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                                                          PRIMARY KEY (`id`),
+                                                          UNIQUE KEY `uk_wf_trigger_fire_id` (`fire_id`),
+                                                          UNIQUE KEY `uk_wf_trigger_fire_slot` (`trigger_id`, `scheduled_time`),
+                                                          KEY `idx_wf_trigger_fire_pending` (`fire_status`, `scheduled_time`, `id`),
+                                                          KEY `idx_wf_trigger_fire_retry` (`fire_status`, `next_retry_time`, `id`),
+                                                          KEY `idx_wf_trigger_fire_lease` (`fire_status`, `claim_until`, `id`),
+                                                          KEY `idx_wf_trigger_fire_tenant` (`tenant_id`, `trigger_id`, `scheduled_time`),
+                                                          CONSTRAINT `chk_wf_trigger_fire_status` CHECK (`fire_status` IN (
+                                                                                                                           'PENDING','DISPATCHING','DISPATCHED','FAILED','CANCELLED','DEAD'
+                                                              ))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流定时触发可靠批次';
 -- ============================================================================
 -- 二、工作流菜单与权限数据初始化
 -- ============================================================================
