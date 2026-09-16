@@ -576,6 +576,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             instance.setUpdateTime(now);
             approvalInstanceMapper.updateById(instance);
         }
+        if (!instances.isEmpty()) {
+            persistence.signalApprovalScheduleRefresh();
+        }
     }
 
     @Override

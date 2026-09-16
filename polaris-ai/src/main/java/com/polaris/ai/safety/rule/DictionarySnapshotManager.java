@@ -52,16 +52,25 @@ public class DictionarySnapshotManager {
     }
 
     public synchronized boolean reloadPublishedIfNewer(long candidateVersion) {
-        CapturedSnapshot captured = capture();
-        if (captured != null && captured.version() >= candidateVersion) {
-            return false;
-        }
+        return reloadPublishedIfChanged(candidateVersion);
+    }
+
+    public synchronized boolean reloadPublishedIfChanged(long candidateVersion) {
         try {
-            long reloaded = reloadPublished();
-            return reloaded >= candidateVersion;
+            return reloadPublishedIfChangedOrThrow(candidateVersion);
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Reloads when the published version differs, including rollback to a lower database id. */
+    public synchronized boolean reloadPublishedIfChangedOrThrow(long candidateVersion) {
+        CapturedSnapshot captured = capture();
+        if (captured != null && captured.version() == candidateVersion) {
+            return false;
+        }
+        long reloaded = reloadPublished();
+        return reloaded == candidateVersion;
     }
 
     protected SnapshotLoader loader() {

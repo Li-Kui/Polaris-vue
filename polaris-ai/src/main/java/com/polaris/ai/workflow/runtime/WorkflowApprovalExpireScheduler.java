@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "ai.workflow", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(
+        prefix = "ai.workflow", name = "approval-scheduler-mode",
+        havingValue = "polling")
 public class WorkflowApprovalExpireScheduler {
 
     private final WorkflowApprovalService approvalService;

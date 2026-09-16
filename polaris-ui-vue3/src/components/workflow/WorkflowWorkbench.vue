@@ -1341,6 +1341,7 @@ import {
   resolveWorkflowNodeSchemas,
   saveWorkflowResourceBinding,
   startWorkflowExecution,
+  streamWorkflowExecutionEvents,
   testWorkflowNode,
   updateWorkflowDraft,
   validateWorkflowDraft
@@ -1609,6 +1610,7 @@ export default {
       waitTestTargetAt: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
+      nodeTestPollDelay: 800,
       nodeTestGeneratingSchema: false,
       nodeTestSchemaApplied: false,
       nodeTestSchemaPromoted: false,
@@ -1619,6 +1621,9 @@ export default {
       debugExecution: null,
       debugNodeRuns: [],
       executionPollTimer: null,
+      executionStreamController: null,
+      executionReconnectTimer: null,
+      executionReconnectAttempt: 0,
       executionCancelling: false,
       paletteCategories: [
         {label: '全部', value: 'all'},
@@ -1634,6 +1639,15 @@ export default {
         {label: 'API 连接器', value: 'API_CONNECTOR'},
         {label: '外部数据源', value: 'DATASOURCE'}
       ]
+    }
+  },
+  watch: {
+    nodeTestDialogOpen(open) {
+      clearTimeout(this.nodeTestPollTimer)
+      this.nodeTestPollTimer = null
+      if (open && this.nodeTestRunning && !document.hidden) {
+        this.pollNodeTest()
+      }
     }
   },
   computed: {
@@ -2322,14 +2336,33 @@ export default {
     this.refreshResourceContext()
     this.refreshSubWorkflows()
   },
+  mounted() {
+    document.addEventListener('visibilitychange', this.handleWorkflowVisibility)
+  },
   beforeUnmount() {
     clearTimeout(this.historyTimer)
-    clearTimeout(this.executionPollTimer)
+    this.stopExecutionStream()
     clearTimeout(this.nodeTestPollTimer)
+    document.removeEventListener('visibilitychange', this.handleWorkflowVisibility)
     window.removeEventListener('pointermove', this.resizeInspector)
     window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    handleWorkflowVisibility() {
+      if (document.hidden) {
+        this.stopExecutionStream(false)
+        clearTimeout(this.nodeTestPollTimer)
+        this.nodeTestPollTimer = null
+        return
+      }
+      if (this.debugExecution && !this.executionFinished) {
+        this.pollExecution()
+        this.startExecutionStream()
+      }
+      if (this.nodeTestDialogOpen && this.nodeTestRunning) {
+        this.pollNodeTest()
+      }
+    },
     async refreshSubWorkflows() {
       this.subWorkflowLoading = true
       this.subWorkflowError = ''
@@ -4307,6 +4340,7 @@ export default {
       this.nodeTestMode = 'NODE'
       this.workflowDraftTest = false
       this.nodeTestResult = null
+      this.nodeTestPollDelay = 800
       this.nodeTestSchemaApplied = false
       this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
       this.nodeTestInferredSchema = this.selectedNode.ui?.inferredOutputSchema?.schema || null
@@ -4436,9 +4470,14 @@ export default {
         const response = await getWorkflowNodeTest(testRunId)
         this.nodeTestResult = response.data
         if (['QUEUED', 'RUNNING'].includes(response.data?.status)) {
-          this.nodeTestPollTimer = setTimeout(() => this.pollNodeTest(), 800)
+          if (this.nodeTestDialogOpen && !document.hidden) {
+            const delay = this.nodeTestPollDelay
+            this.nodeTestPollDelay = Math.min(5000, Math.max(800, delay * 2))
+            this.nodeTestPollTimer = setTimeout(() => this.pollNodeTest(), delay)
+          }
           return
         }
+        this.nodeTestPollDelay = 800
         this.nodeTestRunning = false
         this.refreshCanvasNodeData()
         if (response.data?.status === 'SUCCEEDED') {
@@ -4815,7 +4854,8 @@ export default {
         this.debugExecution = response.data
         this.debugNodeRuns = []
         this.testDialogOpen = false
-        this.pollExecution()
+        await this.pollExecution()
+        this.startExecutionStream()
       } finally {
         this.testStarting = false
       }
@@ -4858,12 +4898,61 @@ export default {
         this.debugExecution = executionResponse.data
         this.debugNodeRuns = nodeRunResponse.data || []
         this.refreshCanvasNodeData()
-        if (!this.executionFinished) {
-          this.executionPollTimer = setTimeout(() => this.pollExecution(), 1800)
-        }
+        if (this.executionFinished) this.stopExecutionStream()
       } catch (error) {
-        this.stopPolling()
+        if (!this.executionFinished) this.scheduleExecutionReconnect(executionId)
       }
+    },
+    startExecutionStream() {
+      this.stopExecutionStream(false)
+      if (!this.debugExecution?.executionId || this.executionFinished || document.hidden) return
+      const executionId = this.debugExecution.executionId
+      this.executionStreamController = streamWorkflowExecutionEvents(
+        executionId,
+        this.debugExecution.eventSequence || 0,
+        {
+          onOpen: () => {
+            this.executionReconnectAttempt = 0
+            this.pollExecution()
+          },
+          onEvent: event => {
+            if (event.event !== 'workflow'
+              || executionId !== this.debugExecution?.executionId) return
+            const sequence = Number(event.data?.sequenceNo || event.id || 0)
+            if (sequence > Number(this.debugExecution.eventSequence || 0)) {
+              this.debugExecution.eventSequence = sequence
+            }
+            clearTimeout(this.executionPollTimer)
+            const terminalEvent = ['EXECUTION_SUCCEEDED', 'EXECUTION_FAILED',
+              'EXECUTION_CANCELLED', 'EXECUTION_REJECTED']
+              .includes(event.data?.eventType)
+            this.executionPollTimer = setTimeout(
+              () => this.pollExecution(), terminalEvent ? 25 : 350)
+          },
+          onClose: () => this.scheduleExecutionReconnect(executionId),
+          onError: () => this.scheduleExecutionReconnect(executionId)
+        }
+      )
+    },
+    scheduleExecutionReconnect(executionId) {
+      if (document.hidden || this.executionFinished
+        || executionId !== this.debugExecution?.executionId) return
+      clearTimeout(this.executionReconnectTimer)
+      const delays = [1000, 2000, 5000, 10000, 30000]
+      const delay = delays[Math.min(this.executionReconnectAttempt, delays.length - 1)]
+      this.executionReconnectAttempt += 1
+      const jitter = Math.floor(Math.random() * Math.max(250, delay * 0.2))
+      this.executionReconnectTimer = setTimeout(
+        () => this.startExecutionStream(), delay + jitter)
+    },
+    stopExecutionStream(resetReconnect = true) {
+      this.executionStreamController?.abort()
+      this.executionStreamController = null
+      clearTimeout(this.executionPollTimer)
+      clearTimeout(this.executionReconnectTimer)
+      this.executionPollTimer = null
+      this.executionReconnectTimer = null
+      if (resetReconnect) this.executionReconnectAttempt = 0
     },
     async cancelExecution() {
       if (!this.debugExecution?.executionId || this.executionFinished || this.executionCancelling) return
@@ -4884,8 +4973,7 @@ export default {
       this.debugNodeRuns = []
     },
     stopPolling() {
-      clearTimeout(this.executionPollTimer)
-      this.executionPollTimer = null
+      this.stopExecutionStream()
     },
     toggleRetry(enabled) {
       if (enabled) {

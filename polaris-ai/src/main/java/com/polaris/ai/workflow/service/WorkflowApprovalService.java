@@ -125,7 +125,9 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         if (preview == null || !Objects.equals(preview.getTenantId(), currentTenantId())) {
             throw new ServiceException("审批任务不存在或无权访问");
         }
-        return decideInstance(preview, command, decision);
+        WorkflowApprovalTaskView result = decideInstance(preview, command, decision);
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
+        return result;
     }
 
     @Override
@@ -274,6 +276,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
                 Map.of("approvalInstanceId", instance.getApprovalInstanceId(),
                         "stageInstanceId", stage.getStageInstanceId(),
                         "operator", safeActorName(), "reason", reason));
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
         return view(instance, stage, operator);
     }
 
@@ -284,6 +287,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         }
         sendDueReminders();
         expireInstances();
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
     }
 
     @Override
@@ -389,6 +393,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         }
         auditManagementAction(locked, "APPROVAL_STAGE_RESTARTED",
                 command.reason(), principals);
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
         return view(locked.instance(), activation.stage(), CallerUtils.getContext());
     }
 

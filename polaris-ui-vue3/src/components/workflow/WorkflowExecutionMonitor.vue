@@ -252,6 +252,10 @@ export default {
     workflowCode: {
       type: String,
       default: ''
+    },
+    initialExecutionId: {
+      type: String,
+      default: ''
     }
   },
   emits: ['back'],
@@ -266,6 +270,7 @@ export default {
       drawerOpen: false,
       streamController: null,
       reconnectTimer: null,
+      reconnectAttempt: 0,
       refreshTimer: null,
       streamConnected: false,
       lastSequence: 0,
@@ -285,12 +290,28 @@ export default {
     }
   },
   created() {
-    this.loadExecutions()
+    this.initialize()
+  },
+  mounted() {
+    document.addEventListener('visibilitychange', this.refreshWhenVisible)
+    window.addEventListener('focus', this.refreshWhenVisible)
   },
   beforeUnmount() {
     this.stopEventStream()
+    document.removeEventListener('visibilitychange', this.refreshWhenVisible)
+    window.removeEventListener('focus', this.refreshWhenVisible)
   },
   methods: {
+    async initialize() {
+      await this.loadExecutions()
+      if (!this.initialExecutionId) return
+      const execution = this.executions.find(
+        item => item.executionId === this.initialExecutionId)
+      if (execution) await this.openDetail(execution)
+    },
+    refreshWhenVisible() {
+      if (!document.hidden) this.loadExecutions()
+    },
     nodeWriteStatusLabel(row) {
       if (row?.sideEffect === 'DURABLE_INTERNAL') {
         return row.sideEffectStatus === 'COMMITTED' ? '产物已保存'
@@ -345,6 +366,7 @@ export default {
         Math.max(maximum, item.sequenceNo || 0), 0)
       this.detailTab = 'nodes'
       this.drawerOpen = true
+      this.reconnectAttempt = 0
       this.startEventStream()
     },
     async cancel(row) {
@@ -416,6 +438,8 @@ export default {
         {
           onOpen: () => {
             this.streamConnected = true
+            this.reconnectAttempt = 0
+            this.refreshSelectedExecution(executionId)
           },
           onEvent: event => this.handleStreamEvent(executionId, event),
           onClose: () => this.scheduleReconnect(executionId),
@@ -433,23 +457,36 @@ export default {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = setTimeout(async () => {
         if (executionId !== this.selected?.executionId) return
+        await this.refreshSelectedExecution(executionId)
+      }, 350)
+    },
+    async refreshSelectedExecution(executionId) {
+      try {
         const [detail, runs] = await Promise.all([
           getWorkflowExecution(executionId),
           listWorkflowNodeRuns(executionId)
         ])
+        if (executionId !== this.selected?.executionId) return
         this.selected = detail.data
         this.nodeRuns = runs.data || []
         const index = this.executions.findIndex(item => item.executionId === executionId)
         if (index >= 0) this.executions.splice(index, 1, detail.data)
         if (this.terminal(this.selected.status)) this.stopEventStream()
-      }, 150)
+      } catch (error) {
+        if (executionId === this.selected?.executionId) this.scheduleReconnect(executionId)
+      }
     },
     scheduleReconnect(executionId) {
       this.streamConnected = false
       if (!this.drawerOpen || executionId !== this.selected?.executionId
           || this.terminal(this.selected.status)) return
       clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = setTimeout(() => this.startEventStream(), 2000)
+      const delays = [1000, 2000, 5000, 10000, 30000]
+      const baseDelay = delays[Math.min(this.reconnectAttempt, delays.length - 1)]
+      this.reconnectAttempt += 1
+      const jitter = Math.floor(Math.random() * Math.max(250, baseDelay * 0.2))
+      this.reconnectTimer = setTimeout(
+        () => this.startEventStream(), baseDelay + jitter)
     },
     stopEventStream() {
       this.streamController?.abort()

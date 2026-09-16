@@ -36,6 +36,7 @@
       :definition-id="executionTarget.id"
       :workflow-name="executionTarget.workflowName"
       :workflow-code="executionTarget.workflowCode"
+      :initial-execution-id="executionTarget.initialExecutionId"
       @back="backToList"
     />
     <WorkflowApprovalInbox
@@ -470,7 +471,10 @@ export default {
         })
         this.$message.success(`执行已创建：${response.data.executionId}`)
         this.runDialogOpen = false
-        this.executionTarget = this.runTarget
+        this.executionTarget = {
+          ...this.runTarget,
+          initialExecutionId: response.data.executionId
+        }
         this.pageMode = 'executions'
       } finally {
         this.starting = false

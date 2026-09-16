@@ -11,6 +11,7 @@ import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowTriggerMapper;
 import com.polaris.ai.workflow.mapper.WorkflowVersionMapper;
 import com.polaris.common.exception.ServiceException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
     private final WorkflowProperties properties;
     private final ObjectMapper objectMapper;
     private final WorkflowExecutionApplicationFacade executionFacade;
+    private final ApplicationEventPublisher eventPublisher;
 
     public WorkflowTriggerService(
             WorkflowTriggerMapper triggerMapper,
@@ -44,13 +46,15 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
             WorkflowVersionMapper versionMapper,
             WorkflowProperties properties,
             ObjectMapper objectMapper,
-            WorkflowExecutionApplicationFacade executionFacade) {
+            WorkflowExecutionApplicationFacade executionFacade,
+            ApplicationEventPublisher eventPublisher) {
         this.triggerMapper = triggerMapper;
         this.definitionMapper = definitionMapper;
         this.versionMapper = versionMapper;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executionFacade = executionFacade;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -106,6 +110,9 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         trigger.setCreateBy(CallerUtils.getUsername());
         trigger.setUpdateBy(CallerUtils.getUsername());
         if (triggerMapper.insert(trigger) != 1) throw new ServiceException("创建工作流触发器失败");
+        if ("SCHEDULE".equals(type)) {
+            eventPublisher.publishEvent(new WorkflowTriggerScheduleChanged(trigger.getTriggerId()));
+        }
         return view(trigger);
     }
 
@@ -141,12 +148,16 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         }
         existing.setStatus(status);
         existing.setLockVersion(command.expectedLockVersion() + 1);
-        if (nextFireTime != null) existing.setNextFireTime(nextFireTime);
+        existing.setNextFireTime(nextFireTime);
         existing.setUpdateTime(new Date());
+        if ("SCHEDULE".equals(existing.getTriggerType())) {
+            eventPublisher.publishEvent(new WorkflowTriggerScheduleChanged(triggerId));
+        }
         return view(existing);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public WorkflowExecutionView invoke(
             String triggerId, WorkflowTriggerInvocationCommand command) {
         requireEnabled();
@@ -154,7 +165,8 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         applyTenantScope(query, currentTenantId());
         WorkflowTrigger trigger = triggerMapper.selectOne(
                 query.eq(WorkflowTrigger::getTriggerId, triggerId)
-                        .eq(WorkflowTrigger::getStatus, "ACTIVE").last("LIMIT 1"));
+                        .eq(WorkflowTrigger::getStatus, "ACTIVE")
+                        .last("LIMIT 1 FOR UPDATE"));
         if (trigger == null) throw new ServiceException("触发器不存在、已停用或无权访问");
         String callerKey = command == null ? null : command.idempotencyKey();
         String idempotencyKey = triggerIdempotencyKey(trigger, callerKey);
@@ -174,6 +186,17 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
                 ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
             } catch (Exception e) {
                 throw new ServiceException("定时触发器cron或时区无效");
+            }
+            String misfirePolicy = config.path("misfirePolicy")
+                    .asString("FIRE_ONCE").trim().toUpperCase(Locale.ROOT);
+            if (!Set.of("FIRE_ONCE", "SKIP", "CATCH_UP").contains(misfirePolicy)) {
+                throw new ServiceException("定时触发器misfirePolicy无效");
+            }
+            int graceSeconds = config.path("misfireGraceSeconds").asInt(5);
+            int maxCatchUpCount = config.path("maxCatchUpCount").asInt(10);
+            if (graceSeconds < 0 || graceSeconds > 3600
+                    || maxCatchUpCount < 1 || maxCatchUpCount > 100) {
+                throw new ServiceException("定时触发器错过执行策略参数超出允许范围");
             }
         } else if ("WEBHOOK".equals(type)) {
             String method = config.path("method").asString("POST");

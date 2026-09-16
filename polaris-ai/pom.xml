@@ -89,6 +89,12 @@
 		    <artifactId>polaris-system</artifactId>
 		</dependency>
 
+		<!-- 工作流定时触发仅复用 Quartz API；业务状态仍以工作流表为准。 -->
+		<dependency>
+		    <groupId>org.quartz-scheduler</groupId>
+		    <artifactId>quartz</artifactId>
+		</dependency>
+
 		<!-- PDF 解析器 PDFBox -->
 		<dependency>
 		    <groupId>org.apache.pdfbox</groupId>

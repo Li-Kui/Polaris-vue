@@ -26,6 +26,9 @@ import java.util.Date;
 @Slf4j
 @Component
 @ConditionalOnProperty(prefix = "ai.workflow", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(
+        prefix = "ai.workflow", name = "trigger-scheduler-mode",
+        havingValue = "polling")
 public class WorkflowTriggerScheduler {
 
     private final WorkflowTriggerMapper triggerMapper;
