@@ -38,9 +38,23 @@ public class AiRemoteModelServiceImpl implements IAiRemoteModelService {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private com.polaris.ai.service.IAiModelConfigService modelConfigService;
+
     @Override
     public List<String> fetchRemoteModels(FetchModelsRequest req) {
         String provider = req.getProvider().trim().toLowerCase();
+        if (req.getModelId() != null && (req.getApiKey() == null || req.getApiKey().trim().isEmpty() || req.getApiKey().matches("^\\*+$"))) {
+            com.polaris.ai.domain.AiModelConfig existing = modelConfigService.selectModelConfigById(req.getModelId());
+            if (existing != null) {
+                if (existing.getApiKey() != null && !existing.getApiKey().trim().isEmpty()) {
+                    req.setApiKey(existing.getApiKey());
+                }
+                if ((req.getBaseUrl() == null || req.getBaseUrl().trim().isEmpty()) && existing.getBaseUrl() != null) {
+                    req.setBaseUrl(existing.getBaseUrl());
+                }
+            }
+        }
         String resolvedUrl = resolveBaseUrl(provider, req.getBaseUrl());
         String apiKey = resolveApiKey(provider, req.getApiKey());
 

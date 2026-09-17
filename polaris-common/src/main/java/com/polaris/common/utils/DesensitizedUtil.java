@@ -19,7 +19,7 @@ public class DesensitizedUtil
         {
             return StringUtils.EMPTY;
         }
-        return StringUtils.repeat('*', password.length());
+        return "******";
     }
 
     /**

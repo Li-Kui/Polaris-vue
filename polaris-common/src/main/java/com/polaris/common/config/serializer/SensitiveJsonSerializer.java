@@ -67,6 +67,11 @@ public class SensitiveJsonSerializer extends StdSerializer<String> implements Co
     {
         try
         {
+            // 密码/密钥类敏感数据强制脱敏，任何角色（包括管理员）均不输出明文
+            if (desensitizedType == DesensitizedType.PASSWORD)
+            {
+                return true;
+            }
             LoginUser securityUser = SecurityUtils.getLoginUser();
             // 管理员不脱敏
             return !securityUser.getUser().isAdmin();

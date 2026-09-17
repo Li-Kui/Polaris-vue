@@ -23,4 +23,7 @@ public class FetchModelsRequest {
 
     @Schema(description = "连接方式：direct=直连厂商 relay=中转站")
     private String accessMode;
+
+    @Schema(description = "模型配置ID（编辑已有配置时传入，用于后端自动提取已保存的有效密钥）")
+    private Long modelId;
 }
