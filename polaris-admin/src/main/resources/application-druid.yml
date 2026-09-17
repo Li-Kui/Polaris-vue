@@ -104,7 +104,9 @@ ai:
     moderation:
         enabled: true
         seed-location: classpath:moderation/polaris-sensitive-seed-v3.json
-        snapshot-poll-ms: 60000
+        # 发布/回滚由本机加载和 Redis 广播即时生效；数据库仅作 5~30 分钟自适应安全核对。
+        snapshot-reconcile-initial-ms: 300000
+        snapshot-reconcile-max-ms: 1800000
         audit-retention-days: 90
         candidate-observation-threshold: 3
         provider:
@@ -143,6 +145,7 @@ ai:
         retention-days: 30
         approval-expire-days: 7
         maintenance-ms: 3600000
+        artifact-cleanup-poll-ms: 3600000
         enabled: true
         write-nodes-enabled: false
         code-node-enabled: false
@@ -151,7 +154,22 @@ ai:
         agent-max-tool-result-chars: 20000
         worker-enabled: true
         accepting-new-executions: true
+        # 单体部署复用 RAM Quartz；工作流业务表仍是调度事实来源。
+        trigger-scheduler-mode: quartz
+        approval-scheduler-mode: quartz
         worker-batch-size: 10
+        # 无任务时安全协调从 30 秒退避至 5 分钟；正常任务由事务事件即时唤醒。
+        worker-idle-reconcile-initial-ms: 30000
+        worker-idle-reconcile-max-ms: 300000
+        node-test-recovery-initial-ms: 30000
+        node-test-recovery-max-ms: 300000
+        node-test-lease-renew-ms: 5000
+        outbox-idle-reconcile-initial-ms: 30000
+        outbox-idle-reconcile-max-ms: 300000
+        approval-quartz-reconcile-ms: 600000
+        # SSE 事件由事务提交即时唤醒；心跳不查库，每分钟只做一次按执行合并的安全核对。
+        event-stream-heartbeat-ms: 15000
+        event-stream-reconcile-ms: 60000
         tenant-concurrency: 20
         workflow-concurrency: 10
         principal-concurrency: 5

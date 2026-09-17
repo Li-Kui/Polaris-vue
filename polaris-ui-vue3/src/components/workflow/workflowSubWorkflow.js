@@ -15,7 +15,8 @@ export function isInsideSubWorkflowLoop(definition, nodeId) {
       if(!current || current===loop.id || current===done || seen.has(current))continue
       if(current===nodeId)return true
       seen.add(current)
-      edges.filter(e=>e.source===current && e.targetPort!=='loop-return').forEach(e=>pending.push(e.target))
+      edges.filter(e=>e.source===current && e.targetPort!=='loop-return'
+        && !String(e.targetPort || '').startsWith('parallel-return:')).forEach(e=>pending.push(e.target))
     }
     return false
   })

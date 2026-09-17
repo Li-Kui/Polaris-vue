@@ -15,25 +15,6 @@
        ai大模型模块
     </description>
 
-    <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
-        <qdrant.client.version>1.17.0</qdrant.client.version>
-        <grpc.version>1.77.0</grpc.version>
-    </properties>
-
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>io.grpc</groupId>
-                <artifactId>grpc-bom</artifactId>
-                <version>${grpc.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
-
     <dependencies>
 
         <!-- 本地敏感内容候选匹配；项目使用自带的受控种子，不引入公共运行时词库。 -->
@@ -65,27 +46,23 @@
 		<dependency>
 		    <groupId>dev.langchain4j</groupId>
 		    <artifactId>langchain4j</artifactId>
-		    <version>1.17.0</version>
 		</dependency>
 		
 		<!-- OpenAI 适配（DashScope / DeepSeek / OpenAI 均走此模块） -->
 		<dependency>
 		    <groupId>dev.langchain4j</groupId>
 		    <artifactId>langchain4j-open-ai</artifactId>
-		    <version>1.17.0</version>
 		</dependency>
 
-		<!-- Qdrant 向量存储适配（与 LangChain4j 1.17.0 对齐） -->
+		<!-- Qdrant 向量存储适配（版本由根 BOM 对齐） -->
 		<dependency>
 		    <groupId>dev.langchain4j</groupId>
 		    <artifactId>langchain4j-qdrant</artifactId>
-		    <version>1.17.0-beta27</version>
 		</dependency>
 
 		<dependency>
 		    <groupId>io.qdrant</groupId>
 		    <artifactId>client</artifactId>
-		    <version>${qdrant.client.version}</version>
 		</dependency>
 		
 		<!-- SpringWeb模块 -->
@@ -110,6 +87,12 @@
 		<dependency>
 		    <groupId>com.polaris</groupId>
 		    <artifactId>polaris-system</artifactId>
+		</dependency>
+
+		<!-- 工作流定时触发仅复用 Quartz API；业务状态仍以工作流表为准。 -->
+		<dependency>
+		    <groupId>org.quartz-scheduler</groupId>
+		    <artifactId>quartz</artifactId>
 		</dependency>
 
 		<!-- PDF 解析器 PDFBox -->
@@ -140,6 +123,10 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<version>3.5.4</version>
+				<configuration>
+					<!-- JDK 17 及以上版本可能阻止 Mockito 在运行时自行附加代理。 -->
+					<argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar</argLine>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

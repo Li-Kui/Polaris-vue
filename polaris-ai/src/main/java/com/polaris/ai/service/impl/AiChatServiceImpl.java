@@ -4,12 +4,15 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.attachment.MultimodalMediaHelper;
 import com.polaris.ai.chat.AiAssistant;
+import com.polaris.ai.chat.CancellableStreamingChatCall;
+import com.polaris.ai.chat.CancellableStreamingChatModel;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
 import com.polaris.ai.rag.AiVectorStoreResolver;
@@ -29,10 +32,13 @@ import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskExecutor;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -100,6 +106,13 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     @Autowired
     private AiVectorStoreResolver vectorStoreResolver;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    @Qualifier("aiTaskExecutor")
+    private TaskExecutor aiTaskExecutor;
+
     @Autowired(required = false)
     private com.polaris.ai.safety.guard.IModeratedInputPreparationService moderatedInputPreparationService;
 
@@ -119,7 +132,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     }
 
     /** 会话级防重互锁容器（保证单个会话同时只有一个流式推送在进行） */
-    private static final java.util.concurrent.ConcurrentHashMap<Long, Boolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.atomic.AtomicBoolean> ACTIVE_CONVERSATIONS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** 记录当前模型流的取消动作，同时覆盖普通对话、工具调用和知识库检索。 */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, Runnable> ACTIVE_STREAM_CANCEL_ACTIONS = new java.util.concurrent.ConcurrentHashMap<>();
 
     // ----------------------------------------------------------------
     // 会话管理
@@ -206,10 +221,15 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     }
 
     /**
-     * 删除会话 先物理删除该会话下所有消息，再逻辑删除会话本身
+     * 校验会话归属后，物理删除消息并逻辑删除会话。
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor = Exception.class)
     public int deleteConversation(Long id, Long userId) {
+        AiConversation ownedConversation = aiChatMapper.selectConversationById(id, userId);
+        if (ownedConversation == null) {
+            return 0;
+        }
         aiChatMapper.deleteMessagesByConversationId(id);
         return aiChatMapper.deleteConversation(id, userId);
     }
@@ -220,8 +240,46 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (ids == null || ids.isEmpty()) {
             return 0;
         }
-        aiChatMapper.deleteMessagesByConversationIds(ids);
-        return aiChatMapper.deleteConversationsBatch(ids, userId);
+        List<Long> ownedIds = aiChatMapper.selectOwnedConversationIds(ids, userId);
+        if (ownedIds == null || ownedIds.isEmpty()) {
+            return 0;
+        }
+        aiChatMapper.deleteMessagesByConversationIds(ownedIds);
+        return aiChatMapper.deleteConversationsBatch(ownedIds, userId);
+    }
+
+    @Override
+    public boolean cancelChat(Long conversationId, Long userId) {
+        if (conversationId == null || aiChatMapper.selectConversationById(conversationId, userId) == null) {
+            return false;
+        }
+        java.util.concurrent.atomic.AtomicBoolean cancellation = ACTIVE_CONVERSATIONS.get(conversationId);
+        if (cancellation == null) {
+            return false;
+        }
+        cancellation.set(true);
+        AiObservability.recordTerminal("cancelled");
+        Runnable cancelAction = ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId);
+        if (cancelAction != null) {
+            cancelAction.run();
+        }
+        // 使用 value 条件删除，防止旧流的完成回调误删随后启动的新流。
+        ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+        return true;
+    }
+
+    @Override
+    public void cancelStream(
+            Long conversationId,
+            java.util.concurrent.atomic.AtomicBoolean cancellation) {
+        if (conversationId == null || cancellation == null) return;
+        cancellation.set(true);
+        if (!ACTIVE_CONVERSATIONS.remove(conversationId, cancellation)) return;
+        AiObservability.recordTerminal("cancelled");
+        Runnable cancelAction = ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId);
+        if (cancelAction != null) {
+            cancelAction.run();
+        }
     }
 
     // ----------------------------------------------------------------
@@ -269,8 +327,22 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             SseEmitter emitter,
             java.util.concurrent.atomic.AtomicBoolean isCancelled) {
 
+        if (conversationId == null || userInput == null || userInput.trim().isEmpty()) {
+            if (sseHelper != null) {
+                sseHelper.sendSse(emitter, "error", "会话 ID 和消息内容不能为空");
+            }
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+
+        java.util.concurrent.atomic.AtomicBoolean cancellation = isCancelled != null
+                ? isCancelled : new java.util.concurrent.atomic.AtomicBoolean(false);
+
         // 0. 防重复与并发互锁：检查同一会话是否正在回复中
-        if (ACTIVE_CONVERSATIONS.putIfAbsent(conversationId, true) != null) {
+        if (ACTIVE_CONVERSATIONS.putIfAbsent(conversationId, cancellation) != null) {
             if (sseHelper != null) sseHelper.sendSse(emitter, "error", "当前对话正在回复中，请稍后再试");
             try {
                 emitter.complete();
@@ -279,6 +351,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             return;
         }
 
+        boolean streamStarted = false;
         try {
             // 1. 鉴权：会话必须属于当前用户
             AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
@@ -309,7 +382,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         sseHelper.sendSse(emitter, "moderation_blocked",
                                 "{\"scope\":\"input\",\"code\":\"AI_INPUT_BLOCKED\",\"message\":\"输入内容包含敏感信息，请调整后重试。\"}");
                     }
-                    if (isCancelled != null) isCancelled.set(true);
+                    cancellation.set(true);
                     try {
                         emitter.complete();
                     } catch (Exception ignored) {
@@ -320,7 +393,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     if (sseHelper != null) {
                         sseHelper.sendSse(emitter, "error", e.getMessage());
                     }
-                    if (isCancelled != null) isCancelled.set(true);
+                    cancellation.set(true);
                     try {
                         emitter.complete();
                     } catch (Exception ignored) {
@@ -426,7 +499,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     accessibleKnowledgeBaseId);
             if (recResult != null && recResult.isHasRecognizedDocs()) {
                 try {
-                    String jsonDocs = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(recResult.getRecognizedDocs());
+                    String jsonDocs = objectMapper.writeValueAsString(recResult.getRecognizedDocs());
                     sseHelper.sendSse(emitter, "doc_recognized", jsonDocs);
                     log.info(">>> [AiChatService] 自动识别挂载文档推送 SSE: {}", jsonDocs);
                 } catch (Exception e) {
@@ -533,16 +606,6 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
                 StreamingChatModel targetChatModel = modelFactory.getStreamingModel(conv.getModelConfigId());
 
-                AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
-                        .streamingChatModel(targetChatModel)
-                        .tools(tools);
-
-                if (contentRetriever != null) {
-                    builder.contentRetriever(contentRetriever);
-                }
-
-                AiAssistant assistant = builder.build();
-
                 StreamingModerationSession answerSession = null;
                 StreamingModerationSession reasoningSession = null;
                 if (moderationFacade != null) {
@@ -569,10 +632,13 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                 reasoningSession,
                                 (event, data) -> {
                                     if (sseHelper != null) {
-                                        sseHelper.sendSse(emitter, event, data);
+                                        boolean sent = sseHelper.sendSse(emitter, event, data);
+                                        if (!sent) {
+                                            cancellation.set(true);
+                                        }
                                     }
                                 },
-                                isCancelled,
+                                cancellation,
                                 aiMsg -> {
                                     try {
                                         if (aiMsg.getContent() != null && !aiMsg.getContent().isEmpty()) {
@@ -608,40 +674,119 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                         );
                 moderatedHandler.setConversationId(conversationId);
 
-                TokenStream tokenStream = assistant.chat(messages);
-                tokenStream.onPartialResponse(moderatedHandler::onToken)
-                        .onPartialThinking(thinking -> {
+                // LangChain4j 可能在取消或网络异常后继续投递晚到回调，终态只允许处理一次。
+                java.util.concurrent.atomic.AtomicBoolean terminalCallbackHandled =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
+                java.util.concurrent.atomic.AtomicReference<Runnable> activeCallRef =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                java.util.function.Consumer<String> partialResponse = token -> {
+                    throwIfChatCancelled(cancellation);
+                    moderatedHandler.onToken(token);
+                    throwIfChatCancelled(cancellation);
+                };
+                java.util.function.Consumer<dev.langchain4j.model.chat.response.PartialThinking> partialThinking =
+                        thinking -> {
+                            throwIfChatCancelled(cancellation);
                             if (thinking != null && thinking.text() != null) {
                                 moderatedHandler.onThinking(thinking.text());
                             }
-                        })
-                        .onCompleteResponse(response -> {
+                            throwIfChatCancelled(cancellation);
+                        };
+                java.util.function.Consumer<dev.langchain4j.model.chat.response.ChatResponse> completeResponse =
+                        response -> {
+                            if (!terminalCallbackHandled.compareAndSet(false, true)) {
+                                return;
+                            }
                             try {
                                 Integer totalTokens = (response != null && response.tokenUsage() != null)
                                         ? response.tokenUsage().totalTokenCount() : null;
                                 moderatedHandler.onComplete(totalTokens);
                             } finally {
+                                clearActiveChatCall(conversationId, activeCallRef);
                                 com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
-                                ACTIVE_CONVERSATIONS.remove(conversationId);
+                                ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
                                 try {
                                     emitter.complete();
                                 } catch (Exception ignored) {
                                 }
                             }
-                        })
-                        .onError(error -> {
-                            log.error("LangChain4j 声明式 AI 助手流式调用异常", error);
-                            com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
-                            ACTIVE_CONVERSATIONS.remove(conversationId);
-                            if (sseHelper != null) {
-                                sseHelper.sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
-                            }
-                            try {
-                                emitter.complete();
-                            } catch (Exception ignored) {
-                            }
-                        })
-                        .start();
+                        };
+                java.util.function.Consumer<Throwable> streamError = error -> {
+                    if (!terminalCallbackHandled.compareAndSet(false, true)) {
+                        return;
+                    }
+                    clearActiveChatCall(conversationId, activeCallRef);
+                    if (cancellation.get()) {
+                        log.info(">>> 会话 {} 的 AI 回复已取消", conversationId);
+                    } else {
+                        log.error("LangChain4j 声明式 AI 助手流式调用异常", error);
+                    }
+                    com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
+                    ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                    if (!cancellation.get() && sseHelper != null) {
+                        sseHelper.sendSse(emitter, "error", "AI 服务异常：" + error.getMessage());
+                    }
+                    try {
+                        emitter.complete();
+                    } catch (Exception ignored) {
+                    }
+                };
+
+                throwIfChatCancelled(cancellation);
+                if (tools.isEmpty() && contentRetriever == null) {
+                    // 无工具和知识库检索时使用响应式接口，使取消操作能够下传到底层订阅。
+                    CancellableStreamingChatCall activeCall = CancellableStreamingChatCall.start(
+                            targetChatModel, messages, new dev.langchain4j.model.chat.response.StreamingChatResponseHandler() {
+                                @Override
+                                public void onPartialResponse(String response) {
+                                    partialResponse.accept(response);
+                                }
+
+                                @Override
+                                public void onPartialThinking(dev.langchain4j.model.chat.response.PartialThinking thinking) {
+                                    partialThinking.accept(thinking);
+                                }
+
+                                @Override
+                                public void onCompleteResponse(dev.langchain4j.model.chat.response.ChatResponse response) {
+                                    completeResponse.accept(response);
+                                }
+
+                                @Override
+                                public void onError(Throwable error) {
+                                    streamError.accept(error);
+                                }
+                            }, aiTaskExecutor);
+                    Runnable cancelAction = activeCall::cancel;
+                    activeCallRef.set(cancelAction);
+                    ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
+                    if (terminalCallbackHandled.get() || cancellation.get()) {
+                        ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId, cancelAction);
+                        if (!activeCall.isTerminated()) activeCall.cancel();
+                    }
+                } else {
+                    // 声明式代理的每一轮模型请求都通过可取消装饰器，客户端断开时立即取消底层订阅。
+                    CancellableStreamingChatModel cancellableModel =
+                            new CancellableStreamingChatModel(targetChatModel, aiTaskExecutor);
+                    Runnable cancelAction = cancellableModel::cancel;
+                    activeCallRef.set(cancelAction);
+                    ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
+                    AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
+                            .streamingChatModel(cancellableModel)
+                            .tools(tools);
+                    if (contentRetriever != null) {
+                        builder.contentRetriever(contentRetriever);
+                    }
+                    AiAssistant assistant = builder.build();
+                    TokenStream tokenStream = assistant.chat(messages);
+                    tokenStream.onPartialResponse(partialResponse)
+                            .onPartialThinking(partialThinking)
+                            .beforeToolExecution(ignored -> throwIfChatCancelled(cancellation))
+                            .onCompleteResponse(completeResponse)
+                            .onError(streamError)
+                            .start();
+                }
+                streamStarted = true;
             } finally {
                 com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
@@ -649,12 +794,34 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         } catch (Exception e) {
             log.error("执行 AI 对话发生系统异常: conversationId={}", conversationId, e);
             com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
-            ACTIVE_CONVERSATIONS.remove(conversationId);
+            ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
             sseHelper.sendSse(emitter, "error", "系统内部错误：" + e.getMessage());
             try {
                 emitter.complete();
             } catch (Exception ignored) {
             }
+        } finally {
+            // 异步流启动成功后由 onComplete/onError 释放；所有前置校验、审核拦截和初始化失败路径在此释放。
+            if (!streamStarted) {
+                ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+            }
+        }
+    }
+
+    /** 在模型回调线程主动抛出取消信号，促使底层流尽快停止读取。 */
+    private void throwIfChatCancelled(java.util.concurrent.atomic.AtomicBoolean cancellation) {
+        if (Thread.currentThread().isInterrupted() || cancellation.get()) {
+            throw new java.util.concurrent.CancellationException("对话已取消");
+        }
+    }
+
+    /** 按调用实例清理可取消流，避免旧回调移除同一会话随后创建的新流。 */
+    private void clearActiveChatCall(
+            Long conversationId,
+            java.util.concurrent.atomic.AtomicReference<Runnable> activeCallRef) {
+        Runnable cancelAction = activeCallRef.get();
+        if (cancelAction != null) {
+            ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId, cancelAction);
         }
     }
 

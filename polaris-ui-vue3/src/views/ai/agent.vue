@@ -525,7 +525,7 @@ export default {
       if (tool.requirement === 'SEARCH_KEY') {
         const model = this.selectedModelConfig;
         if (!model) return true; // 未选底座大模型时，联网搜索不可选
-        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.enableSearch === '1';
+        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.hasSearchKey === true || model.enableSearch === '1';
         return !hasKey;
       }
       return false;
@@ -540,7 +540,7 @@ export default {
         if (!model) {
           return '请先在左侧选择绑定的底座大模型';
         }
-        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.enableSearch === '1';
+        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.hasSearchKey === true || model.enableSearch === '1';
         if (!hasKey) {
           return '当前所选大模型未配置联网检索 API Key (Tavily Key)，请在模型配置中填写';
         }

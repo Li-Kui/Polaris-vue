@@ -15,7 +15,7 @@ public class WorkflowSubWorkflowSchemaResolver implements WorkflowNodeSchemaReso
     @Override public boolean supports(String type, String version) { return "sub_workflow".equals(type) && "2.0".equals(version); }
     @Override public ResolvedNodeSchema resolve(WorkflowNodeSchemaContext context) {
         var contract = service.resolve(context.config().path("definitionId").asLong(),
-                context.config().path("reviewedVersionId").asText(), context.tenantId());
+                context.config().path("reviewedVersionId").asString(), context.tenantId());
         return new ResolvedNodeSchema(contract.inputSchema(), service.envelope(contract.outputSchema()),
                 "SUB_WORKFLOW_VERSION", contract.versionId(), Map.of(), List.of());
     }

@@ -19,6 +19,10 @@ public interface WorkflowDefinitionApplicationFacade {
 
     WorkflowCompilationResult validateDraft(Long definitionId);
 
+    WorkflowCompilationResult validateDraft(Long definitionId, String definitionJson);
+
+    WorkflowCompilationResult validateDraft(String definitionJson);
+
     WorkflowPublishResult publish(Long definitionId, WorkflowPublishCommand command);
 
     List<WorkflowPublishedVersionView> listVersions(Long definitionId);

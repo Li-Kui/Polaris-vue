@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.Date;
 import java.util.List;
 
 /** 基于领取机制、至少投递一次的工作流发件箱数据访问接口。 */
@@ -19,6 +20,17 @@ public interface WorkflowOutboxMapper extends BaseMapper<WorkflowOutbox> {
             + "OR (publish_status = 'PUBLISHING' AND claim_until < NOW())) "
             + "ORDER BY id LIMIT #{limit}")
     List<Long> selectPublishCandidates(@Param("limit") int limit);
+
+    @Select("SELECT MIN(next_action_time) FROM ("
+            + "SELECT MIN(create_time) AS next_action_time FROM ai_workflow_outbox "
+            + "WHERE attempt_count < 10 AND publish_status = 'PENDING' "
+            + "UNION ALL SELECT MIN(next_retry_time) FROM ai_workflow_outbox "
+            + "WHERE attempt_count < 10 AND publish_status = 'FAILED' "
+            + "AND next_retry_time IS NOT NULL "
+            + "UNION ALL SELECT MIN(claim_until) FROM ai_workflow_outbox "
+            + "WHERE attempt_count < 10 AND publish_status = 'PUBLISHING' "
+            + "AND claim_until IS NOT NULL) outbox_actions")
+    Date selectNextPublishTime();
 
     @Update("UPDATE ai_workflow_outbox SET publish_status = 'PUBLISHING', "
             + "claimed_by = #{publisherId}, claim_until = DATE_ADD(NOW(), INTERVAL 30 SECOND), "

@@ -1,11 +1,6 @@
 package com.polaris.ai.workflow.runtime;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.contract.WorkflowErrorCode;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
 import com.polaris.ai.workflow.domain.*;
@@ -19,6 +14,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -274,7 +274,7 @@ public class WorkflowExecutionEngine {
                 WorkflowExecutionPlan.PlanNode loopNode = failedLoop == null ? null
                         : nodes.get(failedLoop.getNodeId());
                 String itemErrorPolicy = loopNode == null ? "FAIL"
-                        : loopNode.getConfig().path("itemErrorPolicy").asText("FAIL");
+                        : loopNode.getConfig().path("itemErrorPolicy").asString("FAIL");
                 if (failedLoop != null && Set.of("SKIP", "COLLECT").contains(itemErrorPolicy)
                         && canSkip(failure)) {
                     String nodeRunId = logicalNodeRunId(
@@ -316,7 +316,7 @@ public class WorkflowExecutionEngine {
                 skippedRun.setErrorMessage(failure.getMessage());
                 skippedRun.setFinishTime(new Date());
                 storeOutput(state, node.getId(), token.getBranchPath(),
-                        com.fasterxml.jackson.databind.node.NullNode.instance);
+                        tools.jackson.databind.node.NullNode.instance);
                 state.getCompletedKeys().add(instanceKey);
                 enqueueOutgoing(node, token, outgoing.getOrDefault(node.getId(), List.of()),
                         execution, state);
@@ -420,7 +420,7 @@ public class WorkflowExecutionEngine {
             input.put("originalBranchPath", candidate.getBranchPath());
             input.set("originalOutput", state.getOutputs().getOrDefault(
                     candidate.getNodeId(),
-                    com.fasterxml.jackson.databind.node.NullNode.instance));
+                    tools.jackson.databind.node.NullNode.instance));
             input.set("executionInput", state.getInput());
             ObjectNode failure = input.putObject("failure");
             failure.put("code", originalFailure.code);
@@ -623,7 +623,7 @@ public class WorkflowExecutionEngine {
                         skippedRun.setErrorMessage(run.getErrorMessage());
                         skippedRun.setFinishTime(new Date());
                         storeOutput(state, node.getId(), token.getBranchPath(),
-                                com.fasterxml.jackson.databind.node.NullNode.instance);
+                                tools.jackson.databind.node.NullNode.instance);
                         state.getCompletedKeys().add(instanceKey);
                         enqueueOutgoing(node, token,
                                 outgoing.getOrDefault(node.getId(), List.of()), execution, state);
@@ -926,7 +926,7 @@ public class WorkflowExecutionEngine {
         try {
             JsonNode snapshot = objectMapper.readTree(execution.getPrincipalSnapshot());
             String value = snapshot.path("approvalSimulation")
-                    .path(node.getId()).asText("").toUpperCase(Locale.ROOT);
+                    .path(node.getId()).asString("").toUpperCase(Locale.ROOT);
             return Set.of("APPROVED", "REJECTED", "EXPIRED").contains(value)
                     ? value : null;
         } catch (Exception ignored) {
@@ -1045,8 +1045,8 @@ public class WorkflowExecutionEngine {
         if (created) {
             child = executionService.startChild(
                     execution,
-                    node.getConfig().path("workflowCode").asText(),
-                    node.getConfig().path("workflowVersionId").asText(),
+                    node.getConfig().path("workflowCode").asString(),
+                    node.getConfig().path("workflowVersionId").asString(),
                     input,
                     nodeRunId);
             run = newNodeRun(
@@ -1067,7 +1067,7 @@ public class WorkflowExecutionEngine {
             String childExecutionId;
             try {
                 childExecutionId = objectMapper.readTree(run.getOutputJson())
-                        .path("childExecutionId").asText();
+                        .path("childExecutionId").asString();
             } catch (Exception e) {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
                         "子工作流节点状态已损坏", false);
@@ -1083,7 +1083,7 @@ public class WorkflowExecutionEngine {
             output.putObject("execution").put("executionId", child.getExecutionId()).put("status", child.getStatus());
             try {
                 output.set("result", child.getOutputJson() == null
-                        ? com.fasterxml.jackson.databind.node.NullNode.instance
+                        ? tools.jackson.databind.node.NullNode.instance
                         : objectMapper.readTree(child.getOutputJson()));
             } catch (Exception e) {
                 throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
@@ -1098,7 +1098,7 @@ public class WorkflowExecutionEngine {
         }
         if (Set.of("FAILED", "CANCELLED", "REJECTED")
                 .contains(child.getStatus())) {
-            if (!"STOP".equals(node.getConfig().path("resultMode").asText("STOP"))) {
+            if (!"STOP".equals(node.getConfig().path("resultMode").asString("STOP"))) {
                 ObjectNode output = objectMapper.createObjectNode();
                 output.putNull("result");
                 output.putObject("execution").put("executionId", child.getExecutionId()).put("status", child.getStatus())
@@ -1327,11 +1327,15 @@ public class WorkflowExecutionEngine {
             }
             if (selected.isEmpty() && fallback != null) selected.add(fallback);
         } else if ("parallel".equals(node.getType())) {
+            if (node.getConfig().path("version").asInt(1) >= 2) {
+                enqueueV2Parallel(node, token, edges, state);
+                return;
+            }
             selected.addAll(edges);
         } else if ("llm_classifier".equals(node.getType())) {
             String branch = state.getOutputs().getOrDefault(
-                    node.getId(), com.fasterxml.jackson.databind.node.NullNode.instance)
-                    .path("branch").asText();
+                    node.getId(), tools.jackson.databind.node.NullNode.instance)
+                    .path("branch").asString();
             edges.stream().filter(edge -> branch.equals(edge.getSourcePort()))
                     .findFirst().ifPresent(selected::add);
             if (selected.isEmpty()) {
@@ -1340,8 +1344,8 @@ public class WorkflowExecutionEngine {
             }
         } else if ("sub_workflow".equals(node.getType())) {
             String status = state.getOutputs().getOrDefault(node.getId(), NullNode.instance)
-                    .path("execution").path("status").asText();
-            String mode = node.getConfig().path("resultMode").asText("STOP");
+                    .path("execution").path("status").asString();
+            String mode = node.getConfig().path("resultMode").asString("STOP");
             String port = "SUCCEEDED".equals(status) ? "completed" : "DETAILED".equals(mode)
                     ? ("REJECTED".equals(status) ? "rejected" : "failed") : "incomplete";
             edges.stream().filter(edge -> port.equals(edge.getSourcePort())
@@ -1351,9 +1355,9 @@ public class WorkflowExecutionEngine {
                     "子工作流结果出口未连接", false);
         } else if ("approval".equals(node.getType())
                 && "BRANCH".equalsIgnoreCase(node.getConfig().path("resultPolicy")
-                .path("mode").asText())) {
+                .path("mode").asString())) {
             String status = state.getOutputs().getOrDefault(
-                    node.getId(), NullNode.instance).path("status").asText();
+                    node.getId(), NullNode.instance).path("status").asString();
             edges.stream()
                     .filter(edge -> status.equalsIgnoreCase(edge.getSourcePort()))
                     .findFirst().ifPresent(selected::add);
@@ -1394,6 +1398,131 @@ public class WorkflowExecutionEngine {
         state.getArrivals().merge(key, 1, Integer::sum);
     }
 
+    void enqueueV2Parallel(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.Token token,
+            List<WorkflowExecutionPlan.PlanEdge> edges,
+            WorkflowRuntimeState state) {
+        String parentPath = parallelParentPath(node.getId(), token.getBranchPath());
+        String instanceKey = node.getId() + "@" + parentPath;
+        WorkflowRuntimeState.ParallelState parallel = state.getParallels().computeIfAbsent(
+                instanceKey, ignored -> initializeParallel(node, parentPath, instanceKey));
+        if (parallel.isCompleted()) return;
+
+        String branchKey = parallelBranchKey(node.getId(), token.getBranchPath());
+        if (branchKey != null) {
+            collectParallelResult(node, token, branchKey, state, parallel);
+        } else if (!parallel.isStarted()) {
+            parallel.setStarted(true);
+            for (JsonNode branch : node.getConfig().path("branches")) {
+                String key = branch.path("key").asString();
+                WorkflowExecutionPlan.PlanEdge branchEdge = edges.stream()
+                        .filter(edge -> "PARALLEL".equals(edge.getKind())
+                                && key.equals(edge.getSourcePort()))
+                        .findFirst().orElse(null);
+                if (branchEdge == null) {
+                    throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                            "并行任务组分支缺少入口：" + key, false);
+                }
+                enqueue(state, branchEdge.getTarget(),
+                        appendParallelPath(parentPath, node.getId(), key));
+            }
+        }
+
+        int total = node.getConfig().path("branches").size();
+        if (parallel.getCompletedBranches().size() < total) return;
+        parallel.setCompleted(true);
+        ObjectNode summary = parallelSummary(node, parallel);
+        storeOutput(state, node.getId(), parentPath, summary);
+        WorkflowExecutionPlan.PlanEdge completedEdge = edges.stream()
+                .filter(edge -> "NORMAL".equals(edge.getKind())
+                        && "completed".equals(edge.getSourcePort()))
+                .findFirst().orElse(null);
+        if (completedEdge == null) {
+            throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                    "并行任务组缺少“全部完成”出口", false);
+        }
+        enqueue(state, completedEdge.getTarget(), parentPath);
+    }
+
+    private WorkflowRuntimeState.ParallelState initializeParallel(
+            WorkflowExecutionPlan.PlanNode node, String parentPath, String instanceKey) {
+        WorkflowRuntimeState.ParallelState parallel = new WorkflowRuntimeState.ParallelState();
+        parallel.setNodeId(node.getId());
+        parallel.setInstanceKey(instanceKey);
+        parallel.setParentBranchPath(parentPath);
+        return parallel;
+    }
+
+    private void collectParallelResult(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.Token token,
+            String branchKey,
+            WorkflowRuntimeState state,
+            WorkflowRuntimeState.ParallelState parallel) {
+        JsonNode configuredBranch = null;
+        for (JsonNode branch : node.getConfig().path("branches")) {
+            if (branchKey.equals(branch.path("key").asString())) {
+                configuredBranch = branch;
+                break;
+            }
+        }
+        if (configuredBranch == null) {
+            throw new NodeFailure(WorkflowErrorCode.PLAN_INCOMPATIBLE.name(),
+                    "并行任务组收到未知分支结果：" + branchKey, false);
+        }
+        if (!parallel.getCompletedBranches().add(branchKey)) return;
+        String resultNodeId = configuredBranch.path("resultNodeId").asString();
+        JsonNode result = state.getInstanceOutputs().getOrDefault(
+                resultNodeId + "@" + token.getBranchPath(), NullNode.instance);
+        parallel.getResults().put(branchKey, result.deepCopy());
+    }
+
+    private ObjectNode parallelSummary(
+            WorkflowExecutionPlan.PlanNode node,
+            WorkflowRuntimeState.ParallelState parallel) {
+        ObjectNode summary = objectMapper.createObjectNode();
+        summary.put("completed", true);
+        summary.put("completionMode", node.getConfig().path("completionMode")
+                .asString("ALL_SUCCEEDED"));
+        summary.put("totalBranches", node.getConfig().path("branches").size());
+        summary.put("successCount", parallel.getCompletedBranches().size());
+        summary.put("failureCount", 0);
+        ObjectNode results = summary.putObject("results");
+        for (JsonNode branch : node.getConfig().path("branches")) {
+            String key = branch.path("key").asString();
+            results.set(key, parallel.getResults().getOrDefault(
+                    key, NullNode.instance).deepCopy());
+        }
+        return summary;
+    }
+
+    private String appendParallelPath(String parentPath, String nodeId, String branchKey) {
+        String base = parentPath == null || parentPath.isBlank() ? "root" : parentPath;
+        return base + "/" + nodeId + "@" + branchKey;
+    }
+
+    private String parallelParentPath(String nodeId, String branchPath) {
+        String path = branchPath == null || branchPath.isBlank() ? "root" : branchPath;
+        String marker = "/" + nodeId + "@";
+        int markerIndex = path.lastIndexOf(marker);
+        if (markerIndex < 0 || path.indexOf('/', markerIndex + marker.length()) >= 0) {
+            return path;
+        }
+        return path.substring(0, markerIndex);
+    }
+
+    private String parallelBranchKey(String nodeId, String branchPath) {
+        String path = branchPath == null ? "" : branchPath;
+        String marker = "/" + nodeId + "@";
+        int markerIndex = path.lastIndexOf(marker);
+        if (markerIndex < 0) return null;
+        int start = markerIndex + marker.length();
+        if (path.indexOf('/', start) >= 0) return null;
+        String branchKey = path.substring(start);
+        return branchKey.isBlank() ? null : branchKey;
+    }
+
     void enqueueV2Loop(
             WorkflowExecutionPlan.PlanNode node,
             WorkflowRuntimeState.Token token,
@@ -1415,7 +1544,7 @@ public class WorkflowExecutionEngine {
         int maximum = node.getConfig().path("maxIterations").asInt(10);
         if ("FOR_EACH".equals(mode)) {
             if (loop.getTotal() == 0) {
-                if ("FAIL".equals(node.getConfig().path("emptyPolicy").asText("COMPLETE"))) {
+                if ("FAIL".equals(node.getConfig().path("emptyPolicy").asString("COMPLETE"))) {
                     throw new NodeFailure(WorkflowErrorCode.DEFINITION_INVALID.name(),
                             "循环数据列表为空", false);
                 }
@@ -1488,8 +1617,8 @@ public class WorkflowExecutionEngine {
         loop.setNodeId(node.getId());
         loop.setInstanceKey(instanceKey);
         loop.setParentBranchPath(parentPath);
-        loop.setMode(node.getConfig().path("mode").asText("REPEAT"));
-        loop.setRepeatMode(node.getConfig().path("repeatMode").asText("COUNT"));
+        loop.setMode(node.getConfig().path("mode").asString("REPEAT"));
+        loop.setRepeatMode(node.getConfig().path("repeatMode").asString("COUNT"));
         if ("FOR_EACH".equals(loop.getMode())) {
             JsonNode input = state.getInstanceOutputs().getOrDefault(
                     node.getId() + "@" + parentPath,
@@ -1514,8 +1643,8 @@ public class WorkflowExecutionEngine {
             WorkflowRuntimeState.Token token,
             WorkflowRuntimeState state,
             WorkflowRuntimeState.LoopState loop) {
-        String resultMode = node.getConfig().path("resultMode").asText("LAST");
-        String resultNodeId = node.getConfig().path("resultNodeId").asText();
+        String resultMode = node.getConfig().path("resultMode").asString("LAST");
+        String resultNodeId = node.getConfig().path("resultNodeId").asString();
         JsonNode output = resultNodeId.isBlank() ? NullNode.instance
                 : state.getInstanceOutputs().getOrDefault(
                 resultNodeId + "@" + token.getBranchPath(), NullNode.instance);
@@ -1535,7 +1664,7 @@ public class WorkflowExecutionEngine {
         result.put("successCount", Math.max(0, loop.getIteration() - failureCount));
         result.put("failureCount", failureCount);
         result.put("stopReason", loop.getStopReason());
-        boolean keepResult = !"NONE".equals(node.getConfig().path("resultMode").asText("LAST"));
+        boolean keepResult = !"NONE".equals(node.getConfig().path("resultMode").asString("LAST"));
         result.set("lastResult", !keepResult || loop.getLastOutput() == null
                 ? NullNode.instance : loop.getLastOutput().deepCopy());
         ArrayNode results = result.putArray("results");
@@ -1588,7 +1717,7 @@ public class WorkflowExecutionEngine {
 
     private int requiredJoinArrivals(
             WorkflowExecutionPlan.PlanNode node, int incomingCount) {
-        String mode = node.getConfig().path("mode").asText("ALL");
+        String mode = node.getConfig().path("mode").asString("ALL");
         if ("ANY".equals(mode)) {
             return 1;
         }
@@ -1650,6 +1779,9 @@ public class WorkflowExecutionEngine {
                 }
                 if (restored.getLoops() == null) {
                     restored.setLoops(new LinkedHashMap<>());
+                }
+                if (restored.getParallels() == null) {
+                    restored.setParallels(new LinkedHashMap<>());
                 }
                 return restored;
             } catch (Exception e) {
@@ -1759,7 +1891,10 @@ public class WorkflowExecutionEngine {
     private Map<String, Integer> incomingCounts(WorkflowExecutionPlan plan) {
         Map<String, Integer> result = new HashMap<>();
         plan.getEdges().stream()
-                .filter(edge -> !"LOOP".equals(edge.getKind()))
+                .filter(edge -> !"LOOP".equals(edge.getKind())
+                        && !"loop-return".equals(edge.getTargetPort())
+                        && !String.valueOf(edge.getTargetPort())
+                        .startsWith("parallel-return:"))
                 .forEach(edge -> result.merge(edge.getTarget(), 1, Integer::sum));
         return result;
     }

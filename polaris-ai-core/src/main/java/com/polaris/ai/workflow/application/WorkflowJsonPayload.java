@@ -1,7 +1,7 @@
 package com.polaris.ai.workflow.application;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /** 在 HTTP 通用 JSON 对象与工作流内部 Jackson 2 树模型之间转换。 */
 public final class WorkflowJsonPayload {

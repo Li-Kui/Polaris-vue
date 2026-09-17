@@ -18,6 +18,8 @@ public class ModerationProperties {
     private final Map<ModerationScene, ScenePolicy> scenes = defaults();
     private int auditRetentionDays = 90;
     private int candidateObservationThreshold = 3;
+    private long snapshotReconcileInitialMs = 300_000L;
+    private long snapshotReconcileMaxMs = 1_800_000L;
 
     public String getStorageRoot() {
         return storageRoot;
@@ -45,6 +47,23 @@ public class ModerationProperties {
 
     public void setCandidateObservationThreshold(int candidateObservationThreshold) {
         this.candidateObservationThreshold = candidateObservationThreshold;
+    }
+
+    public long getSnapshotReconcileInitialMs() {
+        return Math.max(10_000L, Math.min(snapshotReconcileInitialMs, 600_000L));
+    }
+
+    public void setSnapshotReconcileInitialMs(long snapshotReconcileInitialMs) {
+        this.snapshotReconcileInitialMs = snapshotReconcileInitialMs;
+    }
+
+    public long getSnapshotReconcileMaxMs() {
+        return Math.max(getSnapshotReconcileInitialMs(),
+                Math.min(snapshotReconcileMaxMs, 86_400_000L));
+    }
+
+    public void setSnapshotReconcileMaxMs(long snapshotReconcileMaxMs) {
+        this.snapshotReconcileMaxMs = snapshotReconcileMaxMs;
     }
 
     private static Map<ModerationScene, ScenePolicy> defaults() {

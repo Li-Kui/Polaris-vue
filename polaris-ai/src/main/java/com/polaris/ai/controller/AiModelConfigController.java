@@ -60,6 +60,12 @@ public class AiModelConfigController extends BaseController {
     public ResultData<Page<AiModelConfig>> list(AiModelConfig config) {
         startPage();
         List<AiModelConfig> list = modelConfigService.selectModelConfigList(config);
+        if (list != null) {
+            for (AiModelConfig item : list) {
+                item.setHasApiKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getApiKey()));
+                item.setHasSearchKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getSearchKey()));
+            }
+        }
         return ok(getDataPage(list));
     }
 
@@ -70,6 +76,14 @@ public class AiModelConfigController extends BaseController {
     @GetMapping("/list/available")
     public ResultData<List<AiModelConfig>> listAvailable(CallerContext caller) {
         List<AiModelConfig> list = modelConfigService.selectAvailableModelConfigs(caller.getDeptId(), caller.isSuperAdmin());
+        if (list != null) {
+            for (AiModelConfig item : list) {
+                item.setHasApiKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getApiKey()));
+                item.setHasSearchKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getSearchKey()));
+                item.setApiKey(null);
+                item.setSearchKey(null);
+            }
+        }
         return ok(list);
     }
 
@@ -79,7 +93,16 @@ public class AiModelConfigController extends BaseController {
     @Operation(summary = "查询当前用户可用的向量模型列表")
     @GetMapping("/list/availableEmbedding")
     public ResultData<List<AiModelConfig>> listAvailableEmbedding(CallerContext caller) {
-        return ok(modelConfigService.selectAvailableModelConfigsByType("EMBEDDING", caller.getDeptId(), caller.isSuperAdmin()));
+        List<AiModelConfig> list = modelConfigService.selectAvailableModelConfigsByType("EMBEDDING", caller.getDeptId(), caller.isSuperAdmin());
+        if (list != null) {
+            for (AiModelConfig item : list) {
+                item.setHasApiKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getApiKey()));
+                item.setHasSearchKey(com.polaris.common.utils.StringUtils.isNotBlank(item.getSearchKey()));
+                item.setApiKey(null);
+                item.setSearchKey(null);
+            }
+        }
+        return ok(list);
     }
 
     /**
@@ -88,7 +111,12 @@ public class AiModelConfigController extends BaseController {
     @Operation(summary = "获取模型配置详情")
     @GetMapping("/{id}")
     public ResultData getInfo(@PathVariable Long id) {
-        return ok(modelConfigService.selectModelConfigById(id));
+        AiModelConfig config = modelConfigService.selectModelConfigById(id);
+        if (config != null) {
+            config.setHasApiKey(com.polaris.common.utils.StringUtils.isNotBlank(config.getApiKey()));
+            config.setHasSearchKey(com.polaris.common.utils.StringUtils.isNotBlank(config.getSearchKey()));
+        }
+        return ok(config);
     }
 
     /**
@@ -165,10 +193,10 @@ public class AiModelConfigController extends BaseController {
             config.setDeptId(null);
         }
         config.setUpdateBy(CallerUtils.getUsername());
-        if (config.getApiKey() != null && config.getApiKey().matches("^\\*+$")) {
+        if (config.getApiKey() != null && (config.getApiKey().trim().isEmpty() || config.getApiKey().matches("^\\*+$"))) {
             config.setApiKey(null);
         }
-        if (config.getSearchKey() != null && config.getSearchKey().matches("^\\*+$")) {
+        if (config.getSearchKey() != null && (config.getSearchKey().trim().isEmpty() || config.getSearchKey().matches("^\\*+$"))) {
             config.setSearchKey(null);
         }
         // 如果更新为默认模型，先清空同部门（或全局）下该类型（modelType）的其他默认状态
@@ -411,6 +439,18 @@ public class AiModelConfigController extends BaseController {
     @Operation(summary = "拉取远程可用模型列表")
     @PostMapping("/list/remote")
     public ResultData<List<String>> fetchModels(@RequestBody FetchModelsRequest req) {
+        // 编辑已有模型配置场景：若传入了 modelId 且未录入新 Key，自动从数据库回填已保存的密钥与地址
+        if (req.getModelId() != null && (req.getApiKey() == null || req.getApiKey().trim().isEmpty() || req.getApiKey().matches("^\\*+$"))) {
+            AiModelConfig existing = modelConfigService.selectModelConfigById(req.getModelId());
+            if (existing != null) {
+                if (existing.getApiKey() != null && !existing.getApiKey().trim().isEmpty()) {
+                    req.setApiKey(existing.getApiKey());
+                }
+                if ((req.getBaseUrl() == null || req.getBaseUrl().trim().isEmpty()) && existing.getBaseUrl() != null) {
+                    req.setBaseUrl(existing.getBaseUrl());
+                }
+            }
+        }
         // 参数校验
         if (req.getProvider() == null || req.getProvider().trim().isEmpty()) {
             return ResultData.fail("提供商不能为空");

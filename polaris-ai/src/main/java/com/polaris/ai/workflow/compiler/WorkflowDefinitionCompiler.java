@@ -1,11 +1,5 @@
 package com.polaris.ai.workflow.compiler;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.application.WorkflowResolvedNodeSchemaView;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
@@ -16,6 +10,12 @@ import com.polaris.ai.workflow.runtime.WorkflowOutputSchemaGovernance;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptor;
 import com.polaris.ai.workflow.spi.WorkflowNodeDescriptorResolver;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -41,8 +41,9 @@ public class WorkflowDefinitionCompiler {
             ObjectMapper objectMapper,
             WorkflowNodeDescriptorResolver descriptors) {
         this.objectMapper = objectMapper;
-        this.contractMapper = objectMapper.copy()
-                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        this.contractMapper = objectMapper.rebuild()
+                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                .build();
         this.descriptors = descriptors;
         this.expressionParser = new WorkflowExpressionParser();
         this.validator = new WorkflowDefinitionValidator(descriptors, expressionParser);
@@ -62,7 +63,7 @@ public class WorkflowDefinitionCompiler {
         WorkflowDefinitionSpec definition;
         try {
             definition = contractMapper.readValue(definitionJson, WorkflowDefinitionSpec.class);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             return invalid("DEFINITION_JSON_INVALID", "$", "工作流定义JSON格式无效: "
                     + rootMessage(e));
         }
@@ -90,10 +91,10 @@ public class WorkflowDefinitionCompiler {
             if (subWorkflows == null) throw new IllegalStateException("子工作流契约解析服务不可用");
             var config = (ObjectNode) node.getConfig();
             Long tenant = com.polaris.ai.workflow.service.WorkflowSubWorkflowService.currentTenant();
-            boolean pinned = "PINNED".equals(config.path("versionPolicy").asText());
+            boolean pinned = "PINNED".equals(config.path("versionPolicy").asString());
             var contract = subWorkflows.resolve(config.path("definitionId").asLong(),
-                    pinned ? config.path("reviewedVersionId").asText() : null, tenant);
-            if (!contract.versionId().equals(config.path("reviewedVersionId").asText()))
+                    pinned ? config.path("reviewedVersionId").asString() : null, tenant);
+            if (!contract.versionId().equals(config.path("reviewedVersionId").asString()))
                 throw new IllegalStateException("子工作流「" + contract.name() + "」已更新，请确认新版本的输入输出后再发布");
             if (Objects.equals(contract.workflowCode(), definition.getMetadata().getCode()))
                 throw new IllegalStateException("子工作流不能调用当前工作流");
@@ -146,10 +147,10 @@ public class WorkflowDefinitionCompiler {
     }
 
     private void validateSubWorkflowSourceTree(JsonNode tree, Set<String> upstream, boolean inLoop) {
-        if ("SOURCE".equals(tree.path("mode").asText())) {
+        if ("SOURCE".equals(tree.path("mode").asString())) {
             JsonNode ast = tree.path("ast");
-            String path = ast.path("value").asText();
-            if (!"path".equals(ast.path("type").asText())) throw new IllegalArgumentException("子工作流来源必须选择一个字段");
+            String path = ast.path("value").asString();
+            if (!"path".equals(ast.path("type").asString())) throw new IllegalArgumentException("子工作流来源必须选择一个字段");
             if (path.equals("$.input") || path.startsWith("$.input.") || path.startsWith("$.input[")) return;
             if (inLoop && (path.equals("$.loop.current") || path.startsWith("$.loop.current."))) return;
             if (path.startsWith("$.nodes.")) {
@@ -226,10 +227,10 @@ public class WorkflowDefinitionCompiler {
         JsonNode compiledConfig = node.getConfig() == null
                 ? objectMapper.createObjectNode() : node.getConfig().deepCopy();
         if ("loop".equals(node.getType())
-                && "UNTIL".equals(compiledConfig.path("repeatMode").asText())
+                && "UNTIL".equals(compiledConfig.path("repeatMode").asString())
                 && compiledConfig.hasNonNull("stopCondition")) {
             ((ObjectNode) compiledConfig).set("_stopConditionAst",
-                    expressionParser.parse(compiledConfig.path("stopCondition").asText()));
+                    expressionParser.parse(compiledConfig.path("stopCondition").asString()));
         }
         result.setConfig(compiledConfig);
         result.setSideEffect(descriptor.sideEffect().name());
@@ -298,6 +299,7 @@ public class WorkflowDefinitionCompiler {
         result.setSource(edge.getSource());
         result.setSourcePort(edge.getSourcePort());
         result.setTarget(edge.getTarget());
+        result.setTargetPort(edge.getTargetPort());
         result.setKind(edge.getKind());
         result.setPriority(priority(edge));
         result.setDefaultEdge(Boolean.TRUE.equals(edge.getDefaultEdge()));
@@ -359,7 +361,7 @@ public class WorkflowDefinitionCompiler {
         }
         ObjectNode result = objectMapper.createObjectNode();
         Map<String, JsonNode> fields = new TreeMap<>();
-        Iterator<Map.Entry<String, JsonNode>> iterator = node.fields();
+        Iterator<Map.Entry<String, JsonNode>> iterator = node.properties().iterator();
         while (iterator.hasNext()) {
             Map.Entry<String, JsonNode> field = iterator.next();
             fields.put(field.getKey(), field.getValue());
@@ -373,7 +375,7 @@ public class WorkflowDefinitionCompiler {
                 List.of(WorkflowDiagnostic.error(code, null, fieldPath, message)));
     }
 
-    private String rootMessage(JsonProcessingException error) {
+    private String rootMessage(JacksonException error) {
         Throwable cause = error;
         while (cause.getCause() != null) {
             cause = cause.getCause();

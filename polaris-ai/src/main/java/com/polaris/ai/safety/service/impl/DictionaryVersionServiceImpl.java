@@ -14,6 +14,7 @@ import com.polaris.ai.safety.rule.DictionarySnapshot;
 import com.polaris.ai.safety.rule.DictionarySnapshotManager;
 import com.polaris.ai.safety.rule.TextNormalizer;
 import com.polaris.ai.safety.service.DictionarySeedSource;
+import com.polaris.ai.safety.service.DictionaryVersionReconcileRequested;
 import com.polaris.ai.safety.service.IDictionaryVersionNotifier;
 import com.polaris.ai.safety.service.IDictionaryVersionService;
 import com.polaris.ai.safety.vo.DictionaryVersionDiffView;
@@ -22,6 +23,7 @@ import com.polaris.common.exception.ServiceException;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -69,6 +71,9 @@ public class DictionaryVersionServiceImpl extends ServiceImpl<ModerationDictiona
 
     @Autowired(required = false)
     private ObjectProvider<IDictionaryVersionNotifier> notifiers;
+
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
 
     private Persistence persistence;
     private TransactionBoundary transactions = Supplier::get;
@@ -560,6 +565,9 @@ public class DictionaryVersionServiceImpl extends ServiceImpl<ModerationDictiona
                 throw new IllegalStateException("Reloaded an unexpected dictionary version");
             }
         } catch (RuntimeException reloadFailure) {
+            if (eventPublisher != null) {
+                eventPublisher.publishEvent(new DictionaryVersionReconcileRequested(versionId));
+            }
             throw new IllegalStateException(
                     "Dictionary publication committed but local snapshot reload failed; retry publication",
                     reloadFailure);

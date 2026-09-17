@@ -1,7 +1,7 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -46,8 +46,8 @@ public class WorkflowInputValidator {
         if ("array".equals(type) && value != null && value.isArray()) {
             validateArray(schema, value, path, errors);
         }
-        if ("string".equals(type) && value.isTextual()) {
-            validateString(schema, value.asText(), path, errors);
+        if ("string".equals(type) && value.isString()) {
+            validateString(schema, value.asString(), path, errors);
         }
         if (("number".equals(type) || "integer".equals(type)) && value.isNumber()) {
             validateNumber(schema, value.decimalValue(), path, errors);
@@ -59,15 +59,15 @@ public class WorkflowInputValidator {
         JsonNode required = schema.path("required");
         if (required.isArray()) {
             required.forEach(name -> {
-                if (!value.has(name.asText())) {
-                    add(errors, path + "." + name.asText() + " 为必填字段");
+                if (!value.has(name.asString())) {
+                    add(errors, path + "." + name.asString() + " 为必填字段");
                 }
             });
         }
         JsonNode properties = schema.path("properties");
         Set<String> declared = new HashSet<>();
         if (properties.isObject()) {
-            properties.fields().forEachRemaining(field -> {
+            properties.properties().forEach(field -> {
                 declared.add(field.getKey());
                 if (value.has(field.getKey())) {
                     validateValue(field.getValue(), value.get(field.getKey()),
@@ -78,7 +78,7 @@ public class WorkflowInputValidator {
         if (schema.has("additionalProperties")
                 && schema.path("additionalProperties").isBoolean()
                 && !schema.path("additionalProperties").asBoolean()) {
-            Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
+            Iterator<Map.Entry<String, JsonNode>> fields = value.properties().iterator();
             while (fields.hasNext() && errors.size() < MAX_ERRORS) {
                 String name = fields.next().getKey();
                 if (!declared.contains(name)) {
@@ -125,7 +125,7 @@ public class WorkflowInputValidator {
         }
         if (schema.hasNonNull("pattern")) {
             try {
-                if (!Pattern.compile(schema.path("pattern").asText()).matcher(value).find()) {
+                if (!Pattern.compile(schema.path("pattern").asString()).matcher(value).find()) {
                     add(errors, path + " 格式不符合要求");
                 }
             } catch (PatternSyntaxException e) {
@@ -187,7 +187,7 @@ public class WorkflowInputValidator {
         return switch (type) {
             case "object" -> value.isObject();
             case "array" -> value.isArray();
-            case "string" -> value.isTextual();
+            case "string" -> value.isString();
             case "integer" -> value.isIntegralNumber();
             case "number" -> value.isNumber();
             case "boolean" -> value.isBoolean();
@@ -198,12 +198,12 @@ public class WorkflowInputValidator {
 
     private String matchingType(JsonNode typeNode, JsonNode value) {
         if (typeNode == null || typeNode.isMissingNode() || typeNode.isNull()) return "";
-        if (typeNode.isTextual()) {
-            return matches(typeNode.asText(), value) ? typeNode.asText() : null;
+        if (typeNode.isString()) {
+            return matches(typeNode.asString(), value) ? typeNode.asString() : null;
         }
         if (typeNode.isArray()) {
             for (JsonNode item : typeNode) {
-                if (item.isTextual() && matches(item.asText(), value)) return item.asText();
+                if (item.isString() && matches(item.asString(), value)) return item.asString();
             }
         }
         return null;
@@ -211,10 +211,10 @@ public class WorkflowInputValidator {
 
     private String expectedTypes(JsonNode typeNode) {
         if (typeNode == null || typeNode.isMissingNode()) return "未声明类型";
-        if (typeNode.isTextual()) return typeNode.asText();
+        if (typeNode.isString()) return typeNode.asString();
         if (typeNode.isArray()) {
             List<String> types = new ArrayList<>();
-            typeNode.forEach(item -> types.add(item.asText()));
+            typeNode.forEach(item -> types.add(item.asString()));
             return String.join(" 或 ", types);
         }
         return "有效 JSON 类型";

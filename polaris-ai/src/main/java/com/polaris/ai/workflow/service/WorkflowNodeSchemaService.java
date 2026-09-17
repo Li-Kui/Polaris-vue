@@ -1,7 +1,5 @@
 package com.polaris.ai.workflow.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.WorkflowDefinitionApplicationFacade;
@@ -18,6 +16,8 @@ import com.polaris.ai.workflow.spi.*;
 import com.polaris.common.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
 

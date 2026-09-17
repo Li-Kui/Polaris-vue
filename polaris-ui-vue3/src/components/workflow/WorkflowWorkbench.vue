@@ -375,6 +375,19 @@
                   @update:body-target="loopBodyTargetChanged"
                   @update:exit-target="loopExitTargetChanged"
                 />
+                <WorkflowParallelEditor
+                  v-else-if="isParallelNode"
+                  :config="selectedNode.config"
+                  :entry-options="parallelEntryTargetOptions"
+                  :continuation-options="parallelContinuationTargetOptions"
+                  :branch-targets="parallelBranchTargets"
+                  :result-options="parallelResultOptions"
+                  :continuation-target="parallelContinuationTarget"
+                  :disabled="!canEdit"
+                  @update:config="parallelConfigChanged"
+                  @update:branch-target="parallelBranchTargetChanged"
+                  @update:continuation-target="parallelContinuationTargetChanged"
+                />
                 <WorkflowSubWorkflowEditor
                   v-else-if="isSubWorkflowNode"
                   :config="selectedNode.config"
@@ -775,7 +788,7 @@
           </el-tabs>
           <div class="inspector-footer">
             <el-tooltip
-              v-if="isSubWorkflowNode ? canExecute : canDebug"
+              v-if="!isParallelNode && (isSubWorkflowNode ? canExecute : canDebug)"
               :content="nodeTestAvailability.reason"
               :disabled="nodeTestAvailability.available"
               placement="top"
@@ -1328,6 +1341,7 @@ import {
   resolveWorkflowNodeSchemas,
   saveWorkflowResourceBinding,
   startWorkflowExecution,
+  streamWorkflowExecutionEvents,
   testWorkflowNode,
   updateWorkflowDraft,
   validateWorkflowDraft
@@ -1382,6 +1396,7 @@ import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
 import WorkflowSemanticClassifierEditor from './WorkflowSemanticClassifierEditor.vue'
 import WorkflowTransformEditor from './WorkflowTransformEditor.vue'
 import WorkflowLoopEditor from './WorkflowLoopEditor.vue'
+import WorkflowParallelEditor from './WorkflowParallelEditor.vue'
 import WorkflowLoopScope from './WorkflowLoopScope.vue'
 import WorkflowApprovalEditor from './WorkflowApprovalEditor.vue'
 import WorkflowSubWorkflowEditor from './WorkflowSubWorkflowEditor.vue'
@@ -1393,6 +1408,13 @@ import {
   isClassifierTargetAllowed
 } from './workflowClassifier'
 import {loopResultNodeOptions, withSynchronizedLoopReturn} from './workflowLoop'
+import {
+  normalizeParallelConfig,
+  PARALLEL_DEFAULT_CONFIG,
+  parallelEntryNodeOptions,
+  parallelResultNodeOptions,
+  withSynchronizedParallelReturns
+} from './workflowParallel'
 import {
   agentConfigurationState,
   agentTaskSummary,
@@ -1437,6 +1459,7 @@ export default {
     WorkflowSemanticClassifierEditor,
     WorkflowTransformEditor,
     WorkflowLoopEditor,
+    WorkflowParallelEditor,
     WorkflowLoopScope,
     WorkflowApprovalEditor,
     ChatDotRound,
@@ -1587,6 +1610,7 @@ export default {
       waitTestTargetAt: '',
       nodeTestResult: null,
       nodeTestPollTimer: null,
+      nodeTestPollDelay: 800,
       nodeTestGeneratingSchema: false,
       nodeTestSchemaApplied: false,
       nodeTestSchemaPromoted: false,
@@ -1597,6 +1621,9 @@ export default {
       debugExecution: null,
       debugNodeRuns: [],
       executionPollTimer: null,
+      executionStreamController: null,
+      executionReconnectTimer: null,
+      executionReconnectAttempt: 0,
       executionCancelling: false,
       paletteCategories: [
         {label: '全部', value: 'all'},
@@ -1612,6 +1639,15 @@ export default {
         {label: 'API 连接器', value: 'API_CONNECTOR'},
         {label: '外部数据源', value: 'DATASOURCE'}
       ]
+    }
+  },
+  watch: {
+    nodeTestDialogOpen(open) {
+      clearTimeout(this.nodeTestPollTimer)
+      this.nodeTestPollTimer = null
+      if (open && this.nodeTestRunning && !document.hidden) {
+        this.pollNodeTest()
+      }
     }
   },
   computed: {
@@ -1656,6 +1692,9 @@ export default {
     },
     isLoopNode() {
       return this.selectedNode?.type === 'loop'
+    },
+    isParallelNode() {
+      return this.selectedNode?.type === 'parallel'
     },
     isApprovalNode() {
       return this.selectedNode?.type === 'approval'
@@ -1753,6 +1792,40 @@ export default {
       const schema = this.resolvedNodeSchemas[resultNode.id]?.outputSchema
         || descriptor?.outputSchema || {type: 'object'}
       return this.classifierSchemaOptions(schema, '$.loop.current.lastOutput', '完整结果')
+    },
+    parallelEntryTargetOptions() {
+      return this.isParallelNode
+        ? parallelEntryNodeOptions(this.definition, this.selectedNode.id) : []
+    },
+    parallelContinuationTargetOptions() {
+      return this.isParallelNode
+        ? buildClassifierTargetOptions(this.definition, this.selectedNode.id) : []
+    },
+    parallelBranchTargets() {
+      if (!this.isParallelNode) return {}
+      return (this.definition.edges || []).filter(edge => edge.source === this.selectedNode.id
+        && edge.kind === 'PARALLEL' && edge.sourcePort)
+        .reduce((result, edge) => ({...result, [edge.sourcePort]: edge.target}), {})
+    },
+    parallelContinuationTarget() {
+      if (!this.isParallelNode) return ''
+      return (this.definition.edges || []).find(edge => edge.source === this.selectedNode.id
+        && edge.kind === 'NORMAL' && edge.sourcePort === 'completed')?.target || ''
+    },
+    parallelResultOptions() {
+      if (!this.isParallelNode) return {}
+      const entries = Object.values(this.parallelBranchTargets)
+      return Object.fromEntries((this.selectedNode.config?.branches || []).map(branch => [
+        branch.key,
+        parallelResultNodeOptions(
+          this.definition,
+          this.selectedNode.id,
+          this.parallelBranchTargets[branch.key],
+          this.parallelContinuationTarget,
+          entries.filter(entry => entry !== this.parallelBranchTargets[branch.key])
+        ).filter(option => !(this.selectedNode.config?.branches || []).some(other =>
+          other.key !== branch.key && other.resultNodeId === option.id))
+      ]))
     },
     classifierSourceGroups() {
       return this.isClassifierNode && this.selectedNode
@@ -1896,6 +1969,9 @@ export default {
         ? {available:true,reason:''} : {available:false,reason:'请先选择可用的子工作流，并确认有运行权限'}
       if (this.nodeTestRunning) return {available: true, reason: ''}
       if (!this.selectedNode) return {available: false, reason: '请先选择节点'}
+      if (this.selectedNode.type === 'parallel') {
+        return {available: false, reason: '并行任务组需要在完整流程中验证，不能隔离试运行'}
+      }
       if (this.selectedNode.type === 'loop') {
         return this.currentDefinition?.currentPublishedVersionId
           ? {available: true, reason: ''}
@@ -2260,14 +2336,33 @@ export default {
     this.refreshResourceContext()
     this.refreshSubWorkflows()
   },
+  mounted() {
+    document.addEventListener('visibilitychange', this.handleWorkflowVisibility)
+  },
   beforeUnmount() {
     clearTimeout(this.historyTimer)
-    clearTimeout(this.executionPollTimer)
+    this.stopExecutionStream()
     clearTimeout(this.nodeTestPollTimer)
+    document.removeEventListener('visibilitychange', this.handleWorkflowVisibility)
     window.removeEventListener('pointermove', this.resizeInspector)
     window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    handleWorkflowVisibility() {
+      if (document.hidden) {
+        this.stopExecutionStream(false)
+        clearTimeout(this.nodeTestPollTimer)
+        this.nodeTestPollTimer = null
+        return
+      }
+      if (this.debugExecution && !this.executionFinished) {
+        this.pollExecution()
+        this.startExecutionStream()
+      }
+      if (this.nodeTestDialogOpen && this.nodeTestRunning) {
+        this.pollNodeTest()
+      }
+    },
     async refreshSubWorkflows() {
       this.subWorkflowLoading = true
       this.subWorkflowError = ''
@@ -2563,6 +2658,7 @@ export default {
       this.normalizeWaitNodeConfigs()
       this.normalizeClassifierNodeConfigs()
       this.normalizeLoopNodeConfigs()
+      this.normalizeParallelNodeConfigs()
       this.normalizeInferredOutputSchemas()
       this.buildCanvas()
       this.dirty = false
@@ -2615,6 +2711,17 @@ export default {
             ? `满足条件时停止 · 最多 ${node.config?.maxIterations || 10} 次`
             : `重复 ${node.config?.count || node.config?.maxIterations || 1} 次`
         : ''
+      const parallelBranches = node.type === 'parallel'
+        ? [
+            ...(node.config?.branches || []).map(branch => ({port: branch.key, label: branch.name, kind: 'PARALLEL'})),
+            {port: 'completed', label: '全部完成', kind: 'NORMAL'}
+          ].map(branch => {
+            const edge = (this.definition.edges || []).find(item => item.source === node.id
+              && item.kind === branch.kind && item.sourcePort === branch.port)
+            const target = edge?.target === '__end__' ? {name: '结束流程'}
+              : (this.definition.nodes || []).find(item => item.id === edge?.target)
+            return {...branch, targetName: target?.name || '未连接', connected: !!edge}
+          }) : []
       const approvalBranches = node.type === 'approval'
         && node.config?.resultPolicy?.mode === 'BRANCH'
         ? [
@@ -2692,7 +2799,7 @@ export default {
         waitConfigurationLabel: waitState?.label || '',
         waitConfigurationTone: waitState?.tone || 'info',
         status: this.latestNodeStatus(node.id),
-        testable: node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
+        testable: node.type === 'parallel' ? false : node.type === 'sub_workflow' ? this.canExecute && this.nodeSupportsTest(node) : node.type === 'loop'
           ? (this.canDebug || this.canExecute) && this.nodeSupportsTest(node)
           : this.canDebug && this.nodeSupportsTest(node),
         testLabel: node.type === 'sub_workflow' ? '试运行子工作流' : node.type === 'loop' ? '测试完整流程' : node.type === 'wait' ? '模拟等待' : '',
@@ -2700,6 +2807,9 @@ export default {
         classifierBranches,
         loopBranches,
         loopModeSummary,
+        parallelBranches,
+        parallelSummary: node.type === 'parallel'
+          ? `${node.config?.branches?.length || 0} 条任务线 · 全部成功后继续` : '',
         approvalBranches,
         approvalSummary,
         subWorkflowName: this.subWorkflowCatalog.find(c=>c.definitionId===node.config?.definitionId)?.name || '请选择子工作流',
@@ -2806,7 +2916,7 @@ export default {
       return {
         id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
         source: edge.source,
-        sourceHandle: ['SEMANTIC', 'LOOP'].includes(edge.kind)
+        sourceHandle: ['SEMANTIC', 'LOOP', 'PARALLEL'].includes(edge.kind)
           || ['approved', 'rejected', 'expired', 'completed', 'incomplete', 'failed'].includes(edge.sourcePort)
           || (edge.kind === 'CONDITION' && edge.default && edge.sourcePort === 'done')
           ? edge.sourcePort : undefined,
@@ -2818,7 +2928,8 @@ export default {
         animated: edge.kind === 'CONDITION' || edge.kind === 'LOOP',
         style: {stroke: '#6762e8', strokeWidth: 1.6},
         labelStyle: {fill: '#6f7890', fontSize: 10},
-        hidden: edge.targetPort === 'loop-return',
+        hidden: edge.targetPort === 'loop-return'
+          || String(edge.targetPort || '').startsWith('parallel-return:'),
         data: { definitionEdge: edge }
       }
     },
@@ -2856,7 +2967,9 @@ export default {
       })
       if (this.definition.nodes.length === 1 && this.definition.edges.length === 0) {
         this.addDefinitionEdge('__start__', node.id, 'NORMAL')
-        if (!['llm_classifier', 'loop'].includes(node.type)) {
+        if (node.type === 'parallel') {
+          this.addDefinitionEdge(node.id, '__end__', 'NORMAL', 'completed')
+        } else if (!['llm_classifier', 'loop'].includes(node.type)) {
           this.addDefinitionEdge(node.id, '__end__', 'NORMAL')
         }
       }
@@ -2915,6 +3028,7 @@ export default {
           checkBeforeFirst: false
         }
       }
+      if (type === 'parallel') return normalizeParallelConfig(PARALLEL_DEFAULT_CONFIG)
       if (type === 'join') return {mode: 'ALL'}
       if (type === 'wait') return normalizeWaitConfig(WAIT_DEFAULT_CONFIG)
       if (type === 'database_query') return {sql: '', maxRows: 100, queryTimeoutSeconds: 10}
@@ -2960,6 +3074,15 @@ export default {
         } else if (port === 'done') {
           this.selectedNode = sourceNode
           this.loopExitTargetChanged(params.target)
+        }
+        return
+      }
+      if (sourceNode?.type === 'parallel') {
+        const port = String(params.sourceHandle || '')
+        if (port === 'completed') {
+          this.parallelContinuationTargetChanged(params.target, sourceNode)
+        } else if ((sourceNode.config?.branches || []).some(branch => branch.key === port)) {
+          this.parallelBranchTargetChanged({key: port, target: params.target}, sourceNode)
         }
         return
       }
@@ -3154,6 +3277,83 @@ export default {
         this.syncLoopReturnEdge(this.selectedNode)
       }
       this.buildCanvas()
+    },
+    parallelConfigChanged(value) {
+      if (!this.selectedNode || this.selectedNode.type !== 'parallel') return
+      const next = normalizeParallelConfig(value)
+      const keys = new Set(next.branches.map(branch => branch.key))
+      this.definition.edges = (this.definition.edges || []).filter(edge =>
+        edge.source !== this.selectedNode.id || edge.kind !== 'PARALLEL'
+          || keys.has(edge.sourcePort))
+      this.schemaConfigChanged(next)
+      this.syncParallelReturnEdges(this.selectedNode)
+      this.buildCanvas()
+    },
+    parallelBranchTargetChanged({key, target}, nodeOverride = null) {
+      const node = nodeOverride || this.selectedNode
+      if (!node || node.type !== 'parallel'
+        || !(node.config?.branches || []).some(branch => branch.key === key)) return
+      const allowed = parallelEntryNodeOptions(this.definition, node.id)
+        .some(option => option.id === target)
+      if (target && !allowed) {
+        this.$message.warning('请选择尚未接入其他路径的普通任务节点作为任务线入口')
+        return
+      }
+      const occupied = (this.definition.edges || []).some(edge => edge.source === node.id
+        && edge.kind === 'PARALLEL' && edge.sourcePort !== key && edge.target === target)
+      const completedTarget = (this.definition.edges || []).find(edge => edge.source === node.id
+        && edge.kind === 'NORMAL' && edge.sourcePort === 'completed')?.target
+      if (target && (occupied || target === completedTarget)) {
+        this.$message.warning('每条任务线需要独立入口，且不能与“全部完成”进入同一节点')
+        return
+      }
+      this.definition.edges = (this.definition.edges || []).filter(edge =>
+        !(edge.source === node.id && edge.kind === 'PARALLEL' && edge.sourcePort === key))
+      if (target) this.addDefinitionEdge(node.id, target, 'PARALLEL', key)
+      const branch = (node.config?.branches || []).find(item => item.key === key)
+      if (branch) {
+        const otherEntries = Object.entries(this.parallelBranchTargets)
+          .filter(([branchKey]) => branchKey !== key).map(([, entry]) => entry)
+        const candidates = parallelResultNodeOptions(
+          this.definition, node.id, target, this.parallelContinuationTarget, otherEntries)
+        if (!candidates.some(candidate => candidate.id === branch.resultNodeId)) {
+          branch.resultNodeId = candidates.find(candidate => candidate.id === target)?.id
+            || (candidates.length === 1 ? candidates[0].id : '')
+        }
+      }
+      this.syncParallelReturnEdges(node)
+      this.buildCanvas()
+      this.markDirty()
+    },
+    parallelContinuationTargetChanged(target, nodeOverride = null) {
+      const node = nodeOverride || this.selectedNode
+      if (!node || node.type !== 'parallel') return
+      if (target && !isClassifierTargetAllowed(this.definition, node.id, target)) {
+        this.$message.warning('完成出口只能连接下游节点，当前目标会形成循环')
+        return
+      }
+      const branchUsesTarget = (this.definition.edges || []).some(edge => edge.source === node.id
+        && edge.kind === 'PARALLEL' && edge.target === target)
+      if (target && branchUsesTarget) {
+        this.$message.warning('“全部完成”不能与任一任务线进入同一节点')
+        return
+      }
+      this.definition.edges = (this.definition.edges || []).filter(edge =>
+        !(edge.source === node.id && edge.kind === 'NORMAL' && edge.sourcePort === 'completed'))
+      if (target) this.addDefinitionEdge(node.id, target, 'NORMAL', 'completed')
+      this.syncParallelReturnEdges(node)
+      this.buildCanvas()
+      this.markDirty()
+    },
+    syncParallelReturnEdges(node) {
+      this.definition.edges = withSynchronizedParallelReturns(
+        this.definition,
+        node.id,
+        node.config?.branches || [],
+        (this.definition.edges || []).find(edge => edge.source === node.id
+          && edge.kind === 'NORMAL' && edge.sourcePort === 'completed')?.target || '',
+        () => `edge-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      )
     },
     approvalConfigChanged(value) {
       if (!this.selectedNode || this.selectedNode.type !== 'approval') return
@@ -3368,6 +3568,22 @@ export default {
           && edge.kind === 'CONDITION' && edge.default)
         if (doneEdge) doneEdge.sourcePort = 'done'
         if (returnEdge) returnEdge.targetPort = 'loop-return'
+      })
+    },
+    normalizeParallelNodeConfigs() {
+      ;(this.definition.nodes || []).forEach(node => {
+        if (node.type !== 'parallel') return
+        node.config = normalizeParallelConfig(node.config)
+        const branchEdges = (this.definition.edges || []).filter(edge =>
+          edge.source === node.id && edge.kind === 'PARALLEL')
+        branchEdges.forEach((edge, index) => {
+          if (!edge.sourcePort && node.config.branches[index]) {
+            edge.sourcePort = node.config.branches[index].key
+          }
+        })
+        const completedEdge = (this.definition.edges || []).find(edge =>
+          edge.source === node.id && edge.kind === 'NORMAL' && !edge.sourcePort)
+        if (completedEdge) completedEdge.sourcePort = 'completed'
       })
     },
     normalizeInferredOutputSchemas() {
@@ -4034,6 +4250,7 @@ export default {
         .sort((left, right) => (right.attemptNo || 0) - (left.attemptNo || 0))[0]?.status || ''
     },
     nodeSupportsTest(node) {
+      if (node?.type === 'parallel') return false
       if (node?.type === 'sub_workflow') return this.canExecute && !!this.subWorkflowContracts[node.config?.reviewedVersionId]
       if (node?.type === 'loop') {
         return !!this.currentDefinition?.currentPublishedVersionId
@@ -4123,6 +4340,7 @@ export default {
       this.nodeTestMode = 'NODE'
       this.workflowDraftTest = false
       this.nodeTestResult = null
+      this.nodeTestPollDelay = 800
       this.nodeTestSchemaApplied = false
       this.nodeTestSchemaPromoted = !!this.selectedNode.outputSchemaOverride
       this.nodeTestInferredSchema = this.selectedNode.ui?.inferredOutputSchema?.schema || null
@@ -4252,9 +4470,14 @@ export default {
         const response = await getWorkflowNodeTest(testRunId)
         this.nodeTestResult = response.data
         if (['QUEUED', 'RUNNING'].includes(response.data?.status)) {
-          this.nodeTestPollTimer = setTimeout(() => this.pollNodeTest(), 800)
+          if (this.nodeTestDialogOpen && !document.hidden) {
+            const delay = this.nodeTestPollDelay
+            this.nodeTestPollDelay = Math.min(5000, Math.max(800, delay * 2))
+            this.nodeTestPollTimer = setTimeout(() => this.pollNodeTest(), delay)
+          }
           return
         }
+        this.nodeTestPollDelay = 800
         this.nodeTestRunning = false
         this.refreshCanvasNodeData()
         if (response.data?.status === 'SUCCEEDED') {
@@ -4631,7 +4854,8 @@ export default {
         this.debugExecution = response.data
         this.debugNodeRuns = []
         this.testDialogOpen = false
-        this.pollExecution()
+        await this.pollExecution()
+        this.startExecutionStream()
       } finally {
         this.testStarting = false
       }
@@ -4674,12 +4898,61 @@ export default {
         this.debugExecution = executionResponse.data
         this.debugNodeRuns = nodeRunResponse.data || []
         this.refreshCanvasNodeData()
-        if (!this.executionFinished) {
-          this.executionPollTimer = setTimeout(() => this.pollExecution(), 1800)
-        }
+        if (this.executionFinished) this.stopExecutionStream()
       } catch (error) {
-        this.stopPolling()
+        if (!this.executionFinished) this.scheduleExecutionReconnect(executionId)
       }
+    },
+    startExecutionStream() {
+      this.stopExecutionStream(false)
+      if (!this.debugExecution?.executionId || this.executionFinished || document.hidden) return
+      const executionId = this.debugExecution.executionId
+      this.executionStreamController = streamWorkflowExecutionEvents(
+        executionId,
+        this.debugExecution.eventSequence || 0,
+        {
+          onOpen: () => {
+            this.executionReconnectAttempt = 0
+            this.pollExecution()
+          },
+          onEvent: event => {
+            if (event.event !== 'workflow'
+              || executionId !== this.debugExecution?.executionId) return
+            const sequence = Number(event.data?.sequenceNo || event.id || 0)
+            if (sequence > Number(this.debugExecution.eventSequence || 0)) {
+              this.debugExecution.eventSequence = sequence
+            }
+            clearTimeout(this.executionPollTimer)
+            const terminalEvent = ['EXECUTION_SUCCEEDED', 'EXECUTION_FAILED',
+              'EXECUTION_CANCELLED', 'EXECUTION_REJECTED']
+              .includes(event.data?.eventType)
+            this.executionPollTimer = setTimeout(
+              () => this.pollExecution(), terminalEvent ? 25 : 350)
+          },
+          onClose: () => this.scheduleExecutionReconnect(executionId),
+          onError: () => this.scheduleExecutionReconnect(executionId)
+        }
+      )
+    },
+    scheduleExecutionReconnect(executionId) {
+      if (document.hidden || this.executionFinished
+        || executionId !== this.debugExecution?.executionId) return
+      clearTimeout(this.executionReconnectTimer)
+      const delays = [1000, 2000, 5000, 10000, 30000]
+      const delay = delays[Math.min(this.executionReconnectAttempt, delays.length - 1)]
+      this.executionReconnectAttempt += 1
+      const jitter = Math.floor(Math.random() * Math.max(250, delay * 0.2))
+      this.executionReconnectTimer = setTimeout(
+        () => this.startExecutionStream(), delay + jitter)
+    },
+    stopExecutionStream(resetReconnect = true) {
+      this.executionStreamController?.abort()
+      this.executionStreamController = null
+      clearTimeout(this.executionPollTimer)
+      clearTimeout(this.executionReconnectTimer)
+      this.executionPollTimer = null
+      this.executionReconnectTimer = null
+      if (resetReconnect) this.executionReconnectAttempt = 0
     },
     async cancelExecution() {
       if (!this.debugExecution?.executionId || this.executionFinished || this.executionCancelling) return
@@ -4700,8 +4973,7 @@ export default {
       this.debugNodeRuns = []
     },
     stopPolling() {
-      clearTimeout(this.executionPollTimer)
-      this.executionPollTimer = null
+      this.stopExecutionStream()
     },
     toggleRetry(enabled) {
       if (enabled) {
@@ -4781,7 +5053,9 @@ export default {
       const pending = [nodeId]
       while (pending.length) {
         const current = pending.shift()
-        ;(this.definition.edges || []).filter(edge => edge.target === current && edge.targetPort !== 'loop-return')
+        ;(this.definition.edges || []).filter(edge => edge.target === current
+          && edge.targetPort !== 'loop-return'
+          && !String(edge.targetPort || '').startsWith('parallel-return:'))
           .forEach(edge => {
             if (edge.source === '__start__' || edge.source === nodeId || upstreamIds.has(edge.source)) return
             upstreamIds.add(edge.source)
@@ -4809,7 +5083,8 @@ export default {
       while (pending.length) {
         const current = pending.shift()
         ;(this.definition.edges || []).filter(edge => edge.target === current
-          && edge.targetPort !== 'loop-return').forEach(edge => {
+          && edge.targetPort !== 'loop-return'
+          && !String(edge.targetPort || '').startsWith('parallel-return:')).forEach(edge => {
           if (edge.source === '__start__' || edge.source === nodeId || result.has(edge.source)) return
           result.add(edge.source)
           pending.push(edge.source)
@@ -5151,13 +5426,13 @@ export default {
       await this.refreshResourceContext()
     },
     async validate() {
-      if (!this.currentDefinition?.id || this.dirty) {
-        const saved = await this.saveDraft()
-        if (!saved) return false
-      }
+      if (!this.validateWorkflowMetadata() || this.configError || this.mappingError) return false
       this.validating = true
       try {
-        const response = await validateWorkflowDraft(this.currentDefinition.id)
+        const response = await validateWorkflowDraft(
+          this.currentDefinition?.id,
+          this.definitionJson()
+        )
         this.diagnostics = response.data?.diagnostics || []
         if (response.data?.valid) {
           this.validationPassed = true
@@ -5175,6 +5450,10 @@ export default {
       if (!this.canPublish || this.publishing || this.validating || this.saving) return
       this.publishing = true
       try {
+        if (!this.currentDefinition?.id || this.dirty) {
+          const saved = await this.saveDraft({silent: true})
+          if (!saved) return
+        }
         const valid = await this.validate()
         if (!valid) return
         const response = await publishWorkflowDraft(

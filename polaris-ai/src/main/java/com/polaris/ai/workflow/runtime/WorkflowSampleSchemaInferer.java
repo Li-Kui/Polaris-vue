@@ -1,10 +1,10 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.*;
 
@@ -78,7 +78,7 @@ public class WorkflowSampleSchemaInferer {
             int[] propertyCount, List<String> diagnostics, boolean allowRequired) {
         ObjectNode properties = schema.putObject("properties");
         Set<String> names = new LinkedHashSet<>();
-        objects.forEach(value -> value.fieldNames().forEachRemaining(names::add));
+        objects.forEach(value -> value.propertyNames().forEach(names::add));
         ArrayNode required = objectMapper.createArrayNode();
         boolean truncated = false;
         for (String name : names) {

@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.polaris.ai.workflow.application.WorkflowTaskSignal;
-import com.polaris.ai.workflow.application.WorkflowTimerSignal;
+import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.domain.*;
 import com.polaris.ai.workflow.mapper.*;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
@@ -10,6 +8,7 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.Date;
@@ -86,6 +85,7 @@ public class WorkflowExecutionPersistence {
             throw new ServiceException("创建工作流事务事件失败");
         }
         eventPublisher.publishEvent(WorkflowTaskSignal.EXECUTION_QUEUED);
+        eventPublisher.publishEvent(WorkflowOutboxSignal.PENDING);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -122,6 +122,7 @@ public class WorkflowExecutionPersistence {
         if (outboxMapper.insert(outbox) != 1) {
             throw new ServiceException("创建工作流通知事件失败");
         }
+        eventPublisher.publishEvent(WorkflowOutboxSignal.PENDING);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -277,6 +278,7 @@ public class WorkflowExecutionPersistence {
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("挂起工作流审批失败");
         }
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -337,6 +339,11 @@ public class WorkflowExecutionPersistence {
     /** 当前事务提交后重新核对最近闹钟，供取消等删除等待时间的操作使用。 */
     public void signalTimerRefresh() {
         eventPublisher.publishEvent(WorkflowTimerSignal.refreshSchedule());
+    }
+
+    /** 审批实例取消后重新核对最近审批闹钟。 */
+    public void signalApprovalScheduleRefresh() {
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -429,6 +436,7 @@ public class WorkflowExecutionPersistence {
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("结束工作流执行失败");
         }
+        eventPublisher.publishEvent(WorkflowTimerSignal.refreshSchedule());
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -450,6 +458,7 @@ public class WorkflowExecutionPersistence {
         if (executionMapper.updateById(execution) != 1) {
             throw new ServiceException("挂起工作流执行失败");
         }
+        eventPublisher.publishEvent(WorkflowTimerSignal.refreshSchedule());
     }
 
     private WorkflowExecution lockAndCheckFence(
@@ -512,6 +521,8 @@ public class WorkflowExecutionPersistence {
         if (eventMapper.insert(event) != 1) {
             throw new ServiceException("保存工作流事件失败");
         }
+        eventPublisher.publishEvent(new WorkflowExecutionEventAvailable(
+                execution.getExecutionId(), sequence, eventType));
         if (java.util.Set.of(
                 "EXECUTION_SUCCEEDED", "EXECUTION_FAILED", "EXECUTION_CANCELLED", "EXECUTION_REJECTED",
                 "EXECUTION_NEEDS_ATTENTION", "EXECUTION_WAITING").contains(eventType)) {

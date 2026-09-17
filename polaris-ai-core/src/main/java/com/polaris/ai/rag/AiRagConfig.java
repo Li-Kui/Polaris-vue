@@ -1,10 +1,9 @@
 package com.polaris.ai.rag;
 
+import com.polaris.ai.observability.ObservedEmbeddingStore;
 import com.polaris.ai.pivot.AiModelFactory;
-import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.output.Response;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
@@ -18,8 +17,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
-
-import java.util.List;
 
 /**
  * AI RAG 向量知识库配置类
@@ -40,22 +37,7 @@ public class AiRagConfig
     public EmbeddingModel embeddingModel(AiModelFactory factory)
     {
         log.info(">>> 注册 EmbeddingModel 动态热切换代理 Bean");
-        return new EmbeddingModel() {
-            @Override
-            public Response<Embedding> embed(String text) {
-                return factory.getEmbeddingModel().embed(text);
-            }
-
-            @Override
-            public Response<Embedding> embed(TextSegment textSegment) {
-                return factory.getEmbeddingModel().embed(textSegment);
-            }
-
-            @Override
-            public Response<List<Embedding>> embedAll(List<TextSegment> textSegments) {
-                return factory.getEmbeddingModel().embedAll(textSegments);
-            }
-        };
+        return new HotSwappableEmbeddingModel(factory::getEmbeddingModel);
     }
 
     @Bean
@@ -79,8 +61,7 @@ public class AiRagConfig
             builder.withApiKey(qdrant.getApiKey().trim());
         }
 
-        // Collection schema depends on the embedding model bound to each knowledge base.
-        // It is initialized lazily by AiVectorStoreResolver once that model is known.
+        // 集合结构取决于知识库绑定的向量模型，待模型明确后由解析器延迟初始化。
         return new QdrantClient(builder.build());
     }
 
@@ -92,10 +73,11 @@ public class AiRagConfig
     {
         AiVectorStoreProperties.QdrantProperties qdrant = properties.getQdrant();
         log.info(">>> 初始化 Qdrant 向量数据库, collection={}", qdrant.getCollectionName());
-        return QdrantEmbeddingStore.builder()
+        EmbeddingStore<TextSegment> store = QdrantEmbeddingStore.builder()
                 .client(client)
                 .collectionName(qdrant.getCollectionName())
                 .payloadTextKey(qdrant.getPayloadTextKey())
                 .build();
+        return new ObservedEmbeddingStore<>(store, qdrant.getCollectionName());
     }
 }

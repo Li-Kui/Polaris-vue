@@ -50,7 +50,7 @@
         <div class="panel-configs">
           <div class="config-row">
             <el-select
-              v-model="selectedModelName"
+              v-model="selectedModelConfigId"
               :disabled="isStreaming || !!selectedWorkflowCode"
               class="config-select"
               placeholder="选择模型"
@@ -62,7 +62,7 @@
                 v-for="item in models"
                 :key="item.id"
                 :label="'🤖 ' + item.name"
-                :value="item.modelName"
+                :value="item.id"
               />
             </el-select>
             <el-select
@@ -264,7 +264,7 @@
 import {getToken} from '@/utils/auth'
 import {listAvailableModel} from '@/api/ai/model'
 import {listKnowledge} from '@/api/ai/knowledge'
-import {createConversation, updateConversationConfig} from '@/api/ai/chat'
+import {cancelChatGeneration, createConversation, updateConversationConfig} from '@/api/ai/chat'
 import {cancelWorkflowExecution, listActiveWorkflows, streamWorkflowExecution} from '@/api/ai/workflow'
 
 import useSettingsStore from '@/store/modules/settings'
@@ -283,7 +283,7 @@ export default {
 
       // 模型与知识库
       models: [],
-      selectedModelName: null,
+      selectedModelConfigId: null,
       knowledgeBases: [],
       selectedKbId: null,
 
@@ -300,6 +300,7 @@ export default {
       enableWebSearch: false,
 
       currentReader: null,
+      chatAbortController: null,
       sseEventBuffer: null,
       workflowAbortController: null,
       currentWorkflowExecutionId: null
@@ -319,8 +320,8 @@ export default {
       return '0 8px 32px var(--el-color-primary-light-5), 0 0 15px var(--el-color-primary-light-7)'
     },
     currentModelSupportsSearch() {
-      if (!this.selectedModelName) return false
-      const m = this.models.find(item => item.modelName === this.selectedModelName)
+      if (!this.selectedModelConfigId) return false
+      const m = this.models.find(item => item.id === this.selectedModelConfigId)
       return m && m.enableSearch === '1'
     },
     currentWorkflowName() {
@@ -361,7 +362,7 @@ export default {
       this.chatVisible = !this.chatVisible
       if (this.chatVisible) {
         this.$nextTick(() => {
-          this.scrollToBottom()
+          this.scrollToBottom(true)
         })
       }
     },
@@ -377,13 +378,13 @@ export default {
               name: '默认模型',
               modelName: defaultModelName
             }]
-            this.selectedModelName = defaultModelName
+            this.selectedModelConfigId = null
           } else {
             const defModel = this.models.find(m => m.isDefault === '1')
             if (defModel) {
-              this.selectedModelName = defModel.modelName
+              this.selectedModelConfigId = defModel.id
             } else if (this.models.length > 0) {
-              this.selectedModelName = this.models[0].modelName
+              this.selectedModelConfigId = this.models[0].id
             }
           }
         }
@@ -395,7 +396,7 @@ export default {
           name: '默认模型',
           modelName: defaultModelName
         }]
-        this.selectedModelName = defaultModelName
+        this.selectedModelConfigId = null
       }
     },
     async loadKnowledgeBases() {
@@ -421,7 +422,7 @@ export default {
     async handleModelOrKbChange() {
       if (this.currentConvId) {
         try {
-          await updateConversationConfig(this.currentConvId, this.selectedModelName, this.selectedKbId)
+          await updateConversationConfig(this.currentConvId, this.selectedModelConfigId, this.selectedKbId)
         } catch (e) {
           console.error('同步会话配置失败', e)
         }
@@ -457,14 +458,14 @@ export default {
         expanded: true,
         error: null
       })
-      this.$nextTick(() => this.scrollToBottom())
+      this.$nextTick(() => this.scrollToBottom(true))
 
       const isWorkflowMode = !!this.selectedWorkflowCode
 
       try {
         // 普通聊天和工作流都必须绑定会话，保证消息与待审批执行可恢复。
         if (!this.currentConvId) {
-          const convRes = await createConversation(this.selectedModelName, this.selectedKbId)
+          const convRes = await createConversation(this.selectedModelConfigId, this.selectedKbId)
           if (convRes.code === 200) {
             this.currentConvId = convRes.data.id
           } else {
@@ -524,13 +525,16 @@ export default {
           attachmentTokens: []
         }
 
+        const chatController = new AbortController()
+        this.chatAbortController = chatController
         const response = await fetch(`${baseUrl}/ai/chat/stream`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json;charset=UTF-8',
             'Authorization': 'Bearer ' + token
           },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: chatController.signal
         })
 
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
@@ -615,6 +619,10 @@ export default {
           }
         }
 
+        if (!chatController.signal.aborted) {
+          throw new Error('连接已中断，未收到完成信号')
+        }
+
       } catch (e) {
         if (e.name === 'AbortError') return
         const errMsg = e.message || '服务异常，请重试'
@@ -622,12 +630,27 @@ export default {
         this.messages[aiIndex].error = errMsg
         this.$message.error('AI 响应失败：' + errMsg)
       } finally {
+        const currentMessage = this.messages[aiIndex]
+        if (currentMessage) {
+          currentMessage.loading = false
+          currentMessage.statusMsg = ''
+        }
         this.isStreaming = false
         this.currentReader = null
+        this.chatAbortController = null
       }
     },
-    handleStopMessage() {
-      this.abortStream()
+    async handleStopMessage() {
+      const conversationId = this.currentConvId
+      const stoppingChat = !!this.chatAbortController
+      if (stoppingChat && conversationId) {
+        this.abortStream(false)
+        // 保持停止按钮，直到服务端释放当前会话。
+        this.isStreaming = true
+        await cancelChatGeneration(conversationId).catch(() => {})
+      } else {
+        this.abortStream()
+      }
       this.isStreaming = false
       if (this.messages.length > 0) {
         const lastMsg = this.messages[this.messages.length - 1]
@@ -664,7 +687,15 @@ export default {
         })
         .join('\n')
     },
-    abortStream() {
+    abortStream(notifyServer = true) {
+      const conversationId = this.currentConvId
+      if (this.chatAbortController) {
+        this.chatAbortController.abort()
+        this.chatAbortController = null
+        if (notifyServer && conversationId) {
+          cancelChatGeneration(conversationId).catch(() => {})
+        }
+      }
       if (this.workflowAbortController) {
         this.workflowAbortController.abort()
         this.workflowAbortController = null
@@ -691,9 +722,9 @@ export default {
     toggleThinkingExpanded(index) {
       this.messages[index].expanded = !this.messages[index].expanded
     },
-    scrollToBottom() {
+    scrollToBottom(force = false) {
       const area = this.$refs.msgArea
-      if (area) {
+      if (area && (force || area.scrollHeight - area.scrollTop - area.clientHeight < 120)) {
         area.scrollTop = area.scrollHeight
       }
     },

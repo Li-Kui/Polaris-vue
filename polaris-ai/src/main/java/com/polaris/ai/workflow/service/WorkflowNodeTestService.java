@@ -1,9 +1,5 @@
 package com.polaris.ai.workflow.service;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.*;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.compiler.WorkflowDefinitionCompiler;
@@ -20,10 +16,16 @@ import com.polaris.ai.workflow.runtime.*;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
 import com.polaris.ai.workflow.spi.*;
 import com.polaris.common.exception.ServiceException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.lang.management.ManagementFactory;
 import java.math.BigDecimal;
@@ -37,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /** 对已保存草稿中的单个无副作用或只读节点执行隔离试运行。 */
 @Service
+@Slf4j
 public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacade {
 
     private static final int MAX_INPUT_BYTES = 256 * 1024;
@@ -58,6 +61,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private final WorkflowNodeTestPersistenceService persistenceService;
     private final ThreadPoolTaskExecutor taskExecutor;
     private final ThreadPoolTaskExecutor nodeExecutor;
+    private final ScheduledExecutorService timerExecutor;
     private final ObjectMapper objectMapper;
     private final WorkflowDataRedactor dataRedactor;
     private final WorkflowNodeTestPayloadCipher payloadCipher;
@@ -65,6 +69,11 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private final WorkflowInputValidator schemaValidator = new WorkflowInputValidator();
     private final WorkflowExpressionEvaluator expressionEvaluator;
     private final Map<String, ActiveTest> activeTests = new ConcurrentHashMap<>();
+    private final AtomicLong nextRecoveryScanAt = new AtomicLong(0L);
+    private final AtomicLong recoveryIdleDelayMs = new AtomicLong();
+    private final Object timerLock = new Object();
+    private ScheduledFuture<?> nextCoordinatorTask;
+    private long nextCoordinatorAt = Long.MAX_VALUE;
     private final String runnerId;
 
     public WorkflowNodeTestService(
@@ -77,6 +86,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
             WorkflowNodeTestPersistenceService persistenceService,
             @Qualifier("workflowTaskExecutor") ThreadPoolTaskExecutor taskExecutor,
             @Qualifier("workflowNodeTaskExecutor") ThreadPoolTaskExecutor nodeExecutor,
+            @Qualifier("scheduledExecutorService") ScheduledExecutorService timerExecutor,
             ObjectMapper objectMapper,
             WorkflowDataRedactor dataRedactor,
             WorkflowNodeTestPayloadCipher payloadCipher,
@@ -90,13 +100,20 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         this.persistenceService = persistenceService;
         this.taskExecutor = taskExecutor;
         this.nodeExecutor = nodeExecutor;
+        this.timerExecutor = timerExecutor;
         this.objectMapper = objectMapper;
         this.dataRedactor = dataRedactor;
         this.payloadCipher = payloadCipher;
         this.workflowProperties = workflowProperties;
         this.expressionEvaluator = new WorkflowExpressionEvaluator(objectMapper);
+        this.recoveryIdleDelayMs.set(workflowProperties.getNodeTestRecoveryInitialMs());
         this.runnerId = ManagementFactory.getRuntimeMXBean().getName()
                 + ":node-test:" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void initializeScheduler() {
+        requestRecoveryScan();
     }
 
     @Override
@@ -106,14 +123,15 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         String testRunId = UUID.randomUUID().toString();
         WorkflowNodeTestRun record = queuedRecord(testRunId, prepared);
         persistenceService.create(record, auditRecord(record));
-        dispatch(testRunId, prepared);
+        if (!dispatch(testRunId, prepared)) {
+            requestRecoveryScan();
+        } else {
+            scheduleCoordinator(workflowProperties.getNodeTestLeaseRenewMs());
+        }
         return toResult(record);
     }
 
-    /** 续租本实例任务，并领取新任务或已过期任务。 */
-    @Scheduled(
-            fixedDelayString = "${ai.workflow.node-test-poll-ms:5000}",
-            initialDelayString = "${ai.workflow.node-test-poll-ms:5000}")
+    /** 单次闹钟协调续租与恢复；空闲时不再每 5 秒唤醒。 */
     public void pollNodeTests() {
         if (!workflowProperties.isEnabled() || !workflowProperties.isWorkerEnabled()) return;
         activeTests.forEach((testRunId, active) -> {
@@ -123,10 +141,24 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                 active.cancel();
             }
         });
-        for (String testRunId : testRunMapper.selectClaimCandidates(
-                workflowProperties.getWorkerBatchSize())) {
+        long now = System.currentTimeMillis();
+        if (now < nextRecoveryScanAt.get()) {
+            scheduleNextCoordinator(now);
+            return;
+        }
+        List<String> candidates = testRunMapper.selectClaimCandidates(
+                workflowProperties.getWorkerBatchSize());
+        for (String testRunId : candidates) {
             dispatch(testRunId, null);
         }
+        if (candidates.isEmpty()) {
+            long delayMs = nextRecoveryIdleDelay();
+            nextRecoveryScanAt.set(now + delayMs);
+        } else {
+            recoveryIdleDelayMs.set(workflowProperties.getNodeTestRecoveryInitialMs());
+            nextRecoveryScanAt.set(now + workflowProperties.getNodeTestLeaseRenewMs());
+        }
+        scheduleNextCoordinator(now);
     }
 
     @Override
@@ -187,27 +219,79 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         return executePrepared(UUID.randomUUID().toString(), prepared, new AtomicBoolean(false));
     }
 
-    private void dispatch(String testRunId, PreparedTest prepared) {
-        if (activeTests.containsKey(testRunId)) return;
+    private boolean dispatch(String testRunId, PreparedTest prepared) {
+        if (activeTests.containsKey(testRunId)) return true;
         if (testRunMapper.claimLease(
-                testRunId, runnerId, workflowProperties.getLeaseSeconds()) != 1) return;
+                testRunId, runnerId, workflowProperties.getLeaseSeconds()) != 1) return false;
         WorkflowNodeTestRun claimed = testRunMapper.selectByTestRunId(testRunId);
-        if (claimed == null || claimed.getFencingToken() == null) return;
+        if (claimed == null || claimed.getFencingToken() == null) return false;
         ActiveTest active = new ActiveTest(claimed.getFencingToken());
         ActiveTest existing = activeTests.putIfAbsent(testRunId, active);
         if (existing != null) {
             testRunMapper.releaseLease(
                     testRunId, runnerId, claimed.getFencingToken());
-            return;
+            return true;
         }
         try {
             active.future = taskExecutor.submit(
                     () -> executeAsync(testRunId, claimed, prepared, active));
+            return true;
         } catch (RuntimeException e) {
             activeTests.remove(testRunId, active);
             testRunMapper.releaseLease(
                     testRunId, runnerId, claimed.getFencingToken());
+            return false;
         }
+    }
+
+    private void requestRecoveryScan() {
+        recoveryIdleDelayMs.set(workflowProperties.getNodeTestRecoveryInitialMs());
+        nextRecoveryScanAt.set(0L);
+        scheduleCoordinator(0L);
+    }
+
+    private void scheduleNextCoordinator(long now) {
+        long recoveryDelay = Math.max(0L, nextRecoveryScanAt.get() - now);
+        long delay = activeTests.isEmpty()
+                ? recoveryDelay
+                : Math.min(recoveryDelay, workflowProperties.getNodeTestLeaseRenewMs());
+        scheduleCoordinator(delay);
+    }
+
+    private void scheduleCoordinator(long delayMs) {
+        if (!workflowProperties.isEnabled() || !workflowProperties.isWorkerEnabled()) return;
+        long wakeAt = System.currentTimeMillis() + Math.max(0L, delayMs);
+        synchronized (timerLock) {
+            if (nextCoordinatorTask != null && nextCoordinatorAt <= wakeAt) {
+                return;
+            }
+            if (nextCoordinatorTask != null) {
+                nextCoordinatorTask.cancel(false);
+            }
+            nextCoordinatorAt = wakeAt;
+            try {
+                nextCoordinatorTask = timerExecutor.schedule(() -> {
+                    synchronized (timerLock) {
+                        nextCoordinatorTask = null;
+                        nextCoordinatorAt = Long.MAX_VALUE;
+                    }
+                    pollNodeTests();
+                }, Math.max(0L, wakeAt - System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+            } catch (RuntimeException e) {
+                nextCoordinatorTask = null;
+                nextCoordinatorAt = Long.MAX_VALUE;
+                log.warn("Unable to schedule workflow node-test coordinator", e);
+            }
+        }
+    }
+
+    private long nextRecoveryIdleDelay() {
+        long initial = workflowProperties.getNodeTestRecoveryInitialMs();
+        long maximum = workflowProperties.getNodeTestRecoveryMaxMs();
+        long current = Math.max(initial, recoveryIdleDelayMs.get());
+        long next = current > Long.MAX_VALUE / 2L ? Long.MAX_VALUE : current * 2L;
+        recoveryIdleDelayMs.set(Math.min(maximum, next));
+        return Math.min(current, maximum);
     }
 
     private void executeAsync(
@@ -235,6 +319,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                     result.errorMessage(), result.durationMs());
         } finally {
             activeTests.remove(testRunId, active);
+            scheduleCoordinator(0L);
         }
     }
 
@@ -260,7 +345,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         if (envelope == null) throw new ServiceException("试运行恢复载荷不存在或已损坏");
         boolean versioned = envelope.path("payloadVersion").asInt(0) == 1;
         JsonNode input = versioned ? envelope.get("input") : envelope;
-        String mode = versioned ? envelope.path("mode").asText("NODE")
+        String mode = versioned ? envelope.path("mode").asString("NODE")
                 : record.getTestMode() == null ? "NODE" : record.getTestMode();
         CallerContext previous = CallerContextHolder.get();
         try {
@@ -448,7 +533,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
         contextRoot.set("input", prepared.input());
         ObjectNode outputs = contextRoot.putObject("nodes");
         contextRoot.putObject("env").put("name", prepared.environment());
-        contextRoot.with("env").put("production", "PROD".equals(prepared.environment()));
+        contextRoot.withObject("env").put("production", "PROD".equals(prepared.environment()));
         ObjectNode execution = contextRoot.putObject("execution");
         execution.put("id", "node-test:" + testRunId);
         execution.put("workflowCode", prepared.definition().workflowCode());
@@ -531,7 +616,7 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
                 }
                 outputs.putObject(current.getId()).set("output",
                         finalOutput == null
-                                ? com.fasterxml.jackson.databind.node.NullNode.instance
+                                ? tools.jackson.databind.node.NullNode.instance
                                 : finalOutput);
             }
             return new WorkflowNodeTestResult(
@@ -966,8 +1051,8 @@ public class WorkflowNodeTestService implements WorkflowNodeTestApplicationFacad
     private String safeMessage(Throwable error) {
         String value = error == null || error.getMessage() == null
                 ? "节点试运行失败" : error.getMessage();
-        JsonNode redacted = dataRedactor.redact(objectMapper.getNodeFactory().textNode(value));
-        String result = redacted == null ? "节点试运行失败" : redacted.asText();
+        JsonNode redacted = dataRedactor.redact(objectMapper.getNodeFactory().stringNode(value));
+        String result = redacted == null ? "节点试运行失败" : redacted.asString();
         result = result.replaceAll(
                 "(?i)(api[-_ ]?key|authorization|password|token)\\s*[:=]\\s*[^,;\\s]+",
                 "$1=[REDACTED]");

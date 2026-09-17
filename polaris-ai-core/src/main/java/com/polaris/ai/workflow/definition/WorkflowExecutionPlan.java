@@ -1,7 +1,7 @@
 package com.polaris.ai.workflow.definition;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -47,6 +47,7 @@ public class WorkflowExecutionPlan {
         private String source;
         private String sourcePort;
         private String target;
+        private String targetPort;
         private String kind;
         private JsonNode expressionAst;
         private Integer priority;

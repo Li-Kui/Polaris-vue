@@ -1,7 +1,7 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -98,7 +98,7 @@ public final class WorkflowStructuredOutput {
             errors.add(path + " 嵌套深度不能超过 " + MAX_DEPTH);
             return;
         }
-        Iterator<String> names = schema.fieldNames();
+        Iterator<String> names = schema.propertyNames().iterator();
         while (names.hasNext()) {
             String name = names.next();
             if (!KEYWORDS.contains(name)) errors.add(path + " 使用了不支持的关键字 " + name);
@@ -122,11 +122,11 @@ public final class WorkflowStructuredOutput {
     private static Set<String> validateTypes(
             JsonNode typeNode, String path, List<String> errors) {
         Set<String> result = new HashSet<>();
-        if (typeNode.isTextual()) {
-            result.add(typeNode.asText());
+        if (typeNode.isString()) {
+            result.add(typeNode.asString());
         } else if (typeNode.isArray() && !typeNode.isEmpty()) {
             typeNode.forEach(item -> {
-                if (item.isTextual()) result.add(item.asText());
+                if (item.isString()) result.add(item.asString());
                 else errors.add(path + ".type 只能包含字符串类型名");
             });
             if (result.size() != typeNode.size()) {
@@ -153,7 +153,7 @@ public final class WorkflowStructuredOutput {
             errors.add("结构化输出 Schema 属性总数不能超过 " + MAX_PROPERTIES);
             return;
         }
-        properties.fields().forEachRemaining(field -> validateNode(
+        properties.properties().forEach(field -> validateNode(
                 field.getValue(), path + ".properties." + field.getKey(),
                 depth + 1, propertyCount, errors));
         JsonNode required = schema.path("required");
@@ -163,12 +163,12 @@ public final class WorkflowStructuredOutput {
             } else {
                 Set<String> names = new HashSet<>();
                 required.forEach(item -> {
-                    if (!item.isTextual()) {
+                    if (!item.isString()) {
                         errors.add(path + ".required 只能包含字段名");
-                    } else if (!properties.has(item.asText())) {
-                        errors.add(path + ".required 包含未声明字段 " + item.asText());
-                    } else if (!names.add(item.asText())) {
-                        errors.add(path + ".required 不能包含重复字段 " + item.asText());
+                    } else if (!properties.has(item.asString())) {
+                        errors.add(path + ".required 包含未声明字段 " + item.asString());
+                    } else if (!names.add(item.asString())) {
+                        errors.add(path + ".required 不能包含重复字段 " + item.asString());
                     }
                 });
             }
@@ -181,7 +181,7 @@ public final class WorkflowStructuredOutput {
 
     private static void validateMetadata(JsonNode schema, String path, List<String> errors) {
         for (String key : List.of("title", "description", "format", "pattern", "$schema")) {
-            if (schema.has(key) && !schema.path(key).isTextual()) {
+            if (schema.has(key) && !schema.path(key).isString()) {
                 errors.add(path + "." + key + " 必须是字符串");
             }
         }
@@ -202,7 +202,7 @@ public final class WorkflowStructuredOutput {
         }
         if (schema.hasNonNull("pattern")) {
             try {
-                Pattern.compile(schema.path("pattern").asText());
+                Pattern.compile(schema.path("pattern").asString());
             } catch (PatternSyntaxException e) {
                 errors.add(path + ".pattern 不是有效正则表达式");
             }
@@ -218,10 +218,10 @@ public final class WorkflowStructuredOutput {
     }
 
     private static boolean declaresType(JsonNode typeNode, String expected) {
-        if (typeNode.isTextual()) return expected.equals(typeNode.asText());
+        if (typeNode.isString()) return expected.equals(typeNode.asString());
         if (!typeNode.isArray()) return false;
         for (JsonNode item : typeNode) {
-            if (expected.equals(item.asText())) return true;
+            if (expected.equals(item.asString())) return true;
         }
         return false;
     }

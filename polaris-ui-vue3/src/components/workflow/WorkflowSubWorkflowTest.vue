@@ -23,21 +23,27 @@
   </el-dialog>
 </template>
 <script setup>
-import {computed, onBeforeUnmount, ref, watch} from 'vue'
+import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
-import {cancelWorkflowExecution, getWorkflowExecution, startWorkflowExecution} from '@/api/ai/workflow'
+import {
+  cancelWorkflowExecution,
+  getWorkflowExecution,
+  startWorkflowExecution,
+  streamWorkflowExecutionEvents
+} from '@/api/ai/workflow'
 
 const props=defineProps({modelValue:Boolean,contract:Object})
 defineEmits(['update:modelValue'])
 const input=ref({}), validation=ref({valid:false}), execution=ref(null), loading=ref(false), error=ref('')
-let timer, key, requestSnapshot
+let refreshTimer, reconnectTimer, streamController, reconnectAttempt=0, key, requestSnapshot
 const active=computed(()=>execution.value && !['SUCCEEDED','FAILED','CANCELLED','REJECTED'].includes(execution.value.status))
 const statusLabel=computed(()=>({QUEUED:'等待执行',RUNNING:'执行中',RECOVERING:'恢复中',WAITING_TIMER:'等待时间',WAITING_EVENT:'等待子流程或事件',WAITING_APPROVAL:'等待审批',NEEDS_ATTENTION:'需要人工处理',SUCCEEDED:'执行成功',FAILED:'执行失败',CANCELLED:'已取消',REJECTED:'未通过'})[execution.value?.status] || execution.value?.status)
 const outputText=computed(()=>{try{return JSON.stringify(JSON.parse(execution.value.outputJson),null,2)}catch{return execution.value.outputJson}})
-watch(()=>props.contract?.versionId,()=>{clearTimeout(timer);execution.value=null;input.value={};key=null;requestSnapshot=null;error.value=''})
-watch(()=>props.modelValue,open=>{clearTimeout(timer);if(open && execution.value)refresh()})
-onBeforeUnmount(()=>clearTimeout(timer))
+watch(()=>props.contract?.versionId,()=>{stopStream();execution.value=null;input.value={};key=null;requestSnapshot=null;error.value=''})
+watch(()=>props.modelValue,open=>{if(!open)stopStream();else if(execution.value){refresh();startStream()}})
+onMounted(()=>document.addEventListener('visibilitychange',handleVisibility))
+onBeforeUnmount(()=>{stopStream();document.removeEventListener('visibilitychange',handleVisibility)})
 async function start(){
   if(loading.value || !props.contract || !validation.value.valid)return
   if(props.contract.writes){try{await ElMessageBox.confirm('此次测试会执行子流程中的写入节点，是否使用当前 TEST 资源开始？','确认测试写入',{type:'warning'})}catch{return}}
@@ -49,19 +55,53 @@ async function start(){
   error.value=''
   const selectedVersion=props.contract.versionId
   if(!key || requestSnapshot!==snapshot){key=crypto.randomUUID();requestSnapshot=snapshot}
-  try{const response=await startWorkflowExecution({definitionId:props.contract.definitionId,workflowVersionId:selectedVersion,environment:'TEST',input:JSON.parse(snapshot),idempotencyKey:key});if(props.contract?.versionId!==selectedVersion)return;execution.value=response.data;await refresh()}
+  try{const response=await startWorkflowExecution({definitionId:props.contract.definitionId,workflowVersionId:selectedVersion,environment:'TEST',input:JSON.parse(snapshot),idempotencyKey:key});if(props.contract?.versionId!==selectedVersion)return;execution.value=response.data;await refresh();startStream()}
   catch(e){error.value=e.message || '启动失败；如网络中断，可用相同输入重试以恢复同一次执行'}finally{loading.value=false}
 }
 async function refresh(){
   if(!execution.value)return
-  clearTimeout(timer)
   const executionId=execution.value.executionId
   try{const response=await getWorkflowExecution(executionId);if(execution.value?.executionId!==executionId)return;execution.value=response.data;error.value=''}
   catch(e){error.value='暂时无法获取状态，请点击刷新重试';return}
-  if(props.modelValue && active.value)timer=setTimeout(refresh,2500)
+  if(!active.value)stopStream()
 }
 async function cancel(){if(execution.value){await cancelWorkflowExecution(execution.value.executionId);await refresh()}}
-function restart(){clearTimeout(timer);execution.value=null;key=null;requestSnapshot=null;error.value=''}
+function startStream(){
+  stopStream(false)
+  if(!props.modelValue||!active.value||document.hidden)return
+  const executionId=execution.value.executionId
+  streamController=streamWorkflowExecutionEvents(executionId,execution.value.eventSequence||0,{
+    onOpen:()=>{reconnectAttempt=0;refresh()},
+    onEvent:event=>{
+      if(event.event!=='workflow'||executionId!==execution.value?.executionId)return
+      const sequence=Number(event.data?.sequenceNo||event.id||0)
+      if(sequence>Number(execution.value.eventSequence||0))execution.value.eventSequence=sequence
+      clearTimeout(refreshTimer)
+      const terminal=['EXECUTION_SUCCEEDED','EXECUTION_FAILED','EXECUTION_CANCELLED','EXECUTION_REJECTED'].includes(event.data?.eventType)
+      refreshTimer=setTimeout(refresh,terminal?25:350)
+    },
+    onClose:()=>scheduleReconnect(executionId),
+    onError:()=>scheduleReconnect(executionId)
+  })
+}
+function scheduleReconnect(executionId){
+  if(document.hidden||!props.modelValue||!active.value||executionId!==execution.value?.executionId)return
+  clearTimeout(reconnectTimer)
+  const delays=[1000,2000,5000,10000,30000],delay=delays[Math.min(reconnectAttempt,delays.length-1)]
+  reconnectAttempt+=1
+  reconnectTimer=setTimeout(startStream,delay+Math.floor(Math.random()*Math.max(250,delay*.2)))
+}
+function stopStream(reset=true){
+  streamController?.abort();streamController=null
+  clearTimeout(refreshTimer);clearTimeout(reconnectTimer)
+  refreshTimer=null;reconnectTimer=null
+  if(reset)reconnectAttempt=0
+}
+function handleVisibility(){
+  if(document.hidden)stopStream(false)
+  else if(props.modelValue&&active.value){refresh();startStream()}
+}
+function restart(){stopStream();execution.value=null;key=null;requestSnapshot=null;error.value=''}
 </script>
 <style scoped>
 .child-test-result{display:grid;gap:12px;padding-top:16px}.child-test-result pre{overflow:auto;max-height:360px;background:var(--el-fill-color-light);padding:16px;border-radius:8px}.child-test-result p{margin:0}

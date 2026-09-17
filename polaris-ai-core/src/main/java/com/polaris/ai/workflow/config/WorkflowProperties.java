@@ -17,7 +17,19 @@ public class WorkflowProperties {
     private boolean agentReadOnlyToolsEnabled;
     private boolean workerEnabled = true;
     private boolean acceptingNewExecutions = true;
+    private String triggerSchedulerMode = "quartz";
+    private String approvalSchedulerMode = "quartz";
+    private int triggerFireBatchSize = 50;
+    private int triggerFireLeaseSeconds = 60;
+    private int triggerFireMaxAttempts = 10;
     private int workerBatchSize = 10;
+    private long workerIdleReconcileInitialMs = 30000L;
+    private long workerIdleReconcileMaxMs = 300000L;
+    private long nodeTestRecoveryInitialMs = 30000L;
+    private long nodeTestRecoveryMaxMs = 300000L;
+    private long nodeTestLeaseRenewMs = 5000L;
+    private long outboxIdleReconcileInitialMs = 30000L;
+    private long outboxIdleReconcileMaxMs = 300000L;
     private int leaseSeconds = 30;
     private int tenantConcurrency = 20;
     private int workflowConcurrency = 10;
@@ -66,6 +78,54 @@ public class WorkflowProperties {
         this.acceptingNewExecutions = acceptingNewExecutions;
     }
 
+    public String getTriggerSchedulerMode() {
+        return triggerSchedulerMode;
+    }
+
+    public void setTriggerSchedulerMode(String triggerSchedulerMode) {
+        this.triggerSchedulerMode = triggerSchedulerMode;
+    }
+
+    public boolean isQuartzTriggerScheduler() {
+        return "quartz".equalsIgnoreCase(triggerSchedulerMode);
+    }
+
+    public String getApprovalSchedulerMode() {
+        return approvalSchedulerMode;
+    }
+
+    public void setApprovalSchedulerMode(String approvalSchedulerMode) {
+        this.approvalSchedulerMode = approvalSchedulerMode;
+    }
+
+    public boolean isQuartzApprovalScheduler() {
+        return "quartz".equalsIgnoreCase(approvalSchedulerMode);
+    }
+
+    public int getTriggerFireBatchSize() {
+        return Math.max(1, Math.min(triggerFireBatchSize, 200));
+    }
+
+    public void setTriggerFireBatchSize(int triggerFireBatchSize) {
+        this.triggerFireBatchSize = triggerFireBatchSize;
+    }
+
+    public int getTriggerFireLeaseSeconds() {
+        return Math.max(10, Math.min(triggerFireLeaseSeconds, 300));
+    }
+
+    public void setTriggerFireLeaseSeconds(int triggerFireLeaseSeconds) {
+        this.triggerFireLeaseSeconds = triggerFireLeaseSeconds;
+    }
+
+    public int getTriggerFireMaxAttempts() {
+        return Math.max(1, Math.min(triggerFireMaxAttempts, 100));
+    }
+
+    public void setTriggerFireMaxAttempts(int triggerFireMaxAttempts) {
+        this.triggerFireMaxAttempts = triggerFireMaxAttempts;
+    }
+
     public void setWorkerEnabled(boolean workerEnabled) {
         this.workerEnabled = workerEnabled;
     }
@@ -76,6 +136,65 @@ public class WorkflowProperties {
 
     public void setWorkerBatchSize(int workerBatchSize) {
         this.workerBatchSize = workerBatchSize;
+    }
+
+    public long getWorkerIdleReconcileInitialMs() {
+        return Math.max(1000L, Math.min(workerIdleReconcileInitialMs, 60000L));
+    }
+
+    public void setWorkerIdleReconcileInitialMs(long workerIdleReconcileInitialMs) {
+        this.workerIdleReconcileInitialMs = workerIdleReconcileInitialMs;
+    }
+
+    public long getWorkerIdleReconcileMaxMs() {
+        return Math.max(getWorkerIdleReconcileInitialMs(),
+                Math.min(workerIdleReconcileMaxMs, 3600000L));
+    }
+
+    public void setWorkerIdleReconcileMaxMs(long workerIdleReconcileMaxMs) {
+        this.workerIdleReconcileMaxMs = workerIdleReconcileMaxMs;
+    }
+
+    public long getNodeTestRecoveryInitialMs() {
+        return Math.max(5000L, Math.min(nodeTestRecoveryInitialMs, 60000L));
+    }
+
+    public void setNodeTestRecoveryInitialMs(long nodeTestRecoveryInitialMs) {
+        this.nodeTestRecoveryInitialMs = nodeTestRecoveryInitialMs;
+    }
+
+    public long getNodeTestRecoveryMaxMs() {
+        return Math.max(getNodeTestRecoveryInitialMs(),
+                Math.min(nodeTestRecoveryMaxMs, 3600000L));
+    }
+
+    public void setNodeTestRecoveryMaxMs(long nodeTestRecoveryMaxMs) {
+        this.nodeTestRecoveryMaxMs = nodeTestRecoveryMaxMs;
+    }
+
+    public long getNodeTestLeaseRenewMs() {
+        return Math.max(1000L, Math.min(nodeTestLeaseRenewMs, 30000L));
+    }
+
+    public void setNodeTestLeaseRenewMs(long nodeTestLeaseRenewMs) {
+        this.nodeTestLeaseRenewMs = nodeTestLeaseRenewMs;
+    }
+
+    public long getOutboxIdleReconcileInitialMs() {
+        return Math.max(1000L, Math.min(outboxIdleReconcileInitialMs, 60000L));
+    }
+
+    public void setOutboxIdleReconcileInitialMs(long outboxIdleReconcileInitialMs) {
+        this.outboxIdleReconcileInitialMs = outboxIdleReconcileInitialMs;
+    }
+
+    public long getOutboxIdleReconcileMaxMs() {
+        return Math.max(getOutboxIdleReconcileInitialMs(),
+                Math.min(outboxIdleReconcileMaxMs, 3600000L));
+    }
+
+    public void setOutboxIdleReconcileMaxMs(long outboxIdleReconcileMaxMs) {
+        this.outboxIdleReconcileMaxMs = outboxIdleReconcileMaxMs;
     }
 
     public int getLeaseSeconds() {

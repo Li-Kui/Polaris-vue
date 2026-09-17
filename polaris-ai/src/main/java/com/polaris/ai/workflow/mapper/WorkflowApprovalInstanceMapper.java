@@ -48,4 +48,18 @@ public interface WorkflowApprovalInstanceMapper extends BaseMapper<WorkflowAppro
     List<WorkflowApprovalInstance> selectReminderCandidates(
             @Param("now") Date now,
             @Param("limit") int limit);
+
+    @Select("SELECT MIN(next_action_time) FROM ("
+            + "SELECT MIN(reminder_time) AS next_action_time "
+            + "FROM ai_workflow_approval_instance "
+            + "WHERE status = 'PENDING' AND reminder_sent_time IS NULL "
+            + "AND reminder_time IS NOT NULL "
+            + "UNION ALL SELECT MIN(deadline) FROM ai_workflow_approval_instance "
+            + "WHERE status = 'PENDING' AND deadline IS NOT NULL "
+            + "UNION ALL SELECT MIN(s.deadline) FROM ai_workflow_approval_stage s "
+            + "JOIN ai_workflow_approval_instance i "
+            + "ON i.current_stage_id = s.stage_instance_id "
+            + "WHERE i.status = 'PENDING' AND s.status = 'ACTIVE' "
+            + "AND s.deadline IS NOT NULL) approval_actions")
+    Date selectNextScheduledActionTime();
 }

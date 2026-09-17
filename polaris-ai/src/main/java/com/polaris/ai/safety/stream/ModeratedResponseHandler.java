@@ -1,6 +1,7 @@
 package com.polaris.ai.safety.stream;
 
 import com.polaris.ai.domain.AiMessage;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.safety.exception.ModerationBlockedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,10 @@ public class ModeratedResponseHandler {
     private final SseSender sseSender;
     private final AtomicBoolean isCancelled;
     private final Consumer<AiMessage> onCompleteConsumer;
+    private final StringBuilder directAnswer = new StringBuilder();
+    private final StringBuilder directReasoning = new StringBuilder();
+    /** 保证完成、异常熔断和晚到片段只会有一个终态。 */
+    private final AtomicBoolean terminal = new AtomicBoolean(false);
 
     private boolean firstTokenSent = false;
     private Long conversationId;
@@ -44,7 +49,8 @@ public class ModeratedResponseHandler {
     }
 
     public void onToken(String token) {
-        if (isCancelled.get() || (answerSession != null && answerSession.blocked())) {
+        if (terminal.get() || isCancelled.get()
+                || (answerSession != null && answerSession.blocked())) {
             return;
         }
 
@@ -61,12 +67,13 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlocked();
         }
     }
 
     public void onThinking(String thinking) {
-        if (isCancelled.get() || (reasoningSession != null && reasoningSession.blocked())) {
+        if (terminal.get() || isCancelled.get()
+                || (reasoningSession != null && reasoningSession.blocked())) {
             return;
         }
 
@@ -83,12 +90,20 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlocked();
         }
     }
 
     public void onComplete(Integer totalTokens) {
+        if (isCancelled.get()) {
+            terminal.compareAndSet(false, true);
+            return;
+        }
         if (answerSession != null && answerSession.blocked()) {
+            terminal.compareAndSet(false, true);
+            return;
+        }
+        if (!terminal.compareAndSet(false, true)) {
             return;
         }
 
@@ -110,12 +125,12 @@ public class ModeratedResponseHandler {
                 }
             }
         } catch (ModerationBlockedException e) {
-            handleBlocked(e);
+            handleBlockedAfterTerminalClaimed();
             return;
         }
 
-        String finalApproved = answerSession != null ? answerSession.approvedText() : "";
-        String finalReasoning = reasoningSession != null ? reasoningSession.approvedText() : "";
+        String finalApproved = answerSession != null ? answerSession.approvedText() : directAnswer.toString();
+        String finalReasoning = reasoningSession != null ? reasoningSession.approvedText() : directReasoning.toString();
 
         if (onCompleteConsumer != null) {
             AiMessage msg = new AiMessage();
@@ -135,8 +150,16 @@ public class ModeratedResponseHandler {
         }
     }
 
-    private void handleBlocked(ModerationBlockedException e) {
+    private void handleBlocked() {
+        if (!terminal.compareAndSet(false, true)) {
+            return;
+        }
+        handleBlockedAfterTerminalClaimed();
+    }
+
+    private void handleBlockedAfterTerminalClaimed() {
         isCancelled.set(true);
+        AiObservability.recordTerminal("content_filtered");
         log.warn("AI 输出流触发安全策略已被熔断截断");
 
         if (sseSender != null) {
@@ -170,6 +193,9 @@ public class ModeratedResponseHandler {
                 sseSender.send("status", "");
             }
         }
+        if (answerSession == null) {
+            directAnswer.append(chunk);
+        }
         String escaped = chunk.replace("\n", "__SSE_NEWLINE__");
         if (sseSender != null) {
             sseSender.send("message", escaped);
@@ -179,6 +205,9 @@ public class ModeratedResponseHandler {
     private void sendDirectReasoning(String chunk) {
         if (chunk == null || chunk.isEmpty()) {
             return;
+        }
+        if (reasoningSession == null) {
+            directReasoning.append(chunk);
         }
         String escaped = chunk.replace("\n", "__SSE_NEWLINE__");
         if (sseSender != null) {

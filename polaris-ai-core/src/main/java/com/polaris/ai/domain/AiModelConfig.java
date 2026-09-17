@@ -1,6 +1,7 @@
 package com.polaris.ai.domain;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.polaris.common.annotation.Sensitive;
@@ -155,4 +156,14 @@ public class AiModelConfig extends BaseEntity
     @Schema(description = "删除标志（0代表存在 2代表删除）")
     @TableLogic(value = "0", delval = "2")
     private String delFlag;
+
+    /** 是否已配置 API Key (前端判断标记) */
+    @Schema(description = "是否已配置 API Key")
+    @TableField(exist = false)
+    private Boolean hasApiKey;
+
+    /** 是否已配置联网搜索 Key (前端判断标记) */
+    @Schema(description = "是否已配置联网搜索 Key")
+    @TableField(exist = false)
+    private Boolean hasSearchKey;
 }

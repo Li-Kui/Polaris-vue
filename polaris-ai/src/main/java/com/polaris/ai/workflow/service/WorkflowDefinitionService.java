@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.compiler.WorkflowDefinitionCompiler;
@@ -23,6 +21,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.*;
 
@@ -180,6 +180,27 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     }
 
     @Override
+    public WorkflowCompilationResult validateDraft(Long definitionId, String definitionJson) {
+        requireEnabled();
+        WorkflowDefinition definition = requireDefinition(definitionId);
+        return compiler.compile(requireDefinitionJson(definitionJson),
+                "draft:" + definition.getId() + ":preview");
+    }
+
+    @Override
+    public WorkflowCompilationResult validateDraft(String definitionJson) {
+        requireEnabled();
+        return compiler.compile(requireDefinitionJson(definitionJson), "draft:preview");
+    }
+
+    private String requireDefinitionJson(String definitionJson) {
+        if (definitionJson == null || definitionJson.isBlank()) {
+            throw new ServiceException("工作流定义不能为空");
+        }
+        return definitionJson;
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkflowPublishResult publish(Long definitionId, WorkflowPublishCommand command) {
         requireEnabled();
@@ -319,10 +340,10 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         }
         WorkflowDefinition source = requireDefinition(definitionId);
         try {
-            com.fasterxml.jackson.databind.node.ObjectNode root =
-                    (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(
+            tools.jackson.databind.node.ObjectNode root =
+                    (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(
                             source.getDraftJson());
-            com.fasterxml.jackson.databind.node.ObjectNode metadata = root.with("metadata");
+            tools.jackson.databind.node.ObjectNode metadata = root.withObject("metadata");
             metadata.put("code", command.workflowCode().trim());
             metadata.put("name", command.workflowName().trim());
             return createDraft(new WorkflowDraftCommand(
@@ -370,8 +391,8 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         try {
             JsonNode nodes = objectMapper.readTree(definitionJson).path("nodes");
             for (JsonNode node : nodes) {
-                if (!"approval".equals(node.path("type").asText())) continue;
-                String nodeId = node.path("id").asText();
+                if (!"approval".equals(node.path("type").asString())) continue;
+                String nodeId = node.path("id").asString();
                 JsonNode config = node.path("config");
                 int stageIndex = 0;
                 for (JsonNode stage : config.path("stages")) {
@@ -383,7 +404,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
                             stage.path("fallbackTargets"), false, diagnostics);
                     stageIndex++;
                 }
-                if ("REASSIGN".equals(config.path("expirationPolicy").path("action").asText())) {
+                if ("REASSIGN".equals(config.path("expirationPolicy").path("action").asString())) {
                     validateTargetSet(resolver, tenantId, nodeId,
                             "$.nodes." + nodeId + ".config.expirationPolicy.targets",
                             config.path("expirationPolicy").path("targets"), true, diagnostics);
@@ -411,9 +432,9 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         }
         for (JsonNode target : targets) {
             List<String> ids = new ArrayList<>();
-            target.path("ids").forEach(id -> ids.add(id.asText()));
+            target.path("ids").forEach(id -> ids.add(id.asString()));
             WorkflowApprovalTarget value = new WorkflowApprovalTarget(
-                    target.path("type").asText(), ids,
+                    target.path("type").asString(), ids,
                     target.path("includeChildren").asBoolean(false));
             try {
                 if (resolver.resolve(tenantId, List.of(value)).isEmpty()) {
@@ -446,9 +467,9 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         try {
             JsonNode root = objectMapper.readTree(definitionJson);
             JsonNode metadata = root.path("metadata");
-            String schemaVersion = root.path("schemaVersion").asText();
-            String code = metadata.path("code").asText();
-            String name = metadata.path("name").asText();
+            String schemaVersion = root.path("schemaVersion").asString();
+            String code = metadata.path("code").asString();
+            String name = metadata.path("name").asString();
             if (!WorkflowSchemaVersions.DEFINITION.equals(schemaVersion)) {
                 throw new ServiceException("仅支持 WorkflowDefinition schemaVersion 2.0");
             }
@@ -459,7 +480,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
                 throw new ServiceException("工作流名称不能为空且不能超过128个字符");
             }
             String description = metadata.path("description").isMissingNode()
-                    ? null : metadata.path("description").asText();
+                    ? null : metadata.path("description").asString();
             String tagsJson = metadata.path("tags").isArray()
                     ? objectMapper.writeValueAsString(metadata.path("tags")) : "[]";
             return new DraftMetadata(schemaVersion, code, name, description, tagsJson);

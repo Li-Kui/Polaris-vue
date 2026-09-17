@@ -1,8 +1,8 @@
 package com.polaris.ai.workflow.node;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.*;
 import java.time.format.DateTimeParseException;
@@ -30,13 +30,13 @@ public final class WorkflowWaitPolicy {
         if (config == null || !config.isObject()) {
             throw invalid("WAIT_CONFIG_INVALID", "等待节点配置不存在");
         }
-        if (!"2.0".equals(config.path("configVersion").asText())) {
+        if (!"2.0".equals(config.path("configVersion").asString())) {
             throw invalid("WAIT_CONFIG_INVALID", "等待节点仅支持当前配置版本 2.0");
         }
         JsonNode schedule = config.path("schedule");
         JsonNode source = schedule.path("source");
-        String kind = schedule.path("kind").asText();
-        String sourceKind = source.path("kind").asText();
+        String kind = schedule.path("kind").asString();
+        String sourceKind = source.path("kind").asString();
         if (!Set.of("AFTER", "AT").contains(kind)
                 || !Set.of("FIXED", "INPUT").contains(sourceKind)) {
             throw invalid("WAIT_CONFIG_INVALID", "请选择有效的等待方式和时间来源");
@@ -49,11 +49,11 @@ public final class WorkflowWaitPolicy {
         }
 
         Instant targetAt;
-        String timezone = source.path("timezone").asText(DEFAULT_TIMEZONE);
+        String timezone = source.path("timezone").asString(DEFAULT_TIMEZONE);
         ZoneId zone = zoneId(timezone);
         if ("AFTER".equals(kind)) {
             long amount = durationAmount(source, input, sourceKind);
-            String unit = source.path("unit").asText();
+            String unit = source.path("unit").asString();
             if (!UNITS.contains(unit)) {
                 throw invalid("WAIT_INPUT_INVALID", "请选择秒、分钟、小时或天作为等待单位");
             }
@@ -72,7 +72,7 @@ public final class WorkflowWaitPolicy {
                 ? fixedTarget(source, zone) : inputTarget(input, zone);
         long waitMillis = durationMillis(enteredAt, targetAt);
         if (waitMillis <= 0) {
-            if ("FAIL".equals(config.path("pastDuePolicy").asText("CONTINUE"))) {
+            if ("FAIL".equals(config.path("pastDuePolicy").asString("CONTINUE"))) {
                 throw invalid("WAIT_TARGET_PAST", "目标时间已经过去，当前策略要求节点失败");
             }
             return new Resolution(
@@ -109,16 +109,16 @@ public final class WorkflowWaitPolicy {
 
     public static Resolution restore(JsonNode waitingOutput) {
         try {
-            Instant enteredAt = Instant.parse(waitingOutput.path("enteredAt").asText());
-            Instant targetAt = Instant.parse(waitingOutput.path("targetAt").asText());
+            Instant enteredAt = Instant.parse(waitingOutput.path("enteredAt").asString());
+            Instant targetAt = Instant.parse(waitingOutput.path("targetAt").asString());
             return new Resolution(
-                    waitingOutput.path("mode").asText("AFTER"),
-                    waitingOutput.path("sourceType").asText("FIXED"),
+                    waitingOutput.path("mode").asString("AFTER"),
+                    waitingOutput.path("sourceType").asString("FIXED"),
                     enteredAt, targetAt,
                     Math.max(0, durationMillis(enteredAt, targetAt)),
                     waitingOutput.path("pastDue").asBoolean(false),
                     waitingOutput.path("skipped").asBoolean(false),
-                    waitingOutput.path("timezone").asText(DEFAULT_TIMEZONE));
+                    waitingOutput.path("timezone").asString(DEFAULT_TIMEZONE));
         } catch (DateTimeParseException exception) {
             throw invalid("WAIT_STATE_INVALID", "等待节点的持久化时间状态无法恢复");
         }
@@ -156,7 +156,7 @@ public final class WorkflowWaitPolicy {
     }
 
     private static Instant fixedTarget(JsonNode source, ZoneId timezone) {
-        String value = source.path("localDateTime").asText();
+        String value = source.path("localDateTime").asString();
         if (value.isBlank()) {
             throw invalid("WAIT_INPUT_INVALID", "请选择目标日期和时间");
         }
@@ -169,10 +169,10 @@ public final class WorkflowWaitPolicy {
 
     private static Instant inputTarget(JsonNode input, ZoneId timezone) {
         JsonNode value = input == null ? null : input.get("targetAt");
-        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+        if (value == null || !value.isString() || value.asString().isBlank()) {
             throw invalid("WAIT_INPUT_INVALID", "没有获取到目标时间，请检查上游字段");
         }
-        String text = value.asText().trim();
+        String text = value.asString().trim();
         try {
             return Instant.parse(text);
         } catch (DateTimeParseException ignored) {

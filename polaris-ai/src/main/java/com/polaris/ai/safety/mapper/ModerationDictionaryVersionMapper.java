@@ -10,6 +10,14 @@ import java.util.List;
 @Mapper
 public interface ModerationDictionaryVersionMapper extends BaseMapper<ModerationDictionaryVersion> {
     @Select("""
+            SELECT id
+            FROM ai_moderation_dictionary_version
+            WHERE published_slot = 1
+            LIMIT 1
+            """)
+    Long selectPublishedVersionId();
+
+    @Select("""
             SELECT id, version_no, checksum, status, source_version, source_location,
                    published_by, published_time, create_time, update_time
             FROM ai_moderation_dictionary_version

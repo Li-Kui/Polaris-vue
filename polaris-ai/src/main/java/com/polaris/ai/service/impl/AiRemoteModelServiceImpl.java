@@ -1,11 +1,12 @@
 package com.polaris.ai.service.impl;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.dto.FetchModelsRequest;
 import com.polaris.ai.service.IAiRemoteModelService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -34,11 +35,26 @@ public class AiRemoteModelServiceImpl implements IAiRemoteModelService {
     /** Ollama 默认地址 */
     private static final String OLLAMA_DEFAULT_URL = "http://localhost:11434";
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private com.polaris.ai.service.IAiModelConfigService modelConfigService;
 
     @Override
     public List<String> fetchRemoteModels(FetchModelsRequest req) {
         String provider = req.getProvider().trim().toLowerCase();
+        if (req.getModelId() != null && (req.getApiKey() == null || req.getApiKey().trim().isEmpty() || req.getApiKey().matches("^\\*+$"))) {
+            com.polaris.ai.domain.AiModelConfig existing = modelConfigService.selectModelConfigById(req.getModelId());
+            if (existing != null) {
+                if (existing.getApiKey() != null && !existing.getApiKey().trim().isEmpty()) {
+                    req.setApiKey(existing.getApiKey());
+                }
+                if ((req.getBaseUrl() == null || req.getBaseUrl().trim().isEmpty()) && existing.getBaseUrl() != null) {
+                    req.setBaseUrl(existing.getBaseUrl());
+                }
+            }
+        }
         String resolvedUrl = resolveBaseUrl(provider, req.getBaseUrl());
         String apiKey = resolveApiKey(provider, req.getApiKey());
 
@@ -169,15 +185,15 @@ public class AiRemoteModelServiceImpl implements IAiRemoteModelService {
     private List<String> parseModelIds(String responseBody) {
         List<String> result = new ArrayList<>();
         try {
-            JsonNode root = OBJECT_MAPPER.readTree(responseBody);
+            JsonNode root = objectMapper.readTree(responseBody);
 
             // 标准 OpenAI 格式: { "data": [...] }
             JsonNode dataNode = root.get("data");
             if (dataNode != null && dataNode.isArray()) {
                 for (JsonNode model : dataNode) {
                     JsonNode idNode = model.get("id");
-                    if (idNode != null && !idNode.asText().isEmpty()) {
-                        result.add(idNode.asText());
+                    if (idNode != null && !idNode.asString().isEmpty()) {
+                        result.add(idNode.asString());
                     }
                 }
             }
@@ -188,8 +204,8 @@ public class AiRemoteModelServiceImpl implements IAiRemoteModelService {
                 if (modelsNode != null && modelsNode.isArray()) {
                     for (JsonNode model : modelsNode) {
                         JsonNode nameNode = model.get("name");
-                        if (nameNode != null && !nameNode.asText().isEmpty()) {
-                            result.add(nameNode.asText());
+                        if (nameNode != null && !nameNode.asString().isEmpty()) {
+                            result.add(nameNode.asString());
                         }
                     }
                 }

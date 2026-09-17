@@ -1,11 +1,5 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.NullNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.application.WorkflowArtifactView;
 import com.polaris.ai.workflow.compiler.WorkflowExpressionParser;
 import com.polaris.ai.workflow.domain.WorkflowApprovalAssignment;
@@ -17,6 +11,12 @@ import com.polaris.ai.workflow.spi.WorkflowApprovalPrincipal;
 import com.polaris.ai.workflow.spi.WorkflowApprovalTarget;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.NullNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.time.*;
@@ -118,28 +118,28 @@ public class WorkflowApprovalV2Factory {
         snapshot.put("initiatorName", principalName(execution));
         snapshot.put("createdAt", now.getTime());
         snapshot.put("title", renderTemplate(
-                content.path("titleTemplate").asText("请审批当前工作流任务"), context));
+                content.path("titleTemplate").asString("请审批当前工作流任务"), context));
         snapshot.put("description", renderTemplate(
-                content.path("descriptionTemplate").asText(""), context));
+                content.path("descriptionTemplate").asString(""), context));
         ArrayNode fields = snapshot.putArray("fields");
         for (JsonNode configured : content.path("fields")) {
             ObjectNode item = fields.addObject();
-            item.put("key", configured.path("key").asText());
-            item.put("label", configured.path("label").asText());
-            item.put("displayType", configured.path("displayType").asText("TEXT"));
-            String mask = configured.path("mask").asText("NONE");
+            item.put("key", configured.path("key").asString());
+            item.put("label", configured.path("label").asString());
+            item.put("displayType", configured.path("displayType").asString("TEXT"));
+            String mask = configured.path("mask").asString("NONE");
             item.put("mask", mask);
             JsonNode source = configured.path("source");
             boolean fixedValue = source.has("value");
             JsonNode value = fixedValue
                     ? source.get("value")
-                    : evaluatePathRaw(source.path("expression").asText(), context);
+                    : evaluatePathRaw(source.path("expression").asString(), context);
             boolean available = fixedValue || value != null && !value.isMissingNode();
             item.put("available", available);
             if (!available) item.put("unavailableReason", "运行数据中没有找到该字段");
             if (!available) value = NullNode.instance;
             item.set("value", mask(safeSnapshotValue(value, 0), mask,
-                    configured.path("maskPattern").asText("")));
+                    configured.path("maskPattern").asString("")));
         }
         String json = writeJson(snapshot);
         if (json.getBytes(StandardCharsets.UTF_8).length > MAX_CONTENT_BYTES) {
@@ -153,7 +153,7 @@ public class WorkflowApprovalV2Factory {
             compact.put("executionId", execution.getExecutionId());
             compact.put("workflowCode", execution.getWorkflowCode());
             compact.put("nodeRunId", nodeRunId);
-            compact.put("title", snapshot.path("title").asText());
+            compact.put("title", snapshot.path("title").asString());
             compact.put("description", "审批内容较大，已保存为受权限保护的工作流产物");
             compact.put("artifactId", artifact.artifactId());
             compact.put("artifactFileName", artifact.fileName());
@@ -167,7 +167,7 @@ public class WorkflowApprovalV2Factory {
     private String principalName(WorkflowExecution execution) {
         try {
             JsonNode principal = objectMapper.readTree(execution.getPrincipalSnapshot());
-            String username = principal.path("username").asText("").trim();
+            String username = principal.path("username").asString("").trim();
             return username.isEmpty() ? "工作流发起人" : username;
         } catch (Exception exception) {
             return "工作流发起人";
@@ -180,7 +180,7 @@ public class WorkflowApprovalV2Factory {
         while (matcher.find()) {
             JsonNode value = evaluatePath(matcher.group(1).trim(), context);
             String replacement = value == null || value.isNull() || value.isMissingNode()
-                    ? "" : value.isValueNode() ? value.asText() : value.toString();
+                    ? "" : value.isValueNode() ? value.asString() : value.toString();
             matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(result);
@@ -195,7 +195,7 @@ public class WorkflowApprovalV2Factory {
     private JsonNode evaluatePathRaw(String expression, JsonNode context) {
         if (expression == null || expression.isBlank()) return NullNode.instance;
         JsonNode ast = expressionParser.parse(expression);
-        if (!"path".equals(ast.path("type").asText())) {
+        if (!"path".equals(ast.path("type").asString())) {
             throw new IllegalArgumentException("审批单字段只允许读取变量路径");
         }
         JsonNode value = expressionEvaluator.evaluate(ast, context);
@@ -204,12 +204,12 @@ public class WorkflowApprovalV2Factory {
 
     private JsonNode safeSnapshotValue(JsonNode value, int depth) {
         if (value == null || value.isNull()) return NullNode.instance;
-        if (depth >= 10 && value.isContainerNode()) {
-            return objectMapper.getNodeFactory().textNode("[内容层级超过10层，已省略]");
+        if (depth >= 10 && value.isContainer()) {
+            return objectMapper.getNodeFactory().stringNode("[内容层级超过10层，已省略]");
         }
-        if (value.isTextual()) {
-            String text = value.asText();
-            return objectMapper.getNodeFactory().textNode(
+        if (value.isString()) {
+            String text = value.asString();
+            return objectMapper.getNodeFactory().stringNode(
                     text.length() > 5000 ? text.substring(0, 5000) + "…" : text);
         }
         if (value.isArray()) {
@@ -219,7 +219,7 @@ public class WorkflowApprovalV2Factory {
         }
         if (value.isObject()) {
             ObjectNode result = objectMapper.createObjectNode();
-            value.fields().forEachRemaining(entry ->
+            value.properties().forEach(entry ->
                     result.set(entry.getKey(), safeSnapshotValue(entry.getValue(), depth + 1)));
             return result;
         }
@@ -228,15 +228,15 @@ public class WorkflowApprovalV2Factory {
 
     private JsonNode mask(JsonNode value, String policy, String pattern) {
         if (value == null || value.isNull()) return NullNode.instance;
-        String text = value.isValueNode() ? value.asText() : value.toString();
+        String text = value.isValueNode() ? value.asString() : value.toString();
         return switch (policy) {
-            case "HIDDEN" -> objectMapper.getNodeFactory().textNode("******");
-            case "PARTIAL" -> objectMapper.getNodeFactory().textNode(
+            case "HIDDEN" -> objectMapper.getNodeFactory().stringNode("******");
+            case "PARTIAL" -> objectMapper.getNodeFactory().stringNode(
                     partial(text));
-            case "PHONE" -> objectMapper.getNodeFactory().textNode(maskPhone(text));
-            case "EMAIL" -> objectMapper.getNodeFactory().textNode(maskEmail(text));
-            case "ID_CARD" -> objectMapper.getNodeFactory().textNode(maskIdCard(text));
-            case "CUSTOM" -> objectMapper.getNodeFactory().textNode(maskCustom(text, pattern));
+            case "PHONE" -> objectMapper.getNodeFactory().stringNode(maskPhone(text));
+            case "EMAIL" -> objectMapper.getNodeFactory().stringNode(maskEmail(text));
+            case "ID_CARD" -> objectMapper.getNodeFactory().stringNode(maskIdCard(text));
+            case "CUSTOM" -> objectMapper.getNodeFactory().stringNode(maskCustom(text, pattern));
             default -> value.deepCopy();
         };
     }
@@ -287,7 +287,7 @@ public class WorkflowApprovalV2Factory {
         try {
             JsonNode config = objectMapper.readTree(instance.getConfigSnapshot());
             return activate(instance, config, zeroBasedStageIndex, initiatorId, new Date());
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalArgumentException("审批配置快照已损坏", ex);
         }
     }
@@ -304,7 +304,7 @@ public class WorkflowApprovalV2Factory {
             stage.set("targets", objectMapper.valueToTree(replacementTargets));
             stage.set("fallbackTargets", objectMapper.createArrayNode());
             return activate(instance, config, zeroBasedStageIndex, initiatorId, new Date());
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalArgumentException("审批配置快照已损坏", ex);
         }
     }
@@ -312,7 +312,7 @@ public class WorkflowApprovalV2Factory {
     public int stageCount(WorkflowApprovalInstance instance) {
         try {
             return objectMapper.readTree(instance.getConfigSnapshot()).path("stages").size();
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalArgumentException("审批配置快照已损坏", ex);
         }
     }
@@ -355,7 +355,7 @@ public class WorkflowApprovalV2Factory {
         }
 
         JsonNode policy = stageConfig.path("decisionPolicy");
-        String mode = policy.path("mode").asText("ANY").toUpperCase(Locale.ROOT);
+        String mode = policy.path("mode").asString("ANY").toUpperCase(Locale.ROOT);
         if (!List.of("ANY", "ALL", "N_OF_M").contains(mode)) {
             throw new IllegalArgumentException("不支持的多人审批模式：" + mode);
         }
@@ -370,9 +370,9 @@ public class WorkflowApprovalV2Factory {
         stage.setTenantId(instance.getTenantId());
         stage.setStageInstanceId(UUID.randomUUID().toString());
         stage.setApprovalInstanceId(instance.getApprovalInstanceId());
-        stage.setStageKey(stageConfig.path("id").asText("stage_" + (zeroBasedStageIndex + 1)));
+        stage.setStageKey(stageConfig.path("id").asString("stage_" + (zeroBasedStageIndex + 1)));
         stage.setSequenceNo(zeroBasedStageIndex + 1);
-        stage.setStageName(stageConfig.path("name").asText("第" + (zeroBasedStageIndex + 1) + "级审批"));
+        stage.setStageName(stageConfig.path("name").asString("第" + (zeroBasedStageIndex + 1) + "级审批"));
         stage.setPolicySnapshot(writeJson(policy));
         stage.setRequiredApprovals(required);
         stage.setApprovedCount(0);
@@ -424,10 +424,10 @@ public class WorkflowApprovalV2Factory {
         }
         List<WorkflowApprovalTarget> result = new ArrayList<>();
         for (JsonNode item : node) {
-            String type = item.path("type").asText("").toUpperCase(Locale.ROOT);
+            String type = item.path("type").asString("").toUpperCase(Locale.ROOT);
             List<String> ids = new ArrayList<>();
             item.path("ids").forEach(id -> {
-                String value = id.asText("").trim();
+                String value = id.asString("").trim();
                 if (!value.isEmpty()) ids.add(value);
             });
             if (type.isBlank() || ids.isEmpty()) {
@@ -442,7 +442,7 @@ public class WorkflowApprovalV2Factory {
     private Date deadline(JsonNode node, Date from) {
         if (!node.isObject() || node.isEmpty() || node.isNull()) return null;
         long duration = node.path("duration").asLong(0);
-        String unit = node.path("unit").asText("HOUR").toUpperCase(Locale.ROOT);
+        String unit = node.path("unit").asString("HOUR").toUpperCase(Locale.ROOT);
         ChronoUnit chronoUnit = switch (unit) {
             case "MINUTE" -> ChronoUnit.MINUTES;
             case "HOUR" -> ChronoUnit.HOURS;
@@ -454,8 +454,8 @@ public class WorkflowApprovalV2Factory {
                 || value.compareTo(Duration.ofDays(365)) > 0) {
             throw new IllegalArgumentException("审批期限必须在1分钟到365天之间");
         }
-        if ("BUSINESS_DAY".equals(node.path("calendar").asText()) && "DAY".equals(unit)) {
-            ZoneId zone = zone(node.path("timezone").asText("TENANT"));
+        if ("BUSINESS_DAY".equals(node.path("calendar").asString()) && "DAY".equals(unit)) {
+            ZoneId zone = zone(node.path("timezone").asString("TENANT"));
             ZonedDateTime time = from.toInstant().atZone(zone);
             long remaining = duration;
             while (remaining > 0) {
@@ -472,7 +472,7 @@ public class WorkflowApprovalV2Factory {
         if (deadline == null || !reminder.path("enabled").asBoolean(false)) return null;
         long duration = reminder.path("beforeDuration").asLong(0);
         if (duration < 1) return null;
-        ChronoUnit unit = switch (reminder.path("beforeUnit").asText("HOUR")) {
+        ChronoUnit unit = switch (reminder.path("beforeUnit").asString("HOUR")) {
             case "MINUTE" -> ChronoUnit.MINUTES;
             case "DAY" -> ChronoUnit.DAYS;
             default -> ChronoUnit.HOURS;
@@ -500,7 +500,7 @@ public class WorkflowApprovalV2Factory {
 
     private static String resultMode(JsonNode config) {
         String mode = config.path("resultPolicy").path("mode")
-                .asText("SIMPLE").toUpperCase(Locale.ROOT);
+                .asString("SIMPLE").toUpperCase(Locale.ROOT);
         if (!List.of("SIMPLE", "BRANCH").contains(mode)) {
             throw new IllegalArgumentException("不支持的审批结果模式：" + mode);
         }
@@ -508,7 +508,7 @@ public class WorkflowApprovalV2Factory {
     }
 
     private static void requireV2(JsonNode config) {
-        if (!"2.0".equals(config.path("configVersion").asText())) {
+        if (!"2.0".equals(config.path("configVersion").asString())) {
             throw new IllegalArgumentException("不是V2审批配置");
         }
     }
@@ -516,7 +516,7 @@ public class WorkflowApprovalV2Factory {
     private String writeJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException ex) {
+        } catch (JacksonException ex) {
             throw new IllegalStateException("审批快照序列化失败", ex);
         }
     }

@@ -1,16 +1,17 @@
 package com.polaris.ai.safety.service;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.safety.model.ModerationRule;
 import com.polaris.ai.safety.model.RuleType;
 import com.polaris.ai.safety.rule.DictionarySnapshot;
 import com.polaris.ai.safety.rule.TextNormalizer;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -32,8 +33,9 @@ public class DictionarySeedSource {
             "id", "ruleType", "content", "normalizedContent", "category", "weight");
 
     private final InputFactory inputFactory;
-    private final ObjectMapper objectMapper = new ObjectMapper()
-            .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+    private final ObjectMapper objectMapper = JsonMapper.builderWithJackson2Defaults()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .build();
 
     public DictionarySeedSource() {
         this(() -> new ClassPathResource(RESOURCE_LOCATION).getInputStream());
@@ -109,8 +111,8 @@ public class DictionarySeedSource {
                 throw invalid("rule content must not normalize to blank");
             }
             JsonNode declaredNormalized = node.get("normalizedContent");
-            if (!declaredNormalized.isTextual()
-                    || !normalized.equals(declaredNormalized.textValue())) {
+            if (!declaredNormalized.isString()
+                    || !normalized.equals(declaredNormalized.stringValue())) {
                 throw invalid("normalizedContent must equal TextNormalizer output");
             }
             String category = requiredText(node, "category");
@@ -164,7 +166,7 @@ public class DictionarySeedSource {
 
     private static void requireExactKeys(JsonNode object, Set<String> expected, String context) {
         Set<String> actual = new HashSet<>();
-        object.fieldNames().forEachRemaining(actual::add);
+        object.propertyNames().forEach(actual::add);
         if (!actual.equals(expected)) {
             throw invalid(context + " must contain exactly " + expected);
         }
@@ -172,10 +174,10 @@ public class DictionarySeedSource {
 
     private static String requiredText(JsonNode node, String field) {
         JsonNode value = node.get(field);
-        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+        if (value == null || !value.isString() || value.stringValue().isBlank()) {
             throw invalid(field + " must be a non-empty string");
         }
-        return value.textValue();
+        return value.stringValue();
     }
 
     private static String sha256(String text) {

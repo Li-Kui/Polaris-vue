@@ -1,7 +1,7 @@
 package com.polaris.ai.workflow.runtime;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Data;
+import tools.jackson.databind.JsonNode;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -18,6 +18,8 @@ public class WorkflowRuntimeState {
     private Map<String, Integer> loopCounts = new LinkedHashMap<>();
     /** V2 循环按“节点 + 外层分支路径”隔离，支持嵌套和断点恢复。 */
     private Map<String, LoopState> loops = new LinkedHashMap<>();
+    /** V2 并行任务组按“节点 + 外层分支路径”隔离，防止嵌套执行串扰。 */
+    private Map<String, ParallelState> parallels = new LinkedHashMap<>();
     private Map<String, Integer> arrivals = new LinkedHashMap<>();
     private Map<String, BigDecimal> usage = new LinkedHashMap<>();
     private JsonNode approval;
@@ -47,6 +49,17 @@ public class WorkflowRuntimeState {
         private int total;
         private boolean completed;
         private String stopReason;
+    }
+
+    @Data
+    public static class ParallelState {
+        private String nodeId;
+        private String instanceKey;
+        private String parentBranchPath;
+        private Set<String> completedBranches = new LinkedHashSet<>();
+        private Map<String, JsonNode> results = new LinkedHashMap<>();
+        private boolean started;
+        private boolean completed;
     }
 
     @Data

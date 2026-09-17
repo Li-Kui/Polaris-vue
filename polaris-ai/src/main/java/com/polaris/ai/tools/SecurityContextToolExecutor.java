@@ -3,6 +3,7 @@ package com.polaris.ai.tools;
 import com.polaris.ai.context.SecurityCallerContext;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
+import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.tools.base.*;
 import com.polaris.ai.utils.SearchKeyHolder;
 import com.polaris.ai.utils.ToolSseHolder;
@@ -12,7 +13,9 @@ import com.polaris.common.utils.SecurityUtils;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
+import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
+import dev.langchain4j.service.tool.ToolExecutionResult;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,9 +30,12 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -413,11 +419,47 @@ public class SecurityContextToolExecutor {
 
         @Override
         public String execute(ToolExecutionRequest request, Object memoryId) {
+            return executeGuarded(
+                    request,
+                    () -> delegate.execute(request, memoryId),
+                    Function.identity(),
+                    (result, truncatedText) -> truncatedText);
+        }
+
+        @Override
+        public ToolExecutionResult executeWithContext(
+                ToolExecutionRequest request, InvocationContext invocationContext) {
+            return executeGuarded(
+                    request,
+                    () -> delegate.executeWithContext(request, invocationContext),
+                    result -> result == null ? null : result.resultText(),
+                    (result, truncatedText) -> result == null
+                            ? null
+                            : result.toBuilder().resultText(truncatedText).build());
+        }
+
+        /**
+         * 现有 Polaris 工具按同步方式执行。这里补齐 LangChain4j 异步契约，
+         * 并确保安全上下文和请求上下文安装在真正执行工具的工作线程上。
+         */
+        @Override
+        public CompletableFuture<ToolExecutionResult> executeAsync(
+                ToolExecutionRequest request, InvocationContext invocationContext) {
+            return CompletableFuture.supplyAsync(
+                    () -> executeWithContext(request, invocationContext));
+        }
+
+        private <T> T executeGuarded(
+                ToolExecutionRequest request,
+                ToolInvocation<T> invocation,
+                Function<T, String> resultTextExtractor,
+                BiFunction<T, String, T> resultTextUpdater) {
             SecurityContext previousContext = SecurityContextHolder.getContext();
             CallerContext previousCaller = CallerContextHolder.get();
             RequestAttributes previousAttributes = RequestContextHolder.getRequestAttributes();
             String toolName = request == null ? "unknown" : request.name();
             int callNo = 0;
+            long observationStartedAt = System.nanoTime();
             try {
                 try {
                     ensureNotCancelled();
@@ -491,9 +533,9 @@ public class SecurityContextToolExecutor {
                     throw new SecurityException("工作流智能体工具调用次数超过安全上限");
                 }
                 long startedAt = System.nanoTime();
-                String result;
+                T result;
                 try {
-                    result = delegate.execute(request, memoryId);
+                    result = invocation.execute();
                 } catch (RuntimeException | Error e) {
                     if (toolCallTracker != null) {
                         toolCallTracker.failed(toolName, callNo,
@@ -501,17 +543,25 @@ public class SecurityContextToolExecutor {
                     }
                     throw e;
                 }
+                String resultText = resultTextExtractor.apply(result);
                 boolean truncated = toolCallTracker != null
-                        && result != null && result.length() > maxToolResultChars;
+                        && resultText != null && resultText.length() > maxToolResultChars;
                 if (truncated) {
-                    result = result.substring(0, maxToolResultChars)
+                    String truncatedText = resultText.substring(0, maxToolResultChars)
                             + "\n[工具结果超过安全长度，已截断]";
+                    result = resultTextUpdater.apply(result, truncatedText);
                 }
                 if (toolCallTracker != null) {
                     toolCallTracker.succeeded(
                             toolName, callNo, elapsedMs(startedAt), truncated);
                 }
+                AiObservability.recordTool(
+                        toolName, elapsedMs(observationStartedAt), "success", "none");
                 return result;
+            } catch (RuntimeException | Error e) {
+                AiObservability.recordTool(
+                        toolName, elapsedMs(observationStartedAt), "failure", failureCode(e));
+                throw e;
             } finally {
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
                 ToolSseHolder.clear();
@@ -528,6 +578,11 @@ public class SecurityContextToolExecutor {
                 CallerContextHolder.clear();
                 CallerContextHolder.set(previousCaller);
             }
+        }
+
+        @FunctionalInterface
+        private interface ToolInvocation<T> {
+            T execute();
         }
 
         private void ensureNotCancelled() {
@@ -563,6 +618,9 @@ public class SecurityContextToolExecutor {
             if (error instanceof CancellationException
                     || Thread.currentThread().isInterrupted()) {
                 return "CANCELLED";
+            }
+            if (error.getMessage() != null && error.getMessage().contains("上限")) {
+                return "RATE_LIMITED";
             }
             if (error instanceof SecurityException) return "PERMISSION_DENIED";
             return "TOOL_EXECUTION_FAILED";

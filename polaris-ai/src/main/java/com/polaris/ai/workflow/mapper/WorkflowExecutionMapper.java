@@ -24,10 +24,16 @@ public interface WorkflowExecutionMapper extends BaseMapper<WorkflowExecution> {
     @Select("SELECT * FROM ai_workflow_execution WHERE execution_id = #{executionId} FOR UPDATE")
     WorkflowExecution selectByExecutionIdForUpdate(@Param("executionId") String executionId);
 
-    @Select("SELECT MIN(resume_time) FROM ai_workflow_execution "
+    @Select("SELECT MIN(next_action_time) FROM ("
+            + "SELECT MIN(create_time) AS next_action_time FROM ai_workflow_execution "
+            + "WHERE cancel_requested = 0 AND status = 'QUEUED' "
+            + "UNION ALL SELECT MIN(resume_time) FROM ai_workflow_execution "
             + "WHERE cancel_requested = 0 AND status IN ('WAITING_TIMER','WAITING_EVENT') "
-            + "AND resume_time IS NOT NULL")
-    Date selectNextResumeTime();
+            + "AND resume_time IS NOT NULL "
+            + "UNION ALL SELECT MIN(lease_until) FROM ai_workflow_execution "
+            + "WHERE cancel_requested = 0 AND status IN ('RUNNING','RECOVERING') "
+            + "AND lease_until IS NOT NULL) worker_actions")
+    Date selectNextWorkerActionTime();
 
     @Select("SELECT * FROM ai_workflow_execution "
             + "WHERE idempotency_scope = #{scope} AND idempotency_key = #{key} LIMIT 1")

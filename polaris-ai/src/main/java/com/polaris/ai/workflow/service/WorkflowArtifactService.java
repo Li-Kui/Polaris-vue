@@ -1,11 +1,11 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.workflow.application.WorkflowArtifactApplicationFacade;
 import com.polaris.ai.workflow.application.WorkflowArtifactContent;
 import com.polaris.ai.workflow.application.WorkflowArtifactView;
+import com.polaris.ai.workflow.application.WorkflowExecutionEventAvailable;
+import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.domain.WorkflowArtifact;
 import com.polaris.ai.workflow.domain.WorkflowExecution;
 import com.polaris.ai.workflow.mapper.WorkflowArtifactMapper;
@@ -16,7 +16,12 @@ import com.polaris.common.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -36,24 +41,30 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
     private static final int DEFAULT_RETENTION_DAYS = 30;
     private static final Set<String> TERMINAL_EXECUTION_STATUSES =
             Set.of("SUCCEEDED", "FAILED", "CANCELLED", "REJECTED");
+    private static final Set<String> TERMINAL_EVENT_TYPES = Set.of(
+            "EXECUTION_SUCCEEDED", "EXECUTION_FAILED",
+            "EXECUTION_CANCELLED", "EXECUTION_REJECTED");
 
     private final WorkflowArtifactMapper artifactMapper;
     private final WorkflowExecutionMapper executionMapper;
     private final ObjectMapper objectMapper;
     private final WorkflowDataRedactor dataRedactor;
     private final WorkflowArtifactStorage artifactStorage;
+    private final WorkflowProperties workflowProperties;
 
     public WorkflowArtifactService(
             WorkflowArtifactMapper artifactMapper,
             WorkflowExecutionMapper executionMapper,
             ObjectMapper objectMapper,
             WorkflowDataRedactor dataRedactor,
-            WorkflowArtifactStorage artifactStorage) {
+            WorkflowArtifactStorage artifactStorage,
+            WorkflowProperties workflowProperties) {
         this.artifactMapper = artifactMapper;
         this.executionMapper = executionMapper;
         this.objectMapper = objectMapper;
         this.dataRedactor = dataRedactor;
         this.artifactStorage = artifactStorage;
+        this.workflowProperties = workflowProperties;
     }
 
     /** 保存节点内容；同一逻辑节点运行只允许产生一个内容一致的产物。 */
@@ -178,8 +189,8 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
         try {
             JsonNode redacted = dataRedactor.redact(value);
             if ("TEXT".equals(format)) {
-                content = (redacted != null && redacted.isTextual()
-                        ? redacted.asText() : objectMapper.writerWithDefaultPrettyPrinter()
+                content = (redacted != null && redacted.isString()
+                        ? redacted.asString() : objectMapper.writerWithDefaultPrettyPrinter()
                         .writeValueAsString(redacted)).getBytes(StandardCharsets.UTF_8);
             } else {
                 content = objectMapper.writerWithDefaultPrettyPrinter()
@@ -239,27 +250,25 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
     }
 
     /** 工作流结束后才开始计算保留期，到期后清理物理内容并保留可审计状态。 */
-    @Scheduled(fixedDelayString = "${ai.workflow.artifact-cleanup-poll-ms:60000}")
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public void onExecutionTerminal(WorkflowExecutionEventAvailable event) {
+        if (!TERMINAL_EVENT_TYPES.contains(event.eventType())) return;
+        assignExpiry(event.executionId(), new Date());
+    }
+
+    @Scheduled(fixedDelayString = "${ai.workflow.artifact-cleanup-poll-ms:3600000}")
+    @Transactional(rollbackFor = Exception.class)
     public void maintainArtifacts() {
+        if (!workflowProperties.isEnabled()) return;
         Date now = new Date();
         List<WorkflowArtifact> pendingExpiry = artifactMapper.selectList(
                 new LambdaQueryWrapper<WorkflowArtifact>()
                         .eq(WorkflowArtifact::getStatus, "AVAILABLE")
                         .isNull(WorkflowArtifact::getExpiresTime)
                         .last("LIMIT 200"));
-        for (WorkflowArtifact artifact : pendingExpiry) {
-            WorkflowExecution execution = executionMapper.selectByExecutionId(
-                    artifact.getExecutionId());
-            if (execution == null || !TERMINAL_EXECUTION_STATUSES.contains(execution.getStatus())) {
-                continue;
-            }
-            Date finishedAt = execution.getFinishTime() == null ? now : execution.getFinishTime();
-            int retentionDays = artifact.getRetentionDays() == null
-                    ? DEFAULT_RETENTION_DAYS : artifact.getRetentionDays();
-            artifact.setExpiresTime(new Date(finishedAt.getTime()
-                    + TimeUnit.DAYS.toMillis(retentionDays)));
-            artifactMapper.updateById(artifact);
-        }
+        pendingExpiry.stream().map(WorkflowArtifact::getExecutionId).distinct()
+                .forEach(executionId -> assignExpiry(executionId, now));
 
         List<WorkflowArtifact> expired = artifactMapper.selectList(
                 new LambdaQueryWrapper<WorkflowArtifact>()
@@ -280,6 +289,27 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
                 artifact.setStatus("AVAILABLE");
                 artifactMapper.updateById(artifact);
             }
+        }
+    }
+
+    private void assignExpiry(String executionId, Date fallbackFinishTime) {
+        WorkflowExecution execution = executionMapper.selectByExecutionId(executionId);
+        if (execution == null || !TERMINAL_EXECUTION_STATUSES.contains(execution.getStatus())) {
+            return;
+        }
+        Date finishedAt = execution.getFinishTime() == null
+                ? fallbackFinishTime : execution.getFinishTime();
+        List<WorkflowArtifact> artifacts = artifactMapper.selectList(
+                new LambdaQueryWrapper<WorkflowArtifact>()
+                        .eq(WorkflowArtifact::getExecutionId, executionId)
+                        .eq(WorkflowArtifact::getStatus, "AVAILABLE")
+                        .isNull(WorkflowArtifact::getExpiresTime));
+        for (WorkflowArtifact artifact : artifacts) {
+            int retentionDays = artifact.getRetentionDays() == null
+                    ? DEFAULT_RETENTION_DAYS : artifact.getRetentionDays();
+            artifact.setExpiresTime(new Date(finishedAt.getTime()
+                    + TimeUnit.DAYS.toMillis(retentionDays)));
+            artifactMapper.updateById(artifact);
         }
     }
 

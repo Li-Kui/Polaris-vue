@@ -116,7 +116,7 @@
                   
                   <div class="param-row code-info-row">
                     <span class="param-label"><el-icon><key /></el-icon> API Key</span>
-                    <span class="param-val code-text mask-text">{{ item.apiKey ? '••••••••••••••••' : '未设置' }}</span>
+                    <span class="param-val code-text mask-text">{{ (item.hasApiKey || item.apiKey) ? '••••••••••••••••' : '未设置' }}</span>
                   </div>
                   <div v-if="item.baseUrl" class="param-row code-info-row">
                     <span class="param-label"><el-icon><link-icon /></el-icon> API 地址</span>
@@ -391,7 +391,7 @@
             </el-form-item>
 
             <el-form-item label="API Key" prop="apiKey">
-              <el-input v-model="form.apiKey" placeholder="输入 API Key（脱敏存储）" show-password/>
+              <el-input v-model="form.apiKey" :placeholder="form.id && form.hasApiKey ? '已配置密钥（如需修改请输入新 Key，留空保持不变）' : '输入 API Key（脱敏存储）'" show-password/>
             </el-form-item>
 
             <el-form-item label="API Base URL">
@@ -544,7 +544,7 @@
               <!-- 联网搜索 Key 配置（联级显示） -->
               <el-col :span="12" v-if="form.modelType === 'CHAT' && enabledToolsArray && enabledToolsArray.includes('web_search')" style="margin-top: 10px;">
                 <el-form-item label="联网搜索 Key" prop="searchKey">
-                  <el-input v-model="form.searchKey" placeholder="输入 Tavily 等联网搜索的 API Key" show-password/>
+                  <el-input v-model="form.searchKey" :placeholder="form.id && form.hasSearchKey ? '已配置密钥（如需修改请输入新 Key，留空保持不变）' : '输入 Tavily 等联网搜索的 API Key'" show-password/>
                 </el-form-item>
               </el-col>
             </el-row>
@@ -723,12 +723,13 @@ export default {
     isPlatform() {
       return this.isPlatformMode();
     },
-    // 是否可以点击获取模型按钮：提供商必填 + (API Key 必填 || Ollama 无需 Key) + (OpenAI 中转必须填 URL)
+    // 是否可以点击获取模型按钮：提供商必填 + (API Key 必填 || Ollama 无需 Key || 编辑模式已有Key) + (OpenAI 中转必须填 URL)
     canFetchModels() {
       if (!this.form.provider) return false;
       if (this.form.provider === 'ollama') return true;
       // 中转站模式或 OpenAI 提供商必须填写 baseUrl
       if ((this.form.accessMode === 'relay' || this.form.provider === 'openai') && !this.form.baseUrl) return false;
+      if (this.form.id && (this.form.hasApiKey || this.form.apiKey)) return true;
       return !!this.form.apiKey;
     },
     enabledToolsArray: {
@@ -984,6 +985,7 @@ export default {
     handleFetchModels() {
       this.fetchingModels = true
       fetchRemoteModels({
+        modelId: this.form.id,
         provider: this.form.provider,
         apiKey: this.form.apiKey,
         baseUrl: this.form.baseUrl,

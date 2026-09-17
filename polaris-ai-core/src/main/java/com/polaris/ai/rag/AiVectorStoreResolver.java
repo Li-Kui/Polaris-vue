@@ -3,6 +3,7 @@ package com.polaris.ai.rag;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
+import com.polaris.ai.observability.ObservedEmbeddingStore;
 import com.polaris.ai.pivot.AiModelFactory;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -169,11 +170,12 @@ public class AiVectorStoreResolver
 
     private EmbeddingStore<TextSegment> buildQdrantStore(String collectionName)
     {
-        return QdrantEmbeddingStore.builder()
+        EmbeddingStore<TextSegment> store = QdrantEmbeddingStore.builder()
                 .client(qdrantClient)
                 .collectionName(collectionName)
                 .payloadTextKey(properties.getQdrant().getPayloadTextKey())
                 .build();
+        return new ObservedEmbeddingStore<>(store, collectionName);
     }
 
     private AiVectorStoreProperties.QdrantProperties copyQdrantProperties()

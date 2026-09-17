@@ -393,7 +393,8 @@ export default {
     directUpstreamNodeIds() {
       return new Set((this.definition.edges || [])
         .filter(edge => edge.target === this.selectedNode.id
-          && edge.targetPort !== 'loop-return')
+          && edge.targetPort !== 'loop-return'
+          && !String(edge.targetPort || '').startsWith('parallel-return:'))
         .map(edge => edge.source))
     },
     isHttpNode() {

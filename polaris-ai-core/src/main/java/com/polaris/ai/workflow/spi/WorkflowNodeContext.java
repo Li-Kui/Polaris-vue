@@ -1,6 +1,6 @@
 package com.polaris.ai.workflow.spi;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import java.util.Map;
 

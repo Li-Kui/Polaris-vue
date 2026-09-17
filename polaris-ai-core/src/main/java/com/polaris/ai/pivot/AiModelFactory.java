@@ -4,6 +4,9 @@ import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ModelType;
+import com.polaris.ai.observability.AiObservability;
+import com.polaris.ai.observability.ObservedEmbeddingModel;
+import com.polaris.ai.observability.ObservedStreamingChatModel;
 import com.polaris.ai.service.IAiModelConfigService;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -11,13 +14,16 @@ import dev.langchain4j.model.image.ImageModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiImageModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * 动态多模型工厂类
@@ -35,6 +41,10 @@ public class AiModelFactory
     private static final String DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     // DeepSeek 官方地址
     private static final String DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+    // 工作流快照可能持续产生新指纹，限制缓存数量可避免实例长期累积。
+    private static final int MAX_WORKFLOW_CHAT_CACHE_SIZE = 128;
+    // 工作流定义较长时间未再次执行时，惰性清理对应的快照模型。
+    private static final long WORKFLOW_CHAT_CACHE_IDLE_MILLIS = Duration.ofMinutes(30).toMillis();
     // 模型实例缓存，避免频繁从数据库查询及构建
     private final Map<String, StreamingChatModel> chatCache = new ConcurrentHashMap<>();
     private final Map<String, EmbeddingModel> embeddingCache = new ConcurrentHashMap<>();
@@ -47,15 +57,22 @@ public class AiModelFactory
     private final Map<String, EmbeddingModel> defaultEmbeddingCache = new ConcurrentHashMap<>();
     private final Map<String, ImageModel> defaultImageCache = new ConcurrentHashMap<>();
 
+    // 仅记录工作流快照模型，普通配置模型不参与容量淘汰。
+    private final Set<String> workflowChatCacheKeys = ConcurrentHashMap.newKeySet();
+    private final ConcurrentLinkedDeque<String> workflowChatCacheOrder = new ConcurrentLinkedDeque<>();
+    private final Map<String, Long> workflowChatLastAccess = new ConcurrentHashMap<>();
+
     @Autowired
     private IAiModelConfigService modelConfigService;
     @Autowired
     private AiModelProperties fileProps;
+    @Autowired
+    private AiObservability observability;
 
     /**
      * 清空全部大模型与向量模型缓存（模型配置增删改时调用）
      */
-    public void clearCache()
+    public synchronized void clearCache()
     {
         log.info(">>> 清空动态大模型与向量模型缓存");
         chatCache.clear();
@@ -65,16 +82,31 @@ public class AiModelFactory
         defaultChatCache.clear();
         defaultEmbeddingCache.clear();
         defaultImageCache.clear();
+        workflowChatCacheKeys.clear();
+        workflowChatCacheOrder.clear();
+        workflowChatLastAccess.clear();
     }
 
     /**
      * 清除指定模型配置的所有缓存（模型配置更新/删除时调用）
      */
-    public void evictCache(Long configId) {
+    public synchronized void evictCache(Long configId) {
         if (configId == null) return;
-        chatCache.remove("chat_" + configId);
+        String chatKey = "chat_" + configId;
+        String workflowChatPrefix = "workflow_chat_" + configId + "_";
+        chatCache.keySet().removeIf(key -> key.equals(chatKey)
+                || key.startsWith(workflowChatPrefix));
+        workflowChatCacheKeys.removeIf(key -> key.startsWith(workflowChatPrefix));
+        workflowChatCacheOrder.removeIf(key -> key.startsWith(workflowChatPrefix));
+        workflowChatLastAccess.keySet().removeIf(key -> key.startsWith(workflowChatPrefix));
         embeddingCache.remove("embed_" + configId);
         imageCache.remove("image_" + configId);
+        configCache.remove(configId);
+
+        // 默认模型按调用者范围缓存，无法从缓存键反查具体配置，因此统一失效。
+        defaultChatCache.clear();
+        defaultEmbeddingCache.clear();
+        defaultImageCache.clear();
         log.info(">>> 已清除模型配置缓存, configId={}", configId);
     }
 
@@ -155,8 +187,8 @@ public class AiModelFactory
             }
 
             if (cachedModel == null) {
-                cachedModel = getFallbackChatModel();
-                defaultChatCache.put(cacheKey, cachedModel);
+                cachedModel = new ObservedStreamingChatModel(
+                        getFallbackChatModel(), fileProps.getProvider(), fileProps.getModelName());
             }
         }
         return cachedModel;
@@ -258,8 +290,8 @@ public class AiModelFactory
             }
 
             if (cachedModel == null) {
-                cachedModel = getFallbackEmbeddingModel();
-                defaultEmbeddingCache.put(cacheKey, cachedModel);
+                cachedModel = new ObservedEmbeddingModel(
+                        getFallbackEmbeddingModel(), fileProps.getProvider(), "fallback-embedding");
             }
         }
         return cachedModel;
@@ -288,7 +320,7 @@ public class AiModelFactory
     }
 
     /**
-     * Returns the configured embedding dimension, probing and persisting it on first use when needed.
+     * 返回配置的向量维度；首次使用且未配置时自动探测并持久化。
      */
     public int ensureEmbeddingDimension(AiModelConfig config)
     {
@@ -299,9 +331,7 @@ public class AiModelFactory
         return probeEmbeddingDimension(config);
     }
 
-    /**
-     * Verifies the embedding endpoint and persists the provider's actual output dimension.
-     */
+    /** 校验向量端点，并持久化供应商实际返回的向量维度。 */
     public synchronized int probeEmbeddingDimension(AiModelConfig config)
     {
         if (config == null || config.getId() == null) {
@@ -420,8 +450,15 @@ public class AiModelFactory
         if (config == null || config.getId() == null) {
             throw new IllegalArgumentException("工作流模型快照不完整");
         }
-        String cacheKey = "workflow_chat_" + config.getId() + "_" + snapshotFingerprint;
-        return getChatModelInstance(config, cacheKey, requestTimeout);
+        String normalizedFingerprint = snapshotFingerprint == null ? "default" : snapshotFingerprint;
+        String timeoutFingerprint = requestTimeout == null
+                ? "default"
+                : requestTimeout.getSeconds() + "s_" + requestTimeout.getNano() + "n";
+        String cacheKey = "workflow_chat_" + config.getId() + "_"
+                + normalizedFingerprint + "_" + timeoutFingerprint;
+        StreamingChatModel model = getChatModelInstance(config, cacheKey, requestTimeout);
+        recordWorkflowChatCacheKey(cacheKey);
+        return model;
     }
 
     private StreamingChatModel getChatModelInstance(AiModelConfig config, String cacheKey)
@@ -432,109 +469,231 @@ public class AiModelFactory
     private StreamingChatModel getChatModelInstance(
             AiModelConfig config, String cacheKey, Duration requestTimeout)
     {
-        return chatCache.computeIfAbsent(cacheKey, key -> {
-            log.info(">>> 动态构建聊天模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
-            String provider = config.getProvider().toLowerCase();
-            
-            int maxTokens = config.getMaxTokens() != null ? config.getMaxTokens() : 2048;
-            double temperature = config.getTemperature() != null ? config.getTemperature() : 0.7;
-            Map<String, String> customHeaders = getCustomHeaders(config);
+        return chatCache.computeIfAbsent(cacheKey, key -> new ObservedStreamingChatModel(
+                buildStreamingChatModel(config, requestTimeout),
+                config.getProvider(), config.getModelName()));
+    }
 
-            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
-            if (config.isRelay()) {
-                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建聊天模型");
-                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
-                        ? config.getBaseUrl().trim() : null;
-                if (relayUrl == null) {
-                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
-                }
-                return OpenAiStreamingChatModel.builder()
-                        .baseUrl(relayUrl)
-                        .apiKey(config.getApiKey())
-                        .modelName(config.getModelName())
-                        .maxTokens(maxTokens)
-                        .temperature(temperature)
-                        .timeout(timeoutOrDefault(requestTimeout, 120))
-                        .customHeaders(customHeaders)
-                        .returnThinking("1".equals(config.getEnableThinking()))
-                        .build();
+    private StreamingChatModel buildStreamingChatModel(
+            AiModelConfig config, Duration requestTimeout)
+    {
+        log.info(">>> 动态构建聊天模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
+        String provider = config.getProvider().toLowerCase();
+
+        int maxTokens = config.getMaxTokens() != null ? config.getMaxTokens() : 2048;
+        double temperature = config.getTemperature() != null ? config.getTemperature() : 0.7;
+        Map<String, String> customHeaders = getCustomHeaders(config);
+
+        // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+        if (config.isRelay()) {
+            log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建聊天模型");
+            String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                    ? config.getBaseUrl().trim() : null;
+            if (relayUrl == null) {
+                throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
             }
+            return buildOpenAiStreamingModel(
+                    relayUrl,
+                    config.getApiKey(),
+                    config.getModelName(),
+                    maxTokens,
+                    temperature,
+                    timeoutOrDefault(requestTimeout, 120),
+                    customHeaders,
+                    "1".equals(config.getEnableThinking()));
+        }
 
-            switch (provider) {
+        switch (provider) {
                 case "dashscope":
                     String dashscopeUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : DASHSCOPE_BASE_URL;
-                    return OpenAiStreamingChatModel.builder()
-                            .baseUrl(dashscopeUrl)
-                            .apiKey(config.getApiKey())
-                            .modelName(config.getModelName())
-                            .maxTokens(maxTokens)
-                            .temperature(temperature)
-                            .timeout(timeoutOrDefault(requestTimeout, 120))
-                            .customHeaders(customHeaders)
-                            .returnThinking("1".equals(config.getEnableThinking()))
-                            .build();
+                    return buildOpenAiStreamingModel(
+                            dashscopeUrl,
+                            config.getApiKey(),
+                            config.getModelName(),
+                            maxTokens,
+                            temperature,
+                            timeoutOrDefault(requestTimeout, 120),
+                            customHeaders,
+                            "1".equals(config.getEnableThinking()));
 
                 case "openai":
-                    return OpenAiStreamingChatModel.builder()
-                            .baseUrl(config.getBaseUrl()) // 支持配置自定义端点
-                            .apiKey(config.getApiKey())
-                            .modelName(config.getModelName())
-                            .maxTokens(maxTokens)
-                            .temperature(temperature)
-                            .timeout(timeoutOrDefault(requestTimeout, 120))
-                            .customHeaders(customHeaders)
-                            .returnThinking("1".equals(config.getEnableThinking()))
-                            .build();
+                    return buildOpenAiStreamingModel(
+                            config.getBaseUrl(),
+                            config.getApiKey(),
+                            config.getModelName(),
+                            maxTokens,
+                            temperature,
+                            timeoutOrDefault(requestTimeout, 120),
+                            customHeaders,
+                            "1".equals(config.getEnableThinking()));
 
                 case "deepseek":
-                    return OpenAiStreamingChatModel.builder()
-                            .baseUrl(DEEPSEEK_BASE_URL)
-                            .apiKey(config.getApiKey())
-                            .modelName(config.getModelName())
-                            .maxTokens(maxTokens)
-                            .temperature(temperature)
-                            .timeout(timeoutOrDefault(requestTimeout, 120))
-                            .customHeaders(customHeaders)
-                            .returnThinking("1".equals(config.getEnableThinking()))
-                            .build();
+                    return buildOpenAiStreamingModel(
+                            DEEPSEEK_BASE_URL,
+                            config.getApiKey(),
+                            config.getModelName(),
+                            maxTokens,
+                            temperature,
+                            timeoutOrDefault(requestTimeout, 120),
+                            customHeaders,
+                            "1".equals(config.getEnableThinking()));
 
                 case "ollama":
                     String ollamaUrl = config.getBaseUrl() != null && !config.getBaseUrl().isEmpty() 
                             ? config.getBaseUrl() : "http://localhost:11434";
-                    return OpenAiStreamingChatModel.builder()
-                            .baseUrl(ollamaUrl + "/v1")
-                            .apiKey("ollama")
-                            .modelName(config.getModelName())
-                            .temperature(temperature)
-                            .timeout(timeoutOrDefault(requestTimeout, 180))
-                            .customHeaders(customHeaders)
-                            .returnThinking("1".equals(config.getEnableThinking()))
-                            .build();
+                    return buildOpenAiStreamingModel(
+                            ollamaUrl + "/v1",
+                            "ollama",
+                            config.getModelName(),
+                            null,
+                            temperature,
+                            timeoutOrDefault(requestTimeout, 180),
+                            customHeaders,
+                            "1".equals(config.getEnableThinking()));
 
                 case "ark":
                     String arkUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : "https://ark.cn-beijing.volces.com/api/v3";
-                    return OpenAiStreamingChatModel.builder()
-                            .baseUrl(arkUrl)
-                            .apiKey(config.getApiKey())
-                            .modelName(config.getModelName())
-                            .maxTokens(maxTokens)
-                            .temperature(temperature)
-                            .timeout(timeoutOrDefault(requestTimeout, 120))
-                            .customHeaders(customHeaders)
-                            .returnThinking("1".equals(config.getEnableThinking()))
-                            .build();
+                    return buildOpenAiStreamingModel(
+                            arkUrl,
+                            config.getApiKey(),
+                            config.getModelName(),
+                            maxTokens,
+                            temperature,
+                            timeoutOrDefault(requestTimeout, 120),
+                            customHeaders,
+                            "1".equals(config.getEnableThinking()));
 
-                default:
-                    throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
-            }
-        });
+            default:
+                throw new IllegalArgumentException("未知的 AI 提供商: " + provider);
+        }
+    }
+
+    /** 注册缓存实例数指标，便于及时发现配置快照异常增长。 */
+    @PostConstruct
+    public void bindCacheMetrics()
+    {
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "chat", chatCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "embedding", embeddingCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "image", imageCache::size);
+        AiObservability.bindGauge("polaris.ai.model.cache.instances", "config", configCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_chat", defaultChatCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_embedding", defaultEmbeddingCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "default_image", defaultImageCache::size);
+        AiObservability.bindGauge(
+                "polaris.ai.model.cache.instances", "workflow_chat", workflowChatCacheKeys::size);
     }
 
     private Duration timeoutOrDefault(Duration requestTimeout, long defaultSeconds)
     {
         return requestTimeout == null ? Duration.ofSeconds(defaultSeconds) : requestTimeout;
+    }
+
+    private StreamingChatModel buildOpenAiStreamingModel(
+            String baseUrl,
+            String apiKey,
+            String modelName,
+            Integer maxTokens,
+            Double temperature,
+            Duration timeout,
+            Map<String, String> customHeaders,
+            Boolean returnThinking)
+    {
+        OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
+                OpenAiStreamingChatModel.builder()
+                        .apiKey(apiKey)
+                        .modelName(modelName)
+                        .temperature(temperature)
+                        .timeout(timeout);
+        if (baseUrl != null) {
+            builder.baseUrl(baseUrl);
+        }
+        if (maxTokens != null) {
+            builder.maxTokens(maxTokens);
+        }
+        if (customHeaders != null) {
+            builder.customHeaders(customHeaders);
+        }
+        if (returnThinking != null) {
+            builder.returnThinking(returnThinking);
+        }
+        return builder.build();
+    }
+
+    /** 按空闲时间和创建顺序淘汰工作流快照模型，已返回给执行中的实例不受影响。 */
+    private synchronized void recordWorkflowChatCacheKey(String cacheKey)
+    {
+        // 配置刷新可能恰好发生在模型构建与登记之间，此时不再登记已被清除的实例。
+        if (!chatCache.containsKey(cacheKey)) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        workflowChatLastAccess.put(cacheKey, now);
+        evictIdleWorkflowChatModels(now, cacheKey);
+        if (!workflowChatCacheKeys.add(cacheKey)) {
+            return;
+        }
+        workflowChatCacheOrder.addLast(cacheKey);
+        while (workflowChatCacheKeys.size() > MAX_WORKFLOW_CHAT_CACHE_SIZE) {
+            String oldestKey = workflowChatCacheOrder.pollFirst();
+            if (oldestKey == null) {
+                return;
+            }
+            if (workflowChatCacheKeys.remove(oldestKey)) {
+                chatCache.remove(oldestKey);
+                workflowChatLastAccess.remove(oldestKey);
+            }
+        }
+    }
+
+    /** 惰性清理空闲快照，当前刚访问的键不参与本次清理。 */
+    private void evictIdleWorkflowChatModels(long now, String currentKey)
+    {
+        workflowChatLastAccess.forEach((key, lastAccess) -> {
+            if (!key.equals(currentKey)
+                    && now - lastAccess >= WORKFLOW_CHAT_CACHE_IDLE_MILLIS
+                    && workflowChatCacheKeys.remove(key)) {
+                Object idleModel = chatCache.remove(key);
+                workflowChatLastAccess.remove(key);
+                workflowChatCacheOrder.remove(key);
+                if (idleModel != null) {
+                    closeDistinctModels(List.of(idleModel));
+                }
+            }
+        });
+    }
+
+    /** 应用停止后统一释放未来可能实现 AutoCloseable 的模型客户端。 */
+    @PreDestroy
+    public synchronized void destroy()
+    {
+        List<Object> cachedModels = new ArrayList<>();
+        cachedModels.addAll(chatCache.values());
+        cachedModels.addAll(embeddingCache.values());
+        cachedModels.addAll(imageCache.values());
+        cachedModels.addAll(defaultChatCache.values());
+        cachedModels.addAll(defaultEmbeddingCache.values());
+        cachedModels.addAll(defaultImageCache.values());
+        clearCache();
+        closeDistinctModels(cachedModels);
+    }
+
+    private void closeDistinctModels(Collection<?> models)
+    {
+        Set<Object> closed = java.util.Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Object model : models) {
+            if (model instanceof AutoCloseable closeable && closed.add(model)) {
+                try {
+                    closeable.close();
+                } catch (Exception e) {
+                    log.warn(">>> 释放模型客户端失败: {}", model.getClass().getName(), e);
+                }
+            }
+        }
     }
 
     private Map<String, String> getCustomHeaders(AiModelConfig config)
@@ -552,23 +711,29 @@ public class AiModelFactory
     private EmbeddingModel getEmbeddingModelInstance(AiModelConfig config)
     {
         String cacheKey = "embed_" + config.getId();
-        return embeddingCache.computeIfAbsent(cacheKey, key -> {
-            log.info(">>> 动态构建向量模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
-            String provider = config.getProvider().toLowerCase();
-            String apiKey = config.getApiKey();
+        return embeddingCache.computeIfAbsent(cacheKey, key -> new ObservedEmbeddingModel(
+                buildEmbeddingModel(config), config.getProvider(), config.getModelName()));
+    }
 
-            // ── 中转站模式：统一用 OpenAI 兼容协议 ──
-            if (config.isRelay()) {
-                log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建向量模型");
-                String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
-                        ? config.getBaseUrl().trim() : null;
-                if (relayUrl == null) {
-                    throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
-                }
-                return buildOpenAiEmbeddingModel(config, relayUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
+    private EmbeddingModel buildEmbeddingModel(AiModelConfig config)
+    {
+        log.info(">>> 动态构建向量模型, 名称={}, 提供商={}", config.getName(), config.getProvider());
+        String provider = config.getProvider().toLowerCase();
+        String apiKey = config.getApiKey();
+
+        // ── 中转站模式：统一用 OpenAI 兼容协议 ──
+        if (config.isRelay()) {
+            log.info(">>> [中转站模式] 使用 OpenAI 兼容协议构建向量模型");
+            String relayUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
+                    ? config.getBaseUrl().trim() : null;
+            if (relayUrl == null) {
+                throw new IllegalArgumentException("中转站模式下必须填写 API Base URL");
             }
+            return buildOpenAiEmbeddingModel(
+                    config, relayUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
+        }
 
-            switch (provider) {
+        switch (provider) {
                 case "dashscope":
                     String dashscopeEmbedUrl = config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()
                             ? config.getBaseUrl().trim() : "https://dashscope.aliyuncs.com/compatible-mode/v1";
@@ -600,10 +765,9 @@ public class AiModelFactory
                     return buildOpenAiEmbeddingModel(
                             config, arkEmbedUrl, apiKey, config.getModelName(), Duration.ofSeconds(60));
 
-                default:
-                    throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
-            }
-        });
+            default:
+                throw new IllegalArgumentException("未知的向量模型提供商: " + provider);
+        }
     }
 
     private EmbeddingModel buildOpenAiEmbeddingModel(
@@ -688,52 +852,59 @@ public class AiModelFactory
         
         switch (provider) {
             case "dashscope":
-                return OpenAiStreamingChatModel.builder()
-                        .baseUrl(DASHSCOPE_BASE_URL)
-                        .apiKey(fileProps.getApiKey())
-                        .modelName(fileProps.getModelName())
-                        .maxTokens(fileProps.getMaxTokens())
-                        .temperature(fileProps.getTemperature())
-                        .timeout(Duration.ofSeconds(120))
-                        .build();
+                return buildOpenAiStreamingModel(
+                        DASHSCOPE_BASE_URL,
+                        fileProps.getApiKey(),
+                        fileProps.getModelName(),
+                        fileProps.getMaxTokens(),
+                        fileProps.getTemperature(),
+                        Duration.ofSeconds(120),
+                        null,
+                        null);
 
             case "openai":
-                return OpenAiStreamingChatModel.builder()
-                        .apiKey(fileProps.getApiKey())
-                        .modelName(fileProps.getModelName())
-                        .maxTokens(fileProps.getMaxTokens())
-                        .temperature(fileProps.getTemperature())
-                        .timeout(Duration.ofSeconds(120))
-                        .build();
+                return buildOpenAiStreamingModel(
+                        null,
+                        fileProps.getApiKey(),
+                        fileProps.getModelName(),
+                        fileProps.getMaxTokens(),
+                        fileProps.getTemperature(),
+                        Duration.ofSeconds(120),
+                        null,
+                        null);
 
             case "deepseek":
-                return OpenAiStreamingChatModel.builder()
-                        .baseUrl(DEEPSEEK_BASE_URL)
-                        .apiKey(fileProps.getApiKey())
-                        .modelName(fileProps.getModelName())
-                        .maxTokens(fileProps.getMaxTokens())
-                        .temperature(fileProps.getTemperature())
-                        .timeout(Duration.ofSeconds(120))
-                        .build();
+                return buildOpenAiStreamingModel(
+                        DEEPSEEK_BASE_URL,
+                        fileProps.getApiKey(),
+                        fileProps.getModelName(),
+                        fileProps.getMaxTokens(),
+                        fileProps.getTemperature(),
+                        Duration.ofSeconds(120),
+                        null,
+                        null);
 
             case "ollama":
-                return OpenAiStreamingChatModel.builder()
-                        .baseUrl(fileProps.getBaseUrl() + "/v1")
-                        .apiKey("ollama")
-                        .modelName(fileProps.getModelName())
-                        .temperature(fileProps.getTemperature())
-                        .timeout(Duration.ofSeconds(180))
-                        .build();
+                return buildOpenAiStreamingModel(
+                        fileProps.getBaseUrl() + "/v1",
+                        "ollama",
+                        fileProps.getModelName(),
+                        null,
+                        fileProps.getTemperature(),
+                        Duration.ofSeconds(180),
+                        null,
+                        null);
 
             case "ark":
-                return OpenAiStreamingChatModel.builder()
-                        .baseUrl("https://ark.cn-beijing.volces.com/api/v3")
-                        .apiKey(fileProps.getApiKey())
-                        .modelName(fileProps.getModelName())
-                        .maxTokens(fileProps.getMaxTokens())
-                        .temperature(fileProps.getTemperature())
-                        .timeout(Duration.ofSeconds(120))
-                        .build();
+                return buildOpenAiStreamingModel(
+                        "https://ark.cn-beijing.volces.com/api/v3",
+                        fileProps.getApiKey(),
+                        fileProps.getModelName(),
+                        fileProps.getMaxTokens(),
+                        fileProps.getTemperature(),
+                        Duration.ofSeconds(120),
+                        null,
+                        null);
 
             default:
                 throw new IllegalArgumentException("不支持的 AI provider: " + provider);

@@ -1,9 +1,5 @@
 package com.polaris.ai.workflow.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.workflow.node.WorkflowKnowledgeResourceHandle;
 import com.polaris.ai.workflow.spi.ResolvedWorkflowResource;
 import com.polaris.ai.workflow.spi.WorkflowNodeContext;
@@ -12,6 +8,10 @@ import dev.langchain4j.store.embedding.EmbeddingMatch;
 import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
 import dev.langchain4j.store.embedding.filter.Filter;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -47,7 +47,7 @@ public class WorkflowKnowledgeRetrievalService {
         int maxContextTokens = contextTokenBudget(config);
         double minScore = minimumScore(mode);
         boolean allowDegradation = "ALLOW".equalsIgnoreCase(
-                config.path("degradationPolicy").asText("DENY"));
+                config.path("degradationPolicy").asString("DENY"));
 
         List<ResolvedWorkflowResource> resources = context.resources().values().stream()
                 .filter(resource -> "KNOWLEDGE_BASE".equals(resource.kind()))
@@ -107,7 +107,7 @@ public class WorkflowKnowledgeRetrievalService {
                 candidates, resultLimit, maxChunksPerDocument, maxContextTokens);
         List<Candidate> selected = selection.candidates();
         if (selected.isEmpty() && "FAIL".equalsIgnoreCase(
-                config.path("emptyPolicy").asText("CONTINUE"))) {
+                config.path("emptyPolicy").asString("CONTINUE"))) {
             throw new IllegalStateException("没有找到符合条件的知识库资料");
         }
         return output(context, query, mode, traceId, resources.size(), successfulSourceCount,
@@ -277,14 +277,14 @@ public class WorkflowKnowledgeRetrievalService {
     }
 
     private static String requiredQuery(JsonNode input) {
-        String query = input == null ? "" : input.path("query").asText("").trim();
+        String query = input == null ? "" : input.path("query").asString("").trim();
         if (query.isBlank()) throw new IllegalArgumentException("请选择要检索的内容");
         if (query.length() > 4000) throw new IllegalArgumentException("检索内容不能超过4000个字符");
         return query;
     }
 
     private static String searchText(JsonNode input, String query) {
-        String context = input == null ? "" : input.path("searchContext").asText("").trim();
+        String context = input == null ? "" : input.path("searchContext").asString("").trim();
         if (context.length() > 8000) {
             throw new IllegalArgumentException("补充背景不能超过8000个字符");
         }
@@ -295,7 +295,7 @@ public class WorkflowKnowledgeRetrievalService {
         JsonNode filters = input == null ? null : input.get("filters");
         if (filters == null || filters.isNull()) return List.of();
         if (!filters.isObject()) throw new IllegalArgumentException("过滤条件必须是对象");
-        filters.fieldNames().forEachRemaining(field -> {
+        filters.propertyNames().forEach(field -> {
             if (!"documentIds".equals(field)) {
                 throw new IllegalArgumentException("不支持的过滤条件: " + field);
             }
@@ -306,14 +306,14 @@ public class WorkflowKnowledgeRetrievalService {
         if (values.size() > 100) throw new IllegalArgumentException("文档范围最多包含100项");
         List<String> result = new ArrayList<>();
         values.forEach(value -> {
-            String documentId = value.asText("").trim();
+            String documentId = value.asString("").trim();
             if (!documentId.isBlank() && !result.contains(documentId)) result.add(documentId);
         });
         return List.copyOf(result);
     }
 
     private static String retrievalMode(JsonNode config) {
-        String mode = config == null ? "BALANCED" : config.path("retrievalMode").asText("BALANCED");
+        String mode = config == null ? "BALANCED" : config.path("retrievalMode").asString("BALANCED");
         return switch (mode.toUpperCase()) {
             case "PRECISE", "BROAD" -> mode.toUpperCase();
             default -> "BALANCED";
@@ -321,7 +321,7 @@ public class WorkflowKnowledgeRetrievalService {
     }
 
     private static int contextTokenBudget(JsonNode config) {
-        String mode = config == null ? "AUTO" : config.path("contextBudgetMode").asText("AUTO");
+        String mode = config == null ? "AUTO" : config.path("contextBudgetMode").asString("AUTO");
         if (!"MANUAL".equalsIgnoreCase(mode)) return 4000;
         return bounded(config.path("maxContextTokens").asInt(4000), 256, 32000);
     }

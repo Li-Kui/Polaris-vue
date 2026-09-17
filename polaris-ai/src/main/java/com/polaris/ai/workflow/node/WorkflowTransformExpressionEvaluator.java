@@ -1,9 +1,9 @@
 package com.polaris.ai.workflow.node;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.BooleanNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.NullNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.BooleanNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.NullNode;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
@@ -93,8 +93,8 @@ final class WorkflowTransformExpressionEvaluator {
             while (true) {
                 if (match("+")) {
                     JsonNode right = parseMultiplicative();
-                    if (result.isTextual() || right.isTextual()) {
-                        result = JsonNodeFactory.instance.textNode(text(result) + text(right));
+                    if (result.isString() || right.isString()) {
+                        result = JsonNodeFactory.instance.stringNode(text(result) + text(right));
                     } else {
                         result = number(decimal(result).add(decimal(right)));
                     }
@@ -141,7 +141,7 @@ final class WorkflowTransformExpressionEvaluator {
                     return result;
                 }
                 if (peek('$')) return resolvePath(readPath());
-                if (peek('\'') || peek('"')) return JsonNodeFactory.instance.textNode(readString());
+                if (peek('\'') || peek('"')) return JsonNodeFactory.instance.stringNode(readString());
                 if (peekDigit() || peek('-') && nextIsDigit()) return readNumber();
                 if (matchWord("true")) return BooleanNode.TRUE;
                 if (matchWord("false")) return BooleanNode.FALSE;
@@ -288,9 +288,9 @@ final class WorkflowTransformExpressionEvaluator {
 
     private static BigDecimal decimal(JsonNode value) {
         if (value != null && value.isNumber()) return value.decimalValue();
-        if (value != null && value.isTextual()) {
+        if (value != null && value.isString()) {
             try {
-                return new BigDecimal(value.asText());
+                return new BigDecimal(value.asString());
             } catch (NumberFormatException ignored) {
                 // 统一使用下面的字段级错误。
             }
@@ -312,7 +312,7 @@ final class WorkflowTransformExpressionEvaluator {
 
     private static String text(JsonNode value) {
         if (value == null || value.isNull()) return "";
-        return value.isContainerNode() ? value.toString() : value.asText();
+        return value.isContainer() ? value.toString() : value.asString();
     }
 
     private static boolean equal(JsonNode left, JsonNode right) {
@@ -326,8 +326,8 @@ final class WorkflowTransformExpressionEvaluator {
         if (left != null && right != null && left.isNumber() && right.isNumber()) {
             return left.decimalValue().compareTo(right.decimalValue());
         }
-        if (left != null && right != null && left.isTextual() && right.isTextual()) {
-            return left.asText().compareTo(right.asText());
+        if (left != null && right != null && left.isString() && right.isString()) {
+            return left.asString().compareTo(right.asString());
         }
         throw new IllegalArgumentException("大小比较只支持数字或文本");
     }

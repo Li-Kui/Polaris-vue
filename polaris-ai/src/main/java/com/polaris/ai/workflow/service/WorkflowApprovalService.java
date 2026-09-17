@@ -1,10 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
@@ -21,6 +17,10 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.DayOfWeek;
 import java.time.Duration;
@@ -125,7 +125,9 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         if (preview == null || !Objects.equals(preview.getTenantId(), currentTenantId())) {
             throw new ServiceException("审批任务不存在或无权访问");
         }
-        return decideInstance(preview, command, decision);
+        WorkflowApprovalTaskView result = decideInstance(preview, command, decision);
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
+        return result;
     }
 
     @Override
@@ -215,7 +217,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
             active.put(principal.userId(), assignment);
         }
         JsonNode policy = readJson(stage.getPolicySnapshot());
-        String mode = policy.path("mode").asText("ANY");
+        String mode = policy.path("mode").asString("ANY");
         int required = "ALL".equals(mode) ? active.size()
                 : "N_OF_M".equals(mode) ? policy.path("requiredApprovals").asInt(0) : 1;
         if (required < 1 || required > active.size()) {
@@ -274,6 +276,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
                 Map.of("approvalInstanceId", instance.getApprovalInstanceId(),
                         "stageInstanceId", stage.getStageInstanceId(),
                         "operator", safeActorName(), "reason", reason));
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
         return view(instance, stage, operator);
     }
 
@@ -284,6 +287,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         }
         sendDueReminders();
         expireInstances();
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
     }
 
     @Override
@@ -389,6 +393,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         }
         auditManagementAction(locked, "APPROVAL_STAGE_RESTARTED",
                 command.reason(), principals);
+        eventPublisher.publishEvent(WorkflowApprovalScheduleChanged.REFRESH);
         return view(locked.instance(), activation.stage(), CallerUtils.getContext());
     }
 
@@ -508,7 +513,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         stage.setUpdateTime(now);
         JsonNode policy = readJson(stage.getPolicySnapshot());
         WorkflowApprovalDecisionEngine.Outcome outcome = decisionEngine.evaluate(
-                policy.path("mode").asText("ANY"), stage.getRequiredApprovals(),
+                policy.path("mode").asString("ANY"), stage.getRequiredApprovals(),
                 policy.path("rejectOnAny").asBoolean(false), approved, rejected, pending);
         persistence.appendEvent(execution.getExecutionId(), null, null,
                 "APPROVAL_DECIDED", instance.getNodeRunId(), null,
@@ -661,7 +666,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
     private void ensureReachable(WorkflowApprovalStage stage) {
         JsonNode policy = readJson(stage.getPolicySnapshot());
         WorkflowApprovalDecisionEngine.Outcome outcome = decisionEngine.evaluate(
-                policy.path("mode").asText("ANY"), stage.getRequiredApprovals(),
+                policy.path("mode").asString("ANY"), stage.getRequiredApprovals(),
                 policy.path("rejectOnAny").asBoolean(false),
                 value(stage.getApprovedCount()), value(stage.getRejectedCount()),
                 value(stage.getPendingCount()));
@@ -843,7 +848,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         if (config == null || !config.isObject() || !config.has("duration")) return null;
         long duration = config.path("duration").asLong(0);
         if (duration < 1) return null;
-        ChronoUnit unit = switch (config.path("unit").asText("HOUR")) {
+        ChronoUnit unit = switch (config.path("unit").asString("HOUR")) {
             case "MINUTE" -> ChronoUnit.MINUTES;
             case "DAY" -> ChronoUnit.DAYS;
             default -> ChronoUnit.HOURS;
@@ -854,9 +859,9 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
                     || value.compareTo(Duration.ofDays(365)) > 0) {
                 throw new ServiceException("审批期限必须在1分钟到365天之间");
             }
-            if ("BUSINESS_DAY".equals(config.path("calendar").asText())
-                    && "DAY".equals(config.path("unit").asText("HOUR"))) {
-                String configuredZone = config.path("timezone").asText("TENANT");
+            if ("BUSINESS_DAY".equals(config.path("calendar").asString())
+                    && "DAY".equals(config.path("unit").asString("HOUR"))) {
+                String configuredZone = config.path("timezone").asString("TENANT");
                 ZoneId zone = configuredZone.isBlank() || "TENANT".equals(configuredZone)
                         ? ZoneId.systemDefault() : ZoneId.of(configuredZone);
                 ZonedDateTime time = now.toInstant().atZone(zone);
@@ -1114,7 +1119,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
             Date now) {
         JsonNode config = readJson(instance.getConfigSnapshot());
         JsonNode policy = config.path("expirationPolicy");
-        if (!"REASSIGN".equals(policy.path("action").asText())) return false;
+        if (!"REASSIGN".equals(policy.path("action").asString())) return false;
         int maximum = policy.path("maxEscalations").asInt(1);
         int current = value(instance.getEscalationCount());
         if (current >= maximum || !policy.path("targets").isArray()
@@ -1122,8 +1127,8 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         List<WorkflowApprovalTarget> targets = new ArrayList<>();
         for (JsonNode target : policy.path("targets")) {
             List<String> ids = new ArrayList<>();
-            target.path("ids").forEach(id -> ids.add(id.asText()));
-            targets.add(new WorkflowApprovalTarget(target.path("type").asText(), ids,
+            target.path("ids").forEach(id -> ids.add(id.asString()));
+            targets.add(new WorkflowApprovalTarget(target.path("type").asString(), ids,
                     target.path("includeChildren").asBoolean(false)));
         }
         List<WorkflowApprovalPrincipal> principals;
@@ -1177,7 +1182,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         if (deadline == null || !reminder.path("enabled").asBoolean(false)) return null;
         long duration = reminder.path("beforeDuration").asLong(0);
         if (duration < 1) return null;
-        ChronoUnit unit = switch (reminder.path("beforeUnit").asText("HOUR")) {
+        ChronoUnit unit = switch (reminder.path("beforeUnit").asString("HOUR")) {
             case "MINUTE" -> ChronoUnit.MINUTES;
             case "DAY" -> ChronoUnit.DAYS;
             default -> ChronoUnit.HOURS;
@@ -1344,7 +1349,7 @@ public class WorkflowApprovalService implements WorkflowApprovalApplicationFacad
         return new WorkflowApprovalTaskView(
                 instance.getApprovalInstanceId(), instance.getExecutionId(),
                 instance.getNodeRunId(),
-                policy.path("mode").asText("ANY"),
+                policy.path("mode").asString("ANY"),
                 stage == null ? 1 : stage.getRequiredApprovals(),
                 config.path("options").path("allowSelfApproval").asBoolean(false),
                 instance.getStatus(), writeJson(summary),

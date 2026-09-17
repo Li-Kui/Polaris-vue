@@ -1,8 +1,6 @@
 package com.polaris.ai.workflow.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.config.WorkflowProperties;
@@ -13,9 +11,12 @@ import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowTriggerMapper;
 import com.polaris.ai.workflow.mapper.WorkflowVersionMapper;
 import com.polaris.common.exception.ServiceException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
@@ -37,6 +38,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
     private final WorkflowProperties properties;
     private final ObjectMapper objectMapper;
     private final WorkflowExecutionApplicationFacade executionFacade;
+    private final ApplicationEventPublisher eventPublisher;
 
     public WorkflowTriggerService(
             WorkflowTriggerMapper triggerMapper,
@@ -44,13 +46,15 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
             WorkflowVersionMapper versionMapper,
             WorkflowProperties properties,
             ObjectMapper objectMapper,
-            WorkflowExecutionApplicationFacade executionFacade) {
+            WorkflowExecutionApplicationFacade executionFacade,
+            ApplicationEventPublisher eventPublisher) {
         this.triggerMapper = triggerMapper;
         this.definitionMapper = definitionMapper;
         this.versionMapper = versionMapper;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.executionFacade = executionFacade;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -106,6 +110,9 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         trigger.setCreateBy(CallerUtils.getUsername());
         trigger.setUpdateBy(CallerUtils.getUsername());
         if (triggerMapper.insert(trigger) != 1) throw new ServiceException("创建工作流触发器失败");
+        if ("SCHEDULE".equals(type)) {
+            eventPublisher.publishEvent(new WorkflowTriggerScheduleChanged(trigger.getTriggerId()));
+        }
         return view(trigger);
     }
 
@@ -141,12 +148,16 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         }
         existing.setStatus(status);
         existing.setLockVersion(command.expectedLockVersion() + 1);
-        if (nextFireTime != null) existing.setNextFireTime(nextFireTime);
+        existing.setNextFireTime(nextFireTime);
         existing.setUpdateTime(new Date());
+        if ("SCHEDULE".equals(existing.getTriggerType())) {
+            eventPublisher.publishEvent(new WorkflowTriggerScheduleChanged(triggerId));
+        }
         return view(existing);
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public WorkflowExecutionView invoke(
             String triggerId, WorkflowTriggerInvocationCommand command) {
         requireEnabled();
@@ -154,7 +165,8 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
         applyTenantScope(query, currentTenantId());
         WorkflowTrigger trigger = triggerMapper.selectOne(
                 query.eq(WorkflowTrigger::getTriggerId, triggerId)
-                        .eq(WorkflowTrigger::getStatus, "ACTIVE").last("LIMIT 1"));
+                        .eq(WorkflowTrigger::getStatus, "ACTIVE")
+                        .last("LIMIT 1 FOR UPDATE"));
         if (trigger == null) throw new ServiceException("触发器不存在、已停用或无权访问");
         String callerKey = command == null ? null : command.idempotencyKey();
         String idempotencyKey = triggerIdempotencyKey(trigger, callerKey);
@@ -168,19 +180,30 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
 
     private void validateConfig(String type, JsonNode config) {
         if ("SCHEDULE".equals(type)) {
-            String cron = config.path("cron").asText();
+            String cron = config.path("cron").asString();
             try {
                 CronExpression.parse(cron);
-                ZoneId.of(config.path("timezone").asText("Asia/Shanghai"));
+                ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
             } catch (Exception e) {
                 throw new ServiceException("定时触发器cron或时区无效");
             }
+            String misfirePolicy = config.path("misfirePolicy")
+                    .asString("FIRE_ONCE").trim().toUpperCase(Locale.ROOT);
+            if (!Set.of("FIRE_ONCE", "SKIP", "CATCH_UP").contains(misfirePolicy)) {
+                throw new ServiceException("定时触发器misfirePolicy无效");
+            }
+            int graceSeconds = config.path("misfireGraceSeconds").asInt(5);
+            int maxCatchUpCount = config.path("maxCatchUpCount").asInt(10);
+            if (graceSeconds < 0 || graceSeconds > 3600
+                    || maxCatchUpCount < 1 || maxCatchUpCount > 100) {
+                throw new ServiceException("定时触发器错过执行策略参数超出允许范围");
+            }
         } else if ("WEBHOOK".equals(type)) {
-            String method = config.path("method").asText("POST");
+            String method = config.path("method").asString("POST");
             if (!"POST".equalsIgnoreCase(method)) {
                 throw new ServiceException("Webhook触发器仅允许POST");
             }
-        } else if (!config.path("eventType").asText()
+        } else if (!config.path("eventType").asString()
                 .matches("[A-Za-z][A-Za-z0-9_.-]{0,127}")) {
             throw new ServiceException("事件触发器eventType格式无效");
         }
@@ -188,8 +211,8 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
 
     private Date nextFireTime(JsonNode config, Date after) {
         try {
-            ZoneId zone = ZoneId.of(config.path("timezone").asText("Asia/Shanghai"));
-            ZonedDateTime next = CronExpression.parse(config.path("cron").asText())
+            ZoneId zone = ZoneId.of(config.path("timezone").asString("Asia/Shanghai"));
+            ZonedDateTime next = CronExpression.parse(config.path("cron").asString())
                     .next(ZonedDateTime.ofInstant(after.toInstant(), zone));
             if (next == null) throw new ServiceException("定时触发器没有可计算的下次运行时间");
             return Date.from(next.toInstant());
@@ -201,7 +224,7 @@ public class WorkflowTriggerService implements WorkflowTriggerApplicationFacade 
     }
 
     private void validateNoSecrets(JsonNode value) {
-        value.fields().forEachRemaining(field -> {
+        value.properties().forEach(field -> {
             String normalizedKey = field.getKey().toLowerCase(Locale.ROOT)
                     .replace("-", "").replace("_", "");
             if (SECRET_KEYS.stream().anyMatch(normalizedKey::contains)) {

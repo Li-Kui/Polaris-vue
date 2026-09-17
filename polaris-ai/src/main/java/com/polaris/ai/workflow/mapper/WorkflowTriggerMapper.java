@@ -15,7 +15,8 @@ import java.util.List;
 public interface WorkflowTriggerMapper extends BaseMapper<WorkflowTrigger> {
 
     @Update("UPDATE ai_workflow_trigger SET status = #{status}, "
-            + "next_fire_time = COALESCE(#{nextFireTime}, next_fire_time), "
+            + "next_fire_time = CASE WHEN #{status} = 'ACTIVE' "
+            + "THEN #{nextFireTime} ELSE NULL END, "
             + "lock_version = lock_version + 1, update_by = #{updateBy}, update_time = NOW() "
             + "WHERE trigger_id = #{triggerId} "
             + "AND ((#{tenantId} IS NULL AND tenant_id IS NULL) OR tenant_id = #{tenantId}) "
@@ -33,12 +34,33 @@ public interface WorkflowTriggerMapper extends BaseMapper<WorkflowTrigger> {
             + "ORDER BY next_fire_time, id LIMIT #{limit}")
     List<WorkflowTrigger> selectDueSchedules(@Param("limit") int limit);
 
+    @Select("SELECT * FROM ai_workflow_trigger WHERE status = 'ACTIVE' "
+            + "AND trigger_type = 'SCHEDULE' AND next_fire_time IS NOT NULL "
+            + "ORDER BY next_fire_time, id")
+    List<WorkflowTrigger> selectActiveSchedules();
+
+    @Select("SELECT * FROM ai_workflow_trigger WHERE trigger_id = #{triggerId} LIMIT 1")
+    WorkflowTrigger selectByTriggerIdInternal(@Param("triggerId") String triggerId);
+
+    @Select("SELECT * FROM ai_workflow_trigger WHERE trigger_id = #{triggerId} LIMIT 1 FOR UPDATE")
+    WorkflowTrigger selectByTriggerIdForUpdate(@Param("triggerId") String triggerId);
+
     @Update("UPDATE ai_workflow_trigger SET next_fire_time = #{nextFireTime}, "
-            + "last_fire_time = NOW(), lock_version = lock_version + 1, update_time = NOW() "
+            + "last_fire_time = NOW(), update_time = NOW() "
             + "WHERE trigger_id = #{triggerId} AND status = 'ACTIVE' "
             + "AND trigger_type = 'SCHEDULE' AND next_fire_time <= NOW()")
     int claimSchedule(
             @Param("triggerId") String triggerId,
+            @Param("nextFireTime") Date nextFireTime);
+
+    @Update("UPDATE ai_workflow_trigger SET next_fire_time = #{nextFireTime}, "
+            + "last_fire_time = #{lastFireTime}, update_time = NOW() "
+            + "WHERE trigger_id = #{triggerId} AND status = 'ACTIVE' "
+            + "AND trigger_type = 'SCHEDULE' AND next_fire_time = #{scheduledTime}")
+    int advanceScheduledFire(
+            @Param("triggerId") String triggerId,
+            @Param("scheduledTime") Date scheduledTime,
+            @Param("lastFireTime") Date lastFireTime,
             @Param("nextFireTime") Date nextFireTime);
 
     @Update("UPDATE ai_workflow_trigger SET last_execution_id = #{executionId}, "
@@ -46,6 +68,17 @@ public interface WorkflowTriggerMapper extends BaseMapper<WorkflowTrigger> {
             + "update_time = NOW() WHERE trigger_id = #{triggerId}")
     int recordTriggerResult(
             @Param("triggerId") String triggerId,
+            @Param("executionId") String executionId,
+            @Param("status") String status,
+            @Param("errorMessage") String errorMessage);
+
+    @Update("UPDATE ai_workflow_trigger SET last_execution_id = #{executionId}, "
+            + "last_trigger_status = #{status}, last_error_message = #{errorMessage}, "
+            + "update_time = NOW() WHERE trigger_id = #{triggerId} "
+            + "AND last_fire_time = #{scheduledTime}")
+    int recordScheduledTriggerResult(
+            @Param("triggerId") String triggerId,
+            @Param("scheduledTime") Date scheduledTime,
             @Param("executionId") String executionId,
             @Param("status") String status,
             @Param("errorMessage") String errorMessage);
