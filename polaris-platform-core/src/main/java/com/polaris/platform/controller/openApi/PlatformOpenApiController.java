@@ -3,10 +3,9 @@ package com.polaris.platform.controller.openApi;
 import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
-import com.polaris.ai.domain.AiModelConfig;
-import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.observability.AiObservability;
-import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.runtime.openapi.OpenApiModelHandle;
+import com.polaris.ai.runtime.openapi.OpenApiModelRuntimeGateway;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.domain.AjaxResult;
@@ -58,7 +57,7 @@ public class PlatformOpenApiController {
     private static final int DEFAULT_OUTPUT_TOKEN_RESERVATION = 4096;
 
     @Autowired
-    private AiModelFactory aiModelFactory;
+    private OpenApiModelRuntimeGateway modelRuntimeGateway;
 
     @Autowired
     private TokenQuotaService tokenQuotaService;
@@ -77,15 +76,14 @@ public class PlatformOpenApiController {
         responseData.put("object", "list");
 
         List<Map<String, Object>> data = new ArrayList<>();
-        AiModelConfig chatConfig = aiModelFactory.getDefaultModelConfig(ModelType.CHAT);
-        if (chatConfig != null) {
+        modelRuntimeGateway.listAccessibleChatModels().forEach(descriptor -> {
             Map<String, Object> model = new HashMap<>();
-            model.put("id", chatConfig.getModelName());
+            model.put("id", descriptor.modelCode());
             model.put("object", "model");
             model.put("created", System.currentTimeMillis() / 1000);
             model.put("owned_by", "polaris-platform");
             data.add(model);
-        }
+        });
         responseData.put("data", data);
         return responseData;
     }
@@ -96,6 +94,15 @@ public class PlatformOpenApiController {
     @Operation(summary = "OpenAI 兼容对话补全")
     @PostMapping(value = "/chat/completions", produces = {MediaType.APPLICATION_JSON_VALUE, MediaType.TEXT_EVENT_STREAM_VALUE})
     public Object chatCompletions(@RequestBody OpenAiChatRequest request, HttpServletResponse response) {
+        OpenApiModelHandle modelHandle;
+        try {
+            modelHandle = modelRuntimeGateway.resolve(
+                    request == null ? null : request.getModel());
+        } catch (RuntimeException e) {
+            response.setStatus(HttpStatus.BAD_REQUEST.value());
+            return openAiError(e.getMessage(), "invalid_request_error",
+                    "model_not_found");
+        }
         CallerContext callerContext = CallerContextHolder.get();
         String tenantId = callerContext != null ? callerContext.getTenantId() : null;
 
@@ -112,10 +119,10 @@ public class PlatformOpenApiController {
         }
 
         if (Boolean.TRUE.equals(request.getStream())) {
-            return handleStreamingChat(request, reservation);
+            return handleStreamingChat(request, modelHandle, reservation);
         } else {
             try {
-                return handleBlockingChat(request, reservation);
+                return handleBlockingChat(request, modelHandle, reservation);
             } catch (RuntimeException e) {
                 tokenQuotaService.release(reservation);
                 throw e;
@@ -123,7 +130,10 @@ public class PlatformOpenApiController {
         }
     }
 
-    private SseEmitter handleStreamingChat(OpenAiChatRequest request, TokenReservation reservation) {
+    private SseEmitter handleStreamingChat(
+            OpenAiChatRequest request,
+            OpenApiModelHandle modelHandle,
+            TokenReservation reservation) {
         SseEmitter emitter = new SseEmitter(180000L);
         AtomicBoolean finalized = new AtomicBoolean(false);
         AtomicBoolean streamClosed = new AtomicBoolean(false);
@@ -162,14 +172,7 @@ public class PlatformOpenApiController {
         });
         CompletableFuture.runAsync(() -> {
             try {
-                StreamingChatModel model = aiModelFactory.getDefaultStreamingModel();
-                if (model == null) {
-                    streamClosed.set(true);
-                    releaseReservation.run();
-                    emitter.send(SseEmitter.event().data("{\"error\":\"未配置默认对话模型\"}"));
-                    emitter.complete();
-                    return;
-                }
+                StreamingChatModel model = modelHandle.model();
 
                 List<ChatMessage> chatMessages = convertMessages(request.getMessages());
                 StringBuilder fullResponse = new StringBuilder();
@@ -181,7 +184,8 @@ public class PlatformOpenApiController {
                         if (streamClosed.get()) return;
                         try {
                             fullResponse.append(token);
-                            Map<String, Object> chunk = buildChunk(request.getModel(), token);
+                            Map<String, Object> chunk = buildChunk(
+                                    modelHandle.descriptor().modelCode(), token);
                             emitter.send(SseEmitter.event().data(chunk));
                         } catch (IOException e) {
                             if (streamClosed.compareAndSet(false, true)) {
@@ -229,14 +233,11 @@ public class PlatformOpenApiController {
         return emitter;
     }
 
-    private Map<String, Object> handleBlockingChat(OpenAiChatRequest request, TokenReservation reservation) {
-        StreamingChatModel model = aiModelFactory.getDefaultStreamingModel();
-        if (model == null) {
-            tokenQuotaService.release(reservation);
-            Map<String, Object> err = new HashMap<>();
-            err.put("error", "未配置默认对话模型");
-            return err;
-        }
+    private Map<String, Object> handleBlockingChat(
+            OpenAiChatRequest request,
+            OpenApiModelHandle modelHandle,
+            TokenReservation reservation) {
+        StreamingChatModel model = modelHandle.model();
 
         List<ChatMessage> chatMessages = convertMessages(request.getMessages());
         CompletableFuture<ChatResponse> future = new CompletableFuture<>();
@@ -285,7 +286,7 @@ public class PlatformOpenApiController {
         responseData.put("id", "chatcmpl-" + UUID.randomUUID().toString());
         responseData.put("object", "chat.completion");
         responseData.put("created", System.currentTimeMillis() / 1000);
-        responseData.put("model", request.getModel() != null ? request.getModel() : "polaris-default");
+        responseData.put("model", modelHandle.descriptor().modelCode());
 
         Map<String, Object> choice = new HashMap<>();
         choice.put("index", 0);
@@ -390,5 +391,15 @@ public class PlatformOpenApiController {
 
         chunk.put("choices", List.of(choice));
         return chunk;
+    }
+
+    private Map<String, Object> openAiError(
+            String message, String type, String code) {
+        Map<String, Object> error = new LinkedHashMap<>();
+        error.put("message", message == null ? "Model request failed" : message);
+        error.put("type", type);
+        error.put("param", "model");
+        error.put("code", code);
+        return Map.of("error", error);
     }
 }

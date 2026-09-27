@@ -22,8 +22,7 @@ public class ImageProviderDispatcher {
         if (adapters == null || adapters.isEmpty()) {
             throw new IllegalStateException("未注册任何绘图厂商适配器");
         }
-        String provider = request.getConfig() != null && request.getConfig().getProvider() != null
-                ? request.getConfig().getProvider().toLowerCase() : "";
+        String provider = ImageRuntimeValues.provider(request).toLowerCase();
 
         ImageProviderAdapter matched = null;
         ImageProviderAdapter fallback = null;
@@ -48,8 +47,7 @@ public class ImageProviderDispatcher {
         if (adapters == null || adapters.isEmpty()) {
             throw new IllegalStateException("未注册任何绘图厂商适配器");
         }
-        String provider = request.getConfig() != null && request.getConfig().getProvider() != null
-                ? request.getConfig().getProvider().toLowerCase() : "";
+        String provider = ImageRuntimeValues.provider(request).toLowerCase();
 
         ImageProviderAdapter matched = null;
         ImageProviderAdapter fallback = null;
@@ -70,4 +68,3 @@ public class ImageProviderDispatcher {
         return chosen.generateList(request);
     }
 }
-

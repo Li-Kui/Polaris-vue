@@ -3,9 +3,9 @@ package com.polaris.ai.image.adapter;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.image.ImageGenRequest;
 import com.polaris.ai.image.ImageProviderAdapter;
+import com.polaris.ai.image.ImageRuntimeValues;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -37,22 +37,22 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
 
     @Override
     public String generate(ImageGenRequest request) throws Exception {
-        AiModelConfig config = request.getConfig();
         String prompt = request.getPrompt();
         String taskId = request.getTaskId();
 
-        String apiKey = config.getApiKey();
-        String modelName = config.getModelName();
+        String apiKey = ImageRuntimeValues.apiKey(request);
+        String modelName = ImageRuntimeValues.modelName(request);
         if (modelName == null || modelName.isEmpty()) {
             throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
         }
 
         // 解析 baseUrl（兼容用户可能填入完整路径的情况）
         String baseUrl = ARK_BASE_URL;
-        if (config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()) {
-            String cfgUrl = config.getBaseUrl().trim();
+        if (ImageRuntimeValues.baseUrl(request) != null
+                && !ImageRuntimeValues.baseUrl(request).trim().isEmpty()) {
+            String cfgUrl = ImageRuntimeValues.baseUrl(request).trim();
 
-            if (config.isRelay()) {
+            if (ImageRuntimeValues.relay(request)) {
                 // ── 中转站：baseUrl 直接使用，不做 Ark 特有路径拼接 ──
                 while (cfgUrl.endsWith("/")) cfgUrl = cfgUrl.substring(0, cfgUrl.length() - 1);
                 baseUrl = cfgUrl;
@@ -77,13 +77,14 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
 
         // 尺寸映射：系统 1024x1024 → Doubao "2K"；2048x2048 → "4K"
         String size;
-        if (config.isRelay()) {
+        if (ImageRuntimeValues.relay(request)) {
             // 中转站模式：使用标准像素格式，中转站内部处理转换
             size = request.getSize() != null && !request.getSize().isEmpty()
                     ? request.getSize() : "1024x1024";
         } else {
             // 直连模式：映射为 Ark 特有格式（2K/4K）
-            size = mapSize(request.getSize(), config.getDefaultImageSize());
+            size = mapSize(request.getSize(),
+                    ImageRuntimeValues.defaultImageSize(request));
         }
 
         String createUrl = baseUrl + "/images/generations";
@@ -170,8 +171,8 @@ public class DoubaoImageAdapter implements ImageProviderAdapter {
         conn.setRequestProperty("Authorization", "Bearer " + apiKey);
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(120000);
+        conn.setConnectTimeout(ImageRuntimeValues.connectTimeout(request));
+        conn.setReadTimeout(ImageRuntimeValues.readTimeout(request));
 
         try (OutputStream os = conn.getOutputStream()) {
             os.write(body.toJSONString().getBytes(StandardCharsets.UTF_8));

@@ -1,0 +1,22 @@
+{
+  "code": "TEST_VIDEO_GENERATION",
+  "name": "视频生成架构验收",
+  "kind": "INVOCATION",
+  "category": "VIDEO",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "duration": {"type": "number", "title": "时长（秒）", "minimum": 1, "maximum": 60, "default": 5},
+      "fps": {"type": "integer", "title": "帧率", "enum": [24, 25, 30, 60], "default": 24},
+      "resolution": {"type": "string", "title": "分辨率", "enum": ["720p", "1080p"], "default": "1080p"}
+    }
+  },
+  "uiSchema": {
+    "duration": {"component": "slider", "order": 10, "step": 1},
+    "fps": {"component": "select", "order": 20},
+    "resolution": {"component": "select", "order": 30}
+  },
+  "parameterPolicy": {}
+}

@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.domain.AiAgent;
 import com.polaris.ai.mapper.AiAgentMapper;
+import com.polaris.ai.modelcenter.runtime.ModelDefinitionResolver;
+import com.polaris.ai.modelcenter.runtime.ResolvedModelDefinition;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.common.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
@@ -21,15 +23,23 @@ import java.util.List;
 @Service
 public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> implements IAiAgentService {
 
-    @org.springframework.beans.factory.annotation.Autowired
-    private com.polaris.ai.pivot.AiModelFactory modelFactory;
+    private final ModelDefinitionResolver definitionResolver;
+
+    public AiAgentServiceImpl(ModelDefinitionResolver definitionResolver) {
+        this.definitionResolver = definitionResolver;
+    }
 
     private void fillModelName(AiAgent entity) {
         if (entity != null && entity.getModelConfigId() != null) {
-            com.polaris.ai.domain.AiModelConfig config = modelFactory.getModelConfig(entity.getModelConfigId());
-            if (config != null) {
-                entity.setModelName(config.getModelName());
+            ResolvedModelDefinition definition = definitionResolver.resolve(
+                    entity.getModelConfigId(), "CHAT_COMPLETION");
+            if (entity.getTools() != null && !entity.getTools().isBlank()
+                    && !definition.enabledFeatures().containsKey("TOOL_CALLING")) {
+                throw new com.polaris.common.exception.ServiceException(
+                        "AGENT_MODEL_TOOL_CALLING_REQUIRED");
             }
+            // 仅保留给旧列表展示；运行时身份始终是 modelConfigId。
+            entity.setModelName(definition.modelName());
         }
     }
 

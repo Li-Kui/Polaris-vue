@@ -1,0 +1,23 @@
+{
+  "code": "IMAGE_GENERATION",
+  "name": "图片生成",
+  "kind": "INVOCATION",
+  "category": "IMAGE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "size": {"type": "string", "title": "图片尺寸", "default": "1024x1024"},
+      "quality": {"type": "string", "title": "图片质量", "enum": ["standard", "hd"], "default": "standard"}
+    }
+  },
+  "uiSchema": {
+    "size": {"component": "custom", "customComponent": "image-size-selector", "order": 10},
+    "quality": {"component": "select", "order": 20}
+  },
+  "parameterPolicy": {
+    "size": {"overridable": true, "allowedSources": ["APPLICATION", "AGENT", "WORKFLOW", "REQUEST"]},
+    "quality": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]}
+  }
+}

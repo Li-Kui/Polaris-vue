@@ -1,9 +1,7 @@
 package com.polaris.ai.rag;
 
 import com.polaris.ai.observability.ObservedEmbeddingStore;
-import com.polaris.ai.pivot.AiModelFactory;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
@@ -20,7 +18,7 @@ import org.springframework.util.StringUtils;
 
 /**
  * AI RAG 向量知识库配置类
- * 重构为返回具有热切换能力的 EmbeddingModel 动态代理 Bean
+ * 向量存储基础设施配置。EmbeddingModel 由知识库绑定的统一 Runtime 创建。
  * 
  * @author polaris
  */
@@ -29,16 +27,6 @@ import org.springframework.util.StringUtils;
 public class AiRagConfig
 {
     private static final Logger log = LoggerFactory.getLogger(AiRagConfig.class);
-
-    /**
-     * 注册具有热切换能力的向量模型代理
-     */
-    @Bean
-    public EmbeddingModel embeddingModel(AiModelFactory factory)
-    {
-        log.info(">>> 注册 EmbeddingModel 动态热切换代理 Bean");
-        return new HotSwappableEmbeddingModel(factory::getEmbeddingModel);
-    }
 
     @Bean
     @ConditionalOnProperty(prefix = "ai.vector-store", name = "type", havingValue = "memory", matchIfMissing = true)

@@ -24,19 +24,6 @@ public class ImageGenConcurrencyManager {
     private final Map<Long, Integer> limitMap = new ConcurrentHashMap<>();
 
     /**
-     * 获取并发许可（支持从 AiModelConfig 动态提取自定义并发上限）
-     *
-     * @param config 模型配置
-     */
-    public void acquire(com.polaris.ai.domain.AiModelConfig config) {
-        if (config == null) {
-            acquire(-1L, "", null);
-            return;
-        }
-        acquire(config.getId(), config.getProvider(), config.getMaxConcurrency());
-    }
-
-    /**
      * 获取并发许可（阻塞排队等待，直到获得许可）
      *
      * @param configId 模型配置 ID

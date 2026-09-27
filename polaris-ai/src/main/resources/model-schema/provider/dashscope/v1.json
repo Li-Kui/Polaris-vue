@@ -1,0 +1,35 @@
+{
+  "layer": "PROVIDER",
+  "code": "DASHSCOPE",
+  "profileVersion": 1,
+  "protocolCode": "OPENAI_COMPATIBLE",
+  "defaultBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "modelDiscoverySupported": true,
+  "supportedCapabilities": ["CHAT_COMPLETION", "TEXT_EMBEDDING", "IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPAINT", "IMAGE_VARIATION", "AUDIO_TTS", "AUDIO_STT"],
+  "credentialSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["apiKey"],
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    }
+  },
+  "connectionConfigSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "capabilityOverlays": {
+    "CHAT_COMPLETION": {
+      "uiSchema": {
+        "maxTokens": {
+          "placeholder": "DashScope 模型的最大输出 Token 数"
+        }
+      }
+    }
+  }
+}

@@ -10,6 +10,9 @@
         <result property="name"        column="name"/>
         <result property="description" column="description"/>
         <result property="embeddingModelId" column="embedding_model_id"/>
+        <result property="embeddingDimension" column="embedding_dimension"/>
+        <result property="embeddingModelRevision" column="embedding_model_revision"/>
+        <result property="embeddingSchemaHash" column="embedding_schema_hash"/>
         <result property="vectorCollection" column="vector_collection"/>
         <result property="chunkSize" column="chunk_size"/>
         <result property="chunkOverlap" column="chunk_overlap"/>
@@ -34,13 +37,15 @@
     <insert id="insertKnowledgeBase" parameterType="com.polaris.ai.domain.AiKnowledgeBase"
             useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ai_knowledge_base(
-            name, description, embedding_model_id, vector_collection,
+            name, description, embedding_model_id, embedding_dimension,
+            embedding_model_revision, embedding_schema_hash, vector_collection,
             chunk_size, chunk_overlap, splitter_type, retrieval_top_k, retrieval_min_score,
             index_version, index_signature, index_status, index_error,
             dept_id, del_flag, create_by, create_time, update_by, update_time
         )
         VALUES (
-            #{name}, #{description}, #{embeddingModelId}, #{vectorCollection},
+            #{name}, #{description}, #{embeddingModelId}, #{embeddingDimension},
+            #{embeddingModelRevision}, #{embeddingSchemaHash}, #{vectorCollection},
             #{chunkSize}, #{chunkOverlap}, #{splitterType}, #{retrievalTopK}, #{retrievalMinScore},
             #{indexVersion}, #{indexSignature}, #{indexStatus}, #{indexError},
             #{deptId}, '0', #{createBy}, NOW(), #{createBy}, NOW()
@@ -53,6 +58,9 @@
             <if test="name != null and name != ''">name = #{name},</if>
             <if test="description != null">description = #{description},</if>
             <if test="embeddingModelId != null">embedding_model_id = #{embeddingModelId},</if>
+            <if test="embeddingDimension != null">embedding_dimension = #{embeddingDimension},</if>
+            <if test="embeddingModelRevision != null">embedding_model_revision = #{embeddingModelRevision},</if>
+            <if test="embeddingSchemaHash != null and embeddingSchemaHash != ''">embedding_schema_hash = #{embeddingSchemaHash},</if>
             <if test="vectorCollection != null and vectorCollection != ''">vector_collection = #{vectorCollection},</if>
             <if test="chunkSize != null">chunk_size = #{chunkSize},</if>
             <if test="chunkOverlap != null">chunk_overlap = #{chunkOverlap},</if>

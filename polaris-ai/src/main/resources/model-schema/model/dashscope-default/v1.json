@@ -1,0 +1,16 @@
+{
+  "layer": "MODEL",
+  "code": "DASHSCOPE_DEFAULT",
+  "profileVersion": 1,
+  "providerCode": "DASHSCOPE",
+  "modelNamePattern": "*",
+  "capabilityOverlays": {
+    "CHAT_COMPLETION": {
+      "uiSchema": {
+        "maxTokens": {
+          "placeholder": "模型允许的最大输出 Token 数"
+        }
+      }
+    }
+  }
+}

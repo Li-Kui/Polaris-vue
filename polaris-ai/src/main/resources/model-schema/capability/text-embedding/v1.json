@@ -1,0 +1,61 @@
+{
+  "code": "TEXT_EMBEDDING",
+  "name": "文本向量",
+  "kind": "INVOCATION",
+  "category": "EMBEDDING",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dimension": {
+        "title": "向量维度",
+        "type": "integer",
+        "minimum": 1
+      },
+      "dimensionMode": {
+        "title": "维度模式",
+        "type": "string",
+        "enum": ["MODEL_DEFAULT", "REQUEST"],
+        "default": "MODEL_DEFAULT"
+      },
+      "maxInputTokens": {
+        "title": "最大输入长度",
+        "type": "integer",
+        "minimum": 1
+      },
+      "batchSize": {
+        "title": "批处理数量",
+        "type": "integer",
+        "minimum": 1,
+        "default": 16
+      }
+    }
+  },
+  "uiSchema": {
+    "dimension": {
+      "component": "number",
+      "order": 10
+    },
+    "dimensionMode": {
+      "component": "select",
+      "order": 20
+    },
+    "maxInputTokens": {
+      "component": "number",
+      "order": 30
+    },
+    "batchSize": {
+      "component": "number",
+      "order": 40
+    }
+  },
+  "parameterPolicy": {
+    "dimension": {
+      "overridable": false
+    },
+    "batchSize": {
+      "overridable": false
+    }
+  }
+}

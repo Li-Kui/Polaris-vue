@@ -48,7 +48,7 @@
       <div class="sidebar-header">
         <template v-if="!isBatchMode">
           <el-button
-            :disabled="isStreaming"
+            :disabled="isStreaming || creatingConv"
             :loading="creatingConv"
             class="btn-new-chat"
             @click="handleNewConversation"
@@ -61,7 +61,7 @@
               class="btn-batch-toggle"
               circle
               size="default"
-              :disabled="isStreaming || !conversations.length"
+              :disabled="isStreaming || creatingConv || !conversations.length"
               @click="toggleBatchMode(true)"
             >
               <el-icon><files /></el-icon>
@@ -732,7 +732,7 @@
               ref="inputRef"
               v-model="inputText"
               :autosize="{ minRows: 2, maxRows: 6 }"
-              :disabled="isStreaming"
+              :disabled="isStreaming || creatingConv"
               placeholder="输入消息，Enter 发送，Shift+Enter 换行"
               resize="none"
               type="textarea"
@@ -749,7 +749,7 @@
               <el-upload
                 :action="uploadUrl"
                 :before-upload="beforeAttachmentUpload"
-                :disabled="isStreaming || uploadingAttachment"
+                :disabled="isStreaming || creatingConv || uploadingAttachment"
                 :headers="uploadHeaders"
                 :on-error="handleAttachmentError"
                 :on-success="handleAttachmentSuccess"
@@ -758,7 +758,7 @@
                 class="attachment-uploader-modern"
               >
                 <el-button
-                  :disabled="isStreaming || uploadingAttachment"
+                  :disabled="isStreaming || creatingConv || uploadingAttachment"
                   :loading="uploadingAttachment"
                   class="btn-attach-modern"
                   link
@@ -769,7 +769,7 @@
 
               <!-- 麦克风语音输入按钮 -->
               <el-button
-                :disabled="isStreaming || uploadingAttachment"
+                :disabled="isStreaming || creatingConv || uploadingAttachment"
                 class="btn-voice-modern"
                 title="语音输入"
                 link
@@ -789,7 +789,7 @@
                 @show="loadModels"
               >
                 <template #reference>
-                  <button :disabled="isStreaming" class="config-pill-btn pill-model">
+                  <button :disabled="isStreaming || creatingConv" class="config-pill-btn pill-model">
                     <el-icon><cpu /></el-icon>
                     <span class="pill-label">{{ getSelectedModelLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
@@ -820,7 +820,7 @@
                 @show="loadKnowledgeBases"
               >
                 <template #reference>
-                  <button :disabled="isStreaming" :class="['config-pill-btn pill-kb', { 'is-active': selectedKbId }]">
+                  <button :disabled="isStreaming || creatingConv" :class="['config-pill-btn pill-kb', { 'is-active': selectedKbId }]">
                     <el-icon><collection /></el-icon>
                     <span class="pill-label">{{ getSelectedKbLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
@@ -864,7 +864,7 @@
                 @show="handleShowAgentWorkflowPopover"
               >
                 <template #reference>
-                  <button :disabled="isStreaming" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode || selectedAgentCode }]">
+                  <button :disabled="isStreaming || creatingConv" :class="['config-pill-btn pill-workflow', { 'is-active': selectedWorkflowCode || selectedAgentCode }]">
                     <el-icon><cpu v-if="selectedAgentCode" /><connection v-else-if="selectedWorkflowCode" /><operation v-else /></el-icon>
                     <span class="pill-label">{{ getSelectedAgentOrWorkflowLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
@@ -975,7 +975,7 @@
               <button
                 v-if="currentModelSupportsSearch"
                 :class="['config-pill-btn pill-search', { 'is-active': enableWebSearch }]"
-                :disabled="isStreaming"
+                :disabled="isStreaming || creatingConv"
                 @click="toggleWebSearch"
               >
                 <el-icon><search /></el-icon>
@@ -996,7 +996,7 @@
               <!-- 发送按钮 -->
               <el-button
                 v-else
-                :disabled="canStop || !inputText.trim() || uploadingAttachment"
+                :disabled="canStop || creatingConv || !inputText.trim() || uploadingAttachment"
                 class="btn-send-modern"
                 @click="handleSendMessage"
               >
@@ -1131,7 +1131,7 @@ import {
   updateConversationConfig
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
-import {listAvailableModel} from '@/api/ai/model'
+import {getCapabilityDefault, listAvailableModel} from '@/api/ai/model'
 import {
   cancelWorkflowExecution,
   listActiveWorkflows,
@@ -1874,7 +1874,8 @@ export default {
       try {
         const res = await listAvailableModel()
         if (res.code === 200) {
-          this.models = (res.data.rows || res.data || []).filter(m => m.isDefaultEmbedding !== '1' && !m.modelName.toLowerCase().includes('embed'))
+          // 可用模型接口已按聊天能力过滤，不再依赖旧字段或模型名称猜测。
+          this.models = res.data.rows || res.data || []
           if (this.models.length === 0) {
             const defaultModelName = import.meta.env.VITE_APP_DEFAULT_MODEL || 'deepseek-chat'
             this.models = [{
@@ -1886,7 +1887,14 @@ export default {
           } else {
             const currentExist = this.models.find(m => m.id === this.selectedModelConfigId)
             if (!currentExist) {
-              const defModel = this.models.find(m => m.isDefault === '1')
+              let defaultId = null
+              try {
+                const defaults = await getCapabilityDefault('CHAT_COMPLETION')
+                defaultId = defaults.data
+              } catch (error) {
+                if (!String(error?.message || error).includes('DEFAULT_MODEL_NOT_CONFIGURED')) throw error
+              }
+              const defModel = this.models.find(m => String(m.id) === String(defaultId))
               if (defModel) {
                 this.selectedModelConfigId = defModel.id
               } else if (this.models.length > 0) {
@@ -1977,7 +1985,7 @@ export default {
     },
 
     async handleNewConversation() {
-      if (this.isStreaming) return
+      if (this.isStreaming || this.creatingConv) return
       this.creatingConv = true
       try {
         const res = await createConversation(this.selectedModelConfigId, this.selectedKbId)
@@ -1998,7 +2006,7 @@ export default {
     },
 
     async handleSelectConversation(id) {
-      if (this.isStreaming || id === this.currentConvId) return
+      if (this.isStreaming || this.creatingConv || id === this.currentConvId) return
       await this.selectConversation(id)
     },
 
@@ -2232,10 +2240,11 @@ export default {
     },
 
     async handleSendMessage() {
-      if (this.isStreaming || !this.currentConvId || this.uploadingAttachment) return
+      if (this.isStreaming || this.creatingConv || !this.currentConvId || this.uploadingAttachment) return
       const text = this.inputText.trim()
       if (!text) return
 
+      const conversationId = this.currentConvId
       const attachedFiles = this.attachments || []
       this.inputText = ''
       this.attachments = []
@@ -2254,8 +2263,9 @@ export default {
       })
 
       // 追加 AI loading 占位
-      const aiIndex = this.messages.length
       this.messages.push({ role: 'assistant', content: '', reasoningContent: '', loading: true, streaming: false, error: null })
+      // 保留 Vue 响应式代理对象；直接修改 push 前的原始对象不会触发界面刷新。
+      const aiMessage = this.messages[this.messages.length - 1]
       this.$nextTick(() => this.scrollToBottom(true))
 
       const baseUrl = import.meta.env.VITE_APP_BASE_API || ''
@@ -2266,23 +2276,23 @@ export default {
         if (isWorkflowMode) {
           const workflowController = new AbortController()
           this.workflowAbortController = workflowController
-          this.messages[aiIndex].loading = false
-          this.messages[aiIndex].streaming = true
+          aiMessage.loading = false
+          aiMessage.streaming = true
           await streamWorkflowExecution({
             workflowCode: this.selectedWorkflowCode,
             message: text,
-            conversationId: this.currentConvId,
+            conversationId,
             fileUrl: attachedFiles.map(file => file.url).join(',') || null,
             attachmentTokens: attachedFiles.map(file => file.token || file.url).filter(Boolean),
             testRun: false
           }, (event, envelope) => {
-            this.handleWorkflowEvent(this.messages[aiIndex], event, envelope)
+            this.handleWorkflowEvent(aiMessage, event, envelope)
           }, workflowController.signal)
           return
         }
 
         const payload = {
-          conversationId: this.currentConvId,
+          conversationId,
           message: text,
           enableSearch: enableSearchParam,
           agentCode: this.selectedAgentCode || null,
@@ -2311,8 +2321,8 @@ export default {
         this.sseEventBuffer = null
 
         // loading → streaming
-        this.messages[aiIndex].loading = false
-        this.messages[aiIndex].streaming = true
+        aiMessage.loading = false
+        aiMessage.streaming = true
 
         while (true) {
           const { done, value } = await reader.read()
@@ -2335,17 +2345,15 @@ export default {
               const event = this.sseEventBuffer || 'message'
 
               if (event === 'message') {
-                const cur = this.messages[aiIndex]
                 const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                this.messages[aiIndex].content = cur.content + processedData
+                aiMessage.content = aiMessage.content + processedData
                 this.$nextTick(() => this.scrollToBottom())
               } else if (event === 'reasoning') {
-                const cur = this.messages[aiIndex]
                 const processedData = data ? data.replace(/__SSE_NEWLINE__/g, '\n') : ''
-                this.messages[aiIndex].reasoningContent = (cur.reasoningContent || '') + processedData
+                aiMessage.reasoningContent = (aiMessage.reasoningContent || '') + processedData
                 this.$nextTick(() => this.scrollToBottom())
               } else if (event === 'status') {
-                this.messages[aiIndex].statusMsg = data || ''
+                aiMessage.statusMsg = data || ''
               } else if (event === 'moderation_blocked') {
                 let blockInfo = {}
                 try {
@@ -2355,14 +2363,13 @@ export default {
                 }
                 const warnMsg = blockInfo.message || '内容触发安全策略，已为您终止输出'
                 this.$message.warning(warnMsg)
-                const cur = this.messages[aiIndex]
-                if (cur.content) {
-                  cur.content = cur.content + '\n\n' + `【已拦截：${warnMsg}】`
+                if (aiMessage.content) {
+                  aiMessage.content = aiMessage.content + '\n\n' + `【已拦截：${warnMsg}】`
                 } else {
-                  cur.content = `【已拦截：${warnMsg}】`
+                  aiMessage.content = `【已拦截：${warnMsg}】`
                 }
-                cur.loading = false
-                cur.streaming = false
+                aiMessage.loading = false
+                aiMessage.streaming = false
                 this.isStreaming = false
                 this.currentReader = null
                 this.loadConvList()
@@ -2370,9 +2377,9 @@ export default {
               } else if (event === 'search_sources') {
                 try {
                   const payload = JSON.parse(data || '{}')
-                  this.messages[aiIndex].searchQuery = payload.query || ''
-                  this.messages[aiIndex].searchSourceCount = payload.count || (payload.sources || []).length
-                  this.messages[aiIndex].searchSources = payload.sources || []
+                  aiMessage.searchQuery = payload.query || ''
+                  aiMessage.searchSourceCount = payload.count || (payload.sources || []).length
+                  aiMessage.searchSources = payload.sources || []
                   this.$nextTick(() => this.scrollToBottom())
                 } catch (err) {
                   console.warn('解析联网搜索来源失败', err)
@@ -2380,13 +2387,13 @@ export default {
               } else if (event === 'doc_recognized') {
                 try {
                   const docs = JSON.parse(data || '[]')
-                  this.messages[aiIndex].attachedDocs = docs
+                  aiMessage.attachedDocs = docs
                   this.$nextTick(() => this.scrollToBottom())
                 } catch (err) {
                   console.warn('解析自动识别挂载文档失败', err)
                 }
               } else if (event === 'done') {
-                this.messages[aiIndex].streaming = false
+                aiMessage.streaming = false
                 this.isStreaming = false
                 this.currentReader = null
                 this.loadConvList()
@@ -2407,22 +2414,21 @@ export default {
       } catch (e) {
         if (e.name === 'AbortError') return
         const errMsg = e.message || '服务异常，请重试'
-        this.messages[aiIndex].role = 'assistant'
-        this.messages[aiIndex].loading = false
-        this.messages[aiIndex].streaming = false
-        this.messages[aiIndex].error = errMsg
+        aiMessage.role = 'assistant'
+        aiMessage.loading = false
+        aiMessage.streaming = false
+        aiMessage.error = errMsg
         this.$message.error('AI 响应失败：' + errMsg)
       } finally {
-        const currentMessage = this.messages[aiIndex]
-        if (currentMessage) {
-          currentMessage.loading = false
-          currentMessage.streaming = false
-          currentMessage.statusMsg = ''
-        }
+        aiMessage.loading = false
+        aiMessage.streaming = false
+        aiMessage.statusMsg = ''
         this.isStreaming = false
         this.currentReader = null
         this.chatAbortController = null
-        this.$nextTick(() => this.focusInput())
+        if (Number(this.currentConvId) === Number(conversationId)) {
+          this.$nextTick(() => this.focusInput())
+        }
       }
     },
 

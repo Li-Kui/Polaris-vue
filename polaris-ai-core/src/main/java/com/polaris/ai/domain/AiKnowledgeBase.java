@@ -42,6 +42,18 @@ public class AiKnowledgeBase extends BaseEntity
     @Schema(description = "绑定的向量模型配置 ID")
     private Long embeddingModelId;
 
+    /** 当前索引使用的实际向量维度快照 */
+    @Schema(description = "索引使用的实际向量维度")
+    private Integer embeddingDimension;
+
+    /** 当前索引绑定的模型修订号快照 */
+    @Schema(description = "索引绑定的模型修订号")
+    private Long embeddingModelRevision;
+
+    /** 当前索引绑定的 TEXT_EMBEDDING Schema Hash */
+    @Schema(description = "索引绑定的 Embedding Schema Hash")
+    private String embeddingSchemaHash;
+
     /** 当前生效的向量 collection */
     @Schema(description = "当前生效的向量 collection")
     private String vectorCollection;

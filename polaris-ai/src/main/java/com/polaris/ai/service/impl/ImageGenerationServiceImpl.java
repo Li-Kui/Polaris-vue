@@ -1,287 +1,271 @@
 package com.polaris.ai.service.impl;
 
 import com.alibaba.fastjson2.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.polaris.ai.domain.AiImageTask;
-import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.enums.ImageGenerationMode;
 import com.polaris.ai.image.ImageGenCommand;
-import com.polaris.ai.image.ImageGenRequest;
-import com.polaris.ai.image.ImageProviderDispatcher;
 import com.polaris.ai.image.ImageStorageHelper;
-import com.polaris.ai.pivot.ImageModelCapabilityRouter;
+import com.polaris.ai.modelcenter.runtime.ImageRuntimeService;
+import com.polaris.ai.modelcenter.service.ModelDefaultInternalService;
+import com.polaris.ai.runtime.ModelRuntimeSnapshot;
+import com.polaris.ai.runtime.ModelRuntimeSpec;
+import com.polaris.ai.runtime.image.ImageCapabilityInvocation;
 import com.polaris.ai.service.IAiImageTaskService;
 import com.polaris.ai.service.IImageGenerationService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 
-/**
- * 绘图任务编排服务实现。
- *
- * @author polaris
- */
+/** 图片任务编排：同步冻结 Runtime，异步阶段不再选择模型或读取旧模型字段。 */
 @Slf4j
 @Service
 public class ImageGenerationServiceImpl implements IImageGenerationService {
 
-    @Autowired
-    private ImageModelCapabilityRouter capabilityRouter;
+    private static final int MAX_IMAGES_PER_REQUEST = 10;
 
-    @Autowired
-    private ImageProviderDispatcher imageProviderDispatcher;
+    private final ImageRuntimeService runtimeService;
+    private final ModelDefaultInternalService defaultService;
+    private final ImageStorageHelper imageStorageHelper;
+    private final ThreadPoolTaskExecutor threadPoolTaskExecutor;
+    private final IAiImageTaskService imageTaskService;
+    private final ObjectMapper objectMapper =
+            new ObjectMapper().findAndRegisterModules();
 
-    @Autowired
-    private ImageStorageHelper imageStorageHelper;
-
-    @Autowired
-    private ThreadPoolTaskExecutor threadPoolTaskExecutor;
-
-    @Autowired
-    private IAiImageTaskService imageTaskService;
-
-    @Autowired
-    private com.polaris.ai.image.ImageGenConcurrencyManager concurrencyManager;
+    public ImageGenerationServiceImpl(
+            ImageRuntimeService runtimeService,
+            ModelDefaultInternalService defaultService,
+            ImageStorageHelper imageStorageHelper,
+            ThreadPoolTaskExecutor threadPoolTaskExecutor,
+            IAiImageTaskService imageTaskService) {
+        this.runtimeService = runtimeService;
+        this.defaultService = defaultService;
+        this.imageStorageHelper = imageStorageHelper;
+        this.threadPoolTaskExecutor = threadPoolTaskExecutor;
+        this.imageTaskService = imageTaskService;
+    }
 
     @Override
-    public AiImageTask submit(ImageGenCommand cmd) {
-        // 1. 校验能力
-        ImageGenerationMode mode = ImageGenerationMode.fromCode(cmd.getGenerationMode());
-        if (mode == null) {
-            throw new IllegalArgumentException("不支持的生成能力: " + cmd.getGenerationMode());
-        }
-        final List<String> sources = cmd.getSourceImages() != null ? cmd.getSourceImages() : Collections.emptyList();
-        if (mode.isNeedsSource() && sources.isEmpty()) {
-            throw new IllegalArgumentException("能力[" + mode.getLabel() + "]需要至少一张源图");
-        }
-        if (mode.isNeedsMask() && (cmd.getMaskImage() == null || cmd.getMaskImage().trim().isEmpty())) {
-            throw new IllegalArgumentException("能力[" + mode.getLabel() + "]需要遮罩图");
-        }
+    public AiImageTask submit(ImageGenCommand command) {
+        ImageGenerationMode mode = requireMode(command);
+        List<String> sources = command.getSourceImages() == null
+                ? List.of() : List.copyOf(command.getSourceImages());
+        validateInputs(mode, command, sources);
 
-        // 2. 能力路由选模型
-        AiModelConfig config = capabilityRouter.route(mode.getCode());
-        if (config == null || config.getApiKey() == null || config.getApiKey().trim().isEmpty()) {
-            throw new IllegalStateException("后台未配置支持[" + mode.getLabel() + "]的图像生成服务，请联系管理员配置");
-        }
-        // fail-fast：路由可能回退默认模型，这里严格复核所选模型确实声明支持该能力，避免"静默降级出错图"
-        if (!capabilityRouter.supports(config, mode.getCode())) {
-            throw new IllegalStateException("后台未配置支持[" + mode.getLabel() + "]能力的图像模型，请在模型管理中为对应模型开启该能力");
-        }
+        String capability = capabilityFor(mode);
+        Long modelId = command.getModelConfigId() != null
+                ? command.getModelConfigId()
+                : defaultService.resolveModelId(capability);
+        int targetCount = Math.min(
+                command.getN() > 0 ? command.getN() : 1,
+                MAX_IMAGES_PER_REQUEST);
+        String taskId = "img_" + UUID.randomUUID().toString()
+                .replace("-", "");
+        ImageCapabilityInvocation initial = invocation(
+                capability, mode, command, sources, command.getPrompt(),
+                command.getSize(), targetCount, taskId);
 
-        // 防爆保护：单次最多允许生成 10 张图
-        int targetN = cmd.getN() > 0 ? cmd.getN() : 1;
-        if (targetN > 10) {
-            log.warn(">>> [ImageGenerationService] 请求生成数量 {} 超过单次上线上限 10，自动截断为 10", targetN);
-            targetN = 10;
-        }
-        cmd.setN(targetN);
+        // 请求线程内完成模型权限、Capability 与 Connection 校验。
+        ModelRuntimeSpec runtime = runtimeService.resolve(modelId, initial);
+        String size = selectSize(command.getSize(), runtime);
+        ImageCapabilityInvocation resolvedInvocation = invocation(
+                capability, mode, command, sources, command.getPrompt(),
+                size, targetCount, taskId);
+        ModelRuntimeSnapshot snapshot = runtimeService.snapshot(runtime);
 
-        // 3. 落库任务
-        String taskId = "img_" + UUID.randomUUID().toString().replaceAll("-", "");
-        String size = (cmd.getSize() != null && !cmd.getSize().isEmpty()) ? cmd.getSize() : config.getDefaultImageSize();
-
-        AiImageTask task = new AiImageTask();
-        task.setTaskId(taskId);
-        task.setPrompt(cmd.getPrompt());
-        task.setStatus("0"); // 生成中
-        task.setGenerationMode(mode.getCode());
-        task.setModelConfigId(config.getId());
-        task.setProvider(config.getProvider());
-        if (!sources.isEmpty()) {
-            task.setSourceImages(JSON.toJSONString(sources));
-        }
-        if (cmd.getMaskImage() != null && !cmd.getMaskImage().trim().isEmpty()) {
-            task.setMaskImage(cmd.getMaskImage());
-        }
-        task.setConversationId(cmd.getConversationId());
-        Map<String, Object> params = new HashMap<>();
-        params.put("size", size);
-        params.put("n", targetN);
-        params.put("negativePrompt", cmd.getNegativePrompt());
-        task.setImageParams(JSON.toJSONString(params));
-        task.setCreateTime(new Date());
+        AiImageTask task = createTask(
+                command, mode, sources, targetCount, size, taskId,
+                runtime, snapshot);
         imageTaskService.createTask(task);
 
-        // 4. 异步派发，支持模型能力自适应与自动批次并发拆分
-        final AiModelConfig finalConfig = config;
-        final String finalSize = size;
-        final String firstRef = sources.isEmpty() ? null : sources.get(0);
-        final int finalN = targetN;
-
-        threadPoolTaskExecutor.execute(() -> {
-            long start = System.currentTimeMillis();
-            try {
-                List<String> promptList = cmd.getPrompts();
-                List<java.util.concurrent.CompletableFuture<List<String>>> batchFutures = new ArrayList<>();
-
-                if (promptList != null && !promptList.isEmpty()) {
-                    log.info(">>> [ImageGenerationService] 启用 Multi-Prompt 独立并发架构, 共有 {} 条独立视觉描述", promptList.size());
-                    for (int i = 0; i < promptList.size(); i++) {
-                        final String singlePrompt = promptList.get(i);
-                        final int delayMs = i * 250; // 微错峰，平滑 API QPS，防止瞬间并发触发 HTTP 429
-                        batchFutures.add(java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                            if (delayMs > 0) {
-                                try { Thread.sleep(delayMs); } catch (Exception ignored) {}
-                            }
-                            return generateListWithRetry(finalConfig, singlePrompt, mode.getCode(), finalSize, taskId, sources, cmd);
-                        }, threadPoolTaskExecutor));
-                    }
-                } else {
-                    // 回退单 Prompt 批次拆分引擎
-                    int maxNativeN = getModelMaxNativeN(finalConfig);
-                    List<Integer> batchSizes = splitIntoBatches(finalN, maxNativeN);
-                    for (int subN : batchSizes) {
-                        batchFutures.add(java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-                            try {
-                                ImageGenRequest req = new ImageGenRequest();
-                                req.setConfig(finalConfig);
-                                req.setPrompt(cmd.getPrompt());
-                                req.setNegativePrompt(cmd.getNegativePrompt());
-                                req.setRefImageUrl(firstRef);
-                                req.setSourceImageUrls(sources);
-                                req.setMaskImageUrl(cmd.getMaskImage());
-                                req.setGenerationMode(mode.getCode());
-                                req.setSize(finalSize);
-                                req.setN(subN);
-                                req.setTaskId(taskId);
-                                req.setExpandParams(cmd.getExpandParams());
-                                req.setUpscaleFactor(cmd.getUpscaleFactor());
-                                req.setExtra(cmd.getExtra());
-
-                                return imageProviderDispatcher.generateList(req);
-                            } catch (Exception e) {
-                                log.error(">>> [ImageGenerationService] 子批次绘图异常, subN={}", subN, e);
-                                return Collections.emptyList();
-                            }
-                        }, threadPoolTaskExecutor));
-                    }
-                }
-
-                List<String> totalUrls = new ArrayList<>();
-                for (java.util.concurrent.CompletableFuture<List<String>> future : batchFutures) {
-                    List<String> resList = future.join();
-                    if (resList != null && !resList.isEmpty()) {
-                        totalUrls.addAll(resList);
-                    }
-                }
-
-                if (totalUrls.isEmpty()) {
-                    throw new RuntimeException("图片生成失败，所有子批次均未返回有效图片");
-                }
-
-                log.info(">>> [ImageGenerationService] 汇总成功，实际获取到 {} 张图片 (目标 {} 张)", totalUrls.size(), finalN);
-
-                // 转存到本地，规避厂商临时 URL 过期；单图失败降级使用原始 URL
-                String rawResult = totalUrls.size() == 1 ? totalUrls.get(0) : JSON.toJSONString(totalUrls);
-                String storedUrl = imageStorageHelper.transferAllToLocal(rawResult, threadPoolTaskExecutor);
-                if (storedUrl == null || storedUrl.isEmpty()) {
-                    storedUrl = rawResult;
-                }
-
-                imageTaskService.markSuccess(taskId, storedUrl, System.currentTimeMillis() - start);
-                log.info(">>> [ImageGenerationService] 绘图任务生成成功, taskId: {}, storedUrl: {}", taskId, storedUrl);
-            } catch (Exception e) {
-                log.error(">>> [ImageGenerationService] 绘图异步任务失败, taskId: {}", taskId, e);
-                imageTaskService.markFail(taskId, e.getMessage());
-            }
-        });
-
+        threadPoolTaskExecutor.execute(() -> executeAsync(
+                command, mode, sources, targetCount, size, taskId,
+                runtime, resolvedInvocation));
         return task;
     }
 
-    /**
-     * 获取模型单次 API 支持的最大原生张数
-     */
-    private int getModelMaxNativeN(AiModelConfig config) {
-        if (config == null) return 4;
-        String provider = config.getProvider() != null ? config.getProvider().toLowerCase() : "";
-        String modelName = config.getModelName() != null ? config.getModelName().toLowerCase() : "";
-
-        if (modelName.contains("dall-e-3")) {
-            return 1; // OpenAI DALL-E 3 强制要求 n=1
-        }
-        if ("doubao".equals(provider)) {
-            return 15; // 豆包并发上限较宽
-        }
-        if ("dashscope".equals(provider)) {
-            return 4; // 万相异步 API 上限 4
-        }
-        return 4; // 默认 4
-    }
-
-    /**
-     * 将目标张数拆分为各子批次数量列表
-     */
-    private List<Integer> splitIntoBatches(int targetN, int maxNativeN) {
-        List<Integer> batches = new ArrayList<>();
-        int remain = targetN;
-        int limit = maxNativeN > 0 ? maxNativeN : 4;
-        while (remain > 0) {
-            int current = Math.min(remain, limit);
-            batches.add(current);
-            remain -= current;
-        }
-        return batches;
-    }
-
-    /**
-     * 针对单条提示词发起请求，具备动态信号量并发排队与 HTTP 429 限流自动退避重试能力
-     */
-    private List<String> generateListWithRetry(AiModelConfig config, String prompt, String modeCode, String size, String taskId, List<String> sources, ImageGenCommand cmd) {
-        Long configId = config != null ? config.getId() : -1L;
-        // 1. 获取在途并发许可（阻塞排队等待，保证发给厂商的在途渲染任务永远不超过并发限制，支持 AiModelConfig 自定义配置）
-        concurrencyManager.acquire(config);
+    private void executeAsync(
+            ImageGenCommand command,
+            ImageGenerationMode mode,
+            List<String> sources,
+            int targetCount,
+            String size,
+            String taskId,
+            ModelRuntimeSpec runtime,
+            ImageCapabilityInvocation initialInvocation) {
+        long start = System.currentTimeMillis();
         try {
-            int maxRetries = 3;
-            for (int attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    ImageGenRequest req = new ImageGenRequest();
-                    req.setConfig(config);
-                    req.setPrompt(prompt);
-                    req.setNegativePrompt(cmd.getNegativePrompt());
-                    req.setRefImageUrl(sources.isEmpty() ? null : sources.get(0));
-                    req.setSourceImageUrls(sources);
-                    req.setMaskImageUrl(cmd.getMaskImage());
-                    req.setGenerationMode(modeCode);
-                    req.setSize(size);
-                    req.setN(1);
-                    req.setTaskId(taskId);
-                    req.setExpandParams(cmd.getExpandParams());
-                    req.setUpscaleFactor(cmd.getUpscaleFactor());
-                    req.setExtra(cmd.getExtra());
-
-                    return imageProviderDispatcher.generateList(req);
-                } catch (Exception e) {
-                    String msg = e.getMessage() != null ? e.getMessage() : "";
-                    boolean isRateLimit = msg.contains("429") || msg.contains("RateQuota") || msg.contains("rate limit") || msg.contains("Throttling");
-                    if (isRateLimit) {
-                        // 触发 429 智能通知并发管理器下调上限
-                        concurrencyManager.onRateLimitExceeded(configId);
-                        if (attempt < maxRetries) {
-                            long sleepMs = 4000L * attempt + (long) (Math.random() * 1000); // 匹配 GPU 生图渲染周期的长休眠
-                            log.warn(">>> [ImageGenService] 触发厂商 RateLimit 429 限流, 尝试第 {} 次重试 (等待 {}ms), prompt: {}", attempt, sleepMs, prompt);
-                            try { Thread.sleep(sleepMs); } catch (InterruptedException ignored) {}
-                        } else {
-                            log.error(">>> [ImageGenerationService] 子任务绘图失败 (attempt {}/{}), prompt: {}", attempt, maxRetries, prompt, e);
-                            return Collections.emptyList();
-                        }
-                    } else {
-                        log.error(">>> [ImageGenerationService] 子任务绘图失败 (attempt {}/{}), prompt: {}", attempt, maxRetries, prompt, e);
-                        return Collections.emptyList();
-                    }
+            List<String> urls = new ArrayList<>();
+            List<String> prompts = command.getPrompts();
+            if (prompts != null && !prompts.isEmpty()) {
+                for (String prompt : prompts) {
+                    urls.addAll(runtimeService.execute(runtime, invocation(
+                            runtime.capabilityCode(), mode, command, sources,
+                            prompt, size, 1, taskId)).value().imageUrls());
+                }
+            } else {
+                int maxNativeCount = maxNativeCount(runtime);
+                int remaining = targetCount;
+                while (remaining > 0) {
+                    int batch = Math.min(remaining, maxNativeCount);
+                    ImageCapabilityInvocation invocation =
+                            remaining == targetCount && batch == targetCount
+                            ? initialInvocation
+                            : invocation(runtime.capabilityCode(), mode, command,
+                            sources, command.getPrompt(), size, batch, taskId);
+                    urls.addAll(runtimeService.execute(runtime, invocation)
+                            .value().imageUrls());
+                    remaining -= batch;
                 }
             }
-            return Collections.emptyList();
-        } finally {
-            // 2. 在 finally 块中精准释放信号量许可，供后续排队任务执行
-            concurrencyManager.release(configId);
+            if (urls.isEmpty()) {
+                throw new IllegalStateException("IMAGE_RESULT_EMPTY");
+            }
+            String rawResult = urls.size() == 1
+                    ? urls.get(0) : JSON.toJSONString(urls);
+            String stored = imageStorageHelper.transferAllToLocal(
+                    rawResult, threadPoolTaskExecutor);
+            imageTaskService.markSuccess(
+                    taskId, stored == null || stored.isBlank()
+                            ? rawResult : stored,
+                    System.currentTimeMillis() - start);
+        } catch (Exception e) {
+            log.error("图片任务执行失败, taskId={}", taskId, e);
+            imageTaskService.markFail(taskId, safeMessage(e));
         }
+    }
+
+    private AiImageTask createTask(
+            ImageGenCommand command,
+            ImageGenerationMode mode,
+            List<String> sources,
+            int count,
+            String size,
+            String taskId,
+            ModelRuntimeSpec runtime,
+            ModelRuntimeSnapshot snapshot) {
+        AiImageTask task = new AiImageTask();
+        task.setTaskId(taskId);
+        task.setPrompt(command.getPrompt());
+        task.setStatus("0");
+        task.setGenerationMode(mode.getCode());
+        task.setModelConfigId(runtime.modelId());
+        task.setModelRevision(runtime.modelRevision());
+        task.setConnectionId(runtime.connectionId());
+        task.setConnectionRevision(runtime.connectionRevision());
+        task.setCapabilityCode(runtime.capabilityCode());
+        task.setSchemaHash(runtime.schemaHash());
+        task.setRuntimeSnapshot(writeSnapshot(snapshot));
+        task.setProvider(runtime.providerCode());
+        task.setConversationId(command.getConversationId());
+        if (!sources.isEmpty()) {
+            task.setSourceImages(JSON.toJSONString(sources));
+        }
+        if (command.getMaskImage() != null
+                && !command.getMaskImage().isBlank()) {
+            task.setMaskImage(command.getMaskImage());
+        }
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("size", size);
+        parameters.put("n", count);
+        parameters.put("negativePrompt", command.getNegativePrompt());
+        task.setImageParams(JSON.toJSONString(parameters));
+        task.setCreateTime(new Date());
+        return task;
+    }
+
+    private ImageCapabilityInvocation invocation(
+            String capability,
+            ImageGenerationMode mode,
+            ImageGenCommand command,
+            List<String> sources,
+            String prompt,
+            String size,
+            int count,
+            String taskId) {
+        return new ImageCapabilityInvocation(
+                capability, mode.getCode(), prompt,
+                command.getNegativePrompt(), sources, command.getMaskImage(),
+                size, count, taskId, command.getExpandParams(),
+                command.getUpscaleFactor(), command.getExtra());
+    }
+
+    private ImageGenerationMode requireMode(ImageGenCommand command) {
+        if (command == null) {
+            throw new IllegalArgumentException("IMAGE_COMMAND_REQUIRED");
+        }
+        ImageGenerationMode mode = ImageGenerationMode.fromCode(
+                command.getGenerationMode());
+        if (mode == null) {
+            throw new IllegalArgumentException(
+                    "不支持的生成能力: " + command.getGenerationMode());
+        }
+        return mode;
+    }
+
+    private void validateInputs(
+            ImageGenerationMode mode,
+            ImageGenCommand command,
+            List<String> sources) {
+        if (mode.isNeedsSource() && sources.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "能力[" + mode.getLabel() + "]需要至少一张源图");
+        }
+        if (mode.isNeedsMask() && (command.getMaskImage() == null
+                || command.getMaskImage().isBlank())) {
+            throw new IllegalArgumentException(
+                    "能力[" + mode.getLabel() + "]需要遮罩图");
+        }
+    }
+
+    private String capabilityFor(ImageGenerationMode mode) {
+        return switch (mode) {
+            case TEXT_TO_IMAGE -> "IMAGE_GENERATION";
+            case IMAGE_TO_IMAGE, MULTI_IMAGE -> "IMAGE_VARIATION";
+            case INPAINTING, OBJECT_REMOVAL -> "IMAGE_INPAINT";
+            default -> "IMAGE_EDIT";
+        };
+    }
+
+    private String selectSize(String requested, ModelRuntimeSpec runtime) {
+        if (requested != null && !requested.isBlank()) {
+            return requested;
+        }
+        Object configured = runtime.invocationParameters().get("size");
+        return configured == null ? "1024x1024" : configured.toString();
+    }
+
+    private int maxNativeCount(ModelRuntimeSpec runtime) {
+        String model = runtime.modelName() == null
+                ? "" : runtime.modelName().toLowerCase();
+        if (model.contains("dall-e-3")) {
+            return 1;
+        }
+        return "ARK".equalsIgnoreCase(runtime.providerCode()) ? 10 : 4;
+    }
+
+    private String writeSnapshot(ModelRuntimeSnapshot snapshot) {
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (Exception e) {
+            throw new IllegalStateException("IMAGE_RUNTIME_SNAPSHOT_FAILED", e);
+        }
+    }
+
+    private String safeMessage(Exception error) {
+        String message = error.getMessage();
+        return message == null || message.isBlank()
+                ? error.getClass().getSimpleName() : message;
     }
 
     @Override
-    public java.util.List<String> listSupportedModes() {
-        return new java.util.ArrayList<>(capabilityRouter.supportedModes());
+    public List<String> listSupportedModes() {
+        List<String> result = new ArrayList<>();
+        for (ImageGenerationMode mode : ImageGenerationMode.values()) {
+            result.add(mode.getCode());
+        }
+        return Collections.unmodifiableList(result);
     }
 }

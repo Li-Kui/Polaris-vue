@@ -1,0 +1,13 @@
+{
+  "code": "STREAMING",
+  "name": "流式输出",
+  "kind": "FEATURE",
+  "category": "FEATURE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "allowedAppliesTo": ["CHAT_COMPLETION", "AUDIO_TTS"]
+}

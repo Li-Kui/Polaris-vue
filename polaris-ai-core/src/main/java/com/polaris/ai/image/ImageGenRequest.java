@@ -1,6 +1,6 @@
 package com.polaris.ai.image;
 
-import com.polaris.ai.domain.AiModelConfig;
+import com.polaris.ai.runtime.ModelRuntimeSpec;
 
 /**
  * 绘图厂商适配器统一请求对象
@@ -9,8 +9,8 @@ import com.polaris.ai.domain.AiModelConfig;
  */
 public class ImageGenRequest {
 
-    /** 使用的模型配置 */
-    private AiModelConfig config;
+    /** 请求创建时解析好的运行时；不会在异步线程重新选择默认模型。 */
+    private ModelRuntimeSpec runtime;
     /** 提示词 */
     private String prompt;
     /** 参考图/垫图 URL（文生图时为 null） */
@@ -36,8 +36,8 @@ public class ImageGenRequest {
     /** 透传前端自定义参数（如 pixelExact / presetName 等），供适配器分支判断 */
     private java.util.Map<String, Object> extra;
 
-    public AiModelConfig getConfig() { return config; }
-    public void setConfig(AiModelConfig config) { this.config = config; }
+    public ModelRuntimeSpec getRuntime() { return runtime; }
+    public void setRuntime(ModelRuntimeSpec runtime) { this.runtime = runtime; }
     public String getPrompt() { return prompt; }
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public String getRefImageUrl() { return refImageUrl; }

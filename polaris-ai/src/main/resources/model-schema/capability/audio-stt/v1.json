@@ -1,0 +1,29 @@
+{
+  "code": "AUDIO_STT",
+  "name": "语音识别",
+  "kind": "INVOCATION",
+  "category": "AUDIO",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "language": {"type": "string", "title": "语言", "maxLength": 32},
+      "timestamps": {"type": "boolean", "title": "返回时间戳", "default": false},
+      "speakerDiarization": {"type": "boolean", "title": "区分说话人", "default": false},
+      "punctuation": {"type": "boolean", "title": "自动标点", "default": true}
+    }
+  },
+  "uiSchema": {
+    "language": {"component": "input", "order": 10, "placeholder": "例如 zh-CN；留空自动识别"},
+    "timestamps": {"component": "switch", "order": 20},
+    "speakerDiarization": {"component": "switch", "order": 30},
+    "punctuation": {"component": "switch", "order": 40}
+  },
+  "parameterPolicy": {
+    "language": {"overridable": true, "allowedSources": ["APPLICATION", "AGENT", "WORKFLOW", "REQUEST"]},
+    "timestamps": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]},
+    "speakerDiarization": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]},
+    "punctuation": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]}
+  }
+}

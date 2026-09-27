@@ -7,11 +7,11 @@ import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
-import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
 import com.polaris.ai.rag.AiVectorStoreProperties;
 import com.polaris.ai.rag.AiVectorStoreResolver;
+import com.polaris.ai.runtime.embedding.EmbeddingRuntimeDescriptor;
 import com.polaris.ai.service.IAiKnowledgeService;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.DocumentSplitter;
@@ -101,9 +101,8 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     public int insertKnowledgeBase(AiKnowledgeBase kb)
     {
         applyDefaultsAndValidate(kb);
-        AiModelConfig modelConfig = vectorStoreResolver.resolveModelConfig(kb.getEmbeddingModelId());
-        validateEmbeddingModelScope(kb, modelConfig);
-        kb.setEmbeddingModelId(modelConfig.getId());
+        EmbeddingRuntimeDescriptor descriptor = vectorStoreResolver.prepare(kb);
+        validateEmbeddingModelScope(kb, descriptor);
         kb.setIndexVersion(0L);
         kb.setIndexStatus("EMPTY");
         kb.setIndexError(null);
@@ -119,10 +118,12 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         }
         mergeIndexDefaults(kb, existing);
         applyDefaultsAndValidate(kb);
-        AiModelConfig modelConfig = vectorStoreResolver.resolveModelConfig(kb.getEmbeddingModelId());
-        validateEmbeddingModelScope(kb, modelConfig);
-        kb.setEmbeddingModelId(modelConfig.getId());
+        EmbeddingRuntimeDescriptor descriptor = vectorStoreResolver.prepare(kb);
+        validateEmbeddingModelScope(kb, descriptor);
         boolean indexConfigChanged = !Objects.equals(existing.getEmbeddingModelId(), kb.getEmbeddingModelId())
+                || !Objects.equals(existing.getEmbeddingDimension(), kb.getEmbeddingDimension())
+                || !Objects.equals(existing.getEmbeddingModelRevision(), kb.getEmbeddingModelRevision())
+                || !Objects.equals(existing.getEmbeddingSchemaHash(), kb.getEmbeddingSchemaHash())
                 || !Objects.equals(existing.getChunkSize(), kb.getChunkSize())
                 || !Objects.equals(existing.getChunkOverlap(), kb.getChunkOverlap())
                 || !Objects.equals(existing.getSplitterType(), kb.getSplitterType());
@@ -286,8 +287,8 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
 
         try {
             applyDefaultsAndValidate(knowledgeBase);
-            AiModelConfig modelConfig = vectorStoreResolver.resolveModelConfig(knowledgeBase.getEmbeddingModelId());
-            knowledgeBase.setEmbeddingModelId(modelConfig.getId());
+            EmbeddingRuntimeDescriptor descriptor =
+                    vectorStoreResolver.prepare(knowledgeBase);
             long nextVersion = knowledgeBase.getIndexVersion() == null
                     ? 1L : knowledgeBase.getIndexVersion() + 1L;
             String nextCollection = vectorStoreResolver.newVersionCollection(knowledgeBase, nextVersion);
@@ -302,7 +303,8 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             if (documents == null || documents.isEmpty()) {
                 knowledgeBase.setIndexVersion(nextVersion);
                 knowledgeBase.setVectorCollection(nextCollection);
-                knowledgeBase.setIndexSignature(calculateIndexSignature(knowledgeBase, modelConfig));
+                knowledgeBase.setIndexSignature(calculateIndexSignature(
+                        knowledgeBase, descriptor));
                 knowledgeBase.setIndexStatus("EMPTY");
                 knowledgeBase.setIndexError(null);
                 aiKnowledgeMapper.updateById(knowledgeBase);
@@ -330,7 +332,8 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
 
             knowledgeBase.setIndexVersion(nextVersion);
             knowledgeBase.setVectorCollection(nextCollection);
-            knowledgeBase.setIndexSignature(calculateIndexSignature(knowledgeBase, modelConfig));
+            knowledgeBase.setIndexSignature(calculateIndexSignature(
+                    knowledgeBase, descriptor));
             knowledgeBase.setIndexStatus("READY");
             knowledgeBase.setIndexError(null);
             aiKnowledgeMapper.updateById(knowledgeBase);
@@ -428,8 +431,7 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             throw new IllegalStateException("文档未生成可用的向量分片");
         }
 
-        int batchSize = context.modelConfig().getEmbeddingBatchSize() == null
-                ? 16 : context.modelConfig().getEmbeddingBatchSize();
+        int batchSize = context.descriptor().batchSize();
         for (int offset = 0; offset < indexedSegments.size(); offset += batchSize) {
             int end = Math.min(offset + batchSize, indexedSegments.size());
             List<TextSegment> batch = new ArrayList<>(indexedSegments.subList(offset, end));
@@ -496,6 +498,9 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     private void mergeIndexDefaults(AiKnowledgeBase target, AiKnowledgeBase existing)
     {
         if (target.getEmbeddingModelId() == null) target.setEmbeddingModelId(existing.getEmbeddingModelId());
+        if (target.getEmbeddingDimension() == null) target.setEmbeddingDimension(existing.getEmbeddingDimension());
+        if (target.getEmbeddingModelRevision() == null) target.setEmbeddingModelRevision(existing.getEmbeddingModelRevision());
+        if (target.getEmbeddingSchemaHash() == null) target.setEmbeddingSchemaHash(existing.getEmbeddingSchemaHash());
         if (target.getVectorCollection() == null) target.setVectorCollection(existing.getVectorCollection());
         if (target.getChunkSize() == null) target.setChunkSize(existing.getChunkSize());
         if (target.getChunkOverlap() == null) target.setChunkOverlap(existing.getChunkOverlap());
@@ -507,7 +512,9 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         if (target.getIndexStatus() == null) target.setIndexStatus(existing.getIndexStatus());
     }
 
-    private void validateEmbeddingModelScope(AiKnowledgeBase knowledgeBase, AiModelConfig modelConfig)
+    private void validateEmbeddingModelScope(
+            AiKnowledgeBase knowledgeBase,
+            EmbeddingRuntimeDescriptor descriptor)
     {
         boolean admin = false;
         try {
@@ -516,16 +523,20 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         } catch (Exception ignored) {
             // Background rebuilds use the already validated persisted binding.
         }
-        if (!admin && modelConfig.getDeptId() != null
-                && !Objects.equals(modelConfig.getDeptId(), knowledgeBase.getDeptId())) {
+        if (!admin && descriptor.deptId() != null
+                && !Objects.equals(descriptor.deptId(), knowledgeBase.getDeptId())) {
             throw new IllegalArgumentException("无权绑定该部门的向量模型");
         }
     }
 
-    private String calculateIndexSignature(AiKnowledgeBase knowledgeBase, AiModelConfig modelConfig)
+    private String calculateIndexSignature(
+            AiKnowledgeBase knowledgeBase,
+            EmbeddingRuntimeDescriptor descriptor)
     {
-        String source = modelConfig.getProvider() + "|" + modelConfig.getModelName() + "|"
-                + modelConfig.getEmbeddingDimension() + "|" + knowledgeBase.getChunkSize() + "|"
+        String source = descriptor.modelId() + "|"
+                + descriptor.modelRevision() + "|"
+                + descriptor.schemaHash() + "|"
+                + descriptor.dimension() + "|" + knowledgeBase.getChunkSize() + "|"
                 + knowledgeBase.getChunkOverlap() + "|" + knowledgeBase.getSplitterType();
         return sha256(source);
     }

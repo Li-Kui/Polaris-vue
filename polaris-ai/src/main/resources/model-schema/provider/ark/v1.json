@@ -1,0 +1,17 @@
+{
+  "layer": "PROVIDER",
+  "code": "ARK",
+  "profileVersion": 1,
+  "protocolCode": "OPENAI_COMPATIBLE",
+  "defaultBaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+  "modelDiscoverySupported": true,
+  "supportedCapabilities": ["CHAT_COMPLETION", "TEXT_EMBEDDING", "IMAGE_GENERATION", "IMAGE_EDIT", "IMAGE_INPAINT", "IMAGE_VARIATION"],
+  "credentialSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["apiKey"],
+    "properties": {"apiKey": {"type": "string", "minLength": 1, "maxLength": 4096}}
+  },
+  "connectionConfigSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+  "capabilityOverlays": {}
+}

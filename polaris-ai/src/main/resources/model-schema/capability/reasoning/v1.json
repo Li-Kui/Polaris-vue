@@ -1,0 +1,45 @@
+{
+  "code": "REASONING",
+  "name": "推理思考",
+  "kind": "FEATURE",
+  "category": "FEATURE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "effort": {
+        "title": "思考强度",
+        "type": "string",
+        "enum": ["low", "medium", "high", "max"],
+        "default": "medium"
+      },
+      "activationPolicy": {
+        "title": "启用方式",
+        "type": "string",
+        "enum": ["ON_REQUEST", "ALWAYS"],
+        "default": "ON_REQUEST"
+      }
+    }
+  },
+  "uiSchema": {
+    "effort": {
+      "component": "select",
+      "order": 10
+    },
+    "activationPolicy": {
+      "component": "select",
+      "order": 20
+    }
+  },
+  "parameterPolicy": {
+    "effort": {
+      "overridable": true,
+      "allowedSources": ["APPLICATION", "AGENT", "WORKFLOW", "REQUEST"]
+    },
+    "activationPolicy": {
+      "overridable": false
+    }
+  },
+  "allowedAppliesTo": ["CHAT_COMPLETION"]
+}

@@ -1,0 +1,16 @@
+{
+  "layer": "MODEL",
+  "code": "QWEN_FAMILY",
+  "profileVersion": 1,
+  "providerCode": "DASHSCOPE",
+  "modelNamePattern": "qwen*",
+  "capabilityOverlays": {
+    "CHAT_COMPLETION": {
+      "uiSchema": {
+        "maxTokens": {
+          "placeholder": "Qwen 模型的最大输出 Token 数"
+        }
+      }
+    }
+  }
+}

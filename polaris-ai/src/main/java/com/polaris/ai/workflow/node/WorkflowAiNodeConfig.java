@@ -9,7 +9,9 @@ import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.mapper.AiAgentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
 import com.polaris.ai.mapper.AiModelConfigMapper;
-import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.modelcenter.runtime.ChatRuntimeService;
+import com.polaris.ai.modelcenter.runtime.ModelDefinitionResolver;
+import com.polaris.ai.modelcenter.runtime.RuntimeStreamingChatModel;
 import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.tools.AiToolRegistry;
 import com.polaris.ai.workflow.application.WorkflowResourceOption;
@@ -49,7 +51,8 @@ public class WorkflowAiNodeConfig {
     @Bean
     public WorkflowResourceProvider workflowModelResourceProvider(
             AiModelConfigMapper modelMapper,
-            AiModelFactory modelFactory) {
+            ModelDefinitionResolver definitionResolver,
+            ChatRuntimeService chatRuntimeService) {
         return new WorkflowResourceProvider() {
             @Override
             public String kind() {
@@ -61,7 +64,15 @@ public class WorkflowAiNodeConfig {
                 AiModelConfig model = model(request, modelMapper);
                 if (model == null) return List.of("模型不存在或不属于当前租户");
                 if (!"1".equals(model.getStatus())) return List.of("模型已停用");
-                if (!"CHAT".equalsIgnoreCase(model.getModelType())) return List.of("模型不是CHAT类型");
+                try {
+                    definitionResolver.resolve(model.getId(), "CHAT_COMPLETION");
+                } catch (RuntimeException e) {
+                    return List.of("模型未启用CHAT_COMPLETION能力");
+                }
+                if (request.resourceVersion() != null
+                        && request.resourceVersion() != modelRevision(model)) {
+                    return List.of("执行固定的模型版本已变化，请重新发布工作流");
+                }
                 return List.of();
             }
 
@@ -69,12 +80,15 @@ public class WorkflowAiNodeConfig {
             public ResolvedWorkflowResource resolve(WorkflowResourceRequest request) {
                 AiModelConfig model = model(request, modelMapper);
                 if (model == null) throw new IllegalArgumentException("模型资源不存在");
-                StreamingChatModel handle = modelFactory.getStreamingModel(model.getId());
+                definitionResolver.resolve(model.getId(), "CHAT_COMPLETION");
+                StreamingChatModel handle = new RuntimeStreamingChatModel(
+                        chatRuntimeService, model.getId(), Set.of(), List.of());
                 Map<String, Object> attributes = new LinkedHashMap<>();
                 if (model.getName() != null) attributes.put("name", model.getName());
                 if (model.getModelName() != null) attributes.put("modelName", model.getModelName());
                 return new ResolvedWorkflowResource(
-                        kind(), request.resourceKey(), request.resourceId(), 0,
+                        kind(), request.resourceKey(), request.resourceId(),
+                        modelRevision(model),
                         attributes, handle);
             }
 
@@ -83,9 +97,11 @@ public class WorkflowAiNodeConfig {
                     WorkflowResourceCatalogRequest request) {
                 // 中台严格使用当前租户模型；管理端复用模型管理的部门与管理员可见规则。
                 List<AiModelConfig> models = request.tenantId() != null
-                        ? modelMapper.selectWorkflowResources(request.tenantId())
-                        : modelMapper.selectAvailableModelConfigs(
-                                request.deptId(), request.superAdmin());
+                        ? modelMapper.selectWorkflowResourcesByCapability(
+                                request.tenantId(), "CHAT_COMPLETION")
+                        : modelMapper.selectAvailableModelConfigsByCapability(
+                                "CHAT_COMPLETION", request.deptId(),
+                                request.superAdmin());
                 return models.stream()
                         .filter(model -> request.tenantId() != null
                                 ? Objects.equals(model.getTenantId(), request.tenantId())
@@ -95,11 +111,11 @@ public class WorkflowAiNodeConfig {
                                     request, kind(), model.getId());
                             List<String> errors = validate(validationRequest);
                             Map<String, Object> attributes = new LinkedHashMap<>();
-                            put(attributes, "provider", model.getProvider());
                             put(attributes, "modelName", model.getModelName());
-                            put(attributes, "modelType", model.getModelType());
+                            put(attributes, "modelCode", model.getModelCode());
+                            put(attributes, "modelRevision", model.getRevision());
                             return option(kind(), model.getId(), model.getName(),
-                                    model.getModelDescription(), model.getStatus(),
+                                    model.getDescription(), model.getStatus(),
                                     errors, model.getTenantId() == null, attributes);
                         })
                         .toList();
@@ -189,7 +205,8 @@ public class WorkflowAiNodeConfig {
     public WorkflowResourceProvider workflowAgentResourceProvider(
             AiAgentMapper agentMapper,
             AiModelConfigMapper modelMapper,
-            AiModelFactory modelFactory,
+            ModelDefinitionResolver definitionResolver,
+            ChatRuntimeService chatRuntimeService,
             AiToolRegistry toolRegistry,
             WorkflowProperties properties) {
         return new WorkflowResourceProvider() {
@@ -206,6 +223,11 @@ public class WorkflowAiNodeConfig {
                 AiModelConfig model = agentModel(agent, request.tenantId(), modelMapper);
                 if (model == null || !"1".equals(model.getStatus())) {
                     return List.of("智能体未关联当前作用域内的可用聊天模型");
+                }
+                try {
+                    definitionResolver.resolve(model.getId(), "CHAT_COMPLETION");
+                } catch (RuntimeException e) {
+                    return List.of("智能体模型未启用CHAT_COMPLETION能力");
                 }
                 return List.of();
             }
@@ -225,7 +247,9 @@ public class WorkflowAiNodeConfig {
                 return new ResolvedWorkflowResource(
                         kind(), request.resourceKey(), request.resourceId(), 0,
                         attributes, new AgentHandle(
-                                agent, modelFactory.getStreamingModel(modelConfig.getId())));
+                                agent, new RuntimeStreamingChatModel(
+                                chatRuntimeService, modelConfig.getId(),
+                                Set.of(), List.of())));
             }
 
             @Override
@@ -653,14 +677,19 @@ public class WorkflowAiNodeConfig {
             AiAgent agent, Long tenantId, AiModelConfigMapper mapper) {
         if (agent == null) return null;
         if (agent.getModelConfigId() != null) {
-            AiModelConfig configured = mapper.selectWorkflowResource(
+            return mapper.selectWorkflowResource(
                     tenantId, agent.getModelConfigId());
-            if (configured != null && "CHAT".equalsIgnoreCase(configured.getModelType())) {
-                return configured;
-            }
         }
-        if (agent.getModelName() == null || agent.getModelName().isBlank()) return null;
-        return mapper.selectWorkflowResourceByModelName(tenantId, agent.getModelName().trim());
+        return null;
+    }
+
+    private static int modelRevision(AiModelConfig model) {
+        if (model == null || model.getRevision() == null
+                || model.getRevision() <= 0
+                || model.getRevision() > Integer.MAX_VALUE) {
+            return 1;
+        }
+        return model.getRevision().intValue();
     }
 
     private static ResolvedWorkflowResource firstResource(

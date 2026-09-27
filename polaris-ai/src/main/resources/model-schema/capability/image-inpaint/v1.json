@@ -1,0 +1,23 @@
+{
+  "code": "IMAGE_INPAINT",
+  "name": "图片局部重绘",
+  "kind": "INVOCATION",
+  "category": "IMAGE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "size": {"type": "string", "title": "图片尺寸", "default": "1024x1024"},
+      "maskFeather": {"type": "integer", "title": "蒙版羽化", "minimum": 0, "maximum": 100, "default": 0}
+    }
+  },
+  "uiSchema": {
+    "size": {"component": "custom", "customComponent": "image-size-selector", "order": 10},
+    "maskFeather": {"component": "slider", "order": 20, "step": 1}
+  },
+  "parameterPolicy": {
+    "size": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]},
+    "maskFeather": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]}
+  }
+}

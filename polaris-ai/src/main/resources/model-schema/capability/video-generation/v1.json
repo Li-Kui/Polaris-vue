@@ -1,0 +1,67 @@
+{
+  "code": "VIDEO_GENERATION",
+  "name": "视频生成",
+  "kind": "INVOCATION",
+  "category": "VIDEO",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "duration": {
+        "title": "时长（秒）",
+        "type": "number",
+        "minimum": 1,
+        "maximum": 60,
+        "default": 5
+      },
+      "fps": {
+        "title": "帧率",
+        "type": "integer",
+        "enum": [24, 25, 30, 60],
+        "default": 24
+      },
+      "resolution": {
+        "title": "分辨率",
+        "type": "string",
+        "enum": ["720p", "1080p"],
+        "default": "1080p"
+      },
+      "aspectRatio": {
+        "title": "画面比例",
+        "type": "string",
+        "enum": ["16:9", "9:16", "1:1"],
+        "default": "16:9"
+      }
+    }
+  },
+  "uiSchema": {
+    "duration": {
+      "component": "slider",
+      "order": 10,
+      "step": 1
+    },
+    "fps": {
+      "component": "select",
+      "order": 20
+    },
+    "resolution": {
+      "component": "select",
+      "order": 30
+    },
+    "aspectRatio": {
+      "component": "select",
+      "order": 40
+    }
+  },
+  "parameterPolicy": {
+    "duration": {
+      "overridable": true,
+      "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]
+    },
+    "aspectRatio": {
+      "overridable": true,
+      "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]
+    }
+  }
+}

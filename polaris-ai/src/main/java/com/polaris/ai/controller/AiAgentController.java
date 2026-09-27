@@ -98,11 +98,17 @@ public class AiAgentController extends BaseController {
 
     private boolean checkHasActiveImageModel() {
         try {
-            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.polaris.ai.domain.AiModelConfig> qw =
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-            qw.eq(com.polaris.ai.domain.AiModelConfig::getModelType, "IMAGE")
-              .eq(com.polaris.ai.domain.AiModelConfig::getStatus, "1");
-            return modelConfigService.count(qw) > 0;
+            Long deptId = com.polaris.ai.core.context.CallerUtils.getDeptId();
+            boolean admin = com.polaris.ai.core.context.CallerUtils.isSuperAdmin();
+            for (String capability : java.util.List.of(
+                    "IMAGE_GENERATION", "IMAGE_EDIT",
+                    "IMAGE_INPAINT", "IMAGE_VARIATION")) {
+                if (!modelConfigService.selectAvailableModelConfigsByCapability(
+                        capability, deptId, admin).isEmpty()) {
+                    return true;
+                }
+            }
+            return false;
         } catch (Exception e) {
             return false;
         }

@@ -9,7 +9,9 @@ import com.polaris.ai.domain.AiReport;
 import com.polaris.ai.domain.AiReportRef;
 import com.polaris.ai.dto.RefinedReportOutput;
 import com.polaris.ai.mapper.AiReportMapper;
-import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.modelcenter.runtime.ChatRuntimeService;
+import com.polaris.ai.modelcenter.runtime.RuntimeStreamingChatModel;
+import com.polaris.ai.modelcenter.service.ModelDefaultInternalService;
 import com.polaris.ai.service.IAiReportService;
 import com.polaris.common.constant.HttpStatus;
 import com.polaris.common.exception.ServiceException;
@@ -63,7 +65,10 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     private final Map<Long, Object> refineLocks = new ConcurrentHashMap<>();
 
     @Autowired
-    private AiModelFactory modelFactory;
+    private ModelDefaultInternalService modelDefaultService;
+
+    @Autowired
+    private ChatRuntimeService chatRuntimeService;
 
     @Autowired(required = false)
     @Qualifier("threadPoolTaskExecutor")
@@ -593,7 +598,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         validateReportContent(reportContent);
         log.info(">>> [AiReport] 开始重塑报告, contentLength={}", reportContent.length());
         try {
-            StreamingChatModel streamingModel = modelFactory.getDefaultStreamingModel();
+            StreamingChatModel streamingModel = reportStreamingModel();
             if (streamingModel == null) {
                 log.warn(">>> [AiReport] 未配置默认 StreamingChatModel 实例");
                 return "{}";
@@ -697,7 +702,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         }
 
         try {
-            StreamingChatModel streamingModel = modelFactory.getDefaultStreamingModel();
+            StreamingChatModel streamingModel = reportStreamingModel();
             if (streamingModel == null) {
                 log.warn(">>> [AiReport] 未配置默认 StreamingChatModel 实例");
                 emitter.send("{}");
@@ -776,6 +781,14 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             emitter.completeWithError(e);
         }
         return emitter;
+    }
+
+    /** 报告能力统一使用当前作用域的 CHAT_COMPLETION 默认模型。 */
+    private StreamingChatModel reportStreamingModel() {
+        Long modelId = modelDefaultService.resolveModelId(
+                "CHAT_COMPLETION");
+        return new RuntimeStreamingChatModel(
+                chatRuntimeService, modelId, Set.of(), List.of());
     }
 
     /** 取消报告模型订阅；超时场景同时主动结束 SSE 连接。 */

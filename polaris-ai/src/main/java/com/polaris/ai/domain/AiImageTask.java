@@ -51,6 +51,24 @@ public class AiImageTask {
     @Schema(description = "模型配置ID")
     private Long modelConfigId;
 
+    /** 模型修订号快照。 */
+    private Long modelRevision;
+
+    /** Provider Connection ID 快照。 */
+    private Long connectionId;
+
+    /** Provider Connection 修订号快照。 */
+    private Long connectionRevision;
+
+    /** 实际 Invocation Capability。 */
+    private String capabilityCode;
+
+    /** 不含 Credential 的完整运行时快照 JSON。 */
+    private String runtimeSnapshot;
+
+    /** Invocation Runtime Schema Hash。 */
+    private String schemaHash;
+
     /** 关联会话ID，直连绘图时为空 */
     @Schema(description = "会话ID")
     private Long conversationId;
