@@ -2,6 +2,7 @@ package com.polaris.ai.chat.policy;
 
 import com.polaris.ai.pivot.AiModelProperties;
 import com.polaris.ai.prompt.SystemPromptResolver;
+import com.polaris.ai.tools.WebSearchProperties;
 import org.springframework.stereotype.Service;
 
 /**
@@ -16,12 +17,15 @@ public class DefaultDirectChatPolicyResolver
 
     private final AiModelProperties modelProperties;
     private final SystemPromptResolver promptResolver;
+    private final WebSearchProperties webSearchProperties;
 
     public DefaultDirectChatPolicyResolver(
             AiModelProperties modelProperties,
-            SystemPromptResolver promptResolver) {
+            SystemPromptResolver promptResolver,
+            WebSearchProperties webSearchProperties) {
         this.modelProperties = modelProperties;
         this.promptResolver = promptResolver;
+        this.webSearchProperties = webSearchProperties;
     }
 
     @Override
@@ -32,6 +36,6 @@ public class DefaultDirectChatPolicyResolver
                 promptResolver.getRoleSpecificSystemPrompt(userId),
                 maxHistory,
                 null,
-                null);
+                webSearchProperties.getApiKey());
     }
 }

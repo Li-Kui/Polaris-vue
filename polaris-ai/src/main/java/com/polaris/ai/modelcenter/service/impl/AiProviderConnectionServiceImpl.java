@@ -144,10 +144,23 @@ public class AiProviderConnectionServiceImpl implements IAiProviderConnectionSer
             throw new ServiceException("Credential Action 不能为空");
         }
         long expectedRevision = requireRevision(request.expectedRevision());
+        String networkMode = normalizeMode(request.networkMode());
+        String baseUrl = requireBaseUrl(request.baseUrl());
+        ProviderCredentialContext currentContext = ProviderCredentialContext.from(current);
+        ProviderCredentialContext updatedContext = new ProviderCredentialContext(
+                current.getId(), current.getTenantId(), current.getProviderCode(),
+                current.getProtocolCode(), baseUrl);
+        boolean baseUrlChanged = !Objects.equals(current.getBaseUrl(), baseUrl);
+        boolean credentialWrite = action != CredentialAction.KEEP || baseUrlChanged;
         String ciphertext = switch (action) {
             case KEEP -> {
                 requireCredentialAbsent(request.credential(), "KEEP");
-                yield current.getCredentialCiphertext();
+                if (!baseUrlChanged) {
+                    yield current.getCredentialCiphertext();
+                }
+                Map<String, Object> credential = credentialService.decrypt(
+                        current.getCredentialCiphertext(), currentContext);
+                yield credentialService.encrypt(credential, updatedContext);
             }
             case CLEAR -> {
                 requireCredentialAbsent(request.credential(), "CLEAR");
@@ -156,12 +169,12 @@ public class AiProviderConnectionServiceImpl implements IAiProviderConnectionSer
             case REPLACE -> credentialService.encrypt(
                     profileValueValidator.validateCredential(
                             providerProfile, request.credential(), true),
-                    ProviderCredentialContext.from(current));
+                    updatedContext);
         };
         int updated = connectionMapper.updateMutableFields(
-                current.getId(), requireName(request.connectionName()), action.name(),
-                ciphertext, trimToNull(request.remark()), CallerUtils.getUsername(),
-                expectedRevision);
+                current.getId(), requireName(request.connectionName()), networkMode,
+                baseUrl, credentialWrite, ciphertext, trimToNull(request.remark()),
+                CallerUtils.getUsername(), expectedRevision);
         requireUpdated(updated);
     }
 

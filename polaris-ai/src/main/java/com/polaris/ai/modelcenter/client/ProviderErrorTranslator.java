@@ -2,8 +2,11 @@ package com.polaris.ai.modelcenter.client;
 
 import org.springframework.stereotype.Component;
 
+import javax.net.ssl.SSLException;
 import java.net.ConnectException;
+import java.net.UnknownHostException;
 import java.net.http.HttpTimeoutException;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 
@@ -47,13 +50,34 @@ public class ProviderErrorTranslator {
     public ProviderCallException fromTransport(
             Throwable failure,
             long latencyMillis) {
-        ProviderErrorType type = failure instanceof HttpTimeoutException
-                || failure instanceof TimeoutException
-                ? ProviderErrorType.PROVIDER_TIMEOUT
-                : failure instanceof ConnectException
-                ? ProviderErrorType.PROVIDER_UNAVAILABLE
-                : ProviderErrorType.UNKNOWN;
-        return new ProviderCallException(type, null, null, latencyMillis);
+        ProviderErrorType type;
+        if (causedBy(failure, HttpTimeoutException.class)
+                || causedBy(failure, TimeoutException.class)) {
+            type = ProviderErrorType.PROVIDER_TIMEOUT;
+        } else if (causedBy(failure, UnknownHostException.class)
+                || causedBy(failure, UnresolvedAddressException.class)) {
+            type = ProviderErrorType.DNS_FAILED;
+        } else if (causedBy(failure, SSLException.class)) {
+            type = ProviderErrorType.TLS_FAILED;
+        } else if (causedBy(failure, ConnectException.class)) {
+            type = ProviderErrorType.CONNECTION_REFUSED;
+        } else {
+            type = ProviderErrorType.UNKNOWN;
+        }
+        return new ProviderCallException(
+                type, null, null, latencyMillis, failure);
+    }
+
+    private boolean causedBy(
+            Throwable failure, Class<? extends Throwable> expected) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (expected.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private boolean containsAny(String value, String... candidates) {

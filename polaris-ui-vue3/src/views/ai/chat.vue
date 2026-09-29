@@ -232,7 +232,7 @@
                 placeholder="请选择要使用的大语言模型"
                 size="default"
                 style="width: 100%;"
-                @change="handleModelOrKbChange"
+                @change="handleModelOrKbChange(true)"
               >
                 <el-option
                   v-for="item in models"
@@ -789,7 +789,10 @@
                 @show="loadModels"
               >
                 <template #reference>
-                  <button :disabled="isStreaming || creatingConv" class="config-pill-btn pill-model">
+                  <button
+                    :disabled="isStreaming || creatingConv"
+                    class="config-pill-btn pill-model"
+                  >
                     <el-icon><cpu /></el-icon>
                     <span class="pill-label">{{ getSelectedModelLabel() }}</span>
                     <el-icon class="pill-arrow"><arrow-down /></el-icon>
@@ -799,12 +802,12 @@
                   <div
                     v-for="item in models"
                     :key="item.id"
-                    :class="['popper-selector-item', { 'is-active': selectedModelConfigId === item.id }]"
-                    @click="selectedModelConfigId = item.id; handleModelOrKbChange(); showModelPopover = false"
+                    :class="['popper-selector-item', { 'is-active': isModelSelected(item) }]"
+                    @click="handleModelChange(item.id)"
                   >
                     <el-icon class="item-icon"><cpu /></el-icon>
                     <span class="item-name">{{ item.name }}</span>
-                    <el-icon v-if="selectedModelConfigId === item.id" class="check-icon"><check /></el-icon>
+                    <el-icon v-if="isModelSelected(item)" class="check-icon"><check /></el-icon>
                   </div>
                 </div>
               </el-popover>
@@ -1132,6 +1135,7 @@ import {
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {getCapabilityDefault, listAvailableModel} from '@/api/ai/model'
+import {getAvailableTools} from '@/api/ai/agent'
 import {
   cancelWorkflowExecution,
   listActiveWorkflows,
@@ -1217,6 +1221,7 @@ export default {
       aiRefinementInProgress: false,
       refinedSchema: null,
       enableWebSearch: false,
+      webSearchAvailable: false,
       // 语音输入相关
       isListening: false,
       voiceTempText: '',
@@ -1263,15 +1268,17 @@ export default {
       if (!this.currentConvId || this.conversations.length === 0) return ''
       const c = this.conversations.find(conv => conv.id === this.currentConvId)
       if (c && c.modelConfigId) {
-        const m = this.models.find(item => item.id === c.modelConfigId)
+        const m = this.models.find(item => String(item.id) === String(c.modelConfigId))
         return m ? m.name : (c.model || '')
       }
-      return c ? (c.model || '') : ''
+      if (c && c.model) {
+        const legacyModel = this.models.find(item => item.modelName === c.model)
+        return legacyModel ? legacyModel.name : c.model
+      }
+      return ''
     },
     currentModelSupportsSearch() {
-      if (!this.selectedModelConfigId) return false
-      const m = this.models.find(item => item.id === this.selectedModelConfigId)
-      return m && m.enableSearch === '1'
+      return this.webSearchAvailable && !!this.selectedModelConfigId
     },
     filteredAgents() {
       if (!this.agentSearchKey) return this.agents || []
@@ -1296,6 +1303,18 @@ export default {
       return lastMsg.role === 'assistant' && (lastMsg.loading || lastMsg.streaming || (lastMsg.statusMsg && !lastMsg.content))
     }
   },
+  watch: {
+    currentConvId() {
+      this.$nextTick(() => this.syncSelectedModelFromConversation())
+    },
+    conversations() {
+      this.$nextTick(() => this.syncSelectedModelFromConversation())
+    },
+    models() {
+      // 模型、会话列表并行加载时，最终始终以已打开会话的持久化绑定为准。
+      this.$nextTick(() => this.syncSelectedModelFromConversation())
+    }
+  },
   created() {
     this.currentReader = null
     this.sseEventBuffer = null
@@ -1303,6 +1322,7 @@ export default {
     this.loadModels()
     this.loadWorkflows()
     this.loadToolDictionary()
+    this.loadAvailableTools()
     // 读取联网搜索的偏好设置
     const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
     this.enableWebSearch = savedPreference === 'true'
@@ -1328,6 +1348,32 @@ export default {
     document.body.classList.remove('ai-chat-page')
   },
   methods: {
+    getBoundConversationModel() {
+      if (!this.currentConvId || !this.models.length || !this.conversations.length) return null
+      const conversation = this.conversations.find(
+        item => String(item.id) === String(this.currentConvId)
+      )
+      if (!conversation) return null
+      return conversation.modelConfigId != null
+        ? this.models.find(item => String(item.id) === String(conversation.modelConfigId)) || null
+        : this.models.find(item => item.modelName === conversation.model) || null
+    },
+    syncSelectedModelFromConversation() {
+      const boundModel = this.getBoundConversationModel()
+      if (boundModel) this.selectedModelConfigId = boundModel.id
+    },
+    async loadAvailableTools() {
+      try {
+        const res = await getAvailableTools()
+        const tools = res.code === 200 ? (res.data || []) : []
+        const searchTool = tools.find(tool => tool.requirement === 'SEARCH_KEY')
+        this.webSearchAvailable = !!searchTool && searchTool.available !== false
+        if (!this.webSearchAvailable) this.enableWebSearch = false
+      } catch (_) {
+        this.webSearchAvailable = false
+        this.enableWebSearch = false
+      }
+    },
     isImageTaskMessage(content) {
       if (!content) return false;
       // 1. 系统内置的异步生图轮询格式 (支持含有 type: image-task，或者包含 taskId 且 taskId 含有 img_ 标识)
@@ -1885,7 +1931,19 @@ export default {
             }]
             this.selectedModelConfigId = null
           } else {
-            const currentExist = this.models.find(m => m.id === this.selectedModelConfigId)
+            // 已打开会话的持久化绑定优先于异步加载过程中暂存的默认值。
+            // 否则会出现顶部显示会话模型、输入区却显示另一个默认模型的竞态。
+            const currentConversation = this.conversations.find(
+              conversation => conversation.id === this.currentConvId
+            )
+            const boundModel = currentConversation?.modelConfigId != null
+              ? this.models.find(
+                model => String(model.id) === String(currentConversation.modelConfigId)
+              )
+              : this.models.find(model => model.modelName === currentConversation?.model)
+            const currentExist = boundModel || this.models.find(
+              model => String(model.id) === String(this.selectedModelConfigId)
+            )
             if (!currentExist) {
               let defaultId = null
               try {
@@ -1900,6 +1958,10 @@ export default {
               } else if (this.models.length > 0) {
                 this.selectedModelConfigId = this.models[0].id
               }
+            } else {
+              // 会话接口可能把 bigint 序列化为字符串；统一为模型列表中的实际类型，
+              // 避免顶部会话模型与输入区模型显示不一致。
+              this.selectedModelConfigId = currentExist.id
             }
           }
         }
@@ -2015,7 +2077,12 @@ export default {
       this.currentConvId = id
       const c = this.conversations.find(conv => conv.id === id)
       if (c) {
-        this.selectedModelConfigId = c.modelConfigId || null
+        const conversationModel = c.modelConfigId != null
+          ? this.models.find(item => String(item.id) === String(c.modelConfigId))
+          : this.models.find(item => item.modelName === c.model)
+        this.selectedModelConfigId = conversationModel
+          ? conversationModel.id
+          : (c.modelConfigId || null)
         this.selectedKbId = c.knowledgeBaseId || null
         this.selectedAgentCode = c.agentCode || ''
         this.selectedWorkflowCode = c.workflowCode || ''
@@ -2027,12 +2094,27 @@ export default {
     },
 
     getSelectedModelLabel() {
+      // 当前会话的持久化绑定才是实际请求所使用的模型，优先据此展示。
+      const boundModel = this.getBoundConversationModel()
+      if (boundModel) return boundModel.name
       if (!this.selectedModelConfigId) {
         const def = this.models.find(m => m.id === null || m.isDefault === '1')
         return def ? def.name : '选择 AI 模型';
       }
-      const found = this.models.find(m => m.id === this.selectedModelConfigId);
+      const found = this.models.find(
+        m => String(m.id) === String(this.selectedModelConfigId)
+      );
       return found ? found.name : '选择 AI 模型';
+    },
+    isModelSelected(item) {
+      const boundModel = this.getBoundConversationModel()
+      const selectedId = boundModel ? boundModel.id : this.selectedModelConfigId
+      return String(item.id) === String(selectedId)
+    },
+    async handleModelChange(modelId) {
+      this.selectedModelConfigId = modelId
+      await this.handleModelOrKbChange(true)
+      this.showModelPopover = false
     },
     getSelectedKbLabel() {
       if (!this.selectedKbId) return '✨ 智能挂载中';
@@ -2045,13 +2127,19 @@ export default {
       return found ? found.workflowName : '已选工作流';
     },
 
-    async handleModelOrKbChange() {
+    async handleModelOrKbChange(modelChanged = false) {
       // 只有在当前选中了某会话时，才需要向后端同步已有会话的模型与知识库、智能体与工作流配置
       if (this.currentConvId) {
         try {
+          // 修改知识库或运行模式时不得被异步默认值悄悄改掉会话模型。
+          const boundModel = this.getBoundConversationModel()
+          const modelConfigId = modelChanged
+            ? this.selectedModelConfigId
+            : (boundModel?.id || this.selectedModelConfigId)
+          this.selectedModelConfigId = modelConfigId
           const res = await updateConversationConfig(
             this.currentConvId,
-            this.selectedModelConfigId,
+            modelConfigId,
             this.selectedKbId,
             this.selectedAgentCode,
             this.selectedWorkflowCode

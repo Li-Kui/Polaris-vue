@@ -1,9 +1,11 @@
 package com.polaris.ai.modelcenter.client;
 
 import com.polaris.ai.modelcenter.protocol.ProtocolHttpMethod;
+import com.polaris.ai.runtime.ModelHttpClientProperties;
 import com.polaris.common.exception.ServiceException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.InputStream;
@@ -26,11 +28,21 @@ public class DefaultProviderHttpClientFactory
     private static final int MAX_CACHE_ENTRIES = 512;
 
     private final ProviderErrorTranslator errorTranslator;
+    private final ModelHttpClientProperties httpProperties;
     private final ConcurrentMap<ClientCacheKey, CacheEntry> cache =
             new ConcurrentHashMap<>();
 
-    public DefaultProviderHttpClientFactory(ProviderErrorTranslator errorTranslator) {
+    public DefaultProviderHttpClientFactory(
+            ProviderErrorTranslator errorTranslator) {
+        this(errorTranslator, new ModelHttpClientProperties());
+    }
+
+    @Autowired
+    public DefaultProviderHttpClientFactory(
+            ProviderErrorTranslator errorTranslator,
+            ModelHttpClientProperties httpProperties) {
         this.errorTranslator = errorTranslator;
+        this.httpProperties = httpProperties;
     }
 
     @Override
@@ -49,7 +61,8 @@ public class DefaultProviderHttpClientFactory
             return cached.client();
         }
         prune(now);
-        ProviderHttpClient client = new JdkProviderHttpClient(context, errorTranslator);
+        ProviderHttpClient client = new JdkProviderHttpClient(
+                context, errorTranslator, httpProperties);
         cache.put(key, new CacheEntry(
                 identity, client, now + CACHE_TTL.toMillis()));
         return client;
@@ -105,13 +118,14 @@ public class DefaultProviderHttpClientFactory
 
         private JdkProviderHttpClient(
                 ProviderRuntimeContext context,
-                ProviderErrorTranslator errorTranslator) {
+                ProviderErrorTranslator errorTranslator,
+                ModelHttpClientProperties httpProperties) {
             this.context = context;
             this.errorTranslator = errorTranslator;
-            this.client = HttpClient.newBuilder()
+            HttpClient.Builder builder = HttpClient.newBuilder()
                     .connectTimeout(Duration.ofSeconds(10))
-                    .followRedirects(HttpClient.Redirect.NEVER)
-                    .build();
+                    .followRedirects(HttpClient.Redirect.NEVER);
+            this.client = httpProperties.applyProxy(builder).build();
         }
 
         @Override

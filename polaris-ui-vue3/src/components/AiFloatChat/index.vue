@@ -263,6 +263,7 @@
 <script>
 import {getToken} from '@/utils/auth'
 import {listAvailableModel} from '@/api/ai/model'
+import {getAvailableTools} from '@/api/ai/agent'
 import {listKnowledge} from '@/api/ai/knowledge'
 import {cancelChatGeneration, createConversation, updateConversationConfig} from '@/api/ai/chat'
 import {cancelWorkflowExecution, listActiveWorkflows, streamWorkflowExecution} from '@/api/ai/workflow'
@@ -298,6 +299,7 @@ export default {
 
       // 联网搜索
       enableWebSearch: false,
+      webSearchAvailable: false,
 
       currentReader: null,
       chatAbortController: null,
@@ -320,9 +322,7 @@ export default {
       return '0 8px 32px var(--el-color-primary-light-5), 0 0 15px var(--el-color-primary-light-7)'
     },
     currentModelSupportsSearch() {
-      if (!this.selectedModelConfigId) return false
-      const m = this.models.find(item => item.id === this.selectedModelConfigId)
-      return m && m.enableSearch === '1'
+      return this.webSearchAvailable && !!this.selectedModelConfigId
     },
     currentWorkflowName() {
       if (!this.selectedWorkflowCode) return ''
@@ -334,6 +334,7 @@ export default {
     this.loadModels()
     this.loadKnowledgeBases()
     this.loadActiveWorkflows()
+    this.loadAvailableTools()
     const savedPreference = localStorage.getItem('ai_chat_enable_web_search')
     this.enableWebSearch = savedPreference === 'true'
   },
@@ -342,6 +343,18 @@ export default {
     this.cleanupVoiceInput()
   },
   methods: {
+    async loadAvailableTools() {
+      try {
+        const res = await getAvailableTools()
+        const tools = res.code === 200 ? (res.data || []) : []
+        const searchTool = tools.find(tool => tool.requirement === 'SEARCH_KEY')
+        this.webSearchAvailable = !!searchTool && searchTool.available !== false
+        if (!this.webSearchAvailable) this.enableWebSearch = false
+      } catch (_) {
+        this.webSearchAvailable = false
+        this.enableWebSearch = false
+      }
+    },
     lightenColor(hex, percent) {
       hex = hex.replace(/^\s*#|\s*$/g, '')
       if (hex.length === 3) {
@@ -370,7 +383,7 @@ export default {
       try {
         const res = await listAvailableModel()
         if (res.code === 200) {
-          this.models = (res.data.rows || res.data || []).filter(m => m.isDefaultEmbedding !== '1' && !m.modelName.toLowerCase().includes('embed'))
+          this.models = res.data.rows || res.data || []
           if (this.models.length === 0) {
             const defaultModelName = import.meta.env.VITE_APP_DEFAULT_MODEL || 'deepseek-chat'
             this.models = [{

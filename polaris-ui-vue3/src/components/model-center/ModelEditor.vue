@@ -55,6 +55,13 @@
             </el-select>
             </div>
             <div class="field-tip">可按系列和用途筛选，也可搜索或直接输入模型名。用途按名称识别，实际支持能力以服务商为准。</div>
+            <div v-if="discoveryError" class="discovery-status discovery-status--error">
+              <span>{{ discoveryError }}</span>
+              <el-button link type="primary" :loading="discovering" @click="discover(false)">重新获取</el-button>
+            </div>
+            <div v-else-if="discoverySucceeded" class="discovery-status discovery-status--success">
+              已从服务商获取 {{ remoteModels.length }} 个远程模型
+            </div>
           </el-form-item>
           <el-form-item label="描述" class="wide"><el-input v-model="state.description" type="textarea" :rows="2" maxlength="500" /></el-form-item>
         </div>
@@ -161,6 +168,8 @@ const loading = ref(false)
 const saving = ref(false)
 const testing = ref(false)
 const discovering = ref(false)
+const discoveryError = ref('')
+const discoverySucceeded = ref(false)
 const connections = ref([])
 const schemas = ref([])
 const providerProfiles = ref([])
@@ -344,6 +353,8 @@ async function connectionChanged() {
   remoteFamily.value = ''
   remotePurpose.value = ''
   remoteModels.value = []
+  discoveryError.value = ''
+  discoverySucceeded.value = false
   await enableRecommendedCapability()
   await discover(true)
 }
@@ -385,13 +396,35 @@ async function loadDynamicOptions(item) {
 async function discover(showError) {
   if (!state.connectionId) return
   discovering.value = true
+  discoveryError.value = ''
   try {
     remoteModels.value = unwrap(await discoverProviderModels(state.connectionId)) || []
-  } catch (_) {
-    if (showError) ElMessage.warning('未能获取远程模型列表，可直接输入模型名称')
+    discoverySucceeded.value = true
+  } catch (error) {
+    discoverySucceeded.value = false
+    discoveryError.value = discoveryFailureMessage(error)
+    if (showError) ElMessage.warning(discoveryError.value)
   } finally {
     discovering.value = false
   }
+}
+
+function discoveryFailureMessage(error) {
+  const raw = String(error?.message || '')
+  const messages = {
+    MODEL_DISCOVERY_AUTH_FAILED: 'API 密钥无效或没有读取模型列表的权限，可修改连接后重试。',
+    MODEL_DISCOVERY_NOT_SUPPORTED: '该服务地址不支持自动获取模型，可直接输入完整模型名称。',
+    MODEL_DISCOVERY_RATE_LIMITED: '服务商请求过于频繁，请稍后重新获取。',
+    MODEL_DISCOVERY_TIMEOUT: '服务商响应超时，请检查网络后重新获取。',
+    MODEL_DISCOVERY_DNS_FAILED: '无法解析服务商域名，请检查服务地址或网络设置。',
+    MODEL_DISCOVERY_CONNECTION_REFUSED: '服务连接被拒绝，请检查服务地址；如使用代理，请确认代理正在运行。',
+    MODEL_DISCOVERY_TLS_FAILED: 'HTTPS 证书校验失败，请检查服务地址和证书配置。',
+    MODEL_DISCOVERY_RESPONSE_INVALID: '服务商返回的模型列表格式不兼容，可直接输入完整模型名称。',
+    MODEL_DISCOVERY_MODEL_LIMIT_EXCEEDED: '服务商返回的模型数量过多，请直接搜索或输入模型名称。',
+    MODEL_DISCOVERY_UNAVAILABLE: '暂时无法连接服务商，请检查服务地址和网络后重试。'
+  }
+  const matched = Object.keys(messages).find(code => raw.includes(code))
+  return matched ? messages[matched] : '未能获取远程模型列表，可重新获取或直接输入模型名称。'
 }
 
 function buildPersistableRequest() {
@@ -703,6 +736,9 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
 .policy-title span { margin-left: 8px; color: var(--mc-muted); font-size: 12px; font-weight: 400; }
 .quick-tip { margin-bottom: 16px; }
 .field-tip { margin-top: 8px; color: var(--mc-muted); font-size: 12px; line-height: 1.5; }
+.discovery-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 9px 12px; border: 1px solid var(--mc-border); border-radius: 10px; font-size: 12px; line-height: 1.5; }
+.discovery-status--error { border-color: color-mix(in srgb, var(--el-color-warning) 38%, var(--mc-border)); color: var(--el-color-warning-dark-2); background: color-mix(in srgb, var(--el-color-warning) 9%, var(--mc-surface)); }
+.discovery-status--success { justify-content: flex-start; color: var(--el-color-success-dark-2); background: color-mix(in srgb, var(--el-color-success) 8%, var(--mc-surface)); }
 .quick-advanced { overflow: hidden; margin-top: 4px; padding: 0 14px; border: 1px solid var(--mc-border); border-radius: 12px; background: var(--mc-surface-muted); }
 .quick-advanced :deep(.el-collapse-item__header), .quick-advanced :deep(.el-collapse-item__wrap) { color: var(--mc-text); background: transparent; }
 :global(.quick-connection-dialog) { overflow: hidden; display: flex; max-height: calc(100vh - 32px); flex-direction: column; margin: 16px auto !important; border: 1px solid var(--mc-border); border-radius: 18px !important; color: var(--mc-text); background: var(--mc-surface) !important; }

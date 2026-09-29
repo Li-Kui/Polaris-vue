@@ -14,10 +14,7 @@ import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
 import com.polaris.ai.mapper.AiChatMapper;
-import com.polaris.ai.modelcenter.runtime.ChatRuntimeService;
-import com.polaris.ai.modelcenter.runtime.ChatRuntimeStreamSubscriber;
-import com.polaris.ai.modelcenter.runtime.ModelDefinitionResolver;
-import com.polaris.ai.modelcenter.runtime.RuntimeStreamingChatModel;
+import com.polaris.ai.modelcenter.runtime.*;
 import com.polaris.ai.modelcenter.service.ModelAggregateAccessGuard;
 import com.polaris.ai.modelcenter.service.ModelDefaultInternalService;
 import com.polaris.ai.observability.AiObservability;
@@ -613,7 +610,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 StreamingChatModel targetChatModel =
                         new RuntimeStreamingChatModel(
                                 chatRuntimeService, resolvedTargetModelId,
-                                java.util.Set.of(), java.util.List.of(), streamingEnabled);
+                                java.util.Set.of(),
+                                AgentRuntimeOverrides.from(selectedAgent),
+                                streamingEnabled);
 
                 StreamingModerationSession answerSession = null;
                 StreamingModerationSession reasoningSession = null;

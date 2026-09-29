@@ -15,6 +15,7 @@ public class ProviderRetryExecutor {
     private static final Set<ProviderErrorType> RETRYABLE = Set.of(
             ProviderErrorType.RATE_LIMITED,
             ProviderErrorType.PROVIDER_TIMEOUT,
+            ProviderErrorType.CONNECTION_REFUSED,
             ProviderErrorType.PROVIDER_UNAVAILABLE);
 
     public <T> T execute(

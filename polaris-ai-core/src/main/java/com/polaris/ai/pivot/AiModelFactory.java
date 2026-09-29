@@ -1,14 +1,18 @@
 package com.polaris.ai.pivot;
 
+import com.polaris.ai.runtime.ModelHttpClientProperties;
 import com.polaris.ai.runtime.ModelRuntimeSpec;
+import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -24,10 +28,23 @@ public class AiModelFactory {
 
     private static final String OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE";
 
+    private final ModelHttpClientProperties httpProperties;
+
+    /** 兼容不启动 Spring 容器的运行时单元测试。 */
+    public AiModelFactory() {
+        this(new ModelHttpClientProperties());
+    }
+
+    @Autowired
+    public AiModelFactory(ModelHttpClientProperties httpProperties) {
+        this.httpProperties = httpProperties;
+    }
+
     public ChatModel createChatModel(ModelRuntimeSpec runtime) {
         RuntimeChatSettings settings = runtimeChatSettings(runtime);
         OpenAiChatModel.OpenAiChatModelBuilder builder =
                 OpenAiChatModel.builder()
+                        .httpClientBuilder(httpClientBuilder())
                         .baseUrl(settings.baseUrl())
                         .apiKey(settings.apiKey())
                         .modelName(settings.modelName())
@@ -48,6 +65,7 @@ public class AiModelFactory {
         RuntimeChatSettings settings = runtimeChatSettings(runtime);
         OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
                 OpenAiStreamingChatModel.builder()
+                        .httpClientBuilder(httpClientBuilder())
                         .baseUrl(settings.baseUrl())
                         .apiKey(settings.apiKey())
                         .modelName(settings.modelName())
@@ -68,6 +86,7 @@ public class AiModelFactory {
         requireOpenAiCompatible(runtime, "Embedding");
         OpenAiEmbeddingModel.OpenAiEmbeddingModelBuilder builder =
                 OpenAiEmbeddingModel.builder()
+                        .httpClientBuilder(httpClientBuilder())
                         .baseUrl(requiredString(runtime.baseUrl(), "baseUrl"))
                         .apiKey(requiredString(
                                 runtime.credentials().get("apiKey"), "apiKey"))
@@ -98,6 +117,12 @@ public class AiModelFactory {
             builder.maxSegmentsPerBatch(batchSize);
         }
         return builder.build();
+    }
+
+    private JdkHttpClientBuilder httpClientBuilder() {
+        HttpClient.Builder builder = HttpClient.newBuilder();
+        httpProperties.applyProxy(builder);
+        return new JdkHttpClientBuilder().httpClientBuilder(builder);
     }
 
     private RuntimeChatSettings runtimeChatSettings(ModelRuntimeSpec runtime) {

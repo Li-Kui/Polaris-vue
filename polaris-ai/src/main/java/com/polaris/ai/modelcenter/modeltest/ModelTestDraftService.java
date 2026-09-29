@@ -84,6 +84,9 @@ public class ModelTestDraftService {
             case MODEL_NOT_FOUND -> "服务商未找到该模型，请重新选择远程模型";
             case REQUEST_INVALID -> "服务商不接受当前模型参数，请调整能力配置后重试";
             case PROVIDER_TIMEOUT -> "服务商响应超时，请稍后重试";
+            case DNS_FAILED -> "无法解析服务商域名，请检查服务地址或网络设置";
+            case CONNECTION_REFUSED -> "服务商连接被拒绝，请检查服务地址及代理是否可用";
+            case TLS_FAILED -> "服务商 HTTPS 证书校验失败，请检查服务地址和证书配置";
             case PROVIDER_UNAVAILABLE -> "暂时无法连接服务商，请检查地址或稍后重试";
             case CONTENT_REJECTED -> "测试内容被服务商安全策略拒绝";
             case UNKNOWN -> "服务商调用失败，请检查连接与模型配置";

@@ -75,11 +75,13 @@ public class DefaultOpenApiModelRuntimeGateway
             }
             model = matches.get(0);
         }
-        definitionResolver.resolve(model.getId(), CAPABILITY);
+        ResolvedModelDefinition definition = definitionResolver.resolve(
+                model.getId(), CAPABILITY);
         return new OpenApiModelHandle(
                 descriptor(model),
                 new RuntimeStreamingChatModel(
-                        chatRuntimeService, model.getId(), Set.of(), List.of()));
+                        chatRuntimeService, model.getId(), Set.of(), List.of(),
+                        definition.enabledFeatures().containsKey("STREAMING")));
     }
 
     private List<AiModelConfig> accessibleModels() {

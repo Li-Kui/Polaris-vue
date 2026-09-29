@@ -88,7 +88,10 @@ function capabilityDescription(code) {
     AUDIO_TTS: '将文本转换为语音',
     AUDIO_STT: '将语音转换为文字',
     VIDEO_GENERATION: '根据文本或图片生成视频',
-    REASONING: '为核心能力增加推理过程'
+    REASONING: '为核心能力增加推理过程',
+    STREAMING: '边生成边返回内容，未开启时自动使用普通调用',
+    TOOL_CALLING: '允许模型调用智能体或工作流工具',
+    VISION_INPUT: '允许聊天模型理解图片内容'
   })[code] || (props.schemas.find(schema => schema.code === code)?.kind === 'FEATURE'
     ? '附加到核心能力的可选增强' : '模型可直接执行的核心能力')
 }

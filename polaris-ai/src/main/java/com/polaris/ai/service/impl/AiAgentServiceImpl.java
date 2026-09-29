@@ -36,7 +36,7 @@ public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> impl
             if (entity.getTools() != null && !entity.getTools().isBlank()
                     && !definition.enabledFeatures().containsKey("TOOL_CALLING")) {
                 throw new com.polaris.common.exception.ServiceException(
-                        "AGENT_MODEL_TOOL_CALLING_REQUIRED");
+                        "所选模型未启用工具调用能力，无法绑定工具；请切换模型或在模型管理中启用工具调用");
             }
             // 仅保留给旧列表展示；运行时身份始终是 modelConfigId。
             entity.setModelName(definition.modelName());

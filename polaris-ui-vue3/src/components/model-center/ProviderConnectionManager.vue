@@ -22,24 +22,25 @@
     <el-dialog v-model="dialogVisible" :title="form.id ? '编辑连接' : '新增连接'" width="min(660px, calc(100vw - 28px))" class="provider-connection-dialog" destroy-on-close>
       <el-form label-position="top">
         <el-form-item label="连接名称"><el-input v-model="form.connectionName" /></el-form-item>
-        <template v-if="!form.id">
-          <el-alert title="选择服务商后会自动填写推荐地址。" type="info" :closable="false" class="form-tip" />
-          <el-form-item label="服务商">
+        <el-alert :title="form.id ? '可以调整连接方式和服务地址；服务商类型创建后保持不变。' : '选择服务商后会自动填写推荐地址。'" type="info" :closable="false" class="form-tip" />
+        <el-form-item label="服务商">
+          <el-input v-if="form.id" :model-value="profileLabel(form.providerCode)" disabled />
+          <template v-else>
             <el-select v-model="form.providerCode" style="width: 100%" @change="providerChanged">
               <el-option v-for="profile in profiles" :key="profile.code" :label="profileLabel(profile.code)" :value="profile.code">
                 <div class="provider-option"><span>{{ profileLabel(profile.code) }}</span><small>{{ providerDescription(profile.code) }}</small></div>
               </el-option>
             </el-select>
-          </el-form-item>
-          <el-form-item label="连接方式">
-            <el-radio-group v-model="form.networkMode">
-              <el-radio-button value="DIRECT">直连厂商</el-radio-button>
-              <el-radio-button value="RELAY">兼容中转</el-radio-button>
-            </el-radio-group>
-            <div class="field-tip">两种方式都保留所选服务商身份与能力范围；直连使用推荐地址，兼容中转使用你填写的地址。</div>
-          </el-form-item>
-          <el-form-item label="服务地址"><el-input v-model="form.baseUrl" placeholder="例如 https://api.example.com/v1" /></el-form-item>
-        </template>
+          </template>
+        </el-form-item>
+        <el-form-item label="连接方式">
+          <el-radio-group v-model="form.networkMode">
+            <el-radio-button value="DIRECT">直连厂商</el-radio-button>
+            <el-radio-button value="RELAY">兼容中转</el-radio-button>
+          </el-radio-group>
+          <div class="field-tip">直连使用厂商接口；兼容中转使用你填写的 OpenAI 兼容地址。两种方式都会保留当前服务商的适配能力。</div>
+        </el-form-item>
+        <el-form-item label="服务地址"><el-input v-model="form.baseUrl" placeholder="例如 https://api.example.com/v1" /></el-form-item>
         <el-form-item v-if="form.id" label="凭据操作">
           <el-radio-group v-model="form.credentialAction"><el-radio value="KEEP">保持</el-radio><el-radio value="REPLACE">替换</el-radio><el-radio value="CLEAR">清除</el-radio></el-radio-group>
         </el-form-item>
@@ -89,7 +90,12 @@ function openCreate() {
   dialogVisible.value = true
 }
 function openEdit(row) {
-  Object.assign(form, { id: row.id, revision: row.revision, connectionName: row.connectionName, credentialAction: 'KEEP', apiKey: '', remark: row.remark || '' })
+  Object.assign(form, {
+    id: row.id, revision: row.revision, connectionName: row.connectionName,
+    providerCode: row.providerCode, protocolCode: row.protocolCode,
+    networkMode: row.networkMode, baseUrl: row.baseUrl,
+    credentialAction: 'KEEP', apiKey: '', remark: row.remark || ''
+  })
   dialogVisible.value = true
 }
 function providerChanged(code) {
@@ -115,11 +121,15 @@ function providerDescription(code) {
 function accessModeLabel(mode) { return String(mode).toUpperCase() === 'RELAY' ? '兼容中转' : '直连厂商' }
 async function save() {
   if (!form.connectionName?.trim()) return ElMessage.error('请输入连接名称')
+  if (!form.providerCode) return ElMessage.error('请选择服务商')
+  if (!form.baseUrl?.trim()) return ElMessage.error('请输入服务地址')
+  if (form.credentialAction === 'REPLACE' && !form.apiKey) return ElMessage.error('请输入新的 API 密钥')
   saving.value = true
   try {
     if (form.id) {
       await updateProviderConnection(form.id, {
-        connectionName: form.connectionName.trim(), credentialAction: form.credentialAction,
+        connectionName: form.connectionName.trim(), networkMode: form.networkMode,
+        baseUrl: form.baseUrl, credentialAction: form.credentialAction,
         credential: form.credentialAction === 'REPLACE' ? { apiKey: form.apiKey } : {},
         expectedRevision: form.revision, remark: form.remark || null
       })

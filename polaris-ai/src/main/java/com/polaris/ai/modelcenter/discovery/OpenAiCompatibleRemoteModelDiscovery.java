@@ -84,6 +84,12 @@ public class OpenAiCompatibleRemoteModelDiscovery
                     new ServiceException("MODEL_DISCOVERY_RATE_LIMITED");
             case PROVIDER_TIMEOUT ->
                     new ServiceException("MODEL_DISCOVERY_TIMEOUT");
+            case DNS_FAILED ->
+                    new ServiceException("MODEL_DISCOVERY_DNS_FAILED");
+            case CONNECTION_REFUSED ->
+                    new ServiceException("MODEL_DISCOVERY_CONNECTION_REFUSED");
+            case TLS_FAILED ->
+                    new ServiceException("MODEL_DISCOVERY_TLS_FAILED");
             default -> new ServiceException("MODEL_DISCOVERY_UNAVAILABLE");
         };
     }

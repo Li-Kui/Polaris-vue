@@ -16,6 +16,15 @@ public record ProviderConnectionUpdateRequest(
         @Size(max = 100)
         String connectionName,
 
+        @NotBlank
+        @Size(max = 20)
+        @Schema(description = "连接方式：DIRECT 直连厂商，RELAY OpenAI 兼容中转；PUBLIC/INTERNAL 为兼容旧值")
+        String networkMode,
+
+        @NotBlank
+        @Size(max = 500)
+        String baseUrl,
+
         @NotNull
         CredentialAction credentialAction,
 
@@ -33,6 +42,8 @@ public record ProviderConnectionUpdateRequest(
     @Override
     public String toString() {
         return "ProviderConnectionUpdateRequest[connectionName=" + connectionName
+                + ", networkMode=" + networkMode
+                + ", baseUrl=" + baseUrl
                 + ", credentialAction=" + credentialAction
                 + ", credential=<redacted>"
                 + ", expectedRevision=" + expectedRevision

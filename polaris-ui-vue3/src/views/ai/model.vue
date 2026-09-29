@@ -149,7 +149,9 @@ function capabilityLabel(code) {
     IMAGE_GENERATION: '图片生成', IMAGE_EDIT: '图片编辑',
     IMAGE_INPAINT: '图片局部重绘', IMAGE_VARIATION: '图片变体',
     AUDIO_TTS: '语音合成', AUDIO_STT: '语音识别',
-    VIDEO_GENERATION: '视频生成', RERANK: '文档重排'
+    VIDEO_GENERATION: '视频生成', RERANK: '文档重排',
+    STREAMING: '流式输出', TOOL_CALLING: '工具调用',
+    REASONING: '推理思考', VISION_INPUT: '图像输入'
   })[capability] || capability
 }
 function modelTypeLabel(type) {
@@ -210,6 +212,9 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
 .center-tabs :deep(.el-table td.el-table__cell), .center-tabs :deep(.el-table__fixed-right) { background: var(--mc-surface) !important; color: var(--mc-text) !important; }
 .capability-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .capability-tag { margin: 0; border-color: rgba(37, 99, 235, .25) !important; color: var(--mc-accent) !important; background: var(--mc-accent-soft) !important; }
+:global(html.dark .model-center-page .capability-tag) { border-color: rgba(96, 165, 250, .55) !important; color: #dbeafe !important; background: #1e3a5f !important; }
+:global(html.dark .model-center-page .el-tag.el-tag--success) { border-color: rgba(74, 222, 128, .5) !important; color: #bbf7d0 !important; background: rgba(20, 83, 45, .82) !important; }
+:global(html.dark .model-center-page .el-tag.el-tag--info) { border-color: rgba(148, 163, 184, .45) !important; color: #e2e8f0 !important; background: rgba(51, 65, 85, .82) !important; }
 .capability-more, .empty-capability { color: var(--mc-muted); font-size: 12px; }
 .default-action, .edit-action { color: var(--mc-accent) !important; }.delete-action { color: var(--mc-danger) !important; }
 code { color: var(--mc-accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

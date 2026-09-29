@@ -16,7 +16,16 @@ public class ProviderCallException extends RuntimeException
             Integer httpStatus,
             String providerRequestId,
             long latencyMillis) {
-        super("PROVIDER_" + errorType.name());
+        this(errorType, httpStatus, providerRequestId, latencyMillis, null);
+    }
+
+    public ProviderCallException(
+            ProviderErrorType errorType,
+            Integer httpStatus,
+            String providerRequestId,
+            long latencyMillis,
+            Throwable cause) {
+        super("PROVIDER_" + errorType.name(), cause);
         this.errorType = errorType;
         this.httpStatus = httpStatus;
         this.providerRequestId = providerRequestId;
