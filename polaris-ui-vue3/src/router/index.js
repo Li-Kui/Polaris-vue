@@ -86,6 +86,12 @@ export const constantRoutes = [
     ]
   },
   {
+    path: '/app/:shareCode',
+    component: () => import('@/views/workflowApp/RuntimePage.vue'),
+    hidden: true,
+    meta: { title: '应用' }
+  },
+  {
     path: '/ai',
     component: Layout,
     hidden: true,

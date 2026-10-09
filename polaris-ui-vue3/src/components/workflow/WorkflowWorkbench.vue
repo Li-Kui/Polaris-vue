@@ -1634,6 +1634,7 @@ export default {
       ],
       resourceKindOptions: [
         {label: '大模型', value: 'MODEL'},
+        {label: '图片模型（生成/编辑）', value: 'IMAGE_MODEL'},
         {label: 'AI 智能体', value: 'AGENT'},
         {label: '知识库', value: 'KNOWLEDGE_BASE'},
         {label: 'API 连接器', value: 'API_CONNECTOR'},
@@ -2988,6 +2989,7 @@ export default {
       if (type === 'http_get') return {method: 'GET', path: ''}
       if (type === 'http_request') return {method: 'POST', path: ''}
       if (type === 'agent') return {task: '', maxWaitSeconds: 300}
+      if (type === 'image') return {mode: 'GENERATE', size: '1024x1024'}
       if (type === 'artifact') return {...ARTIFACT_DEFAULT_CONFIG}
       if (type === 'knowledge_retrieval') return {...KNOWLEDGE_RETRIEVAL_DEFAULT_CONFIG}
       if (type === 'transform') {
@@ -3912,6 +3914,7 @@ export default {
     defaultResourceReferences(descriptor, nodeId) {
       const keys = {
         MODEL: 'primary_model',
+        IMAGE_MODEL: 'primary_image_model',
         AGENT: 'primary_agent',
         KNOWLEDGE_BASE: `knowledge.${nodeId}.1`,
         API_CONNECTOR: `api.${nodeId}`,
@@ -3945,6 +3948,7 @@ export default {
     resourceKeyForKind(kind) {
       const keys = {
         MODEL: 'primary_model',
+        IMAGE_MODEL: 'primary_image_model',
         AGENT: 'primary_agent',
         KNOWLEDGE_BASE: 'primary_knowledge',
         API_CONNECTOR: 'primary_api',

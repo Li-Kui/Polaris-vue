@@ -69,6 +69,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="versions">版本记录</el-dropdown-item>
+                <el-dropdown-item v-if="canShare && row.currentPublishedVersionId" command="share">分享管理</el-dropdown-item>
                 <el-dropdown-item v-if="canEdit" command="clone">克隆工作流</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -105,12 +106,16 @@ export default {
       type: Boolean,
       default: false
     },
+    canShare: {
+      type: Boolean,
+      default: false
+    },
     canApprove: {
       type: Boolean,
       default: false
     }
   },
-  emits: ['approvals', 'bindings', 'clone', 'create', 'executions', 'open', 'run', 'triggers', 'versions'],
+  emits: ['approvals', 'bindings', 'clone', 'create', 'executions', 'open', 'run', 'share', 'triggers', 'versions'],
   computed: {
     publishedCount() {
       return this.items.filter(item => item.currentPublishedVersionId).length

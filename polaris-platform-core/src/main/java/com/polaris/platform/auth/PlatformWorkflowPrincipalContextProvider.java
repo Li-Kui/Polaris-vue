@@ -5,7 +5,9 @@ import com.polaris.ai.workflow.spi.WorkflowPrincipalContextProvider;
 import com.polaris.platform.domain.PlatformApiKey;
 import com.polaris.platform.domain.PlatformUser;
 import com.polaris.platform.domain.Tenant;
-import com.polaris.platform.service.IPlatformApiKeyService;
+import com.polaris.platform.domain.WorkflowShare;
+import com.polaris.platform.mapper.PlatformApiKeyMapper;
+import com.polaris.platform.mapper.WorkflowShareMapper;
 import com.polaris.platform.service.IPlatformUserService;
 import com.polaris.platform.service.ITenantService;
 import org.springframework.stereotype.Component;
@@ -19,22 +21,26 @@ public class PlatformWorkflowPrincipalContextProvider
         implements WorkflowPrincipalContextProvider {
 
     private final IPlatformUserService userService;
-    private final IPlatformApiKeyService apiKeyService;
+    private final PlatformApiKeyMapper apiKeyMapper;
     private final ITenantService tenantService;
+    private final WorkflowShareMapper workflowShareMapper;
 
     public PlatformWorkflowPrincipalContextProvider(
             IPlatformUserService userService,
-            IPlatformApiKeyService apiKeyService,
-            ITenantService tenantService) {
+            PlatformApiKeyMapper apiKeyMapper,
+            ITenantService tenantService,
+            WorkflowShareMapper workflowShareMapper) {
         this.userService = userService;
-        this.apiKeyService = apiKeyService;
+        this.apiKeyMapper = apiKeyMapper;
         this.tenantService = tenantService;
+        this.workflowShareMapper = workflowShareMapper;
     }
 
     @Override
     public boolean supports(String principalType) {
         return "PLATFORM_USER".equals(principalType)
-                || "API_KEY".equals(principalType);
+                || "API_KEY".equals(principalType)
+                || "SHARE".equals(principalType);
     }
 
     @Override
@@ -59,7 +65,8 @@ public class PlatformWorkflowPrincipalContextProvider
                     "admin".equalsIgnoreCase(user.getRole())));
         }
         if ("API_KEY".equals(principalType)) {
-            PlatformApiKey apiKey = apiKeyService.selectApiKeyById(id);
+            // 后台线程没有请求租户上下文，按执行记录的租户显式校验归属。
+            PlatformApiKey apiKey = apiKeyMapper.selectById(id);
             if (apiKey == null || !tenantId.equals(apiKey.getTenantId())
                     || !"0".equals(apiKey.getStatus())
                     || apiKey.getExpireTime() != null
@@ -67,7 +74,18 @@ public class PlatformWorkflowPrincipalContextProvider
                 return Optional.empty();
             }
             return Optional.of(new ApiKeyCallerContext(
-                    tenantId, apiKey.getId(), apiKey.getKeyName(), apiKey.getPermissions()));
+                    tenantId, apiKey.getId(), apiKey.getKeyName(), apiKey.getPermissions(),
+                    apiKey.getAllowedWorkflows()));
+        }
+        if ("SHARE".equals(principalType)) {
+            WorkflowShare share = workflowShareMapper.selectById(id);
+            if (share == null || !tenantId.equals(share.getTenantId())
+                    || !"0".equals(share.getStatus())
+                    || share.getExpireTime() != null
+                    && !share.getExpireTime().after(new Date())) {
+                return Optional.empty();
+            }
+            return Optional.of(new ShareCallerContext(tenantId, id, null));
         }
         return Optional.empty();
     }

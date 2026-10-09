@@ -57,7 +57,14 @@ export function getCapabilityDefault(capabilityCode) {
 }
 
 export function testModelDraft(data) {
-  return request({ url: '/ai/model-center/model-test', method: 'post', data })
+  // A provider test can take longer than the shared 10-second UI timeout.
+  // Keep this local to the test request; extending the wait must not retry it.
+  const policy = data?.runtimePolicy || {}
+  const boundedTimeout = (value, fallback, max) => Number.isInteger(value) && value >= 100
+    ? Math.min(value, max) : fallback
+  const timeout = boundedTimeout(policy.connectTimeoutMs, 10000, 60000)
+    + boundedTimeout(policy.readTimeoutMs, 60000, 300000) + 10000
+  return request({ url: '/ai/model-center/model-test', method: 'post', data, timeout })
 }
 
 export function resolveSchemaOptions(data) {

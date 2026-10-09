@@ -6,6 +6,7 @@ public enum ProviderErrorType {
     QUOTA_EXHAUSTED,
     RATE_LIMITED,
     MODEL_NOT_FOUND,
+    ENDPOINT_NOT_FOUND,
     REQUEST_INVALID,
     PROVIDER_TIMEOUT,
     DNS_FAILED,

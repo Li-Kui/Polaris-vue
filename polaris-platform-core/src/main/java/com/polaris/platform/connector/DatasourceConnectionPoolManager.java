@@ -50,7 +50,7 @@ public class DatasourceConnectionPoolManager {
     }
 
     private HikariDataSource createPool(PlatformDatasource datasource, String key) {
-        hostSafetyPolicy.validate(datasource.getHost());
+        hostSafetyPolicy.validate(datasource);
         String password = credentialCipher.decrypt(datasource.getPassword());
         if (password == null) throw new ServiceException("数据库密码尚未配置");
 

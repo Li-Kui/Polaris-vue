@@ -15,6 +15,8 @@ public interface WorkflowDefinitionApplicationFacade {
 
     WorkflowDefinitionView getDefinition(Long definitionId);
 
+    void updateShareDefaults(Long definitionId, WorkflowShareDefaultsCommand command);
+
     List<WorkflowDefinitionView> listDefinitions();
 
     WorkflowCompilationResult validateDraft(Long definitionId);

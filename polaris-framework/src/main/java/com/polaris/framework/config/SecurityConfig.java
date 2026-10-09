@@ -106,6 +106,7 @@ public class SecurityConfig
                     .requestMatchers("/swagger-ui.html", "/v3/api-docs", "/v3/api-docs/**", "/swagger-ui/**", "/druid/**", "/doc.html", "/webjars/**").permitAll()
                     // 中台登录接口允许匿名访问，其他接口按认证类型分别鉴权
                     .requestMatchers("/platform/login").permitAll()
+                    .requestMatchers("/platform/runtime/**").permitAll()
                     .requestMatchers("/platform/api/**").hasRole("PLATFORM_API")
                     .requestMatchers("/platform/**").hasRole("PLATFORM_USER")
                     // 除上面外的所有请求全部需要鉴权认证

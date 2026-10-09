@@ -11,8 +11,18 @@
           <el-tag v-if="showType" size="small" effect="plain">{{ fieldType(field.schema) }}</el-tag>
         </span>
       </template>
+      <WorkflowSchemaConfig
+        v-if="isNestedField(field)"
+        class="nested-schema"
+        :schema="field.schema"
+        :model-value="modelValue?.[field.name] || {}"
+        :disabled="disabled"
+        :nested-objects="true"
+        @update:model-value="update(field.name, $event)"
+        @validation="nestedValidationChanged(field.name, $event)"
+      />
       <el-select
-        v-if="field.schema.enum"
+        v-else-if="field.schema.enum"
         :model-value="modelValue?.[field.name]"
         :disabled="disabled"
         clearable
@@ -34,7 +44,7 @@
         :max="field.schema.maximum"
         :step="field.schema.type === 'integer' ? 1 : 0.1"
         style="width: 100%"
-        @change="update(field.name, $event)"
+        @update:model-value="update(field.name, $event)"
       />
       <el-select
         v-else-if="field.schema.type === 'array' && field.schema.items?.type === 'string'"
@@ -59,11 +69,13 @@
           :model-value="jsonDrafts[field.name]"
           :disabled="disabled"
           :placeholder="field.schema.placeholder"
+          :aria-label="fieldLabel(field)"
+          :aria-invalid="Boolean(jsonErrors[field.name])"
           type="textarea"
           :rows="10"
           @input="updateJson(field.name, $event)"
         />
-        <div v-if="jsonErrors[field.name]" class="field-error">
+        <div v-if="jsonErrors[field.name]" class="field-error" role="alert">
           {{ jsonErrors[field.name] }}
         </div>
       </template>
@@ -118,13 +130,18 @@ export default {
     showType: {
       type: Boolean,
       default: false
+    },
+    nestedObjects: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['update:modelValue'],
+  emits: ['update:modelValue', 'validation'],
   data() {
     return {
       jsonDrafts: {},
-      jsonErrors: {}
+      jsonErrors: {},
+      nestedValidations: {}
     }
   },
   computed: {
@@ -134,9 +151,26 @@ export default {
     fields() {
       return Object.entries(this.schema?.properties || {})
         .map(([name, schema]) => ({name, schema: schema || {}}))
+    },
+    draftValidation() {
+      const errors = this.fields.flatMap(field => {
+        const path = `$.${field.name}`
+        if (this.isNestedField(field)) return (this.nestedValidations[field.name]?.errors || [])
+          .map(error => ({...error, path: path + error.path.slice(1)}))
+        return this.isJsonField(field) && !field.schema.enum && this.jsonErrors[field.name]
+          ? [{path, message: `${this.fieldLabel(field)}：${this.jsonErrors[field.name]}`}] : []
+      })
+      return {valid: !errors.length, message: errors[0]?.message || '', errors}
     }
   },
   watch: {
+    draftValidation: {
+      immediate: true,
+      deep: true,
+      handler(value) {
+        this.$emit('validation', value)
+      }
+    },
     modelValue: {
       immediate: true,
       deep: true,
@@ -152,6 +186,12 @@ export default {
     }
   },
   methods: {
+    isNestedField(field) {
+      return this.nestedObjects && field.schema.type === 'object' && field.schema.properties && !field.schema.enum
+    },
+    nestedValidationChanged(name, validation) {
+      this.nestedValidations[name] = validation
+    },
     fieldLabel(field) {
       const fallbackLabels = {
         maxWaitSeconds: '最长等待时间（秒）',
@@ -211,7 +251,7 @@ export default {
         delete this.jsonErrors[name]
         this.update(name, parsed)
       } catch (error) {
-        this.jsonErrors[name] = error.message
+        this.jsonErrors[name] = error instanceof SyntaxError ? 'JSON 格式错误，请检查引号、逗号和括号' : error.message
       }
     },
     syncJsonDrafts(value) {
@@ -229,6 +269,16 @@ export default {
 </script>
 
 <style scoped>
+.nested-schema {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  background: var(--el-fill-color-light);
+}
+
+.nested-schema :deep(.el-form-item:last-child) { margin-bottom: 0; }
+
 .field-description {
   display: block;
   margin-top: 4px;

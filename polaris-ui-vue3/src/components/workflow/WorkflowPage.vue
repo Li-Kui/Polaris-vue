@@ -6,6 +6,7 @@
       :loading="loading"
       :can-edit="canEdit"
       :can-execute="canExecute"
+      :can-share="appearance === 'platform' && canEdit"
       :can-approve="canApprove"
       @approvals="pageMode = 'approvals'"
       @bindings="pageMode = 'bindings'"
@@ -14,9 +15,11 @@
       @executions="openExecutions"
       @open="openDefinition"
       @run="openRunDialog"
+      @share="openSharePanel"
       @triggers="pageMode = 'triggers'"
       @versions="openVersions"
     />
+
     <WorkflowWorkbench
       v-else-if="pageMode === 'workbench'"
       :model-value="selectedDefinition"
@@ -53,6 +56,14 @@
       :can-edit="canEdit"
       :appearance="appearance"
       @back="backToList"
+    />
+
+    <SharePanel
+      v-if="shareTarget"
+      v-model:visible="sharePanelOpen"
+      :workflow-definition-id="shareTarget.id"
+      :workflow-code="shareTarget.workflowCode"
+      :workflow-name="shareTarget.workflowName"
     />
 
     <el-dialog
@@ -204,6 +215,7 @@ import WorkflowResourceBindings from '@/components/workflow/WorkflowResourceBind
 import WorkflowApprovalInbox from '@/components/workflow/WorkflowApprovalInbox.vue'
 import WorkflowTriggers from '@/components/workflow/WorkflowTriggers.vue'
 import WorkflowExecutionInput from '@/components/workflow/WorkflowExecutionInput.vue'
+import SharePanel from '@/views/workflowApp/SharePanel.vue'
 import {
   cloneWorkflowDefinition,
   getWorkflowDefinition,
@@ -224,7 +236,8 @@ export default {
     WorkflowResourceBindings,
     WorkflowApprovalInbox,
     WorkflowTriggers,
-    WorkflowExecutionInput
+    WorkflowExecutionInput,
+    SharePanel
   },
   props: {
     canEdit: {
@@ -260,6 +273,8 @@ export default {
       definitions: [],
       descriptors: [],
       selectedDefinition: null,
+      sharePanelOpen: false,
+      shareTarget: null,
       executionTarget: null,
       runDialogOpen: false,
       starting: false,
@@ -345,6 +360,11 @@ export default {
       if (!definition?.id) return
       this.executionTarget = definition
       this.pageMode = 'executions'
+    },
+    openSharePanel(definition) {
+      if (this.appearance !== 'platform' || !this.canEdit || !definition?.id) return
+      this.shareTarget = definition
+      this.sharePanelOpen = true
     },
     definitionSaved(definition) {
       this.selectedDefinition = definition

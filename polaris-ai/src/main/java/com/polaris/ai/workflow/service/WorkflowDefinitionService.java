@@ -154,6 +154,43 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateShareDefaults(Long definitionId, WorkflowShareDefaultsCommand command) {
+        requireEnabled();
+        WorkflowDefinition existing = requireDefinition(definitionId);
+        if (command == null || command.expectedLockVersion() == null) {
+            throw new ServiceException("预期工作流版本号不能为空，请重新加载配置");
+        }
+        if (!Objects.equals(existing.getLockVersion(), command.expectedLockVersion())) {
+            throw new ServiceException("工作流已被修改，请重新加载配置后保存");
+        }
+        String pageType = command.defaultPageType();
+        pageType = pageType == null || pageType.isBlank() ? null : pageType.trim();
+        if (pageType != null && !Set.of("form", "chat", "report", "task", "query",
+                "image", "compare", "gallery").contains(pageType)) {
+            throw new ServiceException("默认页面类型无效");
+        }
+        String configJson = command.sharePageConfigJson();
+        if (configJson != null && !configJson.isBlank()) {
+            try {
+                JsonNode config = objectMapper.readTree(configJson);
+                if (!config.isObject()) throw new ServiceException("默认页面配置必须是JSON对象");
+                configJson = objectMapper.writeValueAsString(config);
+            } catch (ServiceException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new ServiceException("默认页面配置JSON格式无效");
+            }
+        } else {
+            configJson = null;
+        }
+        if (definitionMapper.updateShareDefaults(definitionId, command.expectedLockVersion(),
+                pageType, configJson, CallerUtils.getUsername()) != 1) {
+            throw new ServiceException("工作流已被修改，请重新加载配置后保存");
+        }
+    }
+
+    @Override
     public List<WorkflowDefinitionView> listDefinitions() {
         requireEnabled();
         Long tenantId = currentTenantId();
@@ -210,7 +247,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         WorkflowDefinition definition = definitionMapper.selectByIdForUpdate(definitionId);
         if (definition == null || !"0".equals(definition.getDelFlag())
                 || !Objects.equals(definition.getTenantId(), currentTenantId())) {
-            throw new ServiceException("工作流不存在或无权访问");
+            throw new ServiceException("工作流不存在或无权访问", 404);
         }
         if (!command.expectedRevision().equals(definition.getDraftRevision())) {
             throw new ServiceException("草稿已发生变化，请重新校验后发布");
@@ -302,7 +339,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         requireDefinition(definitionId);
         WorkflowVersion version = versionMapper.selectByVersionId(versionId);
         if (version == null || !definitionId.equals(version.getDefinitionId())) {
-            throw new ServiceException("工作流发布版本不存在或无权访问");
+            throw new ServiceException("工作流发布版本不存在或无权访问", 404);
         }
         return new WorkflowPublishedVersionDetailView(
                 version.getVersionId(), version.getDefinitionId(), version.getVersionNo(),
@@ -323,7 +360,7 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         WorkflowVersion version = versionMapper.selectByVersionId(versionId);
         if (version == null || !definitionId.equals(version.getDefinitionId())
                 || !"PUBLISHED".equals(version.getStatus())) {
-            throw new ServiceException("工作流发布版本不存在、已退役或不属于当前定义");
+            throw new ServiceException("工作流发布版本不存在、已退役或不属于当前定义", 404);
         }
         return updateDraft(definitionId,
                 new WorkflowDraftCommand(version.getDefinitionJson(), command.expectedRevision()));
@@ -455,7 +492,8 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         WorkflowDefinition definition = definitionMapper.selectById(definitionId);
         if (definition == null || !"0".equals(definition.getDelFlag())
                 || !Objects.equals(definition.getTenantId(), currentTenantId())) {
-            throw new ServiceException("工作流不存在或无权访问");
+            // 与不存在/已删除资源使用同一响应，避免暴露其他租户的定义。
+            throw new ServiceException("工作流不存在或无权访问", 404);
         }
         return definition;
     }

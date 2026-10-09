@@ -28,6 +28,7 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.core.context.SecurityContext;
@@ -86,6 +87,7 @@ public class WorkflowAiNodeConfig {
                 Map<String, Object> attributes = new LinkedHashMap<>();
                 if (model.getName() != null) attributes.put("name", model.getName());
                 if (model.getModelName() != null) attributes.put("modelName", model.getModelName());
+                attributes.put("visionInput", definition.enabledFeatures().containsKey("VISION_INPUT"));
                 return new ResolvedWorkflowResource(
                         kind(), request.resourceKey(), request.resourceId(),
                         modelRevision(model),
@@ -251,6 +253,7 @@ public class WorkflowAiNodeConfig {
                 attributes.put("modelConfigId", modelConfig.getId());
                 ResolvedModelDefinition definition = definitionResolver.resolve(
                         modelConfig.getId(), "CHAT_COMPLETION");
+                attributes.put("visionInput", definition.enabledFeatures().containsKey("VISION_INPUT"));
                 return new ResolvedWorkflowResource(
                         kind(), request.resourceKey(), request.resourceId(), 0,
                         attributes, new AgentHandle(
@@ -348,7 +351,8 @@ public class WorkflowAiNodeConfig {
 
     @Bean
     public WorkflowNodeHandler llmWorkflowNodeHandler(
-            ObjectMapper objectMapper, WorkflowInputValidator outputValidator) {
+            ObjectMapper objectMapper, WorkflowInputValidator outputValidator,
+            ObjectProvider<WorkflowChatMediaResolver> mediaResolver) {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "llm", "1.0", "大模型调用", "ai",
                 llmConfigSchema(),
@@ -385,7 +389,7 @@ public class WorkflowAiNodeConfig {
                     messages.add(SystemMessage.from(
                             WorkflowStructuredOutput.instruction(outputSchema)));
                 }
-                messages.add(UserMessage.from(prompt));
+                messages.add(workflowUserMessage(prompt, context, resource, mediaResolver));
                 int waitSeconds = context.config().path("maxWaitSeconds").asInt(300);
                 ChatCallResult response = chat(model, messages, context, waitSeconds);
                 if (outputSchema != null) {
@@ -436,7 +440,8 @@ public class WorkflowAiNodeConfig {
             ObjectMapper objectMapper,
             AiToolRegistry toolRegistry,
             WorkflowPrincipalSecurityContextResolver securityContextResolver,
-            WorkflowProperties properties) {
+            WorkflowProperties properties,
+            ObjectProvider<WorkflowChatMediaResolver> mediaResolver) {
         ObjectNode taskSchema = stringSchema();
         taskSchema.put("title", "本次任务");
         taskSchema.put("format", "textarea");
@@ -494,7 +499,8 @@ public class WorkflowAiNodeConfig {
                 if (!task.isBlank()) {
                     messages.add(SystemMessage.from(agentTaskInstruction(task)));
                 }
-                messages.add(UserMessage.from(agentInputMessage(input, !task.isBlank())));
+                messages.add(workflowUserMessage(
+                        agentInputMessage(input, !task.isBlank()), context, resource, mediaResolver));
                 Map<ToolSpecification, ToolExecutor> tools = Map.of();
                 AiToolRegistry.WorkflowToolSet toolSet = null;
                 boolean allowTools = context.config()
@@ -541,7 +547,8 @@ public class WorkflowAiNodeConfig {
     }
 
     @Bean
-    public WorkflowNodeHandler llmClassifierWorkflowNodeHandler(ObjectMapper objectMapper) {
+    public WorkflowNodeHandler llmClassifierWorkflowNodeHandler(
+            ObjectMapper objectMapper, ObjectProvider<WorkflowChatMediaResolver> mediaResolver) {
         ObjectNode branchItem = JsonNodeFactory.instance.objectNode();
         branchItem.put("type", "object");
         branchItem.putArray("required").add("slug").add("description");
@@ -612,7 +619,7 @@ public class WorkflowAiNodeConfig {
                 List<ChatMessage> messages = new ArrayList<>();
                 messages.add(SystemMessage.from(custom.isBlank()
                         ? instruction : instruction + "\n补充分类要求：" + custom));
-                messages.add(UserMessage.from(prompt(context.input())));
+                messages.add(workflowUserMessage(prompt(context.input()), context, resource, mediaResolver));
                 ChatCallResult response = chat(model, messages, context,
                         context.config().path("maxWaitSeconds").asInt(300));
                 ObjectNode result = resolveClassifierResult(
@@ -620,6 +627,17 @@ public class WorkflowAiNodeConfig {
                 return new WorkflowNodeResult(result, response.usage(), "NONE");
             }
         };
+    }
+
+    private static UserMessage workflowUserMessage(
+            String prompt, WorkflowNodeContext context, ResolvedWorkflowResource resource,
+            ObjectProvider<WorkflowChatMediaResolver> mediaResolver) {
+        UserMessage message = WorkflowChatInputMedia.userMessage(prompt, context, mediaResolver.getIfAvailable());
+        if (message.contents().stream().anyMatch(dev.langchain4j.data.message.ImageContent.class::isInstance)
+                && !Boolean.TRUE.equals(resource.attributes().get("visionInput"))) {
+            throw new IllegalArgumentException("当前工作流模型未开启图片理解，请联系管理员配置支持视觉的模型");
+        }
+        return message;
     }
 
     private static AiModelConfig model(

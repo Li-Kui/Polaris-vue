@@ -8,7 +8,7 @@ export default defineConfig({
     logo: '/logo.png',
     nav: [
       { text: '开发指南', link: '/guide/quickstart' },
-      { text: 'API 参考', link: '/api/chat-completions' },
+      { text: 'API 参考', link: '/api/workflow-executions' },
       { text: '错误码', link: '/guide/errors' },
       { text: '中台控制台', link: '#to-platform-console', target: '_self' }
     ],
@@ -18,6 +18,7 @@ export default defineConfig({
         items: [
           { text: '快速开始 (Quickstart)', link: '/guide/quickstart' },
           { text: '鉴权机制与 API Key', link: '/guide/auth' },
+          { text: '工作流页面与 iframe 分享', link: '/guide/workflow-sharing' },
           { text: '模型支持与参数说明', link: '/api/models' },
           { text: 'SSE 流式响应对接', link: '/guide/streaming' },
           { text: '错误处理与状态码', link: '/guide/errors' }
@@ -27,7 +28,8 @@ export default defineConfig({
         text: 'API 接口参考',
         items: [
           { text: '对话补全 (Chat Completions)', link: '/api/chat-completions' },
-          { text: '模型列表 (List Models)', link: '/api/models' }
+          { text: '模型列表 (List Models)', link: '/api/models' },
+          { text: '工作流执行 (Workflows)', link: '/api/workflow-executions' }
         ]
       },
       {

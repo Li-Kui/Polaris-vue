@@ -1,6 +1,7 @@
 package com.polaris.platform.connector;
 
 import com.polaris.common.exception.ServiceException;
+import com.polaris.platform.domain.PlatformDatasource;
 import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
@@ -8,6 +9,10 @@ import java.net.InetAddress;
 /** 阻止数据库连接指向本机、回环或链路本地地址。 */
 @Component
 public class DatasourceHostSafetyPolicy {
+
+    public void validate(PlatformDatasource datasource) {
+        validate(datasource.getHost());
+    }
 
     public void validate(String host) {
         try {

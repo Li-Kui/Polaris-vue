@@ -168,6 +168,12 @@ public class WorkflowDefinitionValidator {
                         path + ".onError", "写节点不能使用SKIP错误策略"));
             }
             validateRetry(node, path, diagnostics);
+            if ("image".equals(node.getType()) && node.getRetryPolicy() != null
+                    && node.getRetryPolicy().getMaxAttempts() != null
+                    && node.getRetryPolicy().getMaxAttempts() > 1) {
+                diagnostics.add(error("IMAGE_NODE_RETRY_NOT_ALLOWED", nodeId,
+                        path + ".retryPolicy.maxAttempts", "图片节点只能尝试一次；超时或中断后须先确认服务商结果"));
+            }
             validateParallel(node, path, diagnostics);
             validateLoop(node, definition.getPolicies(), path, diagnostics);
             validateJoin(node, path, diagnostics);

@@ -10,8 +10,7 @@
     "dev": "npm run docs:build && vite",
     "build:prod": "npm run docs:build && vite build",
     "build:stage": "npm run docs:build && vite build --mode staging",
-    "preview": "vite preview",
-    "test:workflow": "node --test tests/*.test.mjs"
+    "preview": "vite preview"
   },
   "repository": {
     "type": "git",

@@ -26,22 +26,33 @@
               <span class="rate-badge">{{ scope.row.rateLimit || 60 }} 次/分</span>
             </template>
           </el-table-column>
+          <el-table-column label="工作流范围" min-width="180" show-overflow-tooltip>
+            <template #default="scope">
+              {{ formatAllowedWorkflows(scope.row.allowedWorkflows) }}
+            </template>
+          </el-table-column>
           <el-table-column label="状态" align="center" width="120">
             <template #default="scope">
-              <div :class="['status-cell', scope.row.status !== '0' ? 'status-disabled' : '']">
-                <span :class="['pulse-light-ripple', scope.row.status === '0' ? 'pulse-active' : 'pulse-error']"></span>
-                <span class="status-label" :class="scope.row.status === '0' ? 'text-active' : 'text-error'">
-                  {{ scope.row.status === '0' ? '正常' : '停用' }}
+              <div :class="['status-cell', keyStatus(scope.row) !== '正常' ? 'status-disabled' : '']">
+                <span :class="['pulse-light-ripple', keyStatus(scope.row) === '正常' ? 'pulse-active' : 'pulse-error']"></span>
+                <span class="status-label" :class="keyStatus(scope.row) === '正常' ? 'text-active' : 'text-error'">
+                  {{ keyStatus(scope.row) }}
                 </span>
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="有效期" align="center" width="170">
+            <template #default="scope">
+              {{ scope.row.expireTime || '永久有效' }}
+            </template>
+          </el-table-column>
           <el-table-column prop="lastUsedTime" label="最后调用时间" align="center" width="170" />
           <el-table-column prop="createTime" label="创建时间" align="center" width="170" />
-          <el-table-column label="操作" align="center" width="120" class-name="small-padding fixed-width">
+          <el-table-column label="操作" align="center" width="180" fixed="right" class-name="small-padding fixed-width">
             <template #default="scope">
+              <el-button link type="primary" @click="handleValidity(scope.row)">有效期与状态</el-button>
               <el-tooltip content="删除密钥" placement="top">
-                <el-button link icon="Delete" @click="handleDelete(scope.row)" class="table-opt-btn opt-del" />
+                <el-button link icon="Delete" aria-label="删除密钥" @click="handleDelete(scope.row)" class="table-opt-btn opt-del" />
               </el-tooltip>
             </template>
           </el-table-column>
@@ -50,7 +61,7 @@
     </div>
 
     <!-- 新增弹窗 -->
-    <el-dialog title="新建 API Key" v-model="open" width="520px" append-to-body class="polaris-glass-dialog">
+    <el-dialog title="新建 API Key" v-model="open" width="520px" append-to-body class="polaris-glass-dialog api-key-dialog">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="90px">
         <el-form-item label="密钥名称" prop="keyName">
           <el-input v-model="form.keyName" placeholder="例如: 智能问答业务集成" />
@@ -67,6 +78,18 @@
             <el-checkbox label="workflow:cancel">取消工作流执行</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
+        <el-form-item label="工作流范围">
+          <el-input
+            v-model="form.allowedWorkflowsText"
+            type="textarea"
+            :rows="3"
+            placeholder="每行一个工作流编码；留空表示不限制"
+          />
+        </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker v-model="form.expireTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss"
+                          placeholder="留空表示永久有效" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <div class="dialog-footer">
@@ -76,9 +99,33 @@
       </template>
     </el-dialog>
 
+    <el-dialog title="API Key 有效期与状态" v-model="validityOpen" width="520px" append-to-body class="polaris-glass-dialog api-key-dialog">
+      <el-form :model="validityForm" label-width="90px">
+        <el-form-item label="密钥名称">{{ validityForm.keyName }}</el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="validityForm.status">
+            <el-radio value="0">正常</el-radio>
+            <el-radio value="1">停用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="过期时间">
+          <el-date-picker v-model="validityForm.expireTime" type="datetime" value-format="YYYY-MM-DD HH:mm:ss"
+                          placeholder="留空表示永久有效" />
+        </el-form-item>
+        <el-alert title="停用或过期后无法继续调用，已有事件连接也会关闭；不会取消已启动的工作流任务。"
+                  type="info" :closable="false" show-icon />
+      </el-form>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button @click="validityOpen = false">取消</el-button>
+          <el-button type="primary" :loading="submitLoading" @click="submitValidity">保存</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- API Key 仅在创建成功时展示一次 -->
     <el-dialog title="API Key 创建成功" v-model="createdKeyOpen" width="560px" append-to-body
-               :close-on-click-modal="false" @closed="createdApiKey = ''" class="polaris-glass-dialog">
+               :close-on-click-modal="false" @closed="createdApiKey = ''" class="polaris-glass-dialog api-key-dialog">
       <el-alert title="请立即复制并妥善保存，此密钥关闭后将无法再次查看。" type="warning" :closable="false" show-icon />
       <div class="created-key-box">
         <el-input :model-value="createdApiKey" readonly>
@@ -99,7 +146,7 @@
 <script setup>
 import {onMounted, reactive, ref} from 'vue'
 import {ElMessage, ElMessageBox} from 'element-plus'
-import {addApiKey, delApiKey, listApiKey} from '@/api/platform/apiKey'
+import {addApiKey, delApiKey, listApiKey, updateApiKey} from '@/api/platform/apiKey'
 
 const loading = ref(false)
 const keyList = ref([])
@@ -108,11 +155,15 @@ const submitLoading = ref(false)
 const formRef = ref(null)
 const createdKeyOpen = ref(false)
 const createdApiKey = ref('')
+const validityOpen = ref(false)
+const validityForm = reactive({id: null, keyName: '', status: '0', expireTime: null})
 
 const form = reactive({
   keyName: '',
   rateLimit: 60,
-  permissionValues: ['chat']
+  permissionValues: ['chat'],
+  allowedWorkflowsText: '',
+  expireTime: null
 })
 
 const rules = {
@@ -123,6 +174,7 @@ function getList() {
   loading.value = true
   listApiKey().then(res => {
     keyList.value = res.data?.rows || []
+  }).finally(() => {
     loading.value = false
   })
 }
@@ -131,6 +183,8 @@ function handleAdd() {
   form.keyName = ''
   form.rateLimit = 60
   form.permissionValues = ['chat']
+  form.allowedWorkflowsText = ''
+  form.expireTime = null
   open.value = true
 }
 
@@ -141,7 +195,12 @@ function submitForm() {
       addApiKey({
         keyName: form.keyName,
         rateLimit: form.rateLimit,
-        permissions: JSON.stringify(form.permissionValues)
+        expireTime: form.expireTime || null,
+        permissions: JSON.stringify(form.permissionValues),
+        allowedWorkflows: form.allowedWorkflowsText.trim()
+          ? JSON.stringify(form.allowedWorkflowsText.split('\n')
+            .map(item => item.trim()).filter(Boolean))
+          : null
       }).then(res => {
         createdApiKey.value = res.data?.apiKey || ''
         ElMessage.success('创建 API Key 成功')
@@ -153,6 +212,31 @@ function submitForm() {
         submitLoading.value = false
       })
     }
+  })
+}
+
+function handleValidity(row) {
+  Object.assign(validityForm, {
+    id: row.id,
+    keyName: row.keyName,
+    status: row.status,
+    expireTime: row.expireTime || null
+  })
+  validityOpen.value = true
+}
+
+function submitValidity() {
+  submitLoading.value = true
+  updateApiKey({
+    id: validityForm.id,
+    status: validityForm.status,
+    expireTime: validityForm.expireTime || null
+  }).then(() => {
+    ElMessage.success('更新有效期与状态成功')
+    validityOpen.value = false
+    getList()
+  }).finally(() => {
+    submitLoading.value = false
   })
 }
 
@@ -177,10 +261,41 @@ function formatApiKey(keyPrefix) {
   return keyPrefix ? `${keyPrefix}••••••••` : '已隐藏'
 }
 
+function keyStatus(row) {
+  if (row.status !== '0') return '停用'
+  if (row.expireTime && new Date(row.expireTime.replace(' ', 'T')).getTime() <= Date.now()) return '已过期'
+  return '正常'
+}
+
+function formatAllowedWorkflows(value) {
+  if (!value) return '不限'
+  try {
+    const workflows = JSON.parse(value)
+    return workflows.length ? workflows.join('、') : '无'
+  } catch (error) {
+    return value
+  }
+}
+
 onMounted(getList)
 </script>
 
 <style lang="scss" scoped>
+:global(.api-key-dialog.polaris-glass-dialog.el-dialog) {
+  background: var(--el-bg-color-overlay) !important;
+  border-color: var(--el-border-color) !important;
+}
+
+:global(.api-key-dialog .el-dialog__title) {
+  color: var(--el-text-color-primary) !important;
+}
+
+:global(.api-key-dialog.el-dialog .el-dialog__footer .dialog-footer .el-button.el-button--default:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger)) {
+  color: var(--el-text-color-primary) !important;
+  background: var(--el-bg-color-overlay) !important;
+  border-color: var(--el-border-color) !important;
+}
+
 .app-container.no-sidebar-manage-wrap {
   padding: 16px !important;
 }

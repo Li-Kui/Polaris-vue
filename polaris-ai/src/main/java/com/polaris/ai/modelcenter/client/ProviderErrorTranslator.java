@@ -30,7 +30,10 @@ public class ProviderErrorTranslator {
         } else if (status == 401 || status == 403) {
             type = ProviderErrorType.AUTH_FAILED;
         } else if (status == 404) {
-            type = ProviderErrorType.MODEL_NOT_FOUND;
+            // A missing route (including an HTML 404) is not evidence of a missing model.
+            type = containsAny(body, "model_not_found", "modelnotfound", "invalidmodel",
+                    "model does not exist", "model not found", "model is not found")
+                    ? ProviderErrorType.MODEL_NOT_FOUND : ProviderErrorType.ENDPOINT_NOT_FOUND;
         } else if (status == 408 || status == 504) {
             type = ProviderErrorType.PROVIDER_TIMEOUT;
         } else if (status == 429) {

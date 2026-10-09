@@ -16,6 +16,8 @@
 
 ### 2. 流式对话调用示例
 
+请用中台首页接入示例中的实际 Base URL 替换下方占位地址，保留部署的 API 代理前缀，参见[快速开始](/guide/quickstart)。
+
 ```java
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -24,7 +26,7 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 public class PolarisAiDemo {
     public static void main(String[] args) {
         StreamingChatModel model = OpenAiStreamingChatModel.builder()
-                .baseUrl("http://localhost:8080/platform/api/v1")
+                .baseUrl("https://your-polaris-host/prod-api/platform/api/v1")
                 .apiKey("sk-your-api-key-here")
                 .modelName("polaris-default")
                 .temperature(0.7)

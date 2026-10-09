@@ -1,15 +1,15 @@
 <template>
-  <div class="workflow-execution-input">
+  <div class="workflow-execution-input" :class="{ 'is-simple': simple }">
     <el-skeleton v-if="loading" :rows="5" animated />
     <template v-else>
       <el-radio-group v-model="mode" class="input-mode-switch" @change="modeChanged">
-        <el-radio-button value="form">参数表单</el-radio-button>
-        <el-radio-button value="json">JSON 模式</el-radio-button>
+        <el-radio-button value="form">{{ simple ? '填写参数' : '参数表单' }}</el-radio-button>
+        <el-radio-button value="json">{{ simple ? '高级 JSON' : 'JSON 模式' }}</el-radio-button>
       </el-radio-group>
 
       <section v-show="mode === 'form'" class="input-mode-panel">
         <el-alert
-          v-if="hasDeclaredInputs"
+          v-if="hasDeclaredInputs && !simple"
           title="已根据当前发布版本的输入契约生成字段，可直接填写。"
           type="success"
           :closable="false"
@@ -17,11 +17,14 @@
         />
         <el-form v-if="hasDeclaredInputs" label-position="top">
           <WorkflowSchemaConfig
-            :schema="normalizedSchema"
+            :key="formRevision"
+            :schema="formSchema"
             :model-value="inputValue"
             :errors="fieldErrors"
-            show-type
+            :show-type="!simple"
+            :nested-objects="simple"
             @update:model-value="structuredInputChanged"
+            @validation="schemaValidationChanged"
           />
         </el-form>
         <el-empty
@@ -37,7 +40,7 @@
         <div class="json-toolbar">
           <div>
             <strong>输入 JSON</strong>
-            <small>适合粘贴完整对象或调试复杂结构</small>
+            <small>{{ simple ? '粘贴完整参数，也可以切回填写参数' : '适合粘贴完整对象或调试复杂结构' }}</small>
           </div>
           <el-button-group>
             <el-button @click="resetToExample(true)">生成示例</el-button>
@@ -49,16 +52,17 @@
           :model-value="jsonDraft"
           class="json-editor"
           type="textarea"
-          :rows="12"
+          aria-label="输入 JSON"
+          :rows="simple ? 8 : 12"
           spellcheck="false"
           @input="jsonInputChanged"
         />
         <div :class="['json-validation', { 'is-error': jsonError || validationErrors.length }]">
           <template v-if="jsonError">{{ jsonError }}</template>
           <template v-else-if="validationErrors.length">{{ validationErrors[0].message }}</template>
-          <template v-else>格式正确，已通过输入契约校验</template>
+          <template v-else>{{ simple ? '输入格式正确' : '格式正确，已通过输入契约校验' }}</template>
         </div>
-        <div v-if="schemaHints.length" class="schema-hints">
+        <div v-if="schemaHints.length && !simple" class="schema-hints">
           <strong>输入契约提示</strong>
           <span v-for="hint in schemaHints" :key="hint">{{ hint }}</span>
         </div>
@@ -69,11 +73,16 @@
 
 <script>
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
+import {runtimeInputFormSchema} from '@/utils/workflowInputMapping'
 
 export default {
   name: 'WorkflowExecutionInput',
   components: {WorkflowSchemaConfig},
   props: {
+    simple: {
+      type: Boolean,
+      default: false
+    },
     schema: {
       type: Object,
       default: () => ({type: 'object', properties: {}})
@@ -85,6 +94,10 @@ export default {
     loading: {
       type: Boolean,
       default: false
+    },
+    hiddenFields: {
+      type: Array,
+      default: () => []
     }
   },
   emits: ['update:modelValue', 'validation'],
@@ -94,11 +107,17 @@ export default {
       inputValue: {},
       jsonDraft: '{}',
       jsonError: '',
+      formRevision: 0,
+      formValidation: {valid: true, message: '', errors: []},
+      hasEditedInput: false,
       validationErrors: [],
       syncingModel: false
     }
   },
   computed: {
+    formSchema() {
+      return runtimeInputFormSchema(this.normalizedSchema, this.hiddenFields)
+    },
     normalizedSchema() {
       const schema = this.schema && typeof this.schema === 'object' ? this.schema : {}
       return {
@@ -113,6 +132,7 @@ export default {
         || (Array.isArray(this.normalizedSchema.required) && this.normalizedSchema.required.length > 0)
     },
     fieldErrors() {
+      if (this.simple && !this.hasEditedInput) return {}
       return this.validationErrors.reduce((result, item) => {
         const match = item.path.match(/^\$\.([^.[\]]+)/)
         if (match && !result[match[1]]) result[match[1]] = item.message
@@ -166,11 +186,15 @@ export default {
     reset() {
       this.mode = 'form'
       this.jsonError = ''
+      this.hasEditedInput = false
       this.resetToExample(false)
     },
     resetToExample(showFeedback = true) {
+      this.resetFormDrafts()
+      this.jsonError = ''
+      if (showFeedback) this.hasEditedInput = true
       const hasSchemaFields = Object.keys(this.normalizedSchema.properties).length > 0
-      const example = hasSchemaFields
+      const example = this.simple && !showFeedback ? this.initialValueForSchema(this.normalizedSchema) : hasSchemaFields
         ? this.exampleForSchema(this.normalizedSchema, true)
         : showFeedback ? {message: '示例输入'} : {}
       const value = this.isObject(example) ? example : {}
@@ -181,9 +205,20 @@ export default {
         : '当前契约未声明字段，已生成通用示例，可按需修改')
     },
     structuredInputChanged(value) {
+      this.hasEditedInput = true
       this.commit(this.isObject(value) ? value : {})
     },
+    resetFormDrafts() {
+      this.formRevision++
+      this.formValidation = {valid: true, message: '', errors: []}
+    },
+    schemaValidationChanged(value) {
+      this.formValidation = value
+      if (!value.valid) this.hasEditedInput = true
+      this.emitValidation(!this.loading && !this.jsonError && !this.validationErrors.length)
+    },
     jsonInputChanged(value) {
+      this.hasEditedInput = true
       this.jsonDraft = value
       const parsed = this.parseJson(value)
       if (!parsed.ok) {
@@ -205,14 +240,22 @@ export default {
       this.commit(parsed.value)
     },
     clearJson() {
+      this.resetFormDrafts()
       this.jsonDraft = '{}'
       this.jsonError = ''
       this.commit({}, false)
     },
     modeChanged(value) {
+      if (value === 'json' && !this.formValidation.valid) {
+        this.mode = 'form'
+        this.$message.warning('请先修正参数表单中的 JSON 后再切换输入模式')
+        this.emitValidation(false)
+        return
+      }
       if (value !== 'form') return
       const parsed = this.parseJson(this.jsonDraft)
       if (parsed.ok) {
+        this.resetFormDrafts()
         this.jsonError = ''
         this.commit(parsed.value)
         return
@@ -239,8 +282,10 @@ export default {
       this.emitValidation(!this.loading && !this.jsonError && !this.validationErrors.length)
     },
     emitValidation(valid) {
-      const message = this.jsonError || this.validationErrors[0]?.message || ''
-      this.$emit('validation', {valid: Boolean(valid), message, errors: this.validationErrors})
+      const draftErrors = this.mode === 'form' ? this.formValidation.errors : []
+      const errors = [...draftErrors, ...this.validationErrors]
+      const message = this.jsonError || errors[0]?.message || ''
+      this.$emit('validation', {valid: Boolean(valid && (this.mode !== 'form' || this.formValidation.valid)), message, errors})
     },
     parseJson(value) {
       const text = String(value || '').trim()
@@ -357,6 +402,14 @@ export default {
       }
       return labels[type] || type || 'Any'
     },
+    initialValueForSchema(schema) {
+      if (schema?.default !== undefined) return this.deepClone(schema.default)
+      if (schema?.type !== 'object' && !schema?.properties) return undefined
+      return Object.fromEntries(Object.entries(schema.properties || {}).flatMap(([name, child]) => {
+        const value = this.initialValueForSchema(child)
+        return value === undefined || (this.isObject(value) && !Object.keys(value).length && child?.default === undefined) ? [] : [[name, value]]
+      }))
+    },
     exampleForSchema(schema, includeAll = false) {
       if (schema?.default !== undefined) return this.deepClone(schema.default)
       if (schema?.example !== undefined) return this.deepClone(schema.example)
@@ -385,6 +438,9 @@ export default {
       }
       if (type === 'boolean') return false
       if (type === 'integer' || type === 'number') return schema.minimum ?? 0
+      // 文件必须由用户提供，不能用示例文字冒充已经上传的地址。
+      if (schema.format === 'uri' || schema.format === 'binary'
+        || String(schema.contentMediaType || '').startsWith('image/')) return undefined
       if (includeAll && type === 'string') {
         return schema.placeholder || (schema.title ? `示例${schema.title}` : '示例文本')
       }
@@ -423,16 +479,23 @@ export default {
 
 .input-mode-switch :deep(.el-radio-button__inner) {
   width: 100%;
-  border: 0;
+  border: 0 !important;
   border-radius: 8px;
-  box-shadow: none;
+  color: var(--el-text-color-regular) !important;
+  background: var(--el-bg-color) !important;
+  box-shadow: none !important;
 }
 
 .input-mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
-  color: #fff;
-  border-color: var(--workflow-primary, var(--el-color-primary));
-  background: var(--workflow-primary, var(--el-color-primary));
-  box-shadow: none;
+  color: var(--workflow-primary-text, #fff) !important;
+  border-color: var(--workflow-primary, var(--el-color-primary)) !important;
+  background: var(--workflow-primary, var(--el-color-primary)) !important;
+  box-shadow: none !important;
+}
+
+.input-mode-switch :deep(.el-radio-button:focus-within .el-radio-button__inner) {
+  outline: 2px solid var(--workflow-primary, var(--el-color-primary));
+  outline-offset: 2px;
 }
 
 .input-mode-panel {

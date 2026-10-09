@@ -223,7 +223,7 @@ public class DatasourceConnectorExecutor {
     }
 
     private Connection getDirectConnection(PlatformDatasource datasource) throws SQLException {
-        hostSafetyPolicy.validate(datasource.getHost());
+        hostSafetyPolicy.validate(datasource);
         String password = credentialCipher.decrypt(datasource.getPassword());
         if (password == null) throw new ServiceException("数据库密码尚未配置");
         return java.sql.DriverManager.getConnection(

@@ -10,6 +10,7 @@ import com.polaris.ai.modelcenter.client.ProviderHttpRequest;
 import com.polaris.ai.modelcenter.client.ProviderHttpResponse;
 import com.polaris.ai.modelcenter.protocol.ProtocolAdapterRegistry;
 import com.polaris.ai.modelcenter.protocol.ProtocolEndpoint;
+import com.polaris.ai.modelcenter.protocol.ProtocolHttpMethod;
 import com.polaris.ai.runtime.ModelRuntimeSpec;
 import com.polaris.ai.runtime.RuntimePolicySpec;
 import com.polaris.ai.runtime.audio.*;
@@ -17,13 +18,15 @@ import com.polaris.common.exception.ServiceException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import javax.imageio.ImageIO;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Duration;
-import java.util.LinkedHashMap;
+import java.util.*;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 /** 真实 Provider 请求驱动的 Draft Model Test Handler。 */
 @Configuration(proxyBeanMethods = false)
@@ -104,16 +107,81 @@ public class OpenAiCompatibleCapabilityTestConfiguration {
                 body.put("prompt", "A simple blue circle on white background");
                 body.put("n", 1);
                 put(body, "size", value(context, "size"));
-                put(body, "quality", value(context, "quality"));
+                if (!isQwenImage(context)) put(body, "quality", value(context, "quality"));
                 return body;
             }
 
             @Override
             boolean valid(JsonNode response) {
-                return response.path("data").isArray()
-                        && !response.path("data").isEmpty();
+                return hasImageResult(response);
             }
         };
+    }
+
+    @Bean
+    CapabilityTestHandler imageEditTestHandler(
+            ProtocolAdapterRegistry protocols,
+            ProviderHttpClientFactory clients,
+            ProviderErrorTranslator errors) {
+        return new JsonCapabilityTestHandler("IMAGE_EDIT", protocols, clients, errors) {
+            @Override
+            ProtocolEndpoint endpoint(ModelTestContext context) {
+                // Qwen's compatible image editing is JSON, not OpenAI multipart /images/edits.
+                if (!isQwenImage(context) || !"RELAY".equalsIgnoreCase(context.provider().networkMode())) {
+                    throw new ServiceException("当前图片编辑连接测试仅支持千问 OpenAI 兼容连接；不会使用错误协议尝试调用");
+                }
+                return new ProtocolEndpoint(ProtocolHttpMethod.POST, "/images/generations");
+            }
+
+            @Override
+            Map<String, Object> request(ModelTestContext context) {
+                Map<String, Object> body = base(context);
+                body.put("prompt", "Change the red square to green. Keep the blue circle and white background unchanged.");
+                body.put("image", syntheticImage());
+                body.put("n", 1);
+                put(body, "size", value(context, "size"));
+                return body;
+            }
+
+            @Override
+            boolean valid(JsonNode response) { return hasImageResult(response); }
+        };
+    }
+
+    private static boolean isQwenImage(ModelTestContext context) {
+        return "DASHSCOPE".equalsIgnoreCase(context.provider().providerCode())
+                && context.modelName().toLowerCase(java.util.Locale.ROOT).startsWith("qwen-image");
+    }
+
+    private static boolean hasImageResult(JsonNode response) {
+        JsonNode data = response.path("data");
+        if (!data.isArray() || data.isEmpty()) return false;
+        for (JsonNode item : data) {
+            if ((!item.path("url").isTextual() || item.path("url").asText().isBlank())
+                    && (!item.path("b64_json").isTextual() || item.path("b64_json").asText().isBlank())) return false;
+        }
+        return true;
+    }
+
+    /** Generated test-only pixels, never user documents or business data. */
+    private static String syntheticImage() {
+        try {
+            BufferedImage image = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
+            var graphics = image.createGraphics();
+            try {
+                graphics.setColor(Color.WHITE);
+                graphics.fillRect(0, 0, 512, 512);
+                graphics.setColor(Color.RED);
+                graphics.fillRect(64, 192, 128, 128);
+                graphics.setColor(Color.BLUE);
+                graphics.fillOval(320, 192, 128, 128);
+            } finally { graphics.dispose(); }
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            if (!ImageIO.write(image, "png", bytes)) throw new IllegalStateException("PNG encoder unavailable");
+            return "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes.toByteArray());
+        } catch (Exception error) {
+            throw new ServiceException("无法准备图片编辑的合成测试样本");
+        }
     }
 
     @Bean
@@ -185,11 +253,7 @@ public class OpenAiCompatibleCapabilityTestConfiguration {
 
         @Override
         public CapabilityTestResult test(ModelTestContext context) {
-            ProtocolEndpoint endpoint = protocols
-                    .getRequired(context.provider().protocolCode())
-                    .findEndpoint(capabilityCode)
-                    .orElseThrow(() -> new ServiceException(
-                            "PROTOCOL_CAPABILITY_NOT_MAPPED: " + capabilityCode));
+            ProtocolEndpoint endpoint = endpoint(context);
             try {
                 ProviderHttpResponse response = clients.get(context.provider())
                         .execute(ProviderHttpRequest.post(
@@ -222,6 +286,12 @@ public class OpenAiCompatibleCapabilityTestConfiguration {
         }
 
         abstract Map<String, Object> request(ModelTestContext context);
+
+        ProtocolEndpoint endpoint(ModelTestContext context) {
+            return protocols.getRequired(context.provider().protocolCode())
+                    .findEndpoint(capabilityCode).orElseThrow(() -> new ServiceException(
+                            "PROTOCOL_CAPABILITY_NOT_MAPPED: " + capabilityCode));
+        }
 
         abstract boolean valid(JsonNode response);
 

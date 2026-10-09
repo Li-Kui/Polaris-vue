@@ -26,6 +26,8 @@ public class WorkflowDefinition extends BaseEntity {
     private Long draftRevision;
     private String currentPublishedVersionId;
     private String status;
+    private String defaultPageType;
+    private String sharePageConfigJson;
     @Version
     private Integer lockVersion;
     @TableLogic(value = "0", delval = "2")

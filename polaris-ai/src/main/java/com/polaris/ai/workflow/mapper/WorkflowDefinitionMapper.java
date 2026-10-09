@@ -14,6 +14,17 @@ public interface WorkflowDefinitionMapper extends BaseMapper<WorkflowDefinition>
     @Select("SELECT * FROM ai_workflow_definition WHERE id = #{id} AND del_flag = '0' FOR UPDATE")
     WorkflowDefinition selectByIdForUpdate(@Param("id") Long id);
 
+    @Update("UPDATE ai_workflow_definition SET default_page_type = #{defaultPageType,jdbcType=VARCHAR}, "
+            + "share_page_config_json = #{sharePageConfigJson,jdbcType=VARCHAR}, "
+            + "update_by = #{updateBy}, update_time = NOW(), lock_version = lock_version + 1 "
+            + "WHERE id = #{id} AND lock_version = #{expectedLockVersion} AND del_flag = '0'")
+    int updateShareDefaults(
+            @Param("id") Long id,
+            @Param("expectedLockVersion") Integer expectedLockVersion,
+            @Param("defaultPageType") String defaultPageType,
+            @Param("sharePageConfigJson") String sharePageConfigJson,
+            @Param("updateBy") String updateBy);
+
     @Update("UPDATE ai_workflow_definition SET workflow_name = #{workflowName}, "
             + "description = #{description}, tags_json = #{tagsJson}, "
             + "draft_schema_version = #{draftSchemaVersion}, draft_json = #{draftJson}, "

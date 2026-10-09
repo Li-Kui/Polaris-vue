@@ -4,14 +4,17 @@ layout: home
 hero:
   name: "北辰 AI 开放平台"
   text: "企业级大模型与知识库开放中台"
-  tagline: "全兼容 OpenAI 标准协议规范，一站式赋能各业务系统"
+  tagline: "兼容 OpenAI 核心协议，并提供可恢复工作流开放接口"
   actions:
     - theme: brand
       text: 快速开始 →
       link: /guide/quickstart
     - theme: alt
-      text: API 接口参考
+      text: 对话 API
       link: /api/chat-completions
+    - theme: alt
+      text: 工作流 API
+      link: /api/workflow-executions
 
 features:
   - title: ⚡ 标准 OpenAI 兼容
@@ -22,4 +25,6 @@ features:
     details: 基于 Server-Sent Events (SSE) 协议，支持大模型 Token 级极速流式打字机吐字与安全过滤。
   - title: 📊 精确 Token 计量与配额
     details: 内置 Token 级消耗统计与租户配额限制，保障各业务条线资源可控可计量。
+  - title: 🔁 可恢复工作流执行
+    details: 支持幂等启动、状态查询、持久化事件续读、SSE 订阅和取消执行。
 ---

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.WorkflowShareMapper">
+
+    <resultMap id="WorkflowShareResult" type="com.polaris.platform.domain.WorkflowShare">
+        <id property="id" column="id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="shareCode" column="share_code"/>
+        <result property="shareName" column="share_name"/>
+        <result property="workflowDefinitionId" column="workflow_definition_id"/>
+        <result property="pageType" column="page_type"/>
+        <result property="pageConfigJson" column="page_config_json"/>
+        <result property="allowedOrigins" column="allowed_origins"/>
+        <result property="rateLimit" column="rate_limit"/>
+        <result property="status" column="status"/>
+        <result property="expireTime" column="expire_time"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <sql id="selectWorkflowShareVo">
+        select id, tenant_id, share_code, share_name, workflow_definition_id,
+               page_type, page_config_json, allowed_origins, rate_limit,
+               status, expire_time, create_by, create_time, update_by, update_time
+        from platform_workflow_share
+    </sql>
+
+    <select id="selectById" resultMap="WorkflowShareResult">
+        <include refid="selectWorkflowShareVo"/>
+        where id = #{id}
+    </select>
+
+    <select id="selectByShareCode" resultMap="WorkflowShareResult">
+        <include refid="selectWorkflowShareVo"/>
+        where share_code = #{shareCode}
+    </select>
+
+    <select id="selectByTenantId" resultMap="WorkflowShareResult">
+        <include refid="selectWorkflowShareVo"/>
+        where tenant_id = #{tenantId}
+        order by create_time desc
+    </select>
+
+    <select id="selectByWorkflowDefinitionId" resultMap="WorkflowShareResult">
+        <include refid="selectWorkflowShareVo"/>
+        where tenant_id = #{tenantId}
+          and workflow_definition_id = #{workflowDefinitionId}
+        order by create_time desc
+    </select>
+
+    <insert id="insert" parameterType="com.polaris.platform.domain.WorkflowShare" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_workflow_share
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="tenantId != null">tenant_id,</if>
+            <if test="shareCode != null and shareCode != ''">share_code,</if>
+            <if test="shareName != null and shareName != ''">share_name,</if>
+            <if test="workflowDefinitionId != null">workflow_definition_id,</if>
+            <if test="pageType != null">page_type,</if>
+            <if test="pageConfigJson != null">page_config_json,</if>
+            <if test="allowedOrigins != null">allowed_origins,</if>
+            <if test="rateLimit != null">rate_limit,</if>
+            <if test="status != null and status != ''">status,</if>
+            <if test="expireTime != null">expire_time,</if>
+            <if test="createBy != null">create_by,</if>
+            <if test="createTime != null">create_time,</if>
+            <if test="updateBy != null">update_by,</if>
+            <if test="updateTime != null">update_time,</if>
+        </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="tenantId != null">#{tenantId},</if>
+            <if test="shareCode != null and shareCode != ''">#{shareCode},</if>
+            <if test="shareName != null and shareName != ''">#{shareName},</if>
+            <if test="workflowDefinitionId != null">#{workflowDefinitionId},</if>
+            <if test="pageType != null">#{pageType},</if>
+            <if test="pageConfigJson != null">#{pageConfigJson},</if>
+            <if test="allowedOrigins != null">#{allowedOrigins},</if>
+            <if test="rateLimit != null">#{rateLimit},</if>
+            <if test="status != null and status != ''">#{status},</if>
+            <if test="expireTime != null">#{expireTime},</if>
+            <if test="createBy != null">#{createBy},</if>
+            <if test="createTime != null">#{createTime},</if>
+            <if test="updateBy != null">#{updateBy},</if>
+            <if test="updateTime != null">#{updateTime},</if>
+        </trim>
+    </insert>
+
+    <update id="update" parameterType="com.polaris.platform.domain.WorkflowShare">
+        update platform_workflow_share
+        <set>
+            <if test="shareName != null and shareName != ''">share_name = #{shareName},</if>
+            <if test="pageTypeSpecified">page_type = #{pageType,jdbcType=VARCHAR},</if>
+            <if test="pageConfigJson != null">page_config_json = #{pageConfigJson},</if>
+            <if test="allowedOrigins != null">allowed_origins = #{allowedOrigins},</if>
+            <if test="rateLimit != null">rate_limit = #{rateLimit},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="expireTimeSpecified">expire_time = #{expireTime,jdbcType=TIMESTAMP},</if>
+            <if test="updateBy != null">update_by = #{updateBy},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        where id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        delete from platform_workflow_share where id = #{id}
+    </delete>
+
+</mapper>

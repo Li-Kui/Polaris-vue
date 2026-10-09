@@ -2,10 +2,12 @@
 
 在终端或 Linux 服务器上，可以使用 `curl` 直接与北辰 API 进行交互。
 
+请将示例中的 `https://your-polaris-host/prod-api` 替换为中台首页接入示例中的实际站点和 API 代理前缀，参见[快速开始](/guide/quickstart)。
+
 ## 1. 阻塞式对话调用
 
 ```bash
-curl -X POST http://localhost:8080/platform/api/v1/chat/completions \
+curl -X POST https://your-polaris-host/prod-api/platform/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-your-api-key" \
   -d '{
@@ -22,7 +24,7 @@ curl -X POST http://localhost:8080/platform/api/v1/chat/completions \
 使用 `-N` / `--no-buffer` 参数防止终端缓冲，实现实时流式输出：
 
 ```bash
-curl -N -X POST http://localhost:8080/platform/api/v1/chat/completions \
+curl -N -X POST https://your-polaris-host/prod-api/platform/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-your-api-key" \
   -d '{
@@ -37,6 +39,6 @@ curl -N -X POST http://localhost:8080/platform/api/v1/chat/completions \
 ## 3. 查询可用模型列表
 
 ```bash
-curl -X GET http://localhost:8080/platform/api/v1/models \
+curl -X GET https://your-polaris-host/prod-api/platform/api/v1/models \
   -H "X-API-Key: sk-your-api-key"
 ```

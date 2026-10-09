@@ -20,4 +20,7 @@ public interface WorkflowExecutionApplicationFacade {
     WorkflowExecutionView cancel(String executionId);
 
     WorkflowExecutionView retry(String executionId, WorkflowExecutionRetryCommand command);
+
+    /** 获取分享运行时所需的已发布定义和输入 Schema。 */
+    WorkflowShareDefinitionView getShareDefinition(Long definitionId);
 }

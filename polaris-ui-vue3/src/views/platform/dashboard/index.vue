@@ -162,6 +162,7 @@ import {listApiKey} from '@/api/platform/apiKey'
 import {listDatasource} from '@/api/platform/datasource'
 import {listConnector} from '@/api/platform/connector'
 import {listTenantUser} from '@/api/platform/user'
+import {getPlatformOpenApiBaseUrl} from '@/utils/platformApiUrl'
 
 const platformUserStore = usePlatformUserStore()
 const tenantInfo = computed(() => platformUserStore.tenant || {})
@@ -172,9 +173,10 @@ const connectorCount = ref(0)
 const memberCount = ref(1)
 
 const currentLang = ref('curl')
+const openApiBaseUrl = getPlatformOpenApiBaseUrl(window.location.origin, import.meta.env.VITE_APP_BASE_API)
 
 const codeSnippets = {
-  curl: `curl -X POST "http://localhost:8080/platform/api/v1/chat/completions" \\
+  curl: `curl -X POST "${openApiBaseUrl}/chat/completions" \\
   -H "Content-Type: application/json" \\
   -H "X-API-Key: sk-your-api-key-here" \\
   -d '{
@@ -189,7 +191,7 @@ const codeSnippets = {
 
 # 兼容标准 OpenAI SDK，只需配置 Base URL 与 API Key
 client = OpenAI(
-    base_url="http://localhost:8080/platform/api/v1",
+    base_url="${openApiBaseUrl}",
     api_key="sk-your-api-key-here"
 )
 
@@ -207,7 +209,7 @@ for chunk in response:
   node: `import OpenAI from 'openai'
 
 const client = new OpenAI({
-  baseURL: 'http://localhost:8080/platform/api/v1',
+  baseURL: '${openApiBaseUrl}',
   apiKey: 'sk-your-api-key-here'
 })
 
@@ -231,7 +233,7 @@ import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
 public class PolarisMiddlePlatformDemo {
     public static void main(String[] args) {
         StreamingChatModel model = OpenAiStreamingChatModel.builder()
-                .baseUrl("http://localhost:8080/platform/api/v1")
+                .baseUrl("${openApiBaseUrl}")
                 .apiKey("sk-your-api-key-here")
                 .modelName("polaris-default")
                 .temperature(0.7)
@@ -256,11 +258,17 @@ function formatNumber(num) {
   return String(num)
 }
 
-function copyCode() {
-  const text = codeSnippets[currentLang.value]
-  navigator.clipboard.writeText(text).then(() => {
+async function copyCode() {
+  try {
+    if (!navigator.clipboard?.writeText) {
+      ElMessage.warning('当前浏览器不支持复制，请手动选择示例代码复制')
+      return
+    }
+    await navigator.clipboard.writeText(codeSnippets[currentLang.value])
     ElMessage.success('代码已成功复制到剪贴板！')
-  })
+  } catch {
+    ElMessage.error('复制失败，请检查剪贴板权限或手动复制')
+  }
 }
 
 function loadOverviewStats() {

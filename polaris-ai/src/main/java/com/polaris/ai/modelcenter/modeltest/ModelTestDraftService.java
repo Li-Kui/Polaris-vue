@@ -82,6 +82,7 @@ public class ModelTestDraftService {
             case QUOTA_EXHAUSTED -> "服务商额度不足，请充值或调整额度设置后重试";
             case RATE_LIMITED -> "服务商请求过于频繁，请稍后重试";
             case MODEL_NOT_FOUND -> "服务商未找到该模型，请重新选择远程模型";
+            case ENDPOINT_NOT_FOUND -> "服务商未找到调用接口，请检查服务地址、地域和连接方式是否与该能力匹配";
             case REQUEST_INVALID -> "服务商不接受当前模型参数，请调整能力配置后重试";
             case PROVIDER_TIMEOUT -> "服务商响应超时，请稍后重试";
             case DNS_FAILED -> "无法解析服务商域名，请检查服务地址或网络设置";

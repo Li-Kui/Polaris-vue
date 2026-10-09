@@ -10,6 +10,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="keyPrefix"    column="key_prefix"     />
         <result property="keyName"      column="key_name"       />
         <result property="permissions"  column="permissions"    />
+        <result property="allowedWorkflows" column="allowed_workflows" />
         <result property="rateLimit"    column="rate_limit"     />
         <result property="status"       column="status"         />
         <result property="expireTime"   column="expire_time"    />
@@ -21,7 +22,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </resultMap>
 
     <sql id="selectPlatformApiKeyVo">
-        select id, tenant_id, key_prefix, key_name, permissions, rate_limit, status, expire_time, last_used_time, create_by, create_time, update_by, update_time
+        select id, tenant_id, key_prefix, key_name, permissions, allowed_workflows, rate_limit, status, expire_time, last_used_time, create_by, create_time, update_by, update_time
         from platform_api_key
     </sql>
 
@@ -31,7 +32,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="selectAuthApiKeyByHash" parameterType="String" resultMap="PlatformApiKeyResult">
-        select k.id, k.tenant_id, k.key_prefix, k.key_name, k.permissions, k.rate_limit, k.status,
+        select k.id, k.tenant_id, k.key_prefix, k.key_name, k.permissions, k.allowed_workflows, k.rate_limit, k.status,
                k.expire_time, k.last_used_time, k.create_by, k.create_time, k.update_by, k.update_time
         from platform_api_key k
         inner join platform_tenant t on t.tenant_id = k.tenant_id
@@ -52,6 +53,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="keyPrefix != null and keyPrefix != ''">key_prefix,</if>
             <if test="keyName != null and keyName != ''">key_name,</if>
             <if test="permissions != null">permissions,</if>
+            <if test="allowedWorkflows != null">allowed_workflows,</if>
             <if test="rateLimit != null">rate_limit,</if>
             <if test="status != null and status != ''">status,</if>
             <if test="expireTime != null">expire_time,</if>
@@ -63,6 +65,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="keyPrefix != null and keyPrefix != ''">#{keyPrefix},</if>
             <if test="keyName != null and keyName != ''">#{keyName},</if>
             <if test="permissions != null">#{permissions},</if>
+            <if test="allowedWorkflows != null">#{allowedWorkflows},</if>
             <if test="rateLimit != null">#{rateLimit},</if>
             <if test="status != null and status != ''">#{status},</if>
             <if test="expireTime != null">#{expireTime},</if>
@@ -76,9 +79,10 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <set>
             <if test="keyName != null and keyName != ''">key_name = #{keyName},</if>
             <if test="permissions != null">permissions = #{permissions},</if>
+            <if test="allowedWorkflows != null">allowed_workflows = #{allowedWorkflows},</if>
             <if test="rateLimit != null">rate_limit = #{rateLimit},</if>
             <if test="status != null and status != ''">status = #{status},</if>
-            <if test="expireTime != null">expire_time = #{expireTime},</if>
+            <if test="expireTimeSpecified">expire_time = #{expireTime,jdbcType=TIMESTAMP},</if>
             <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
             update_time = sysdate()
         </set>
