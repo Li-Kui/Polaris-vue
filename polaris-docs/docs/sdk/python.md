@@ -10,12 +10,14 @@ pip install openai
 
 ## 代码示例 (流式对话)
 
+请用中台首页接入示例中的实际 Base URL 替换下方占位地址，保留部署的 API 代理前缀，参见[快速开始](/guide/quickstart)。
+
 ```python
 from openai import OpenAI
 
 # 1. 初始化客户端，指向北辰中台 Base URL
 client = OpenAI(
-    base_url="http://localhost:8080/platform/api/v1",
+    base_url="https://your-polaris-host/prod-api/platform/api/v1",
     api_key="sk-your-api-key-here"
 )
 

@@ -3,8 +3,10 @@ package com.polaris.platform.domain;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.polaris.common.core.domain.BaseEntity;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Setter;
 
 import java.util.Date;
 
@@ -39,6 +41,10 @@ public class PlatformApiKey extends BaseEntity {
     @Schema(description = "权限列表 JSON")
     private String permissions;
 
+    /** JSON: ["workflow-code"]，NULL 表示不限制 */
+    @Schema(description = "允许调用的工作流编码列表 JSON")
+    private String allowedWorkflows;
+
     @Schema(description = "每分钟请求次数限制")
     private Integer rateLimit;
 
@@ -47,6 +53,17 @@ public class PlatformApiKey extends BaseEntity {
 
     @Schema(description = "过期时间")
     private Date expireTime;
+
+    /** 区分省略有效期和显式清空，避免停用操作意外延长密钥有效期。 */
+    @JsonIgnore
+    @Schema(hidden = true)
+    @Setter(AccessLevel.NONE)
+    private boolean expireTimeSpecified;
+
+    public void setExpireTime(Date expireTime) {
+        this.expireTime = expireTime;
+        this.expireTimeSpecified = true;
+    }
 
     @Schema(description = "最后使用时间", accessMode = Schema.AccessMode.READ_ONLY)
     private Date lastUsedTime;

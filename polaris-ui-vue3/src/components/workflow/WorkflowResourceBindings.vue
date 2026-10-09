@@ -108,6 +108,7 @@
         <el-form-item label="资源类型">
           <el-select v-model="form.resourceKind" style="width: 100%" @change="resourceKindChanged">
             <el-option label="大模型" value="MODEL" />
+            <el-option label="图片模型（生成/编辑）" value="IMAGE_MODEL" />
             <el-option label="AI 智能体" value="AGENT" />
             <el-option label="知识库" value="KNOWLEDGE_BASE" />
             <el-option label="API 连接器" value="API_CONNECTOR" />
@@ -270,7 +271,7 @@ export default {
       await this.loadBindings()
     },
     async loadCatalogs() {
-      const kinds = ['MODEL', 'AGENT', 'KNOWLEDGE_BASE', 'API_CONNECTOR', 'DATASOURCE']
+      const kinds = ['MODEL', 'IMAGE_MODEL', 'AGENT', 'KNOWLEDGE_BASE', 'API_CONNECTOR', 'DATASOURCE']
       const responses = await Promise.all(kinds.map(kind => listWorkflowResources({
         kind,
         environment: this.environment
@@ -311,6 +312,7 @@ export default {
     resourceKindLabel(resourceKind) {
       const labels = {
         MODEL: '大模型',
+        IMAGE_MODEL: '图片模型',
         AGENT: 'AI 智能体',
         KNOWLEDGE_BASE: '知识库',
         API_CONNECTOR: 'API 连接器',

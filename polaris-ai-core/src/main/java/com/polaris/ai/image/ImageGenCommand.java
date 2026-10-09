@@ -9,6 +9,9 @@ import java.util.List;
  */
 public class ImageGenCommand {
 
+    /** 显式模型 ID；为空时解析当前作用域对应 Capability 的默认模型。 */
+    private Long modelConfigId;
+
     /** 提示词 */
     private String prompt;
     /** 负向提示词（可选） */
@@ -35,6 +38,8 @@ public class ImageGenCommand {
     /** 针对多图场景的独立提示词列表（若提供，则为每张图使用对应的独立描述并发渲染，避免拼图） */
     private List<String> prompts;
 
+    public Long getModelConfigId() { return modelConfigId; }
+    public void setModelConfigId(Long modelConfigId) { this.modelConfigId = modelConfigId; }
     public String getPrompt() { return prompt; }
     public void setPrompt(String prompt) { this.prompt = prompt; }
     public List<String> getPrompts() { return prompts; }

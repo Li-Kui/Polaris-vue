@@ -1,0 +1,23 @@
+{
+  "code": "IMAGE_VARIATION",
+  "name": "图片变体",
+  "kind": "INVOCATION",
+  "category": "IMAGE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "size": {"type": "string", "title": "图片尺寸", "default": "1024x1024"},
+      "similarity": {"type": "number", "title": "相似度", "minimum": 0, "maximum": 1, "default": 0.7}
+    }
+  },
+  "uiSchema": {
+    "size": {"component": "custom", "customComponent": "image-size-selector", "order": 10},
+    "similarity": {"component": "slider", "order": 20, "step": 0.05}
+  },
+  "parameterPolicy": {
+    "size": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]},
+    "similarity": {"overridable": true, "allowedSources": ["APPLICATION", "WORKFLOW", "REQUEST"]}
+  }
+}

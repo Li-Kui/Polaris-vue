@@ -1,72 +1,5 @@
 import request from '@/utils/request'
 
-// 查询模型配置列表
-export function listModel(query) {
-  return request({
-    url: '/ai/model/list',
-    method: 'get',
-    params: query
-  })
-}
-
-// 查询模型配置详情
-export function getModel(id) {
-  return request({
-    url: '/ai/model/' + id,
-    method: 'get'
-  })
-}
-
-// 新增模型配置
-export function addModel(data) {
-  return request({
-    url: '/ai/model',
-    method: 'post',
-    data: data
-  })
-}
-
-// 修改模型配置
-export function updateModel(data) {
-  return request({
-    url: '/ai/model',
-    method: 'put',
-    data: data
-  })
-}
-
-// 删除模型配置
-export function delModel(id) {
-  return request({
-    url: '/ai/model/' + id,
-    method: 'delete'
-  })
-}
-
-// 设为默认聊天模型
-export function setDefaultChat(id) {
-  return request({
-    url: `/ai/model/${id}/default`,
-    method: 'put'
-  })
-}
-
-// 设为默认向量模型
-export function setDefaultEmbedding(id) {
-  return request({
-    url: `/ai/model/${id}/defaultEmbedding`,
-    method: 'put'
-  })
-}
-
-// 设为默认绘图模型
-export function setDefaultImage(id) {
-  return request({
-    url: `/ai/model/${id}/defaultImage`,
-    method: 'put'
-  })
-}
-
 // 查询当前登录用户可用的模型列表
 export function listAvailableModel() {
   return request({
@@ -83,12 +16,57 @@ export function listAvailableEmbeddingModel() {
   })
 }
 
-// 根据提供商、API Key、Base URL 拉取远程可用模型列表
-export function fetchRemoteModels(data) {
+// Model Center V2：稳定列表、Editor 上下文与 Aggregate。
+export function listModelAggregates() {
+  return request({ url: '/ai/model-center/models', method: 'get' })
+}
+
+export function getModelEditorContext() {
+  return request({ url: '/ai/model-center/editor-context', method: 'get' })
+}
+
+export function getModelAggregate(id) {
+  return request({ url: `/ai/model-center/models/${id}`, method: 'get' })
+}
+
+export function createModelAggregate(data) {
+  return request({ url: '/ai/model-center/models', method: 'post', data })
+}
+
+export function updateModelAggregate(id, data) {
+  return request({ url: `/ai/model-center/models/${id}`, method: 'put', data })
+}
+
+export function deleteModelAggregate(id) {
+  return request({ url: `/ai/model-center/models/${id}`, method: 'delete' })
+}
+
+export function setCapabilityDefault(capabilityCode, modelId) {
   return request({
-    url: '/ai/model/list/remote',
-    method: 'post',
-    data: data,
-    timeout: 15000
+    url: `/ai/model-center/defaults/${capabilityCode}/${modelId}`,
+    method: 'put'
   })
+}
+
+export function getCapabilityDefault(capabilityCode) {
+  return request({
+    url: `/ai/model-center/defaults/${capabilityCode}`,
+    method: 'get',
+    silentError: true
+  })
+}
+
+export function testModelDraft(data) {
+  // A provider test can take longer than the shared 10-second UI timeout.
+  // Keep this local to the test request; extending the wait must not retry it.
+  const policy = data?.runtimePolicy || {}
+  const boundedTimeout = (value, fallback, max) => Number.isInteger(value) && value >= 100
+    ? Math.min(value, max) : fallback
+  const timeout = boundedTimeout(policy.connectTimeoutMs, 10000, 60000)
+    + boundedTimeout(policy.readTimeoutMs, 60000, 300000) + 10000
+  return request({ url: '/ai/model-center/model-test', method: 'post', data, timeout })
+}
+
+export function resolveSchemaOptions(data) {
+  return request({ url: '/ai/model-center/options', method: 'post', data })
 }

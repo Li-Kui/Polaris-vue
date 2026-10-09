@@ -1,0 +1,13 @@
+{
+  "code": "TOOL_CALLING",
+  "name": "工具调用",
+  "kind": "FEATURE",
+  "category": "FEATURE",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "allowedAppliesTo": ["CHAT_COMPLETION"]
+}

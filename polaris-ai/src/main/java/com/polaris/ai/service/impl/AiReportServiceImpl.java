@@ -9,7 +9,10 @@ import com.polaris.ai.domain.AiReport;
 import com.polaris.ai.domain.AiReportRef;
 import com.polaris.ai.dto.RefinedReportOutput;
 import com.polaris.ai.mapper.AiReportMapper;
-import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.modelcenter.runtime.ChatRuntimeService;
+import com.polaris.ai.modelcenter.runtime.ModelDefinitionResolver;
+import com.polaris.ai.modelcenter.runtime.RuntimeStreamingChatModel;
+import com.polaris.ai.modelcenter.service.ModelDefaultInternalService;
 import com.polaris.ai.service.IAiReportService;
 import com.polaris.common.constant.HttpStatus;
 import com.polaris.common.exception.ServiceException;
@@ -17,11 +20,8 @@ import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.request.ResponseFormat;
-import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
-import dev.langchain4j.service.output.JsonSchemas;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -63,7 +63,13 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
     private final Map<Long, Object> refineLocks = new ConcurrentHashMap<>();
 
     @Autowired
-    private AiModelFactory modelFactory;
+    private ModelDefaultInternalService modelDefaultService;
+
+    @Autowired
+    private ChatRuntimeService chatRuntimeService;
+
+    @Autowired
+    private ModelDefinitionResolver modelDefinitionResolver;
 
     @Autowired(required = false)
     @Qualifier("threadPoolTaskExecutor")
@@ -463,14 +469,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         if (schema == null || schema.isEmpty()) {
             throw new ServiceException("AI 美化结果不能为空", HttpStatus.ERROR);
         }
-        boolean hasRecognizedField = schema.containsKey("executiveSummary")
-                || schema.containsKey("kpiCards")
-                || schema.containsKey("visualizations")
-                || schema.containsKey("compareMatrix")
-                || schema.containsKey("swot")
-                || schema.containsKey("actionPlan")
-                || schema.containsKey("sections");
-        if (!hasRecognizedField) {
+        if (!hasRecognizedReportField(schema)) {
             throw new ServiceException("AI 美化结果缺少有效报告字段", HttpStatus.ERROR);
         }
         Object schemaVersion = schema.get("schemaVersion");
@@ -593,7 +592,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         validateReportContent(reportContent);
         log.info(">>> [AiReport] 开始重塑报告, contentLength={}", reportContent.length());
         try {
-            StreamingChatModel streamingModel = modelFactory.getDefaultStreamingModel();
+            StreamingChatModel streamingModel = reportStreamingModel();
             if (streamingModel == null) {
                 log.warn(">>> [AiReport] 未配置默认 StreamingChatModel 实例");
                 return "{}";
@@ -618,7 +617,12 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             AtomicReference<Throwable> streamError = new AtomicReference<>();
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
-            ChatRequest chatRequest = structuredReportRequest(messages);
+            // OpenAI compatible does not mean every provider accepts
+            // response_format/json_schema. The prompt still requires JSON and
+            // the parser below applies the same strict server-side validation.
+            ChatRequest chatRequest = ChatRequest.builder()
+                    .messages(messages)
+                    .build();
 
             CancellableStreamingChatCall call = CancellableStreamingChatCall.start(
                     streamingModel.chat(chatRequest), new StreamingChatResponseHandler() {
@@ -648,38 +652,44 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 call.cancel();
-                return java.util.Collections.emptyMap();
+                throw new ServiceException("AI 美化任务已中断", HttpStatus.ERROR);
             }
             if (!finished) {
                 log.warn(">>> [AiReportService] AI 重塑超时");
                 call.cancel();
-                return java.util.Collections.emptyMap();
+                throw new ServiceException("AI 美化超时，请稍后重试", HttpStatus.ERROR);
             }
             if (streamError.get() != null) {
-                return java.util.Collections.emptyMap();
+                throw new ServiceException(
+                        "AI 美化模型调用失败：" + reportErrorMessage(streamError.get()),
+                        HttpStatus.ERROR);
             }
 
             String response = resultBuffer.toString();
-            if (!response.trim().isEmpty()) {
-                try {
-                    RefinedReportOutput structured = objectMapper.readValue(
-                            response.trim(), RefinedReportOutput.class);
-                    Map<String, Object> result = objectMapper.convertValue(
-                            structured, Map.class);
-                    validateRefinedSchema(result);
-                    log.info(">>> [AiReportService] 报告 DTO 结构化输出解析成功");
-                    return result;
-                } catch (Exception parseErr) {
-                    // 个别 OpenAI 兼容供应商可能忽略 JSON Schema，保留旧清洗逻辑作为降级路径。
-                    log.warn(">>> [AiReportService] DTO 解析失败，进入 JSON 清洗降级: {}",
-                            parseErr.getMessage());
-                    return parseLegacyRefinedReport(response);
-                }
+            if (response.trim().isEmpty()) {
+                throw new ServiceException("AI 美化模型未返回内容", HttpStatus.ERROR);
             }
+            try {
+                RefinedReportOutput structured = objectMapper.readValue(
+                        response.trim(), RefinedReportOutput.class);
+                Map<String, Object> result = objectMapper.convertValue(
+                        structured, Map.class);
+                validateRefinedSchema(result);
+                log.info(">>> [AiReportService] 报告 DTO 结构化输出解析成功");
+                return result;
+            } catch (Exception parseErr) {
+                // OpenAI 兼容供应商可能返回 Markdown 代码块或外层包装对象。
+                log.warn(">>> [AiReportService] DTO 解析失败，进入 JSON 清洗降级: {}",
+                        parseErr.getMessage());
+                return parseLegacyRefinedReport(response);
+            }
+        } catch (ServiceException e) {
+            throw e;
         } catch (Exception e) {
             log.error(">>> [AiReportService] AI 重塑报告失败: {}", e.getMessage(), e);
+            throw new ServiceException(
+                    "AI 美化失败：" + reportErrorMessage(e), HttpStatus.ERROR);
         }
-        return java.util.Collections.emptyMap();
     }
 
     @Override
@@ -697,7 +707,7 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         }
 
         try {
-            StreamingChatModel streamingModel = modelFactory.getDefaultStreamingModel();
+            StreamingChatModel streamingModel = reportStreamingModel();
             if (streamingModel == null) {
                 log.warn(">>> [AiReport] 未配置默认 StreamingChatModel 实例");
                 emitter.send("{}");
@@ -715,13 +725,15 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
                     "5. 自动识别报告所属领域 (SECURITY | FINANCIAL | COMPETITION | PROJECT | OPERATIONAL | GENERAL)。\n" +
                     "6. 提炼出 150 字以内的高管摘要 (executiveSummary)，概括最核心发现与决策建议。\n" +
                     "7. 抽取 2-4 个最关键的 KPI 衡量指标 (kpiCards)，格式如：[{\"label\":\"高危风险\",\"value\":\"1项\",\"status\":\"危险\"}]。\n" +
-                    "8. 智能识别数据图表类型 (visualizations)，格式如：[{\"chartType\":\"bar|line|pie|radar\",\"title\":\"图表标题\",\"description\":\"说明\",\"chartData\":{\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"数据\",\"data\":[10,20]}]}}]。\n" +
+                    "8. 智能识别数据图表类型 (visualizations)，格式如：[{\"chartType\":\"bar|line|pie\",\"title\":\"图表标题\",\"description\":\"说明\",\"chartData\":{\"categories\":[\"A\",\"B\"],\"series\":[{\"name\":\"数据\",\"data\":[10,20]}]}}]。\n" +
                     "9. 提取明确的行动计划 (actionPlan)，格式如：[{\"priority\":\"P1\",\"action\":\"建议措施\",\"owner\":\"责任部门\"}]。\n\n" +
                     "【原始报告内容】：\n" + reportContent + "\n\n" +
                     "请仅输出紧凑标准的 JSON 格式，所有字符串值必须是纯净的中文或英文显示文本，绝不要包含 Markdown 标记或原始字段名。";
 
             List<ChatMessage> messages = Collections.singletonList(UserMessage.from(prompt));
-            ChatRequest chatRequest = structuredReportRequest(messages);
+            ChatRequest chatRequest = ChatRequest.builder()
+                    .messages(messages)
+                    .build();
 
             AtomicReference<CancellableStreamingChatCall> callRef = new AtomicReference<>();
             AtomicBoolean streamClosed = new AtomicBoolean(false);
@@ -778,6 +790,17 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         return emitter;
     }
 
+    /** 报告能力统一使用当前作用域的 CHAT_COMPLETION 默认模型。 */
+    private StreamingChatModel reportStreamingModel() {
+        Long modelId = modelDefaultService.resolveModelId(
+                "CHAT_COMPLETION");
+        boolean streaming = modelDefinitionResolver.resolve(
+                modelId, "CHAT_COMPLETION")
+                .enabledFeatures().containsKey("STREAMING");
+        return new RuntimeStreamingChatModel(
+                chatRuntimeService, modelId, Set.of(), List.of(), streaming);
+    }
+
     /** 取消报告模型订阅；超时场景同时主动结束 SSE 连接。 */
     private void cancelReportStream(
             AtomicReference<CancellableStreamingChatCall> callRef,
@@ -805,27 +828,14 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
         }
     }
 
-    /** 使用 LangChain4j JSON Schema 约束模型输出，DTO 是主路径。 */
-    private ChatRequest structuredReportRequest(List<ChatMessage> messages)
-    {
-        var jsonSchema = JsonSchemas.jsonSchemaFrom(RefinedReportOutput.class)
-                .orElseThrow(() -> new IllegalStateException("无法生成报告结构化输出 Schema"));
-        ResponseFormat responseFormat = ResponseFormat.builder()
-                .type(ResponseFormatType.JSON)
-                .jsonSchema(jsonSchema)
-                .build();
-        return ChatRequest.builder()
-                .messages(messages)
-                .responseFormat(responseFormat)
-                .build();
-    }
-
-    /** 兼容不支持 JSON Schema 的旧供应商响应，仅作为降级路径。 */
+    /** 兼容 Markdown 代码块、常见外层包装和字段命名差异。 */
     private Map<String, Object> parseLegacyRefinedReport(String response)
     {
         String cleanJson = response == null ? "" : response.trim();
         if (cleanJson.contains("```")) {
-            cleanJson = cleanJson.replace("```json", "").replace("```", "");
+            cleanJson = cleanJson.replace("```json", "")
+                    .replace("```JSON", "")
+                    .replace("```", "");
         }
         int firstBrace = cleanJson.indexOf("{");
         int lastBrace = cleanJson.lastIndexOf("}");
@@ -833,12 +843,85 @@ public class AiReportServiceImpl extends ServiceImpl<AiReportMapper, AiReport> i
             cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
         }
         try {
-            Map<String, Object> result = objectMapper.readValue(cleanJson, Map.class);
+            Map<String, Object> result = normalizeReportSchema(
+                    objectMapper.readValue(cleanJson, Map.class));
             validateRefinedSchema(result);
             return result;
+        } catch (ServiceException e) {
+            throw e;
         } catch (Exception e) {
             throw new ServiceException("AI 返回的美化结果不是有效结构化报告", HttpStatus.ERROR);
         }
+    }
+
+    private Map<String, Object> normalizeReportSchema(Map<String, Object> source)
+    {
+        Map<String, Object> result = new LinkedHashMap<>(
+                source == null ? Map.of() : source);
+        if (!hasRecognizedReportField(result)) {
+            for (String wrapper : List.of("result", "data", "report", "output", "payload")) {
+                Object nested = result.get(wrapper);
+                if (nested instanceof Map<?, ?> nestedMap) {
+                    Map<String, Object> unwrapped = new LinkedHashMap<>();
+                    nestedMap.forEach((key, value) ->
+                            unwrapped.put(String.valueOf(key), value));
+                    result = unwrapped;
+                    break;
+                }
+            }
+        }
+        alias(result, "executiveSummary", "executive_summary", "summary");
+        alias(result, "kpiCards", "kpi_cards", "kpis");
+        alias(result, "visualizations", "charts", "visualization");
+        alias(result, "actionPlan", "action_plan", "actions");
+        return result;
+    }
+
+    private void alias(Map<String, Object> target, String canonical, String... aliases)
+    {
+        if (target.containsKey(canonical)) {
+            return;
+        }
+        for (String alias : aliases) {
+            if (target.containsKey(alias)) {
+                target.put(canonical, target.get(alias));
+                return;
+            }
+        }
+    }
+
+    private boolean hasRecognizedReportField(Map<String, Object> schema)
+    {
+        return schema != null && (schema.containsKey("executiveSummary")
+                || schema.containsKey("kpiCards")
+                || schema.containsKey("visualizations")
+                || schema.containsKey("compareMatrix")
+                || schema.containsKey("swot")
+                || schema.containsKey("actionPlan")
+                || schema.containsKey("sections"));
+    }
+
+    private String reportErrorMessage(Throwable error)
+    {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        if (message == null || message.isBlank()) {
+            message = current.getClass().getSimpleName();
+        }
+        if (message.contains("MODEL_EMPTY_FINAL_ANSWER")) {
+            return "模型未生成最终内容，可能是思考过程耗尽了输出长度；请提高最大输出长度或改用非推理模型";
+        }
+        if (message.contains("FEATURE_NOT_ENABLED")) {
+            return "当前模型未启用报告所需能力，请在模型管理中开启或切换模型";
+        }
+        if (message.contains("DEFAULT_MODEL_NOT_CONFIGURED")) {
+            return "尚未设置默认聊天模型，请先在模型管理中设置";
+        }
+        message = message.replace('\n', ' ').replace('\r', ' ').trim();
+        return message.length() <= 240 ? message : message.substring(0, 240);
     }
 
 }

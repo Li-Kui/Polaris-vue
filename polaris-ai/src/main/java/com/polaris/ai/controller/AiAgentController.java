@@ -2,6 +2,7 @@ package com.polaris.ai.controller;
 
 import com.polaris.ai.domain.AiAgent;
 import com.polaris.ai.service.IAiAgentService;
+import com.polaris.ai.tools.WebSearchProperties;
 import com.polaris.ai.tools.base.AiAgentTool;
 import com.polaris.ai.tools.base.AiTool;
 import com.polaris.common.annotation.ApiGroup;
@@ -46,6 +47,9 @@ public class AiAgentController extends BaseController {
     @Autowired
     private com.polaris.ai.service.IAiModelConfigService modelConfigService;
 
+    @Autowired
+    private WebSearchProperties webSearchProperties;
+
     /**
      * 获取系统所有可用的智能体工具列表（基于作用域与运行环境动态过滤）
      * GET /ai/agent/tools
@@ -82,9 +86,9 @@ public class AiAgentController extends BaseController {
                     map.put("available", hasImageModel);
                     map.put("disabledReason", hasImageModel ? "" : "当前租户/系统未配置或未启用 AI 绘图模型");
                 } else if (req == com.polaris.ai.tools.base.ToolRequirement.SEARCH_KEY) {
-                    // 联网搜索工具由前端与所选大模型 searchKey 联动控制
-                    map.put("available", true);
-                    map.put("disabledReason", "所选底座大模型未配置联网搜索 API Key (Tavily Key)");
+                    boolean available = webSearchProperties.isConfigured();
+                    map.put("available", available);
+                    map.put("disabledReason", available ? "" : "系统未配置联网搜索 API Key");
                 } else {
                     map.put("available", true);
                     map.put("disabledReason", "");
@@ -98,11 +102,17 @@ public class AiAgentController extends BaseController {
 
     private boolean checkHasActiveImageModel() {
         try {
-            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.polaris.ai.domain.AiModelConfig> qw =
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
-            qw.eq(com.polaris.ai.domain.AiModelConfig::getModelType, "IMAGE")
-              .eq(com.polaris.ai.domain.AiModelConfig::getStatus, "1");
-            return modelConfigService.count(qw) > 0;
+            Long deptId = com.polaris.ai.core.context.CallerUtils.getDeptId();
+            boolean admin = com.polaris.ai.core.context.CallerUtils.isSuperAdmin();
+            for (String capability : java.util.List.of(
+                    "IMAGE_GENERATION", "IMAGE_EDIT",
+                    "IMAGE_INPAINT", "IMAGE_VARIATION")) {
+                if (!modelConfigService.selectAvailableModelConfigsByCapability(
+                        capability, deptId, admin).isEmpty()) {
+                    return true;
+                }
+            }
+            return false;
         } catch (Exception e) {
             return false;
         }

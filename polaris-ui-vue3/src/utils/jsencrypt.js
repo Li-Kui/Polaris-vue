@@ -1,4 +1,4 @@
-import JSEncrypt from 'jsencrypt/bin/jsencrypt.min'
+import JSEncrypt from 'jsencrypt'
 
 // 密钥对生成 http://web.chacuo.net/netrsakeypair
 
@@ -27,4 +27,3 @@ export function decrypt(txt) {
   encryptor.setPrivateKey(privateKey) // 设置私钥
   return encryptor.decrypt(txt) // 对数据进行解密
 }
-

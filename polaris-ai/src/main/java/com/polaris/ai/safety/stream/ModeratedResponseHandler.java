@@ -132,6 +132,14 @@ public class ModeratedResponseHandler {
         String finalApproved = answerSession != null ? answerSession.approvedText() : directAnswer.toString();
         String finalReasoning = reasoningSession != null ? reasoningSession.approvedText() : directReasoning.toString();
 
+        if ((finalApproved == null || finalApproved.isBlank())
+                && finalReasoning != null && !finalReasoning.isBlank()) {
+            if (sseSender != null) {
+                sseSender.send("error", "模型未生成最终回答，请在模型管理中适当提高最大输出长度后重试");
+            }
+            return;
+        }
+
         if (onCompleteConsumer != null) {
             AiMessage msg = new AiMessage();
             msg.setConversationId(conversationId);

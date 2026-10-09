@@ -14,7 +14,7 @@ import usePermissionStore from '@/store/modules/permission'
 
 NProgress.configure({ showSpinner: false })
 
-const whiteList = ['/login', '/register', '/login-demo']
+const whiteList = ['/login', '/register', '/login-demo', '/app']
 
 const isWhiteList = (path) => {
   return whiteList.some(pattern => isPathMatch(pattern, path))
@@ -22,6 +22,10 @@ const isWhiteList = (path) => {
 
 router.beforeEach(async (to, from) => {
   NProgress.start()
+
+  if (to.path.startsWith('/app/')) {
+    return true  // 分享页面直接放行
+  }
 
   // ==========================================
   // 分支 1：中台控制台路由处理 (/platform/login 或 /platform/console/**)

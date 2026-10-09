@@ -44,7 +44,11 @@ import java.util.Map;
 public class LogAspect
 {
     /** 排除敏感属性字段 */
-    public static final String[] EXCLUDE_PROPERTIES = { "password", "oldPassword", "newPassword", "confirmPassword", "apiKey", "searchKey" };
+    public static final String[] EXCLUDE_PROPERTIES = {
+            "password", "oldPassword", "newPassword", "confirmPassword",
+            "apiKey", "searchKey", "secretKey", "token", "credential",
+            "credentialCiphertext"
+    };
     private static final Logger log = LoggerFactory.getLogger(LogAspect.class);
     /** 计算操作消耗时间 */
     private static final ThreadLocal<Long> TIME_THREADLOCAL = new NamedThreadLocal<Long>("Cost Time");

@@ -1,8 +1,8 @@
 package com.polaris.ai.image.adapter;
 
-import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.image.ImageGenRequest;
 import com.polaris.ai.image.ImageProviderAdapter;
+import com.polaris.ai.image.ImageRuntimeValues;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -27,15 +27,15 @@ public class OpenAiImageAdapter implements ImageProviderAdapter {
 
     @Override
     public String generate(ImageGenRequest request) throws Exception {
-        AiModelConfig config = request.getConfig();
         String mode = request.getGenerationMode() != null ? request.getGenerationMode() : "text_to_image";
 
-        String baseUrl = config.getBaseUrl() != null ? config.getBaseUrl().trim() : "";
+        String baseUrl = ImageRuntimeValues.baseUrl(request) != null
+                ? ImageRuntimeValues.baseUrl(request).trim() : "";
         while (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         String url = baseUrl + "/images/generations";
 
-        String apiKey = config.getApiKey();
-        String modelName = config.getModelName();
+        String apiKey = ImageRuntimeValues.apiKey(request);
+        String modelName = ImageRuntimeValues.modelName(request);
         if (modelName == null || modelName.isEmpty()) {
             throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
         }
@@ -81,8 +81,8 @@ public class OpenAiImageAdapter implements ImageProviderAdapter {
         conn.setRequestProperty("Authorization", "Bearer " + apiKey);
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(120000);
+        conn.setConnectTimeout(ImageRuntimeValues.connectTimeout(request));
+        conn.setReadTimeout(ImageRuntimeValues.readTimeout(request));
 
         try (java.io.OutputStream os = conn.getOutputStream()) {
             os.write(body.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));

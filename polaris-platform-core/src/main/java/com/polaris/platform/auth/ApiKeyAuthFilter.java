@@ -27,13 +27,15 @@ import java.util.List;
 
 /**
  * API Key 认证过滤器。
- * 拦截 /platform/api/** 请求，从 X-API-Key 头中校验 Key。
+ * 拦截 /platform/api/** 请求，从 X-API-Key 或 Authorization Bearer 头中校验 Key。
  */
 @Component
 @Slf4j
 public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     private static final String API_KEY_HEADER = "X-API-Key";
+    private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
 
     @Autowired
     private PlatformApiKeyMapper apiKeyMapper;
@@ -44,9 +46,9 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String keyValue = request.getHeader(API_KEY_HEADER);
+        String keyValue = resolveApiKey(request);
         if (keyValue == null || keyValue.isBlank()) {
-            sendError(response, 401, "缺少 X-API-Key 请求头");
+            sendError(response, 401, "缺少 X-API-Key 或 Authorization Bearer 请求头");
             return;
         }
 
@@ -86,7 +88,8 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
         ApiKeyCallerContext context =
                 new ApiKeyCallerContext(apiKey.getTenantId(), apiKey.getId(),
-                        apiKey.getKeyName(), apiKey.getPermissions());
+                        apiKey.getKeyName(), apiKey.getPermissions(),
+                        apiKey.getAllowedWorkflows());
         CallerContextHolder.set(context);
 
         // 注入 Spring Security 上下文，由安全链统一校验开放API访问权限
@@ -107,6 +110,21 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         return !request.getRequestURI().startsWith("/platform/api/");
+    }
+
+    private String resolveApiKey(HttpServletRequest request) {
+        String keyValue = request.getHeader(API_KEY_HEADER);
+        if (keyValue != null && !keyValue.isBlank()) {
+            return keyValue.trim();
+        }
+
+        String authorization = request.getHeader(AUTHORIZATION_HEADER);
+        if (authorization == null || authorization.length() <= BEARER_PREFIX.length()
+                || !authorization.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
+            return null;
+        }
+        String bearerToken = authorization.substring(BEARER_PREFIX.length()).trim();
+        return bearerToken.isBlank() ? null : bearerToken;
     }
 
     private void sendError(HttpServletResponse response, int status, String message) throws IOException {

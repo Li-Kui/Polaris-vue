@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerUtils;
+import com.polaris.ai.core.context.WorkflowShareVisitorContext;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.definition.WorkflowExecutionPlan;
@@ -126,6 +127,70 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 command.environment(), command.idempotencyKey(), null);
     }
 
+    @Override
+    public WorkflowShareDefinitionView getShareDefinition(Long definitionId) {
+        if (definitionId == null) {
+            throw new ServiceException("工作流定义ID不能为空");
+        }
+        Long tenantId = currentTenantId();
+        LambdaQueryWrapper<WorkflowDefinition> q =
+                new LambdaQueryWrapper<WorkflowDefinition>()
+                        .eq(WorkflowDefinition::getId, definitionId)
+                        .eq(WorkflowDefinition::getStatus, "ACTIVE")
+                        .eq(WorkflowDefinition::getDelFlag, "0");
+        if (tenantId == null) {
+            q.isNull(WorkflowDefinition::getTenantId);
+        } else {
+            q.eq(WorkflowDefinition::getTenantId, tenantId);
+        }
+        WorkflowDefinition definition = definitionMapper.selectOne(q.last("LIMIT 1"));
+        if (definition == null || definition.getCurrentPublishedVersionId() == null) {
+            throw new ServiceException("工作流不存在、未发布或无权访问", 404);
+        }
+        WorkflowVersion version = versionMapper.selectByVersionId(
+                definition.getCurrentPublishedVersionId());
+        if (version == null || version.getExecutionPlanJson() == null) {
+            throw new ServiceException("工作流发布版本不存在或已失效", 404);
+        }
+        try {
+            WorkflowExecutionPlan plan = readPlan(version.getExecutionPlanJson());
+            return new WorkflowShareDefinitionView(
+                    definition.getId(),
+                    definition.getTenantId(),
+                    definition.getWorkflowCode(),
+                    definition.getDefaultPageType(),
+                    recommendPageType(plan),
+                    definition.getSharePageConfigJson(),
+                    plan.getInputs(),
+                    definition.getLockVersion());
+        } catch (Exception e) {
+            throw new ServiceException("工作流输入定义格式无效");
+        }
+    }
+
+    private String recommendPageType(WorkflowExecutionPlan plan) {
+        String inputText = String.valueOf(plan.getInputs()).toLowerCase(Locale.ROOT);
+        String outputText = String.valueOf(plan.getOutputs()).toLowerCase(Locale.ROOT);
+        boolean imageInput = inputText.contains("image") || inputText.contains("binary")
+                || inputText.contains("file");
+        boolean imageOutput = outputText.contains("image") || outputText.contains("uri");
+        if (imageInput && imageOutput) return "compare";
+        if (plan.getNodes().stream().anyMatch(node -> "agent".equals(node.getType()))) {
+            return "chat";
+        }
+        if (plan.getNodes().stream().anyMatch(node -> "artifact".equals(node.getType()))) {
+            return "report";
+        }
+        if (plan.getNodes().stream().anyMatch(node -> Set.of("approval", "wait").contains(node.getType()))) {
+            return "task";
+        }
+        if (plan.getNodes().stream().anyMatch(node -> "database_query".equals(node.getType()))) {
+            return "query";
+        }
+        if (imageOutput) return "image";
+        return "form";
+    }
+
     private WorkflowExecutionView startDefinition(
             WorkflowDefinition definition,
             String requestedVersionId,
@@ -149,8 +214,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("执行计划哈希不一致，拒绝运行");
         }
-        if (!properties.isWriteNodesEnabled() && plan.getNodes().stream()
-                .anyMatch(node -> "WRITE".equals(node.getSideEffect()))) {
+        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
+                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
+                definition.getTenantId(), definition.getWorkflowCode()))) {
             throw new ServiceException("当前环境未启用有副作用的工作流节点");
         }
         JsonNode input = requestedInput == null
@@ -224,6 +290,11 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         snapshot.put("id", principal.id());
         snapshot.put("tenantId", principal.tenantId() == null ? 0 : principal.tenantId());
         snapshot.put("username", CallerUtils.getUsername());
+        CallerContext caller = CallerUtils.getContext();
+        if ("SHARE".equals(principal.type()) && caller instanceof WorkflowShareVisitorContext visitor
+                && visitor.getVisitorSessionHash() != null) {
+            snapshot.put("shareVisitorHash", visitor.getVisitorSessionHash());
+        }
         if (approvalSimulation != null && !approvalSimulation.isEmpty()) {
             snapshot.set("approvalSimulation", approvalSimulation);
         }
@@ -281,8 +352,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("子工作流执行计划哈希不一致");
         }
-        if (!properties.isWriteNodesEnabled() && plan.getNodes().stream()
-                .anyMatch(node -> "WRITE".equals(node.getSideEffect()))) {
+        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
+                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
+                definition.getTenantId(), definition.getWorkflowCode()))) {
             throw new ServiceException("当前环境未启用子工作流中的写节点");
         }
         JsonNode safeInput = input == null ? objectMapper.createObjectNode() : input;
@@ -619,9 +691,36 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         WorkflowExecution execution = executionMapper.selectByExecutionId(executionId);
         if (execution == null || !Objects.equals(execution.getTenantId(), currentTenantId())) {
-            throw new ServiceException("工作流执行不存在或无权访问");
+            throw new ServiceException("工作流执行不存在或无权访问", 404);
+        }
+        String username = CallerUtils.getUsername();
+        assertPrincipalOwnership(execution, username, "apikey:", "API_KEY");
+        assertPrincipalOwnership(execution, username, "share:", "SHARE");
+        if (username != null && username.startsWith("share:")) {
+            JsonNode snapshot = objectMapper.readTree(execution.getPrincipalSnapshot());
+            String owner = snapshot.path("shareVisitorHash").asString();
+            if (!owner.isBlank()) {
+                CallerContext caller = CallerUtils.getContext();
+                if (!(caller instanceof WorkflowShareVisitorContext visitor)
+                        || !owner.equals(visitor.getVisitorSessionHash())) {
+                    throw new ServiceException("工作流执行不存在或无权访问", 404);
+                }
+            }
         }
         return execution;
+    }
+
+    private void assertPrincipalOwnership(
+            WorkflowExecution execution,
+            String username,
+            String usernamePrefix,
+            String principalType) {
+        if (username == null || !username.startsWith(usernamePrefix)) return;
+        String principalId = username.substring(usernamePrefix.length());
+        if (!principalType.equals(execution.getPrincipalType())
+                || !principalId.equals(execution.getPrincipalId())) {
+            throw new ServiceException("工作流执行不存在或无权访问", 404);
+        }
     }
 
     private void applyTenantScope(LambdaQueryWrapper<WorkflowExecution> query, Long tenantId) {
@@ -677,6 +776,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (username != null && username.startsWith("apikey:")) {
             type = "API_KEY";
             id = username.substring("apikey:".length());
+        } else if (username != null && username.startsWith("share:")) {
+            type = "SHARE";
+            id = username.substring("share:".length());
         } else if (caller.isPlatformMode()) {
             type = "PLATFORM_USER";
             id = String.valueOf(caller.getUserId());

@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Spring%20Boot-4.0.6-brightgreen.svg" alt="Spring Boot">
-  <img src="https://img.shields.io/badge/LangChain4j-1.17.0-blue.svg" alt="LangChain4j">
+  <img src="https://img.shields.io/badge/LangChain4j-1.20.0-blue.svg" alt="LangChain4j">
   <img src="https://img.shields.io/badge/Vue-3.5.26-4fc08d.svg" alt="Vue 3">
   <img src="https://img.shields.io/badge/Vite-6.4.1-646CFF.svg" alt="Vite">
   <img src="https://img.shields.io/badge/Element%20Plus-2.13.1-409EFF.svg" alt="Element Plus">
@@ -20,7 +20,7 @@
 
 ## 🌐 在线演示与入口
 
-- **管理后台体验**：[http://beichen-ai.tech](http://8.163.1.222:9000)
+- **管理后台体验**：[http://beichen-ai.tech]
 - **默认管理员账号**：`admin` / `admin123` （或 `test` / `123456`）
 - **AI 开放中台控制台**：`/platform/login` 中台测试编码\账号\密码 test\test\123456
 - **中台开发者文档中心**：`/platform/docs/` （内置交互式接口文档与多语言 SDK 示例）
@@ -37,12 +37,12 @@
 
 **北辰 (Polaris)** 是一个面向企业级场景深度打造的 **全栈人工智能大模型对话、通用工作流编排引擎与多租户 AI 开放中台**。
 
-项目后端依托先进的 Java 生态大模型集成框架 **LangChain4j** 与 **Spring Boot 4.x** 构建，前端基于 **Vue 3 + Vite 6 + Element Plus + Vue Flow** 构建现代化大屏沉浸式工作台。北辰打破了“大模型单轮对话”与“传统企业复杂业务”之间的断层，具备 **“管理后台 + 租户中台 + 开放 API”** 的三位一体全景能力：
+项目后端依托先进的 Java 生态大模型集成框架 **LangChain4j** 与 **Spring Boot 4.x** 构建，前端基于 **Vue 3 + Vite 6 + Element Plus + Vue Flow** 构建现代化大屏沉浸式工作台。北辰打破了“大模型单轮对话”与“传统企业复杂业务”之间的断层，具备 **“管理后台 + 租户中台 + 开放 API + 工作流应用”** 的四位一体全景能力：
 
-1. **企业运营底座（Admin Console）**：完备的 RBAC 权限管理、多模型路由配置、智能体工坊、知识库 RAG、敏感词与内容安全双轨风控、系统监控与代码生成。
+1. **企业运营底座（Admin Console）**：完备的 RBAC 权限管理、模型中心 V2、智能体工坊、知识库 RAG、敏感词与内容安全双轨风控、系统监控与代码生成。
 2. **企业 AI 开放中台（Platform Console）**：独立的租户工作台、API Key 细粒度授权、Token 级配额与计量、外部数据源（HikariCP 隔离池）及 API 连接器。
 3. **标准化开放能力（OpenAPI Engine）**：全兼容 **OpenAI 规范协议**（`/platform/v1/chat/completions`、`/platform/v1/models`），已有 LangChain、LlamaIndex、OpenAI SDK 代码仅需修改 Base URL 和 Key 即可无缝接入。
-4. **工业级工作流引擎（Universal Workflow V2）**：具有不可变版本管理、节点原子测试、单调递增租约恢复、人工审批工作流、持久化等待与子流程调用的企业级工作流调度核心。
+4. **工业级工作流与应用分发（Universal Workflow V2）**：具有不可变版本管理、节点原子测试、可靠定时触发、单调递增租约恢复、人工审批、持久化等待、子流程调用，以及独立页面与 iframe 分享能力。
 
 ---
 
@@ -50,13 +50,16 @@
 
 我们将北辰的核心 AI 能力与传统星宿命名相融合，构筑兼具科技感与文化底蕴的功能矩阵：
 
-### 1. 🌌 天枢星 (Polaris-Pivot) - 多模型热插拔路由
-- **全主流提供商原生集成**：原生兼容 **DeepSeek**、**阿里云通义千问 (DashScope)**、**标准 OpenAI** 以及 **本地 Ollama 离线部署模型**。
-- **热插拔与细粒度隔离**：支持在后台进行多模型参数（随机温度 Temperature、最大 Token、专属 System Prompt）的可视化配置，即改即生效。
-- **部门与租户级隔离/共享**：支持按租户/部门独立配置独享的模型端点与参数，亦可设置全局共享的兜底模型，平衡业务效果与 Token 成本。
+### 1. 🌌 天枢星 (Polaris-Pivot) - 模型中心 V2 与多能力热插拔路由
+- **供应商连接与模型定义解耦**：内置 **DeepSeek**、**阿里云通义千问 (DashScope)**、**OpenAI**、**火山方舟 (Ark)**、**SiliconFlow** 与自定义 OpenAI 兼容端点 Profile，可从远端发现模型并复用加密连接凭据。
+- **Schema 驱动的能力配置**：统一管理对话、思考、工具调用、视觉输入、向量嵌入、图片、音频等能力；表单、默认值、参数约束与运行时校验均由版本化 Schema 驱动。
+- **分层运行策略与热切换**：支持能力级默认模型、租户/部门隔离、并发与速率限制、超时重试及应用/工作流/请求级参数覆盖；配置修订后可热切换运行时。
+- **安全运维闭环**：供应商密钥采用 AES-GCM 加密保存，界面支持脱敏回显、连接模型发现与能力草稿测试，避免在模型配置和日志中暴露凭据。
 
 ### 2. 🧠 天璇星 (Polaris-Thinking) - 深度思维链思考流与极速 SSE
 - **流式思考回调拦截**：后端基于 LangChain4j 接口拦截思考流（`onPartialThinking` 回调），前端利用 SSE（Server-Sent Events）实现打字机般流畅的流式推送。
+- **可取消流式调用**：AI 对话支持主动停止；聊天与报告流在取消、超时或连接结束时会继续向底层模型调用传递取消信号，减少无效等待与 Token 消耗。
+- **AI 可观测性**：统一采集模型调用耗时、成功/失败、流式首包、Token 用量以及 Embedding / Vector Store 指标，便于定位供应商和运行时异常。
 - **芯片呼吸动效与可折叠面板**：前端配备极具科技感的 **CPU 芯片脉冲呼吸指示器**，支持对复杂思考步骤自由折叠与展开，比肩顶级大模型交互体验。
 
 ### 3. 📊 天玑星 (Polaris-Analysis) - 启发式智能分析与 ECharts 报告引擎
@@ -86,12 +89,14 @@
 - **版本不可变与强一致性**：引入 `schemaVersion`、`revision`、`versionNo`、`contentHash` 分层体系，执行实例与版本定义强绑定，杜绝运行时配置漂移。
 - **完整丰富的节点生态**：
   - **AI 智能节点**：LLM 提示词节点、语义分类器 (`llm_classifier`)、智能体节点 (`agent`)、知识库检索 (`rag`)。
-  - **逻辑控制节点**：确定性条件分支 (`condition`)、并行分支 (`parallel`)、多分支汇聚 (`ALL` / `ANY` / `N_OF_M`)、循环节点 (`loop`)。
+  - **逻辑控制节点**：确定性条件分支 (`condition`)、并行任务组 (`parallel`)、多分支汇聚 (`ALL` / `ANY` / `N_OF_M`)、循环节点 (`loop`)。
   - **数据与外部连接**：HTTP 接口节点、只读数据库查询节点 (`datasource`)、数据结构转换节点 (`transform`)。
   - **人机协同与高级调度**：人工审批节点 V2 (`approval`，支持单人、会签、或签、多级审批与超时处理)、持久化等待 (`wait`)、产物存储 (`artifact`)、子工作流 (`sub_workflow`，支持多层嵌套与独立试运行)。
 - **高可用执行与故障恢复机制**：
   - **执行持久化**：后台 Worker 异步持久化运行，与 SSE 观察通道彻底解耦，支持网络重连与断点续读。
   - **租约与防护**：单调递增 `fencingToken` 租约机制，结合数据库快照（Checkpoint）与事务 Outbox，提供节点级自动重试与状态自愈。
+  - **可靠定时触发**：Quartz 触发先物化为可追踪批次，再由独立分发器执行；支持失败重试、过期回收与宕机恢复，降低定时任务丢失和重复执行风险。
+- **工作流应用与安全分享**：已发布工作流可生成独立 `/app/{shareCode}` 页面或受控 iframe，提供表单、对话、报告、任务、查询、图片、对比、画廊八类模板，并支持附件、执行恢复、取消、限流、有效期与 Origin 白名单。
 
 ### 8. 👑 紫微星 (Polaris-Platform) - 标准 OpenAI 规范中台与多租户开放平台
 - **标准 OpenAI 协议全兼容**：
@@ -99,6 +104,7 @@
   - 无缝兼容官方 OpenAI Python SDK、Node.js SDK、LangChain、LlamaIndex 等外部生态调用。
 - **严格多租户数据隔离体系**：租户间模型参数、知识库向量库、API Key、外部数据源连接器、对话历史完全隔离。
 - **API Key 细粒度授权与滑动窗口限流**：支持配置调用权限 Scope、速率限制（RPM/TPM），保障业务调用安全。
+- **工作流级开放权限**：API Key 可限制允许调用的工作流编码；浏览器分享使用独立分享码和访客会话，无需向前端暴露 API Key。
 - **精确 Token 计量与配额治理**：内置 Token 级消耗统计与租户用量扣减，提供多维度消耗大屏看板与配额告警。
 - **安全的外部连接器体系**：
   - **数据源连接器**：隔离的 HikariCP 连接池，强制执行只读 SQL 策略与主机白名单。
@@ -116,6 +122,7 @@ flowchart TB
     subgraph Client ["🖥️ 前端与外部接入层"]
         WebAdmin["Vue 3 管理后台\n(polaris-ui-vue3)"]
         TenantConsole["Vue 3 租户中台控制台\n(Platform Console)"]
+        WorkflowApp["工作流独立应用 / iframe\n(Share Runtime)"]
         OpenApiClients["外部第三方系统\n(OpenAI SDK / LangChain / cURL)"]
         DocsSite["VitePress 文档中心\n(polaris-docs)"]
     end
@@ -125,13 +132,13 @@ flowchart TB
     end
 
     subgraph Business ["💼 业务应用与中台核心"]
-        PlatformCore["polaris-platform-core\n(租户管理 / API Key 鉴权 / Token 计量 / 连接器)"]
-        AiModule["polaris-ai\n(智能体 / 对话会话 / 知识库 / 工作流执行引擎 V2)"]
+        PlatformCore["polaris-platform-core\n(租户管理 / API Key 鉴权 / Token 计量 / 连接器 / 工作流分享)"]
+        AiModule["polaris-ai\n(模型中心 V2 / 智能体 / 对话 / 知识库 / 工作流引擎)"]
         SystemModule["polaris-system\n(用户 / 角色 / 部门 / 菜单 / 字典 / 岗位)"]
     end
 
     subgraph Engine ["⚙️ 底座引擎与基础设施"]
-        AiCore["polaris-ai-core\n(LangChain4j 封装 / Qdrant 向量适配 / 敏感词风控 / PDFBox)"]
+        AiCore["polaris-ai-core\n(模型能力运行时 / LangChain4j / Qdrant / 可观测性 / 安全风控)"]
         FrameworkModule["polaris-framework\n(Spring Security / Druid 连接池 / 限流防重)"]
         QuartzModule["polaris-quartz\n(定时任务 / 工作流触发调度)"]
         GenModule["polaris-generator\n(代码生成引擎)"]
@@ -148,9 +155,9 @@ flowchart TB
 | 模块名称 | 职责说明 |
 | :--- | :--- |
 | **`polaris-admin`** | 系统启动入口，集成 Web 接口配置、Spring Security 安全拦截、Swagger/Knife4j 文档及全局异常处理 |
-| **`polaris-platform-core`** | **中台核心模块**。提供多租户隔离、API Key 授权与限流、Token 配额与计量审计、数据源与 API 连接器、兼容 OpenAI 开放接口 |
-| **`polaris-ai`** | **AI 业务应用模块**。智能体编排、模型配置、知识库管理、通用工作流引擎 V2（编译器、执行引擎、审批状态机、事件流） |
-| **`polaris-ai-core`** | **AI 底座核心层**。LangChain4j 驱动集成、Qdrant 向量库适配、本地敏感词与阿里云内容安全、PDFBox 解析 |
+| **`polaris-platform-core`** | **中台核心模块**。提供多租户隔离、API Key 授权与限流、Token 配额与计量审计、数据源与 API 连接器、兼容 OpenAI 开放接口，以及工作流页面/iframe 分享运行时 |
+| **`polaris-ai`** | **AI 业务应用模块**。模型中心 V2、智能体编排、对话与报告、知识库管理、通用工作流引擎 V2（编译器、执行引擎、可靠触发、审批状态机、事件流） |
+| **`polaris-ai-core`** | **AI 底座核心层**。统一模型能力运行时、LangChain4j 驱动集成、Qdrant 向量库适配、AI 可观测性、本地敏感词与阿里云内容安全、PDFBox 解析 |
 | **`polaris-system`** | **系统管理模块**。包含用户、角色、部门、菜单、参数配置、字典及操作日志等基础业务 |
 | **`polaris-framework`** | **框架核心配置**。Spring Security 鉴权机制、数据源监控、分布式限流切面、XSS 与防重复提交 |
 | **`polaris-common`** | **通用工具库**。基础实体、常量、JSON/加密/反射工具类、自定义注解与全局异常类 |
@@ -168,8 +175,8 @@ flowchart TB
 | :--- | :--- | :--- |
 | **Java** | 运行环境开发语言 | 17+ |
 | **Spring Boot** | 核心开发框架与容器底座 | 4.0.6 (Spring 6 + Jakarta EE) |
-| **LangChain4j** | 大语言模型生态与链路框架 | 1.17.0 |
-| **Qdrant Client** | 高性能向量数据库适配 | 1.17.0 |
+| **LangChain4j** | 大语言模型生态与链路框架 | 1.20.0 |
+| **Qdrant Client** | 高性能向量数据库适配 | 1.18.3 |
 | **Spring Security** | 系统权限认证与 API Key 鉴权 | 适配版 |
 | **MyBatis / Druid** | 数据持久层与数据库连接池 | 4.0.1 / 1.2.28 |
 | **HikariCP** | 外部工作流数据源隔离连接池 | Spring Boot 内置 |
@@ -211,27 +218,34 @@ flowchart TB
 
 ```bash
 # 1. 初始化底座系统表结构与数据（用户/菜单/角色等）
-mysql -u root -p polaris < sql/ry_20260417.sql
+mysql -u root -p polaris < sql/01_ry_20260417.sql
 
-# 2. 初始化 AI 大模型、智能体与知识库表
-mysql -u root -p polaris < sql/ry_ai.sql
+# 2. 初始化 Quartz 定时任务调度表
+mysql -u root -p polaris < sql/02_quartz.sql
 
 # 3. 初始化 AI 中台、租户、连接器与 API Key 表
-mysql -u root -p polaris < sql/ry_platform.sql
+mysql -u root -p polaris < sql/03_ry_platform.sql
 
-# 4. 初始化企业通用工作流引擎 V2 相关表
-mysql -u root -p polaris < sql/ai_workflow.sql
+# 4. 初始化 AI 大模型、智能体与知识库表
+mysql -u root -p polaris < sql/04_ry_ai.sql
 
-# 5. 初始化 Quartz 定时任务调度表
-mysql -u root -p polaris < sql/quartz.sql
+# 5. 初始化企业通用工作流引擎 V2 相关表
+mysql -u root -p polaris < sql/05_ai_workflow.sql
+
+# 6. 应用模型中心 V2.4 表结构升级（执行前先处理旧版模型数据）
+mysql -u root -p polaris < sql/06_model-center-v2.4.sql
+
+# 7. 初始化工作流应用分享与工作流级 API Key 权限
+mysql -u root -p polaris < sql/07_workflow_share.sql
 ```
 
 > [!NOTE]
-> 系统在启动时具备自愈机制，会自动对消息历史等相关表结构进行兼容性增量检查，确保无缝升级。
+> 请严格按文件名前缀顺序执行。`06_model-center-v2.4.sql` 只包含 Schema 变更，不负责旧模型数据迁移，并会调整、删除旧模型配置字段；即使是全新环境，`04_ry_ai.sql` 也会写入旧版示例模型，因此执行第 6 步前必须先清理或转换这些记录。已有环境升级前必须备份数据库，并完成供应商连接、模型能力及业务引用的迁移方案。系统启动自愈只处理部分兼容性增量，不能替代上述脚本。
 
 ### 3. 启动后端服务
 1. 打开 `polaris-admin/src/main/resources/application-druid.yml`，修改您的 MySQL 数据库连接用户名与密码。
-2. 在项目根目录执行 Maven 编译并启动主工程：
+2. 生产环境请通过 `PLATFORM_CONNECTOR_CREDENTIAL_KEY` 注入至少 32 字符的独立高强度密钥，用于加密连接器和模型中心供应商凭据；不要沿用仓库中的开发默认值。
+3. 在项目根目录执行 Maven 编译并启动主工程：
 
 ```bash
 # 根目录下安装与打包依赖
@@ -266,9 +280,12 @@ npm run dev
 
 | 入口类型 | 访问路径 | 默认凭据 | 功能说明 |
 | :--- | :--- | :--- | :--- |
-| **管理运营后台** | `http://localhost/` | `admin` / `admin123` | 系统管理、全局模型配置、全局智能体、全流程工作流调度管理、安全风控日志 |
-| **AI 开放中台** | `http://localhost/platform/login` | 租户管理员账号 | 租户控制台仪表盘、专属 API Key 管理、外部数据源连接池、租户工作流、Token 用量分析 |
+| **管理运营后台** | `http://localhost/` | `admin` / `admin123` | 系统管理、模型中心 V2、全局智能体、全流程工作流调度管理、安全风控日志 |
+| **AI 开放中台** | `http://localhost/platform/login` | 租户管理员账号 | 租户控制台仪表盘、模型与智能体、API Key、外部连接器、工作流编排与分享、Token 用量分析 |
+| **工作流独立应用** | `http://localhost/app/{shareCode}` | 按分享策略访问 | 运行已发布工作流，支持八类页面模板、附件、结果恢复以及受控 iframe 嵌入 |
 | **中台开发者文档** | `http://localhost/platform/docs/` | 免登录直接访问 | 在线 API 参考、SDK 接入示例（Python/JS/Java/cURL）、SSE 流式调试说明 |
+
+工作流发布后，可在中台的工作流编排页面通过 **更多 → 分享管理** 创建独立链接或 iframe 代码。详细配置与安全边界参见 [`polaris-docs/docs/guide/workflow-sharing.md`](polaris-docs/docs/guide/workflow-sharing.md)。
 
 ---
 

@@ -96,7 +96,7 @@
 
                 <div class="card-body">
                   <h4 class="card-name" :title="item.agentName">{{ item.agentName }}</h4>
-                  <div class="card-model-chip-badge">
+                  <div :class="['card-model-chip-badge', { 'is-missing': !item.modelConfigId }]">
                     <el-icon class="model-cpu-icon"><cpu /></el-icon>
                     <span>{{ getModelLabel(item.modelConfigId, item.modelName) }}</span>
                   </div>
@@ -219,7 +219,9 @@
             <el-table-column label="智能体名称" prop="agentName" min-width="150" :show-overflow-tooltip="true" />
             <el-table-column label="搭载大模型" prop="modelName" width="180">
               <template #default="{ row }">
-                <span class="model-badge">{{ getModelLabel(row.modelConfigId, row.modelName) }}</span>
+                <span :class="['model-badge', { 'is-missing': !row.modelConfigId }]">
+                  {{ getModelLabel(row.modelConfigId, row.modelName) }}
+                </span>
               </template>
             </el-table-column>
             <el-table-column label="随机温度" width="150">
@@ -320,7 +322,7 @@
                   </el-form-item>
 
                   <!-- 随机温度滑块 -->
-                  <el-form-item label="随机温度 (Temperature)">
+                  <el-form-item label="随机温度">
                     <div class="temp-slider-box">
                       <el-slider
                         v-model="form.temperature"
@@ -329,14 +331,14 @@
                         show-input
                         input-size="small"
                       />
-                      <div class="temp-slider-tips">温度越低，大模型输出越确定、越精准；温度越高则越有创造性。</div>
+                      <div class="temp-slider-tips">该参数会在每次智能体调用时覆盖模型默认随机性；数值越低输出越稳定。</div>
                     </div>
                   </el-form-item>
 
                   <el-form-item label="开启状态">
                     <el-radio-group v-model="form.status">
-                      <el-radio value="1" label="1">正常启用</el-radio>
-                      <el-radio value="0" label="0">停用禁用</el-radio>
+                      <el-radio value="1">正常启用</el-radio>
+                      <el-radio value="0">停用禁用</el-radio>
                     </el-radio-group>
                   </el-form-item>
 
@@ -353,7 +355,7 @@
               <el-card class="pane-card" shadow="never" style="margin-bottom: 20px;">
                 <template #header>
                   <div class="pane-card-header">
-                    <span><el-icon><document /></el-icon> 大脑核心系统指令 (System Role Prompt)</span>
+                    <span><el-icon><document /></el-icon> 核心系统指令</span>
                   </div>
                 </template>
                 <el-form ref="formPrompt" :model="form" label-position="top">
@@ -362,7 +364,7 @@
                       v-model="form.systemPrompt"
                       type="textarea"
                       :rows="12"
-                      placeholder="在此输入指派给大语言模型的 System Instruction/Prompt。定义它扮演的角色、任务边界与工作风格..."
+                      placeholder="定义智能体扮演的角色、任务边界与工作风格..."
                       class="textarea-code-style"
                     />
                   </el-form-item>
@@ -373,7 +375,7 @@
               <el-card class="pane-card" shadow="never">
                 <template #header>
                   <div class="pane-card-header">
-                    <span><el-icon><folder-opened /></el-icon> 绑定系统级扩展工具 (Dynamic Tools)</span>
+                    <span><el-icon><folder-opened /></el-icon> 绑定扩展工具</span>
                   </div>
                 </template>
 
@@ -393,7 +395,7 @@
                             'is-checked': selectedTools.includes(tool.name),
                             'is-disabled': isToolDisabled(tool)
                           }]">
-                            <el-checkbox :label="tool.name" :disabled="isToolDisabled(tool)">
+                            <el-checkbox :value="tool.name" :disabled="isToolDisabled(tool)">
                               <span class="tool-card-content">
                                 <el-icon><link-icon /></el-icon>
                                 <span class="tool-label-text">
@@ -458,22 +460,13 @@ export default {
       }
     };
   },
-  computed: {
-    selectedModelConfig() {
-      if (!this.form || !this.form.modelConfigId || !this.models || this.models.length === 0) {
-        return null;
-      }
-      return this.models.find(m => m.id === this.form.modelConfigId) || null;
-    }
-  },
   watch: {
-    'form.modelConfigId'(newVal) {
+    'form.modelConfigId'() {
       this.$nextTick(() => {
-        // 当切换选中的底座大模型时，若当前模型不支持联网搜索，自动取消勾选 WebSearchTools
-        const searchTool = this.systemTools.find(t => t.requirement === 'SEARCH_KEY');
-        if (searchTool && this.isToolDisabled(searchTool)) {
-          this.selectedTools = this.selectedTools.filter(t => t !== searchTool.name);
-        }
+        const unavailableTools = new Set(this.systemTools
+          .filter(tool => this.isToolDisabled(tool))
+          .map(tool => tool.name));
+        this.selectedTools = this.selectedTools.filter(name => !unavailableTools.has(name));
       });
     }
   },
@@ -501,7 +494,7 @@ export default {
       try {
         const res = await listAvailableModel();
         if (res.code === 200) {
-          this.models = (res.data.rows || res.data || []).filter(m => m.isDefaultEmbedding !== '1' && !m.modelName.toLowerCase().includes('embed'));
+          this.models = res.data.rows || res.data || [];
         }
       } catch (err) {
         console.error(err);
@@ -523,10 +516,7 @@ export default {
         return tool.available === false;
       }
       if (tool.requirement === 'SEARCH_KEY') {
-        const model = this.selectedModelConfig;
-        if (!model) return true; // 未选底座大模型时，联网搜索不可选
-        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.hasSearchKey === true || model.enableSearch === '1';
-        return !hasKey;
+        return tool.available === false;
       }
       return false;
     },
@@ -536,14 +526,7 @@ export default {
         return tool.disabledReason || '当前租户或系统未配置/启用 AI 绘画模型';
       }
       if (tool.requirement === 'SEARCH_KEY') {
-        const model = this.selectedModelConfig;
-        if (!model) {
-          return '请先在左侧选择绑定的底座大模型';
-        }
-        const hasKey = (model.searchKey && String(model.searchKey).trim() !== '') || model.hasSearchKey === true || model.enableSearch === '1';
-        if (!hasKey) {
-          return '当前所选大模型未配置联网检索 API Key (Tavily Key)，请在模型配置中填写';
-        }
+        return tool.disabledReason || '系统未配置联网搜索服务';
       }
       return '';
     },
@@ -676,9 +659,9 @@ export default {
       }).catch(() => {});
     },
     getModelLabel(modelConfigId, fallbackName) {
-      if (!modelConfigId) return fallbackName || '未配置';
+      if (!modelConfigId) return '未绑定有效模型';
       const found = this.models.find(m => m.id === modelConfigId);
-      return found ? found.name : (fallbackName || '未配置');
+      return found ? found.name : (fallbackName || '模型不可用');
     },
     getToolCount(tools) {
       if (!tools) return 0;
@@ -847,6 +830,46 @@ export default {
   .dark &,
   .theme-dark & {
     color: #94a3b8;
+  }
+}
+
+.card-model-chip-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.06);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &.is-missing {
+    border-color: rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.1);
+    color: #b45309;
+  }
+
+  .dark &,
+  .theme-dark & {
+    border-color: rgba(96, 165, 250, 0.24);
+    background: rgba(59, 130, 246, 0.12);
+    color: #bfdbfe;
+
+    &.is-missing {
+      border-color: rgba(251, 191, 36, 0.35);
+      background: rgba(245, 158, 11, 0.14);
+      color: #fcd34d;
+    }
   }
 }
 
@@ -1019,6 +1042,17 @@ export default {
   .theme-dark & {
     background-color: rgba(255, 255, 255, 0.04);
     color: #cbd5e1;
+  }
+
+  &.is-missing {
+    background: rgba(245, 158, 11, 0.1);
+    color: #b45309;
+
+    .dark &,
+    .theme-dark & {
+      background: rgba(245, 158, 11, 0.14);
+      color: #fcd34d;
+    }
   }
 }
 

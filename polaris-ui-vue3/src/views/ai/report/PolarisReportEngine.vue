@@ -76,7 +76,7 @@
             <h3 class="column-title">{{ col.title }}</h3>
             <ul class="column-list">
               <li v-for="(point, pIdx) in col.points" :key="pIdx">
-                <el-icon class="point-bullet"><check-tag /></el-icon>
+                <el-icon class="point-bullet"><check /></el-icon>
                 <span>{{ point }}</span>
               </li>
             </ul>

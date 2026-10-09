@@ -2,18 +2,18 @@ package com.polaris.platform.controller.openApi;
 
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
-import com.polaris.ai.workflow.application.WorkflowExecutionApplicationFacade;
-import com.polaris.ai.workflow.application.WorkflowExecutionByCodeCommand;
-import com.polaris.ai.workflow.application.WorkflowExecutionEventView;
-import com.polaris.ai.workflow.application.WorkflowExecutionView;
+import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.contract.WorkflowPermission;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.constant.ApiVersionConstants;
 import com.polaris.common.core.domain.ResultData;
+import com.polaris.platform.auth.ApiKeyCallerContext;
 import com.polaris.platform.dto.PlatformWorkflowExecutionRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -25,9 +25,13 @@ import java.util.List;
 public class PlatformWorkflowOpenApiController {
 
     private final WorkflowExecutionApplicationFacade workflowFacade;
+    private final WorkflowEventStreamApplicationFacade eventStreamFacade;
 
-    public PlatformWorkflowOpenApiController(WorkflowExecutionApplicationFacade workflowFacade) {
+    public PlatformWorkflowOpenApiController(
+            WorkflowExecutionApplicationFacade workflowFacade,
+            WorkflowEventStreamApplicationFacade eventStreamFacade) {
         this.workflowFacade = workflowFacade;
+        this.eventStreamFacade = eventStreamFacade;
     }
 
     @Operation(summary = "按编码启动已发布工作流")
@@ -37,6 +41,7 @@ public class PlatformWorkflowOpenApiController {
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody(required = false) PlatformWorkflowExecutionRequest request) {
         requirePermission(WorkflowPermission.EXECUTE);
+        requireWorkflowAccess(workflowCode);
         PlatformWorkflowExecutionRequest value = request == null
                 ? new PlatformWorkflowExecutionRequest(null, null) : request;
         return ResultData.ok(workflowFacade.startByCode(new WorkflowExecutionByCodeCommand(
@@ -62,6 +67,18 @@ public class PlatformWorkflowOpenApiController {
         return ResultData.ok(workflowFacade.listEvents(executionId, after, limit));
     }
 
+    @Operation(summary = "SSE 订阅工作流执行事件")
+    @GetMapping(value = "/workflow-executions/{executionId}/events/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamEvents(
+            @PathVariable String executionId,
+            @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId,
+            @RequestParam(required = false) Long afterSequence) {
+        requirePermission(WorkflowPermission.READ);
+        long after = afterSequence == null ? parseSequence(lastEventId) : afterSequence;
+        return eventStreamFacade.subscribe(executionId, Math.max(0, after));
+    }
+
     @Operation(summary = "取消工作流执行")
     @PostMapping("/workflow-executions/{executionId}/cancel")
     public ResultData<WorkflowExecutionView> cancel(@PathVariable String executionId) {
@@ -74,6 +91,15 @@ public class PlatformWorkflowOpenApiController {
         if (!context.hasPermission(permission)) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "API Key缺少权限: " + permission);
+        }
+    }
+
+    private void requireWorkflowAccess(String workflowCode) {
+        CallerContext context = CallerContextHolder.require();
+        if (context instanceof ApiKeyCallerContext apiKey
+                && !apiKey.canAccessWorkflow(workflowCode)) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "API Key无权调用该工作流");
         }
     }
 

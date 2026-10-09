@@ -13,8 +13,10 @@
 
 北辰 API 协议完全兼容 OpenAI 标准，使用标准 HTTP POST 请求即可：
 
+从**中台首页的接入示例**复制当前部署的 API 地址。下文的 `https://your-polaris-host/prod-api` 是占位地址，请替换为实际站点和 API 代理前缀；不要把服务器地址改成调用者电脑上的 `localhost`。若直接连接后端，则使用后端实际地址，不添加前端代理前缀。
+
 ```bash
-curl http://localhost:8080/platform/api/v1/chat/completions \
+curl https://your-polaris-host/prod-api/platform/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-API-Key: sk-your-api-key-here" \
   -d '{

@@ -3,9 +3,9 @@ package com.polaris.ai.image.adapter;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.polaris.ai.domain.AiModelConfig;
 import com.polaris.ai.image.ImageGenRequest;
 import com.polaris.ai.image.ImageProviderAdapter;
+import com.polaris.ai.image.ImageRuntimeValues;
 import com.polaris.common.config.PolarisConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -39,28 +39,28 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
     @Override
     public String generate(ImageGenRequest request) throws Exception {
         // ── 中转站模式：使用标准 OpenAI 兼容端点 ──
-        if (request.getConfig().isRelay()) {
+        if (ImageRuntimeValues.relay(request)) {
             return generateViaRelay(request);
         }
         return generateViaNative(request);
     }
 
     private String generateViaNative(ImageGenRequest request) throws Exception {
-        AiModelConfig config = request.getConfig();
         String prompt = request.getPrompt();
         String taskId = request.getTaskId();
         String refImageUrl = toPublicOrBase64Url(request.getRefImageUrl());
 
-        String apiKey = config.getApiKey();
-        String modelName = config.getModelName();
+        String apiKey = ImageRuntimeValues.apiKey(request);
+        String modelName = ImageRuntimeValues.modelName(request);
         if (modelName == null || modelName.isEmpty()) {
             throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
         }
 
         // 解析 DashScope 基础域名（兼容用户可能填入 OpenAI 兼容路径的情况）
         String baseUrl = "https://dashscope.aliyuncs.com";
-        if (config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty()) {
-            String cfgUrl = config.getBaseUrl().trim();
+        if (ImageRuntimeValues.baseUrl(request) != null
+                && !ImageRuntimeValues.baseUrl(request).trim().isEmpty()) {
+            String cfgUrl = ImageRuntimeValues.baseUrl(request).trim();
             int idx = cfgUrl.indexOf("/compatible-mode");
             if (idx > 0) cfgUrl = cfgUrl.substring(0, idx);
             idx = cfgUrl.indexOf("/v1");
@@ -507,16 +507,16 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
      * 中转站内部负责调用 DashScope 原生异步 API 并同步返回结果。
      */
     private String generateViaRelay(ImageGenRequest request) throws Exception {
-        AiModelConfig config = request.getConfig();
         String taskId = request.getTaskId();
-        String apiKey = config.getApiKey();
-        String modelName = config.getModelName();
+        String apiKey = ImageRuntimeValues.apiKey(request);
+        String modelName = ImageRuntimeValues.modelName(request);
         if (modelName == null || modelName.isEmpty()) {
             throw new IllegalArgumentException("绘图模型名称不能为空，请在模型配置中填写 modelName");
         }
 
         // 中转站 baseUrl 直接使用，不做 DashScope 特有路径裁剪
-        String baseUrl = config.getBaseUrl() != null ? config.getBaseUrl().trim() : "";
+        String baseUrl = ImageRuntimeValues.baseUrl(request) != null
+                ? ImageRuntimeValues.baseUrl(request).trim() : "";
         while (baseUrl.endsWith("/")) baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         String url = baseUrl + "/images/generations";
 
@@ -581,8 +581,8 @@ public class DashScopeImageAdapter implements ImageProviderAdapter {
         conn.setRequestProperty("Authorization", "Bearer " + apiKey);
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setDoOutput(true);
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(120000);
+        conn.setConnectTimeout(ImageRuntimeValues.connectTimeout(request));
+        conn.setReadTimeout(ImageRuntimeValues.readTimeout(request));
 
         try (java.io.OutputStream os = conn.getOutputStream()) {
             os.write(body.toJSONString().getBytes(java.nio.charset.StandardCharsets.UTF_8));

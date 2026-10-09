@@ -1,7 +1,7 @@
 package com.polaris.platform.auth;
 
 import com.alibaba.fastjson2.JSON;
-import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.WorkflowScopedCallerContext;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -11,25 +11,34 @@ import java.util.Set;
 /**
  * API Key 调用方的 CallerContext 实现。
  */
-public class ApiKeyCallerContext implements CallerContext {
+public class ApiKeyCallerContext implements WorkflowScopedCallerContext {
 
     private final Long tenantId;
     private final Long apiKeyId;
     private final String keyName;
     private final String permissions;
     private final Set<String> permissionSet;
+    private final Set<String> allowedWorkflows;
 
     public ApiKeyCallerContext(Long tenantId, String keyName, String permissions) {
-        this(tenantId, null, keyName, permissions);
+        this(tenantId, null, keyName, permissions, null);
     }
 
     public ApiKeyCallerContext(
             Long tenantId, Long apiKeyId, String keyName, String permissions) {
+        this(tenantId, apiKeyId, keyName, permissions, null);
+    }
+
+    public ApiKeyCallerContext(
+            Long tenantId, Long apiKeyId, String keyName,
+            String permissions, String allowedWorkflows) {
         this.tenantId = tenantId;
         this.apiKeyId = apiKeyId;
         this.keyName = keyName;
         this.permissions = permissions;
         this.permissionSet = parsePermissions(permissions);
+        this.allowedWorkflows = allowedWorkflows == null
+                ? null : parsePermissions(allowedWorkflows);
     }
 
     @Override
@@ -53,6 +62,11 @@ public class ApiKeyCallerContext implements CallerContext {
     public boolean isPlatformMode() { return true; }
 
     public String getPermissions() { return permissions; }
+
+    @Override
+    public boolean canAccessWorkflow(String workflowCode) {
+        return allowedWorkflows == null || allowedWorkflows.contains(workflowCode);
+    }
 
     @Override
     public boolean hasPermission(String perm) {

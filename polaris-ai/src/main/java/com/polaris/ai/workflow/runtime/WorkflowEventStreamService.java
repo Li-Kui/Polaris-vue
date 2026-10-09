@@ -2,10 +2,10 @@ package com.polaris.ai.workflow.runtime;
 
 import com.polaris.ai.core.context.CallerContext;
 import com.polaris.ai.core.context.CallerContextHolder;
-import com.polaris.ai.workflow.application.WorkflowExecutionApplicationFacade;
-import com.polaris.ai.workflow.application.WorkflowExecutionEventAvailable;
-import com.polaris.ai.workflow.application.WorkflowExecutionEventView;
-import com.polaris.ai.workflow.application.WorkflowExecutionView;
+import com.polaris.ai.core.context.WorkflowScopedCallerContext;
+import com.polaris.ai.workflow.application.*;
+import com.polaris.ai.workflow.spi.WorkflowPrincipalContextProvider;
+import com.polaris.common.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Component
 @Slf4j
-public class WorkflowEventStreamService {
+public class WorkflowEventStreamService implements WorkflowEventStreamApplicationFacade {
 
     private static final int MAX_CONNECTIONS = 500;
     private static final int EVENT_BATCH_SIZE = 500;
@@ -39,6 +39,7 @@ public class WorkflowEventStreamService {
 
     private final WorkflowExecutionApplicationFacade workflowFacade;
     private final ThreadPoolTaskExecutor taskExecutor;
+    private final List<WorkflowPrincipalContextProvider> principalProviders;
     private final Map<String, Connection> connections = new ConcurrentHashMap<>();
     private final Map<String, Set<String>> executionConnections = new ConcurrentHashMap<>();
     private final Set<String> requestedExecutions = ConcurrentHashMap.newKeySet();
@@ -46,11 +47,14 @@ public class WorkflowEventStreamService {
 
     public WorkflowEventStreamService(
             WorkflowExecutionApplicationFacade workflowFacade,
-            @Qualifier("workflowTaskExecutor") ThreadPoolTaskExecutor taskExecutor) {
+            @Qualifier("workflowTaskExecutor") ThreadPoolTaskExecutor taskExecutor,
+            List<WorkflowPrincipalContextProvider> principalProviders) {
         this.workflowFacade = workflowFacade;
         this.taskExecutor = taskExecutor;
+        this.principalProviders = List.copyOf(principalProviders);
     }
 
+    @Override
     public SseEmitter subscribe(String executionId, long afterSequence) {
         CallerContext caller = CallerContextHolder.require();
         WorkflowExecutionView execution = workflowFacade.get(executionId);
@@ -58,11 +62,14 @@ public class WorkflowEventStreamService {
             throw new IllegalStateException("工作流事件连接数已达上限");
         }
         String connectionId = UUID.randomUUID().toString();
-        SseEmitter emitter = new SseEmitter(EMITTER_TIMEOUT_MS);
+        SseEmitter emitter = new WorkflowSseEmitter(EMITTER_TIMEOUT_MS);
         Connection connection = new Connection(
-                connectionId, executionId, caller, emitter,
+                connectionId, executionId, execution.workflowCode(), caller, emitter,
                 new AtomicLong(Math.max(0, afterSequence)),
                 new AtomicLong(System.currentTimeMillis()));
+        if (!isAuthorized(connection)) {
+            throw new ServiceException("工作流事件访问权限已失效", 403);
+        }
         connections.put(connectionId, connection);
         executionConnections.computeIfAbsent(executionId,
                 ignored -> ConcurrentHashMap.newKeySet()).add(connectionId);
@@ -93,7 +100,7 @@ public class WorkflowEventStreamService {
         }
     }
 
-    /** 心跳不访问数据库。 */
+    /** 心跳只复查连接授权，不查询执行或事件。 */
     @Scheduled(fixedDelayString = "${ai.workflow.event-stream-heartbeat-ms:15000}")
     public void maintainConnections() {
         if (connections.isEmpty()) {
@@ -101,6 +108,10 @@ public class WorkflowEventStreamService {
         }
         long now = System.currentTimeMillis();
         for (Connection connection : new ArrayList<>(connections.values())) {
+            if (!isAuthorized(connection)) {
+                revokeConnection(connection);
+                continue;
+            }
             if (now - connection.lastWriteTime().get() >= HEARTBEAT_INTERVAL_MS) {
                 try {
                     connection.emitter().send(SseEmitter.event().comment("heartbeat"));
@@ -156,18 +167,18 @@ public class WorkflowEventStreamService {
     }
 
     private void flushExecutionSafely(String executionId) {
-        List<Connection> targets = connectionsFor(executionId);
+        List<Connection> targets = authorizedConnectionsFor(executionId);
         if (targets.isEmpty()) {
             return;
         }
         CallerContext previous = CallerContextHolder.get();
         try {
-            CallerContextHolder.set(targets.get(0).caller());
             for (int round = 0; round < MAX_DRAIN_ROUNDS; round++) {
-                targets = connectionsFor(executionId);
+                targets = authorizedConnectionsFor(executionId);
                 if (targets.isEmpty()) {
                     return;
                 }
+                CallerContextHolder.set(targets.get(0).caller());
                 long afterSequence = targets.stream()
                         .mapToLong(connection -> connection.sequence().get())
                         .min().orElse(0L);
@@ -197,6 +208,10 @@ public class WorkflowEventStreamService {
             List<Connection> targets,
             List<WorkflowExecutionEventView> events) {
         for (Connection connection : targets) {
+            if (!isAuthorized(connection)) {
+                revokeConnection(connection);
+                continue;
+            }
             try {
                 for (WorkflowExecutionEventView event : events) {
                     if (event.sequenceNo() <= connection.sequence().get()) {
@@ -241,6 +256,54 @@ public class WorkflowEventStreamService {
         return ids.stream().map(connections::get).filter(Objects::nonNull).toList();
     }
 
+    private List<Connection> authorizedConnectionsFor(String executionId) {
+        List<Connection> authorized = new ArrayList<>();
+        for (Connection connection : connectionsFor(executionId)) {
+            if (isAuthorized(connection)) authorized.add(connection);
+            else revokeConnection(connection);
+        }
+        return authorized;
+    }
+
+    private boolean isAuthorized(Connection connection) {
+        CallerContext caller = connection.caller();
+        String username = caller.getUsername();
+        String type = username != null && username.startsWith("apikey:") ? "API_KEY"
+                : username != null && username.startsWith("share:") ? "SHARE"
+                : caller.isPlatformMode() ? "PLATFORM_USER" : null;
+        if (type == null) return true;
+        try {
+            Long tenantId = Long.valueOf(caller.getTenantId());
+            String principalId = "API_KEY".equals(type) ? username.substring("apikey:".length())
+                    : "SHARE".equals(type) ? username.substring("share:".length())
+                    : String.valueOf(caller.getUserId());
+            for (WorkflowPrincipalContextProvider provider : principalProviders) {
+                if (!provider.supports(type)) continue;
+                Optional<CallerContext> current = provider.resolve(tenantId, type, principalId);
+                if (current.isEmpty()) return false;
+                CallerContext refreshed = current.get();
+                if (!Objects.equals(caller.getTenantId(), refreshed.getTenantId())
+                        || !Objects.equals(username, refreshed.getUsername())) return false;
+                if (("API_KEY".equals(type) || "SHARE".equals(type))
+                        && !refreshed.hasPermission("workflow:read")) return false;
+                if ("API_KEY".equals(type) && !(refreshed instanceof WorkflowScopedCallerContext)) {
+                    return false;
+                }
+                return !(refreshed instanceof WorkflowScopedCallerContext scoped)
+                        || scoped.canAccessWorkflow(connection.workflowCode());
+            }
+        } catch (RuntimeException e) {
+            // 授权查询不可用时关闭旧连接，不沿用订阅时的权限或向客户端暴露内部异常。
+            return false;
+        }
+        return false;
+    }
+
+    private void revokeConnection(Connection connection) {
+        removeConnection(connection.connectionId());
+        connection.emitter().complete();
+    }
+
     private void removeConnection(String connectionId) {
         Connection removed = connections.remove(connectionId);
         if (removed == null) {
@@ -255,6 +318,7 @@ public class WorkflowEventStreamService {
     private record Connection(
             String connectionId,
             String executionId,
+            String workflowCode,
             CallerContext caller,
             SseEmitter emitter,
             AtomicLong sequence,

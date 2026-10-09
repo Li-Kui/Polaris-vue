@@ -1,0 +1,14 @@
+{
+  "layer": "PROTOCOL",
+  "code": "OPENAI_COMPATIBLE",
+  "profileVersion": 1,
+  "capabilityOverlays": {
+    "CHAT_COMPLETION": {
+      "uiSchema": {
+        "maxTokens": {
+          "placeholder": "最大输出 Token 数"
+        }
+      }
+    }
+  }
+}

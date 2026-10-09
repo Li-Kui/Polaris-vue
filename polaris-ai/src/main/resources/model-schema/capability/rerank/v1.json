@@ -1,0 +1,45 @@
+{
+  "code": "RERANK",
+  "name": "文档重排",
+  "kind": "INVOCATION",
+  "category": "RERANK",
+  "schemaVersion": 1,
+  "schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "topN": {
+        "title": "返回结果数",
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000,
+        "default": 10
+      },
+      "returnDocuments": {
+        "title": "返回原文",
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "uiSchema": {
+    "topN": {
+      "component": "number",
+      "order": 10
+    },
+    "returnDocuments": {
+      "component": "switch",
+      "order": 20
+    }
+  },
+  "parameterPolicy": {
+    "topN": {
+      "overridable": true,
+      "allowedSources": ["APPLICATION", "AGENT", "WORKFLOW", "REQUEST"]
+    },
+    "returnDocuments": {
+      "overridable": true,
+      "allowedSources": ["APPLICATION", "AGENT", "WORKFLOW", "REQUEST"]
+    }
+  }
+}

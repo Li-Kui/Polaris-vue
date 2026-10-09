@@ -1,0 +1,27 @@
+{
+  "layer": "PROVIDER",
+  "code": "SILICONFLOW",
+  "profileVersion": 1,
+  "protocolCode": "OPENAI_COMPATIBLE",
+  "defaultBaseUrl": "https://api.siliconflow.cn/v1",
+  "modelDiscoverySupported": true,
+  "supportedCapabilities": ["CHAT_COMPLETION", "TEXT_EMBEDDING"],
+  "credentialSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["apiKey"],
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    }
+  },
+  "connectionConfigSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "capabilityOverlays": {}
+}

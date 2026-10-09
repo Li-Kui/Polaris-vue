@@ -5,19 +5,43 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.polaris.ai.domain.AiModelConfig;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.util.List;
 
-/**
- * AI 模型配置数据访问层
- * 
- * @author polaris
- */
-public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
-{
+/** AI 模型稳定身份数据访问层。 */
+public interface AiModelConfigMapper extends BaseMapper<AiModelConfig> {
+
+    @Update("""
+            UPDATE ai_model_config
+            SET name = #{name}, model_code = #{modelCode},
+                connection_id = #{connectionId}, model_name = #{modelName},
+                model_type = #{modelType}, description = #{description},
+                dept_id = #{deptId}, status = #{status},
+                revision = revision + 1,
+                update_by = #{updateBy}, update_time = NOW()
+            WHERE id = #{id} AND revision = #{expectedRevision}
+              AND del_flag = '0'
+            """)
+    int updateAggregateBase(
+            @Param("id") Long id,
+            @Param("expectedRevision") Long expectedRevision,
+            @Param("name") String name,
+            @Param("modelCode") String modelCode,
+            @Param("connectionId") Long connectionId,
+            @Param("modelName") String modelName,
+            @Param("modelType") String modelType,
+            @Param("description") String description,
+            @Param("deptId") Long deptId,
+            @Param("status") String status,
+            @Param("updateBy") String updateBy);
+
     @InterceptorIgnore(tenantLine = "true")
     @Select({"<script>",
-            "SELECT * FROM ai_model_config WHERE id = #{id} AND del_flag = '0'",
+            "SELECT id, tenant_id, dept_id, name, model_code, connection_id,",
+            "model_name, model_type, description, revision, status, del_flag,",
+            "create_by, create_time, update_by, update_time, remark",
+            "FROM ai_model_config WHERE id = #{id} AND del_flag = '0'",
             "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
             "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
             "LIMIT 1", "</script>"})
@@ -26,106 +50,32 @@ public interface AiModelConfigMapper extends BaseMapper<AiModelConfig>
 
     @InterceptorIgnore(tenantLine = "true")
     @Select({"<script>",
-            "SELECT * FROM ai_model_config WHERE del_flag = '0' AND model_type = 'CHAT'",
-            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
-            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
-            "ORDER BY name, id",
-            "</script>"})
-    List<AiModelConfig> selectWorkflowResources(@Param("tenantId") Long tenantId);
+            "SELECT DISTINCT m.id, m.tenant_id, m.dept_id, m.name,",
+            "m.model_code, m.connection_id, m.model_name, m.model_type,",
+            "m.description, m.revision, m.status, m.del_flag,",
+            "m.create_by, m.create_time, m.update_by, m.update_time, m.remark",
+            "FROM ai_model_config m",
+            "JOIN ai_model_capability c ON c.model_config_id = m.id",
+            "AND c.capability_code = #{capabilityCode}",
+            "AND c.applies_to_capability_code = '' AND c.enabled = '1'",
+            "WHERE m.del_flag = '0' AND m.status = '1'",
+            "<choose><when test='tenantId != null'>AND m.tenant_id = #{tenantId}</when>",
+            "<otherwise>AND m.tenant_id IS NULL</otherwise></choose>",
+            "ORDER BY m.name, m.id", "</script>"})
+    List<AiModelConfig> selectWorkflowResourcesByCapability(
+            @Param("tenantId") Long tenantId,
+            @Param("capabilityCode") String capabilityCode);
 
-    /**
-     * 按模型名称查询当前工作流作用域内优先级最高的聊天模型。
-     */
-    @InterceptorIgnore(tenantLine = "true")
-    @Select({"<script>",
-            "SELECT * FROM ai_model_config",
-            "WHERE model_name = #{modelName} AND model_type = 'CHAT'",
-            "AND status = '1' AND del_flag = '0'",
-            "<choose><when test='tenantId != null'>AND tenant_id = #{tenantId}</when>",
-            "<otherwise>AND tenant_id IS NULL</otherwise></choose>",
-            "ORDER BY is_default DESC, id DESC",
-            "LIMIT 1", "</script>"})
-    AiModelConfig selectWorkflowResourceByModelName(
-            @Param("tenantId") Long tenantId, @Param("modelName") String modelName);
-
-    /**
-     * 查询模型配置列表
-     */
     List<AiModelConfig> selectModelConfigList(AiModelConfig config);
 
-    /**
-     * 查询当前用户可用的模型列表（系统共享 + 指定部门独享）
-     */
     List<AiModelConfig> selectAvailableModelConfigs(
-            @org.apache.ibatis.annotations.Param("deptId") Long deptId,
-            @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
+            @Param("deptId") Long deptId,
+            @Param("isAdmin") Boolean isAdmin);
 
-    /**
-     * 查询当前用户可用的指定类型模型。
-     */
-    List<AiModelConfig> selectAvailableModelConfigsByType(
-            @org.apache.ibatis.annotations.Param("modelType") String modelType,
-            @org.apache.ibatis.annotations.Param("deptId") Long deptId,
-            @org.apache.ibatis.annotations.Param("isAdmin") Boolean isAdmin);
+    List<AiModelConfig> selectAvailableModelConfigsByCapability(
+            @Param("capabilityCode") String capabilityCode,
+            @Param("deptId") Long deptId,
+            @Param("isAdmin") Boolean isAdmin);
 
-    /**
-     * 根据 ID 获取模型配置详情
-     */
     AiModelConfig selectModelConfigById(Long id);
-
-    /**
-     * 根据模型名称（例如 deepseek-chat）获取模型配置
-     */
-    AiModelConfig selectModelConfigByModelName(String modelName);
-
-    /**
-     * 获取默认的聊天对话模型配置 (is_default = '1')
-     */
-    AiModelConfig selectDefaultChatModel(
-            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
-            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
-
-    /**
-     * 获取默认的向量模型配置 (is_default_embedding = '1')
-     */
-    AiModelConfig selectDefaultEmbeddingModel(
-            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
-            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
-
-    /**
-     * 获取指定类型下的默认模型配置 (is_default = '1')
-     */
-    AiModelConfig selectDefaultModel(
-            @org.apache.ibatis.annotations.Param("modelType") String modelType,
-            @org.apache.ibatis.annotations.Param("userDeptId") Long userDeptId,
-            @org.apache.ibatis.annotations.Param("dataScopeSql") String dataScopeSql);
-
-    /**
-     * 新增模型配置
-     */
-    int insertModelConfig(AiModelConfig config);
-
-    /**
-     * 修改模型配置
-     */
-    int updateModelConfig(AiModelConfig config);
-
-
-
-    /**
-     * 重置所有模型配置的默认聊天模型状态 (将 is_default 置为 '0')
-     */
-    int cleanDefaultChatStatus(@org.apache.ibatis.annotations.Param("deptId") Long deptId);
-
-    /**
-     * 重置所有模型配置的默认向量模型状态 (将 is_default_embedding 置为 '0')
-     */
-    int cleanDefaultEmbeddingStatus(@org.apache.ibatis.annotations.Param("deptId") Long deptId);
-
-    /**
-     * 清除指定类型下的默认模型状态
-     */
-    int cleanDefaultStatus(
-            @org.apache.ibatis.annotations.Param("modelType") String modelType,
-            @org.apache.ibatis.annotations.Param("deptId") Long deptId);
 }

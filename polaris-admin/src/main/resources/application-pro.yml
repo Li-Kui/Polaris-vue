@@ -101,6 +101,9 @@ spring:
 
 #兜底的AI配置
 ai:
+    tools:
+        web-search:
+            api-key: ${AI_WEB_SEARCH_API_KEY:}
     moderation:
         enabled: true
         seed-location: classpath:moderation/polaris-sensitive-seed-v3.json

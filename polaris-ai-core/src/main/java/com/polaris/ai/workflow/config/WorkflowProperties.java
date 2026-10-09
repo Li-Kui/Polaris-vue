@@ -13,6 +13,9 @@ public class WorkflowProperties {
 
     private boolean enabled;
     private boolean writeNodesEnabled;
+    private boolean imageNodesEnabled;
+    private Set<Long> imageNodeAllowedTenantIds = new LinkedHashSet<>();
+    private Set<String> imageNodeAllowedWorkflowCodes = new LinkedHashSet<>();
     private boolean codeNodeEnabled;
     private boolean agentReadOnlyToolsEnabled;
     private boolean workerEnabled = true;
@@ -52,6 +55,27 @@ public class WorkflowProperties {
 
     public void setWriteNodesEnabled(boolean writeNodesEnabled) {
         this.writeNodesEnabled = writeNodesEnabled;
+    }
+
+    public boolean isImageNodesEnabled() { return imageNodesEnabled; }
+    public void setImageNodesEnabled(boolean enabled) { imageNodesEnabled = enabled; }
+    public Set<Long> getImageNodeAllowedTenantIds() { return imageNodeAllowedTenantIds; }
+    public void setImageNodeAllowedTenantIds(Set<Long> ids) {
+        imageNodeAllowedTenantIds = ids == null ? new LinkedHashSet<>() : new LinkedHashSet<>(ids);
+    }
+    public Set<String> getImageNodeAllowedWorkflowCodes() { return imageNodeAllowedWorkflowCodes; }
+    public void setImageNodeAllowedWorkflowCodes(Set<String> codes) {
+        imageNodeAllowedWorkflowCodes = codes == null ? new LinkedHashSet<>() : new LinkedHashSet<>(codes);
+    }
+
+    /** Independent, fail-closed image admission; never enables HTTP/Agent write tools. */
+    public boolean isNodeExecutionAllowed(String type, String version, String sideEffect,
+            Long tenantId, String workflowCode) {
+        if (!"WRITE".equals(sideEffect) || writeNodesEnabled) return true;
+        return imageNodesEnabled && "image".equals(type) && "1.0".equals(version)
+                && tenantId != null && workflowCode != null
+                && imageNodeAllowedTenantIds.contains(tenantId)
+                && imageNodeAllowedWorkflowCodes.contains(workflowCode);
     }
 
     public boolean isCodeNodeEnabled() {

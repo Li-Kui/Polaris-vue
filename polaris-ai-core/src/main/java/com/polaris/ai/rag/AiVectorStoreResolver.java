@@ -1,10 +1,11 @@
 package com.polaris.ai.rag;
 
 import com.polaris.ai.domain.AiKnowledgeBase;
-import com.polaris.ai.domain.AiModelConfig;
-import com.polaris.ai.enums.ModelType;
 import com.polaris.ai.observability.ObservedEmbeddingStore;
-import com.polaris.ai.pivot.AiModelFactory;
+import com.polaris.ai.runtime.embedding.EmbeddingRuntimeBinding;
+import com.polaris.ai.runtime.embedding.EmbeddingRuntimeDescriptor;
+import com.polaris.ai.runtime.embedding.EmbeddingRuntimeGateway;
+import com.polaris.common.exception.ServiceException;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -24,18 +25,18 @@ import java.util.concurrent.ConcurrentHashMap;
 public class AiVectorStoreResolver
 {
     private final AiVectorStoreProperties properties;
-    private final AiModelFactory modelFactory;
+    private final EmbeddingRuntimeGateway runtimeGateway;
     private final QdrantClient qdrantClient;
     private final Map<String, StoreBinding> stores = new ConcurrentHashMap<>();
 
     public AiVectorStoreResolver(
             AiVectorStoreProperties properties,
-            AiModelFactory modelFactory,
+            EmbeddingRuntimeGateway runtimeGateway,
             EmbeddingStore<TextSegment> defaultStore,
             ObjectProvider<QdrantClient> qdrantClientProvider)
     {
         this.properties = properties;
-        this.modelFactory = modelFactory;
+        this.runtimeGateway = runtimeGateway;
         this.qdrantClient = qdrantClientProvider.getIfAvailable();
         if (properties.getType() == AiVectorStoreProperties.Type.MEMORY) {
             this.stores.put(properties.getQdrant().getCollectionName(),
@@ -48,14 +49,14 @@ public class AiVectorStoreResolver
         if (knowledgeBase == null) {
             throw new IllegalArgumentException("知识库不能为空");
         }
-        AiModelConfig modelConfig = resolveModelConfig(knowledgeBase.getEmbeddingModelId());
+        EmbeddingRuntimeBinding binding = resolveBinding(knowledgeBase);
         String collectionName = hasText(knowledgeBase.getVectorCollection())
                 ? knowledgeBase.getVectorCollection().trim()
                 : properties.getQdrant().getCollectionName();
-        EmbeddingStore<TextSegment> store = resolveStore(collectionName, modelConfig);
+        EmbeddingStore<TextSegment> store = resolveStore(
+                collectionName, binding.descriptor().dimension());
         return new VectorContext(
-                modelConfig,
-                modelFactory.getEmbeddingModel(modelConfig.getId()),
+                binding.descriptor(), binding.model(),
                 store,
                 collectionName);
     }
@@ -68,11 +69,11 @@ public class AiVectorStoreResolver
         if (!hasText(collectionName)) {
             throw new IllegalArgumentException("向量 collection 不能为空");
         }
-        AiModelConfig modelConfig = resolveModelConfig(knowledgeBase.getEmbeddingModelId());
+        EmbeddingRuntimeBinding binding = resolveBinding(knowledgeBase);
         return new VectorContext(
-                modelConfig,
-                modelFactory.getEmbeddingModel(modelConfig.getId()),
-                resolveStore(collectionName.trim(), modelConfig),
+                binding.descriptor(), binding.model(),
+                resolveStore(collectionName.trim(),
+                        binding.descriptor().dimension()),
                 collectionName.trim());
     }
 
@@ -99,40 +100,66 @@ public class AiVectorStoreResolver
         return buildQdrantStore(collectionName);
     }
 
-    public AiModelConfig resolveModelConfig(Long modelConfigId)
+    /** 创建或显式重建索引前刷新并持久化所需的模型快照字段。 */
+    public EmbeddingRuntimeDescriptor prepare(AiKnowledgeBase knowledgeBase)
     {
-        AiModelConfig config = modelConfigId == null
-                ? modelFactory.getDefaultModelConfig(ModelType.EMBEDDING)
-                : modelFactory.getModelConfig(modelConfigId);
-        if (config == null) {
-            throw new com.polaris.common.exception.ServiceException("未配置可用的向量模型，请先在大模型配置中添加或指定向量模型");
+        if (knowledgeBase == null) {
+            throw new IllegalArgumentException("知识库不能为空");
         }
-        if (!ModelType.EMBEDDING.name().equalsIgnoreCase(config.getModelType())) {
-            throw new com.polaris.common.exception.ServiceException("知识库绑定的模型不是 EMBEDDING 向量模型: " + config.getName());
+        if (knowledgeBase.getEmbeddingModelId() == null) {
+            throw new ServiceException("TEXT_EMBEDDING_MODEL_REQUIRED");
         }
-        if (!"1".equals(config.getStatus())) {
-            throw new com.polaris.common.exception.ServiceException("知识库绑定的向量模型未启用: " + config.getName());
-        }
-        if (config.getEmbeddingDimension() == null || config.getEmbeddingDimension() <= 0) {
-            modelFactory.ensureEmbeddingDimension(config);
-        }
-        return config;
+        EmbeddingRuntimeDescriptor descriptor = runtimeGateway.resolve(
+                knowledgeBase.getEmbeddingModelId()).descriptor();
+        knowledgeBase.setEmbeddingModelId(descriptor.modelId());
+        knowledgeBase.setEmbeddingDimension(descriptor.dimension());
+        knowledgeBase.setEmbeddingModelRevision(descriptor.modelRevision());
+        knowledgeBase.setEmbeddingSchemaHash(descriptor.schemaHash());
+        return descriptor;
     }
 
     public String newVersionCollection(AiKnowledgeBase knowledgeBase, long version)
     {
-        AiModelConfig modelConfig = resolveModelConfig(knowledgeBase.getEmbeddingModelId());
+        if (knowledgeBase.getEmbeddingModelId() == null) {
+            throw new ServiceException("TEXT_EMBEDDING_MODEL_REQUIRED");
+        }
         String prefix = properties.getQdrant().getCollectionName().replaceAll("[^A-Za-z0-9_-]", "_");
         return prefix + "_kb" + knowledgeBase.getId()
-                + "_m" + modelConfig.getId()
+                + "_m" + knowledgeBase.getEmbeddingModelId()
                 + "_v" + version;
     }
 
-    private EmbeddingStore<TextSegment> resolveStore(String collectionName, AiModelConfig modelConfig)
+    private EmbeddingRuntimeBinding resolveBinding(
+            AiKnowledgeBase knowledgeBase)
     {
-        int dimension = modelConfig.getEmbeddingDimension() == null
-                ? properties.getQdrant().getDimension()
-                : modelConfig.getEmbeddingDimension();
+        if (knowledgeBase.getEmbeddingModelId() == null) {
+            throw new ServiceException("TEXT_EMBEDDING_MODEL_REQUIRED");
+        }
+        EmbeddingRuntimeBinding binding = runtimeGateway.resolve(
+                knowledgeBase.getEmbeddingModelId());
+        EmbeddingRuntimeDescriptor descriptor = binding.descriptor();
+        if (knowledgeBase.getEmbeddingDimension() == null
+                || knowledgeBase.getEmbeddingModelRevision() == null
+                || !hasText(knowledgeBase.getEmbeddingSchemaHash())) {
+            throw new ServiceException(
+                    "KNOWLEDGE_EMBEDDING_SNAPSHOT_REQUIRED");
+        }
+        if (knowledgeBase.getEmbeddingDimension() != descriptor.dimension()) {
+            throw new ServiceException("EMBEDDING_DIMENSION_MISMATCH");
+        }
+        if (knowledgeBase.getEmbeddingModelRevision()
+                != descriptor.modelRevision()
+                || !knowledgeBase.getEmbeddingSchemaHash()
+                .equals(descriptor.schemaHash())) {
+            throw new ServiceException("KNOWLEDGE_EMBEDDING_SNAPSHOT_STALE");
+        }
+        return binding;
+    }
+
+    private EmbeddingStore<TextSegment> resolveStore(
+            String collectionName,
+            int dimension)
+    {
         StoreBinding existing = stores.get(collectionName);
         if (existing != null) {
             if (existing.dimension() != dimension) {
@@ -201,7 +228,7 @@ public class AiVectorStoreResolver
     }
 
     public record VectorContext(
-            AiModelConfig modelConfig,
+            EmbeddingRuntimeDescriptor descriptor,
             EmbeddingModel embeddingModel,
             EmbeddingStore<TextSegment> embeddingStore,
             String collectionName)

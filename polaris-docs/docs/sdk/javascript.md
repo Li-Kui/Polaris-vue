@@ -8,11 +8,13 @@ npm install openai
 
 ## Node.js 代码示例
 
+请用中台首页接入示例中的实际 Base URL 替换下方占位地址，保留部署的 API 代理前缀，参见[快速开始](/guide/quickstart)。
+
 ```javascript
 import OpenAI from 'openai'
 
 const openai = new OpenAI({
-  baseURL: 'http://localhost:8080/platform/api/v1',
+  baseURL: 'https://your-polaris-host/prod-api/platform/api/v1',
   apiKey: 'sk-your-api-key-here'
 })
 
