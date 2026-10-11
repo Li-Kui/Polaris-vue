@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformMcpConnectionMapper">
+    <resultMap id="McpConnectionResult" type="com.polaris.platform.domain.PlatformMcpConnection">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="connectionName" column="connection_name" />
+        <result property="endpointUrl" column="endpoint_url" />
+        <result property="authType" column="auth_type" />
+        <result property="credentialHeaderName" column="credential_header_name" />
+        <result property="authConfig" column="auth_config" />
+        <result property="timeoutMs" column="timeout_ms" />
+        <result property="status" column="status" />
+        <result property="revision" column="revision" />
+        <result property="catalogEpoch" column="catalog_epoch" />
+        <result property="catalogRevision" column="catalog_revision" />
+        <result property="discoveryStatus" column="discovery_status" />
+        <result property="lastDiscoveryTime" column="last_discovery_time" />
+        <result property="lastDiscoverySuccessTime" column="last_discovery_success_time" />
+        <result property="lastDiscoveryError" column="last_discovery_error" />
+        <result property="remark" column="remark" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+
+    <sql id="columns">
+        select id, tenant_id, connection_name, endpoint_url, auth_type,
+               credential_header_name, auth_config, timeout_ms, status, revision,
+               catalog_epoch, catalog_revision, discovery_status, last_discovery_time,
+               last_discovery_success_time, last_discovery_error,
+               remark, create_by, create_time, update_by, update_time
+        from platform_mcp_connection
+    </sql>
+
+    <select id="selectList" resultMap="McpConnectionResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId}
+        <if test="connectionName != null and connectionName != ''">
+            and connection_name like concat('%', #{connectionName}, '%')
+        </if>
+        <if test="status != null and status != ''">and status = #{status}</if>
+        order by create_time desc, id desc
+    </select>
+
+    <select id="selectById" resultMap="McpConnectionResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId} and id = #{id}
+    </select>
+
+    <select id="lockById" resultMap="McpConnectionResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId} and id = #{id} for update
+    </select>
+
+    <update id="invalidateCatalog">
+        update platform_mcp_connection
+        set catalog_epoch = catalog_epoch + 1, catalog_revision = catalog_revision + 1,
+            discovery_status = 'STALE', last_discovery_error = null
+        where tenant_id = #{tenantId} and id = #{id}
+    </update>
+
+    <update id="recordDiscovery">
+        update platform_mcp_connection
+        set last_discovery_time = sysdate(),
+        <choose>
+            <when test="success">
+                catalog_revision = catalog_revision + 1, discovery_status = 'SUCCESS',
+                last_discovery_success_time = sysdate(), last_discovery_error = null
+            </when>
+            <otherwise>
+                discovery_status = 'FAILED', last_discovery_error = 'DISCOVERY_FAILED'
+            </otherwise>
+        </choose>
+        where tenant_id = #{tenantId} and id = #{id}
+    </update>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_mcp_connection
+        (tenant_id, connection_name, endpoint_url, auth_type, credential_header_name,
+         auth_config, timeout_ms, status, revision, remark, create_by, create_time)
+        values
+        (#{tenantId}, #{connectionName}, #{endpointUrl}, #{authType}, #{credentialHeaderName},
+         #{authConfig}, #{timeoutMs}, #{status}, 1, #{remark}, #{createBy}, sysdate())
+    </insert>
+
+    <update id="update">
+        update platform_mcp_connection
+        set connection_name = #{connectionName}, endpoint_url = #{endpointUrl},
+            auth_type = #{authType}, credential_header_name = #{credentialHeaderName},
+            auth_config = #{authConfig}, timeout_ms = #{timeoutMs}, status = #{status},
+            remark = #{remark}, revision = revision + 1,
+            update_by = #{updateBy}, update_time = sysdate()
+        where tenant_id = #{tenantId} and id = #{id} and revision = #{revision}
+    </update>
+
+    <delete id="deleteById">
+        delete from platform_mcp_connection
+        where tenant_id = #{tenantId} and id = #{id} and revision = #{revision}
+    </delete>
+</mapper>

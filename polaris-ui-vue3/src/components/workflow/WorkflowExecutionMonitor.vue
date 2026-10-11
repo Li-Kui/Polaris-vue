@@ -25,8 +25,8 @@
       </el-table-column>
       <el-table-column label="状态" width="150" align="center">
         <template #default="{row}">
-          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
-            <i></i>{{ row.status }}
+          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]" :title="row.status">
+            <i></i>{{ statusLabel(row.status) }}
           </span>
         </template>
       </el-table-column>
@@ -52,8 +52,8 @@
       >
         <header>
           <code>{{ row.executionId }}</code>
-          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
-            <i></i>{{ row.status }}
+          <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]" :title="row.status">
+            <i></i>{{ statusLabel(row.status) }}
           </span>
         </header>
         <dl>
@@ -86,8 +86,8 @@
             <span class="detail-eyebrow">EXECUTION DETAIL</span>
             <strong>执行详情</strong>
           </div>
-          <span v-if="selected" :class="['execution-status', `execution-status--${statusClass(selected.status)}`]">
-            <i></i>{{ selected.status }}
+          <span v-if="selected" :class="['execution-status', `execution-status--${statusClass(selected.status)}`]" :title="selected.status">
+            <i></i>{{ statusLabel(selected.status) }}
           </span>
         </div>
       </template>
@@ -102,8 +102,8 @@
         <el-descriptions :column="2" border class="execution-summary">
           <el-descriptions-item label="执行 ID"><code>{{ selected.executionId }}</code></el-descriptions-item>
           <el-descriptions-item label="状态">
-            <span :class="['execution-status', `execution-status--${statusClass(selected.status)}`]">
-              <i></i>{{ selected.status }}
+            <span :class="['execution-status', `execution-status--${statusClass(selected.status)}`]" :title="selected.status">
+              <i></i>{{ statusLabel(selected.status) }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="工作流">{{ selected.workflowCode }}</el-descriptions-item>
@@ -118,11 +118,11 @@
             <template #label><span class="detail-tab-label">节点运行<em>{{ nodeRuns.length }}</em></span></template>
             <el-table :data="nodeRuns" size="small" class="detail-table">
               <el-table-column prop="nodeId" label="节点" min-width="130" />
-              <el-table-column prop="attemptNo" label="Attempt" width="90" />
+              <el-table-column prop="attemptNo" label="尝试次数" width="90" />
               <el-table-column label="状态" width="140">
                 <template #default="{row}">
-                  <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]">
-                    <i></i>{{ row.status }}
+                  <span :class="['execution-status', `execution-status--${statusClass(row.status)}`]" :title="row.status">
+                    <i></i>{{ statusLabel(row.status) }}
                   </span>
                 </template>
               </el-table-column>
@@ -232,6 +232,7 @@ import {
 } from '@/api/ai/workflow'
 import {ArrowLeft, Refresh} from '@element-plus/icons-vue'
 import {agentToolCalls, agentToolEventReason, agentToolEventStatus, agentToolEventType} from './workflowAgent'
+import {workflowStatusLabel} from './workflowStatus'
 
 export default {
   name: 'WorkflowExecutionMonitor',
@@ -319,7 +320,10 @@ export default {
             ? '处理中' : '无需外部写入'
       }
       if (row?.sideEffect === 'WRITE') {
-        return row.sideEffectStatus === 'COMMITTED' ? '外部写入已确认'
+        return row.sideEffectStatus === 'NOT_DISPATCHED' ? '未派发'
+          : row.sideEffectStatus === 'CONFIRMED' ? '调用已确认'
+          : row.sideEffectStatus === 'UNCONFIRMED' ? '结果未确认'
+          : row.sideEffectStatus === 'COMMITTED' ? '外部写入已确认'
           : row.sideEffectStatus === 'PENDING' && !this.terminal(row.status)
             ? '外部写入待确认'
             : row.sideEffectStatus === 'NONE' ? '未执行外部写入' : row.sideEffectStatus
@@ -393,6 +397,9 @@ export default {
     },
     retryable(status) {
       return ['FAILED', 'CANCELLED', 'REJECTED'].includes(status)
+    },
+    statusLabel(status) {
+      return workflowStatusLabel(status)
     },
     statusClass(status) {
       if (status === 'SUCCEEDED') return 'success'

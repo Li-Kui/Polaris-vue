@@ -225,6 +225,15 @@ public class AiWorkflowController extends BaseController {
         return ok(view);
     }
 
+    @Operation(summary = "检查已发布工作流环境准入，不创建执行")
+    @PreAuthorize("@workflowAccess.canExecute()")
+    @GetMapping("/definitions/{definitionId}/execution-admission")
+    public ResultData<WorkflowExecutionAdmissionView> executionAdmission(
+            @PathVariable Long definitionId,
+            @RequestParam(required = false) String workflowVersionId) {
+        return ok(executionFacade.getAdmission(definitionId, workflowVersionId));
+    }
+
     @Operation(summary = "启动工作流持久化执行")
     @PreAuthorize("@workflowAccess.canExecute()")
     @PostMapping("/executions")

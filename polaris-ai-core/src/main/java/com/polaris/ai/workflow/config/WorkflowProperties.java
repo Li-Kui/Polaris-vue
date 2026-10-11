@@ -68,14 +68,28 @@ public class WorkflowProperties {
         imageNodeAllowedWorkflowCodes = codes == null ? new LinkedHashSet<>() : new LinkedHashSet<>(codes);
     }
 
-    /** Independent, fail-closed image admission; never enables HTTP/Agent write tools. */
-    public boolean isNodeExecutionAllowed(String type, String version, String sideEffect,
+    /** MCP 复用连接启停与工具审批，不受全局写节点开关控制；实际资源及权限由调用链复查。 */
+    public String nodeExecutionDeniedReason(String type, String version, String sideEffect,
             Long tenantId, String workflowCode) {
-        if (!"WRITE".equals(sideEffect) || writeNodesEnabled) return true;
-        return imageNodesEnabled && "image".equals(type) && "1.0".equals(version)
+        if ("mcp_tool".equals(type)) {
+            if (!"1.0".equals(version) || !"WRITE".equals(sideEffect)) return "MCP 节点执行契约不受支持";
+            if (tenantId == null || tenantId <= 0 || workflowCode == null || workflowCode.isBlank()) {
+                return "MCP 工作流必须具备有效的租户和工作流身份";
+            }
+            return null;
+        }
+        if (!"WRITE".equals(sideEffect) || writeNodesEnabled) return null;
+        if (imageNodesEnabled && "image".equals(type) && "1.0".equals(version)
                 && tenantId != null && workflowCode != null
                 && imageNodeAllowedTenantIds.contains(tenantId)
-                && imageNodeAllowedWorkflowCodes.contains(workflowCode);
+                && imageNodeAllowedWorkflowCodes.contains(workflowCode)) return null;
+        return "当前环境未启用有副作用的工作流节点";
+    }
+
+    /** 准入与副作用分类分离，不会赋予 MCP 自动重试或重放能力。 */
+    public boolean isNodeExecutionAllowed(String type, String version, String sideEffect,
+            Long tenantId, String workflowCode) {
+        return nodeExecutionDeniedReason(type, version, sideEffect, tenantId, workflowCode) == null;
     }
 
     public boolean isCodeNodeEnabled() {

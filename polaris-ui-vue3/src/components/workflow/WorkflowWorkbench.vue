@@ -9,6 +9,9 @@
             <el-tag size="small" type="info">草稿</el-tag>
             <span class="version-label">r{{ currentDefinition?.draftRevision || 0 }}</span>
             <span v-if="dirty" class="dirty-state">未保存</span>
+            <el-tag v-if="executionAdmission" size="small" :type="executionAdmission.allowed ? 'success' : 'warning'">
+              {{ executionAdmission.allowed ? '发布版本环境准入通过' : '发布版本执行受限' }}
+            </el-tag>
           </div>
           <code>{{ definition.metadata.code || '首次保存时自动生成编码' }}</code>
         </div>
@@ -44,6 +47,16 @@
         >发布</el-button>
       </div>
     </header>
+
+    <div v-if="canExecute && (testRunError || executionAdmission?.allowed === false)" class="execution-admission-strip">
+      <el-alert
+        :title="testRunError || executionAdmission.reason"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <el-button :loading="executionAdmissionLoading" @click="refreshExecutionAdmission">重新检查</el-button>
+    </div>
 
     <div :class="['workbench-body', {'workbench-body--dock-open': !inspectorCollapsed}]">
       <aside :class="['node-palette', {'is-mobile-open': paletteOpen}]">
@@ -420,6 +433,9 @@
                   :disabled="!canEdit"
                   @update:config="schemaConfigChanged"
                 />
+                <el-alert v-else-if="isMcpNode"
+                          title="工具版本快照由“资源”页的明确选择维护；调用参数请在“输入输出”中映射。工具变更后须重新确认版本，不自动重试。"
+                          type="info" :closable="false" show-icon />
                 <template v-else>
                   <section v-if="isLlmNode" class="node-prompt-editor">
                     <div class="node-prompt-heading">
@@ -492,7 +508,7 @@
                 </template>
               </el-form>
             </el-tab-pane>
-            <el-tab-pane v-if="!isSubWorkflowNode && !isArtifactNode" :label="isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : isKnowledgeNode ? '1 选择知识库' : '资源'" name="resource">
+            <el-tab-pane v-if="!isSubWorkflowNode && !isArtifactNode" :label="isMcpNode ? '选择 MCP 工具' : isApiNode ? '1 连接服务' : isDatabaseNode ? '1 连接数据库' : isAgentNode ? '1 选择智能体' : isKnowledgeNode ? '1 选择知识库' : '资源'" name="resource">
               <el-alert
                 v-if="catalogError"
                 :title="catalogError"
@@ -513,6 +529,17 @@
                 :error="catalogError"
                 @select="selectApiConnector"
                 @created="createAndSelectApiConnector"
+              />
+              <WorkflowMcpToolPicker
+                v-else-if="isMcpNode && mcpToolReference"
+                :resources="resourceCatalog.MCP_TOOL || []"
+                :selected-resource-id="selectedResourceId(mcpToolReference)"
+                :selected-resource="selectedResource(mcpToolReference)"
+                :config="selectedNode.config"
+                :loading="resourceLoading"
+                :can-edit="canEdit"
+                :error="catalogError"
+                @select="selectMcpTool"
               />
               <WorkflowDatasourceConnectionStep
                 v-else-if="isDatabaseNode && datasourceReference"
@@ -697,13 +724,13 @@
                     <small>发布后进入执行计划，并用于节点输出校验</small>
                   </div>
                   <el-tag :type="isTransformNode || selectedNode.outputSchemaOverride ? 'success' : 'info'" size="small">
-                    {{ isSubWorkflowNode ? '来自已确认的子工作流版本' : isTransformNode ? '转换规则自动生成' : (selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约') }}
+                    {{ isMcpNode ? '来自已确认的工具契约' : isSubWorkflowNode ? '来自已确认的子工作流版本' : isTransformNode ? '转换规则自动生成' : (selectedNode.outputSchemaOverride ? '用户正式覆盖' : '沿用节点契约') }}
                   </el-tag>
                 </div>
-                <template v-if="isTransformNode || isSubWorkflowNode">
+                <template v-if="isTransformNode || isSubWorkflowNode || isMcpNode">
                   <pre>{{ formatNodeTestJson(resolvedNodeSchemas[selectedNode.id]?.outputSchema || {}) }}</pre>
                   <div class="formal-schema-actions">
-                    <small>{{ isSubWorkflowNode ? '结果结构来自已确认的发布版本；使用新版本前请检查下游字段引用。' : '修改转换规则后自动更新，无需手写或再次确认。' }}</small>
+                    <small>{{ isMcpNode ? '来自已确认的工具契约，不允许手工覆盖；content 为内容块，structuredContent 为工具声明的结构化结果。' : isSubWorkflowNode ? '结果结构来自已确认的发布版本；使用新版本前请检查下游字段引用。' : '修改转换规则后自动更新，无需手写或再次确认。' }}</small>
                   </div>
                 </template>
                 <template v-else-if="selectedNode.outputSchemaOverride">
@@ -1002,7 +1029,7 @@
         <el-icon v-else-if="debugExecution.status === 'SUCCEEDED'"><CircleCheck /></el-icon>
         <el-icon v-else><CircleClose /></el-icon>
       </div>
-      <div class="execution-progress"><strong>{{ executionStatusLabel }}</strong><el-progress :percentage="executionProgress" :show-text="false" /></div>
+      <div class="execution-progress"><strong :title="debugExecution.status">{{ executionStatusLabel }}</strong><el-progress :percentage="executionProgress" :show-text="false" /></div>
       <span>{{ completedNodeRuns }}/{{ Math.max(1, definition.nodes.length) }} 节点</span>
       <code class="execution-id" :title="debugExecution.executionId">{{ debugExecution.executionId }}</code>
       <div class="execution-actions">
@@ -1034,6 +1061,13 @@
       destroy-on-close
     >
       <el-alert v-if="!currentDefinition?.currentPublishedVersionId" title="请先发布一个版本后再运行测试。" type="warning" :closable="false" />
+      <el-alert
+        v-if="testRunError || executionAdmissionLoading || executionAdmission"
+        :title="testRunError || (executionAdmissionLoading ? '正在检查发布版本的环境准入…' : executionAdmission.reason)"
+        :type="testRunError || !executionAdmission?.allowed ? 'warning' : 'info'"
+        :closable="false"
+        show-icon
+      />
       <el-alert
         v-if="testInputSchemaError"
         :title="testInputSchemaError"
@@ -1079,11 +1113,12 @@
         <small>“等待通过”型节点只能模拟通过；需要测试拒绝或超时分支时，请将节点结果处理设为“按结果分支”。</small>
       </section>
       <template #footer>
+        <el-button :loading="executionAdmissionLoading" :disabled="testStarting" @click="refreshExecutionAdmission">重新检查准入</el-button>
         <el-button @click="testDialogOpen = false">取消</el-button>
         <el-button
           type="primary"
           :loading="testStarting"
-          :disabled="!currentDefinition?.currentPublishedVersionId || testInputSchemaLoading || !testInputValidation.valid"
+          :disabled="!canExecute || !currentDefinition?.currentPublishedVersionId || testInputSchemaLoading || !testInputValidation.valid || executionAdmissionLoading || !executionAdmission?.allowed"
           @click="startTestRun"
         >开始运行</el-button>
       </template>
@@ -1330,6 +1365,7 @@ import {
   createWorkflowDraft,
   getSubWorkflowContract,
   getWorkflowExecution,
+  getWorkflowExecutionAdmission,
   getWorkflowNodeTest,
   getWorkflowVersion,
   inferWorkflowNodeTestSchema,
@@ -1389,6 +1425,9 @@ import WorkflowKnowledgeSourcePicker from './WorkflowKnowledgeSourcePicker.vue'
 import WorkflowKnowledgeTestResult from './WorkflowKnowledgeTestResult.vue'
 import WorkflowWaitEditor from './WorkflowWaitEditor.vue'
 import WorkflowDatasourceConnectionStep from './WorkflowDatasourceConnectionStep.vue'
+import WorkflowMcpToolPicker from './WorkflowMcpToolPicker.vue'
+import {mcpNodeSchema, mcpSnapshot} from './workflowMcp'
+import {workflowStatusLabel} from './workflowStatus'
 import WorkflowDatabaseQueryStep from './WorkflowDatabaseQueryStep.vue'
 import WorkflowDisclosureCard from './WorkflowDisclosureCard.vue'
 import WorkflowInputMappingEditor from './WorkflowInputMappingEditor.vue'
@@ -1452,6 +1491,7 @@ export default {
     WorkflowKnowledgeTestResult,
     WorkflowWaitEditor,
     WorkflowDatasourceConnectionStep,
+    WorkflowMcpToolPicker,
     WorkflowDatabaseQueryStep,
     WorkflowDisclosureCard,
     WorkflowInputMappingEditor,
@@ -1587,6 +1627,10 @@ export default {
       pendingResourceBindings: [],
       testDialogOpen: false,
       testStarting: false,
+      executionAdmission: null,
+      executionAdmissionLoading: false,
+      executionAdmissionSequence: 0,
+      testRunError: '',
       testInput: {},
       testInputSchema: {type: 'object', properties: {}},
       testInputSchemaLoading: false,
@@ -1638,7 +1682,8 @@ export default {
         {label: 'AI 智能体', value: 'AGENT'},
         {label: '知识库', value: 'KNOWLEDGE_BASE'},
         {label: 'API 连接器', value: 'API_CONNECTOR'},
-        {label: '外部数据源', value: 'DATASOURCE'}
+        {label: '外部数据源', value: 'DATASOURCE'},
+        {label: 'MCP 工具', value: 'MCP_TOOL'}
       ]
     }
   },
@@ -1663,6 +1708,9 @@ export default {
     },
     isDatabaseNode() {
       return this.selectedNode?.type === 'database_query'
+    },
+    isMcpNode() {
+      return this.selectedNode?.type === 'mcp_tool'
     },
     isAgentNode() {
       return this.selectedNode?.type === 'agent'
@@ -1902,6 +1950,9 @@ export default {
     datasourceReference() {
       return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'DATASOURCE') || null
     },
+    mcpToolReference() {
+      return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'MCP_TOOL') || null
+    },
     agentReference() {
       return this.selectedNode?.resourceRefs?.find(reference => reference.kind === 'AGENT') || null
     },
@@ -1994,6 +2045,9 @@ export default {
         return {available: false, reason: this.waitConfiguration.issues[0] || '请先完成等待设置'}
       }
       if (!this.selectedDescriptor) return {available: false, reason: '当前节点处理器不可用'}
+      if (this.isMcpNode) {
+        return {available: false, reason: 'MCP 不允许隔离调用或自动重试；请先在 MCP 连接中手工测试，再用正式工作流执行验证'}
+      }
       if (this.selectedDescriptor.sideEffect === 'WRITE') {
         return {available: false, reason: '写操作节点暂不允许单节点真实试运行'}
       }
@@ -2037,6 +2091,13 @@ export default {
     },
     resolvedNodeSchemas() {
       const result = (this.definition.nodes || []).reduce((schemas, node) => {
+        if (node.type === 'mcp_tool') {
+          const reference = (node.resourceRefs || []).find(item => item.kind === 'MCP_TOOL')
+          const resource = reference ? this.selectedResource(reference) : null
+          const descriptor = this.descriptors.find(item => item.type === node.type && item.handlerVersion === node.typeVersion)
+          schemas[node.id] = mcpNodeSchema(node.config, resource, descriptor)
+          return schemas
+        }
         if (node.type === 'sub_workflow') {
           const contract = this.subWorkflowContracts[node.config?.reviewedVersionId]
           if (contract) schemas[node.id] = {inputSchema:contract.inputSchema, outputSchema:{type:'object', properties:{
@@ -2089,6 +2150,7 @@ export default {
       }, {...this.backendResolvedNodeSchemas})
       const nodes = this.definition.nodes || []
       nodes.forEach(node => {
+        if (node.type === 'mcp_tool') return
         if (!node.outputSchemaOverride) return
         const descriptor = this.descriptors.find(item => item.type === node.type
           && item.handlerVersion === node.typeVersion)
@@ -2113,6 +2175,7 @@ export default {
           return outputs
         }, new Map())
       nodes.forEach(node => {
+        if (node.type === 'mcp_tool') return
         const outputJson = latestRuntimeOutputs.get(node.id)
         if (!outputJson) return
         try {
@@ -2138,6 +2201,7 @@ export default {
         }
       })
       nodes.forEach(node => {
+        if (node.type === 'mcp_tool') return
         const inferred = node.ui?.inferredOutputSchema
         if (!inferred?.schema) return
         const descriptor = this.descriptors.find(item => item.type === node.type
@@ -2323,13 +2387,7 @@ export default {
       return 'running'
     },
     executionStatusLabel() {
-      const labels = {
-        QUEUED: '等待执行', RUNNING: '正在执行', WAITING_APPROVAL: '等待审批',
-        WAITING_TIMER: '等待时间', WAITING_EVENT: '等待事件', RECOVERING: '正在恢复', SUCCEEDED: '运行成功',
-        FAILED: '运行失败', CANCELLED: '已取消', REJECTED: '已拒绝',
-        NEEDS_ATTENTION: '需要人工处理'
-      }
-      return labels[this.debugExecution?.status] || this.debugExecution?.status || '准备运行'
+      return this.debugExecution?.status ? workflowStatusLabel(this.debugExecution.status) : '准备运行'
     }
   },
   created() {
@@ -2341,6 +2399,7 @@ export default {
     document.addEventListener('visibilitychange', this.handleWorkflowVisibility)
   },
   beforeUnmount() {
+    this.executionAdmissionSequence++
     clearTimeout(this.historyTimer)
     this.stopExecutionStream()
     clearTimeout(this.nodeTestPollTimer)
@@ -2537,7 +2596,7 @@ export default {
       const icons = {
         llm: 'Cpu', agent: 'ChatDotRound', llm_classifier: 'MagicStick',
         knowledge_retrieval: 'Collection', http_get: 'Connection', http_request: 'Connection',
-        database_query: 'Coin', condition: 'Switch', parallel: 'Share', join: 'Grid',
+        database_query: 'Coin', mcp_tool: 'Connection', condition: 'Switch', parallel: 'Share', join: 'Grid',
         loop: 'Refresh', wait: 'Timer', approval: 'User', transform: 'Operation',
         artifact: 'DataAnalysis', sub_workflow: 'Finished'
       }
@@ -2555,6 +2614,7 @@ export default {
         http_get: '调用现有 API 连接器',
         http_request: '执行受控外部写请求',
         database_query: '查询现有只读数据源',
+        mcp_tool: '调用当前已审批的只读 MCP 工具，不自动重试',
         condition: '按确定性条件选择分支',
         parallel: '并行执行多条分支',
         join: '汇聚并行分支结果',
@@ -2665,6 +2725,8 @@ export default {
       this.dirty = false
       this.savedDefinitionSnapshot = JSON.stringify(this.definition)
       this.resetHistory()
+      this.testRunError = ''
+      this.refreshExecutionAdmission()
     },
     canvasNodeData(node) {
       const descriptor = this.descriptors.find(item =>
@@ -3918,7 +3980,8 @@ export default {
         AGENT: 'primary_agent',
         KNOWLEDGE_BASE: `knowledge.${nodeId}.1`,
         API_CONNECTOR: `api.${nodeId}`,
-        DATASOURCE: `db.${nodeId}`
+        DATASOURCE: `db.${nodeId}`,
+        MCP_TOOL: `mcp.${nodeId}`
       }
       if (Array.isArray(descriptor.requiredResourceKinds)
           && descriptor.requiredResourceKinds.length) {
@@ -3934,7 +3997,8 @@ export default {
         knowledge_retrieval: {kind: 'KNOWLEDGE_BASE', key: `knowledge.${nodeId}.1`, required: true},
         http_get: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
         http_request: {kind: 'API_CONNECTOR', key: `api.${nodeId}`, required: true},
-        database_query: {kind: 'DATASOURCE', key: `db.${nodeId}`, required: true}
+        database_query: {kind: 'DATASOURCE', key: `db.${nodeId}`, required: true},
+        mcp_tool: {kind: 'MCP_TOOL', key: `mcp.${nodeId}`, required: true}
       }
       const value = defaults[descriptor.type]
       return value ? [{...value}] : []
@@ -4064,6 +4128,7 @@ export default {
       const labels = {
         NODE_CONTRACT: '节点契约',
         API_CONNECTOR: '连接器 Schema',
+        MCP_TOOL: 'MCP 工具契约',
         OPENAPI: 'OpenAPI',
         DATABASE_METADATA: '数据库元数据',
         LLM_STRUCTURED_OUTPUT: '结构化输出',
@@ -4146,6 +4211,30 @@ export default {
       if (!this.datasourceReference) return
       const selected = await this.bindResource(this.datasourceReference, resourceId)
       if (selected) this.selectedInspectorTab = 'config'
+    },
+    async selectMcpTool(resourceId) {
+      if (!this.canEdit || this.resourceLoading || !this.mcpToolReference) return
+      const node = this.selectedNode
+      const reference = this.mcpToolReference
+      // 只采用用户选择时看到的版本，不随绑定请求返回后的目录刷新悄悄升级。
+      const snapshot = mcpSnapshot((this.resourceCatalog.MCP_TOOL || []).find(item => item.resourceId === resourceId))
+      if (!snapshot) {
+        this.$message.warning('工具不可用或快照无效，请刷新目录并确认当前审批版本')
+        return
+      }
+      const selected = await this.bindResource(reference, resourceId)
+      if (!selected || !this.definition.nodes.includes(node)) return
+      node.config = snapshot
+      node.retryPolicy = null
+      node.onError = 'FAIL'
+      delete node.outputSchemaOverride
+      if (this.selectedNode === node) {
+        this.selectedNodeConfig = JSON.stringify(snapshot, null, 2)
+        this.selectedInspectorTab = 'mapping'
+      }
+      this.invalidateSelectedInferredSchema()
+      this.refreshCanvasNodeData()
+      this.markDirty()
     },
     async selectAgentResource(resourceId) {
       if (!this.agentReference) return
@@ -4772,6 +4861,35 @@ export default {
       if (value === undefined || value === null) return '无输出'
       return JSON.stringify(value, null, 2)
     },
+    async refreshExecutionAdmission() {
+      const sequence = ++this.executionAdmissionSequence
+      const definitionId = this.currentDefinition?.id
+      const versionId = this.currentDefinition?.currentPublishedVersionId
+      this.executionAdmission = null
+      this.executionAdmissionLoading = false
+      if (!this.canExecute || !definitionId || !versionId) return false
+      this.executionAdmissionLoading = true
+      try {
+        const response = await getWorkflowExecutionAdmission(definitionId, versionId)
+        if (sequence !== this.executionAdmissionSequence
+          || this.currentDefinition?.id !== definitionId
+          || this.currentDefinition?.currentPublishedVersionId !== versionId) return false
+        if (response.data?.workflowVersionId !== versionId || typeof response.data?.allowed !== 'boolean') {
+          throw new Error('INVALID_ADMISSION')
+        }
+        this.executionAdmission = response.data
+        this.testRunError = ''
+        return response.data.allowed
+      } catch (error) {
+        if (sequence === this.executionAdmissionSequence) {
+          this.executionAdmission = {allowed: false, code: 'CHECK_UNAVAILABLE', workflowVersionId: versionId,
+            reason: '未能完成环境准入检查，请确认后端已更新并重启，再重新检查。'}
+        }
+        return false
+      } finally {
+        if (sequence === this.executionAdmissionSequence) this.executionAdmissionLoading = false
+      }
+    },
     async openTestRun() {
       if (this.canDebug && this.workflowDraftTestAvailability.available) {
         this.openDraftWorkflowTest()
@@ -4792,6 +4910,7 @@ export default {
       this.testApprovalSimulation = {}
       this.testInputSchemaLoading = true
       this.testDialogOpen = true
+      this.refreshExecutionAdmission()
       try {
         const response = await getWorkflowVersion(
           this.currentDefinition.id,
@@ -4840,12 +4959,14 @@ export default {
       this.nodeTestDialogOpen = true
     },
     async startTestRun() {
+      if (this.testStarting || !this.canExecute) return
       if (!this.testInputValidation.valid) {
         this.$message.error(this.testInputValidation.message || '请先修正测试输入')
         return
       }
       this.testStarting = true
       try {
+        if (!await this.refreshExecutionAdmission()) return
         const response = await startWorkflowExecution({
           definitionId: this.currentDefinition.id,
           workflowVersionId: this.currentDefinition.currentPublishedVersionId,
@@ -4860,6 +4981,10 @@ export default {
         this.testDialogOpen = false
         await this.pollExecution()
         this.startExecutionStream()
+      } catch (error) {
+        this.testRunError = typeof error?.message === 'string' && error.message.trim()
+          ? error.message.slice(0, 300)
+          : '未能启动或读取运行状态，请检查执行记录后再操作。'
       } finally {
         this.testStarting = false
       }
@@ -5470,6 +5595,7 @@ export default {
           return
         }
         this.currentDefinition.currentPublishedVersionId = response.data.version.versionId
+        this.refreshExecutionAdmission()
         const contentUnchanged = this.diagnostics
           .some(item => item.code === 'PUBLISH_CONTENT_UNCHANGED')
         if (contentUnchanged) {
@@ -5528,6 +5654,24 @@ export default {
 </script>
 
 <style scoped>
+.execution-admission-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-bg-color);
+}
+
+.execution-admission-strip .el-alert {
+  flex: 1;
+  min-width: 0;
+}
+
+.execution-admission-strip .el-button {
+  flex-shrink: 0;
+}
+
 .artifact-preview-step {
   padding: 6px 0 18px;
   display: grid;

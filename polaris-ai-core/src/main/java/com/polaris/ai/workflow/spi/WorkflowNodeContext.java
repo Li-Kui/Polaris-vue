@@ -16,7 +16,16 @@ public record WorkflowNodeContext(
         JsonNode config,
         Map<String, ResolvedWorkflowResource> resources,
         WorkflowCancellation cancellation,
-        WorkflowToolCallObserver toolCallObserver) {
+        WorkflowToolCallObserver toolCallObserver,
+        String workflowCode) {
+
+    public WorkflowNodeContext(String executionId, String nodeRunId, int attemptNo,
+            Long tenantId, String principalType, String principalId, JsonNode input, JsonNode config,
+            Map<String, ResolvedWorkflowResource> resources, WorkflowCancellation cancellation,
+            WorkflowToolCallObserver toolCallObserver) {
+        this(executionId, nodeRunId, attemptNo, tenantId, principalType, principalId,
+                input, config, resources, cancellation, toolCallObserver, null);
+    }
 
     public WorkflowNodeContext {
         resources = resources == null ? Map.of() : Map.copyOf(resources);

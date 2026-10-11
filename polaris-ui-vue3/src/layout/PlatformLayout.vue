@@ -71,6 +71,10 @@
           <el-icon class="nav-icon"><Connection /></el-icon>
           <span class="nav-text">API 连接器</span>
         </router-link>
+        <router-link v-if="currentUser.role === 'admin'" to="/platform/console/mcp" class="nav-item" :class="{ active: isCurrent('/platform/console/mcp') }">
+          <el-icon class="nav-icon"><Connection /></el-icon>
+          <span class="nav-text">MCP 连接</span>
+        </router-link>
 
         <div class="menu-group-title">管理与用量</div>
         <router-link to="/platform/console/user" class="nav-item" :class="{ active: isCurrent('/platform/console/user') }">

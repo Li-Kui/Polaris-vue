@@ -6,7 +6,7 @@
       <el-alert v-if="error" :title="error" type="error" :closable="false" />
       <WorkflowExecutionInput v-if="!execution" v-model="input" :schema="contract.inputSchema || {}" @validation="validation = $event" />
       <div v-if="execution" class="child-test-result">
-        <strong>{{ statusLabel }}</strong>
+        <strong :title="execution.status">{{ statusLabel }}</strong>
         <small>运行编号：{{ execution.executionId }}</small>
         <p v-if="execution.errorMessage">{{ execution.errorMessage }}</p>
         <p>关闭后任务仍可在工作流运行记录中查看。</p>
@@ -26,6 +26,7 @@
 import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
 import {ElMessageBox} from 'element-plus'
 import WorkflowExecutionInput from './WorkflowExecutionInput.vue'
+import {workflowStatusLabel} from './workflowStatus'
 import {
   cancelWorkflowExecution,
   getWorkflowExecution,
@@ -38,7 +39,7 @@ defineEmits(['update:modelValue'])
 const input=ref({}), validation=ref({valid:false}), execution=ref(null), loading=ref(false), error=ref('')
 let refreshTimer, reconnectTimer, streamController, reconnectAttempt=0, key, requestSnapshot
 const active=computed(()=>execution.value && !['SUCCEEDED','FAILED','CANCELLED','REJECTED'].includes(execution.value.status))
-const statusLabel=computed(()=>({QUEUED:'等待执行',RUNNING:'执行中',RECOVERING:'恢复中',WAITING_TIMER:'等待时间',WAITING_EVENT:'等待子流程或事件',WAITING_APPROVAL:'等待审批',NEEDS_ATTENTION:'需要人工处理',SUCCEEDED:'执行成功',FAILED:'执行失败',CANCELLED:'已取消',REJECTED:'未通过'})[execution.value?.status] || execution.value?.status)
+const statusLabel=computed(()=>workflowStatusLabel(execution.value?.status))
 const outputText=computed(()=>{try{return JSON.stringify(JSON.parse(execution.value.outputJson),null,2)}catch{return execution.value.outputJson}})
 watch(()=>props.contract?.versionId,()=>{stopStream();execution.value=null;input.value={};key=null;requestSnapshot=null;error.value=''})
 watch(()=>props.modelValue,open=>{if(!open)stopStream();else if(execution.value){refresh();startStream()}})

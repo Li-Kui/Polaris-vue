@@ -5,6 +5,8 @@ import java.util.List;
 /** 工作流持久化执行操作的应用边界。 */
 public interface WorkflowExecutionApplicationFacade {
 
+    WorkflowExecutionAdmissionView getAdmission(Long definitionId, String workflowVersionId);
+
     WorkflowExecutionView start(WorkflowExecutionStartCommand command);
 
     WorkflowExecutionView startByCode(WorkflowExecutionByCodeCommand command);

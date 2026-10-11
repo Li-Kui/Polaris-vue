@@ -8,6 +8,7 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import locale from 'element-plus/es/locale/lang/zh-cn'
 
 import '@/assets/styles/index.scss' // global css
+import '@/assets/styles/platform-mcp.scss' // MCP 页面及 Teleport 弹窗
 import App from './App'
 import store from './store'
 import router from './router'

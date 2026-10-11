@@ -5,6 +5,7 @@ import com.polaris.ai.core.context.CallerUtils;
 import com.polaris.ai.workflow.application.*;
 import com.polaris.ai.workflow.compiler.WorkflowDefinitionCompiler;
 import com.polaris.ai.workflow.config.WorkflowProperties;
+import com.polaris.ai.workflow.contract.WorkflowMcpNodeContract;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowCompilationResult;
 import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
@@ -269,6 +270,8 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         if (!compilation.isValid()) {
             return new WorkflowPublishResult(false, null, compilation.diagnostics());
         }
+        List<WorkflowDiagnostic> mcpDiagnostics = WorkflowMcpNodeContract.validatePublication(compilation.plan(), schemaSnapshots);
+        if (!mcpDiagnostics.isEmpty()) return new WorkflowPublishResult(false, null, mcpDiagnostics);
         List<WorkflowDiagnostic> approvalDirectoryDiagnostics = validateApprovalTargets(
                 definition.getDraftJson(), definition.getTenantId());
         if (!approvalDirectoryDiagnostics.isEmpty()) {

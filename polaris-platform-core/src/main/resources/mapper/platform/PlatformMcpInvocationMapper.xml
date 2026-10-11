@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformMcpInvocationMapper">
+    <resultMap id="InvocationResult" type="com.polaris.platform.domain.PlatformMcpInvocation">
+        <id property="invocationId" column="invocation_id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="actorUserId" column="actor_user_id" />
+        <result property="actorName" column="actor_name" />
+        <result property="source" column="source" />
+        <result property="executionId" column="execution_id" />
+        <result property="nodeRunId" column="node_run_id" />
+        <result property="attemptNo" column="attempt_no" />
+        <result property="connectionId" column="connection_id" />
+        <result property="toolId" column="tool_id" />
+        <result property="connectionRevision" column="connection_revision" />
+        <result property="catalogRevision" column="catalog_revision" />
+        <result property="connectionEpoch" column="connection_epoch" />
+        <result property="toolRevision" column="tool_revision" />
+        <result property="structureHash" column="structure_hash" />
+        <result property="status" column="status" />
+        <result property="errorCode" column="error_code" />
+        <result property="callDispatched" column="call_dispatched" />
+        <result property="startedTime" column="started_time" />
+        <result property="finishedTime" column="finished_time" />
+        <result property="durationMs" column="duration_ms" />
+    </resultMap>
+    <insert id="insert">
+        insert into platform_mcp_invocation
+        (invocation_id, tenant_id, actor_user_id, actor_name, source, execution_id, node_run_id, attempt_no, connection_id, tool_id,
+         connection_revision, catalog_revision, connection_epoch, tool_revision, structure_hash,
+         status, call_dispatched, started_time)
+        values
+        (#{invocationId}, #{tenantId}, #{actorUserId}, #{actorName}, #{source}, #{executionId}, #{nodeRunId}, #{attemptNo}, #{connectionId}, #{toolId},
+         #{connectionRevision}, #{catalogRevision}, #{connectionEpoch}, #{toolRevision}, #{structureHash},
+         'STARTED', '0', #{startedTime})
+    </insert>
+    <update id="markDispatched">
+        update platform_mcp_invocation set call_dispatched = '1'
+        where tenant_id = #{tenantId} and invocation_id = #{invocationId} and status = 'STARTED' and call_dispatched = '0'
+    </update>
+    <update id="finish">
+        update platform_mcp_invocation set status = #{status}, error_code = #{errorCode},
+            finished_time = #{finishedTime}, duration_ms = #{durationMs}
+        where tenant_id = #{tenantId} and invocation_id = #{invocationId} and status = 'STARTED'
+    </update>
+    <select id="selectList" resultMap="InvocationResult">
+        select invocation_id, tenant_id, actor_user_id, actor_name, source, execution_id, node_run_id, attempt_no, connection_id, tool_id,
+               connection_revision, catalog_revision, connection_epoch, tool_revision, structure_hash,
+               status, error_code, call_dispatched, started_time, finished_time, duration_ms
+        from platform_mcp_invocation where tenant_id = #{tenantId}
+        <if test="connectionId != null">and connection_id = #{connectionId}</if>
+        <if test="toolId != null">and tool_id = #{toolId}</if>
+        <if test="status != null and status != ''">and status = #{status}</if>
+        order by started_time desc, invocation_id desc
+    </select>
+</mapper>

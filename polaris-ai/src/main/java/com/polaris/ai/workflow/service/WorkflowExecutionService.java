@@ -82,6 +82,59 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
     }
 
     @Override
+    public WorkflowExecutionAdmissionView getAdmission(Long definitionId, String workflowVersionId) {
+        WorkflowDefinition definition = definitionId == null ? null : definitionMapper.selectById(definitionId);
+        if (definition == null || !"0".equals(definition.getDelFlag())) {
+            throw new ServiceException("工作流定义不存在或无权访问", 404);
+        }
+        currentPrincipal(definition);
+        String versionId = workflowVersionId == null || workflowVersionId.isBlank()
+                ? definition.getCurrentPublishedVersionId() : workflowVersionId;
+        if (versionId == null || versionId.isBlank()) {
+            return new WorkflowExecutionAdmissionView(false, "NOT_PUBLISHED", "请先发布工作流版本", null);
+        }
+        WorkflowVersion version = versionMapper.selectByVersionId(versionId);
+        if (version == null || !definition.getId().equals(version.getDefinitionId())
+                || !"PUBLISHED".equals(version.getStatus())) {
+            throw new ServiceException("工作流发布版本不存在、已退役或不属于当前定义");
+        }
+        WorkflowExecutionPlan plan = readPlan(version.getExecutionPlanJson());
+        if (!Objects.equals(version.getContentHash(), plan.getContentHash())) {
+            throw new ServiceException("执行计划哈希不一致，拒绝运行");
+        }
+        try { requireStartEnabled(); }
+        catch (ServiceException denied) {
+            return new WorkflowExecutionAdmissionView(false, "ENVIRONMENT_DISABLED", denied.getMessage(), versionId);
+        }
+        String denied = planExecutionDeniedReason(plan, definition);
+        if (denied != null) {
+            return new WorkflowExecutionAdmissionView(false, "NODE_EXECUTION_DISABLED", denied, versionId);
+        }
+        if (plan.getNodes().stream().anyMatch(node -> "mcp_tool".equals(node.getType()))
+                && (!CallerUtils.getContext().isTenantAdmin()
+                || !"PLATFORM_USER".equals(currentPrincipal(definition).type()))) {
+            return new WorkflowExecutionAdmissionView(false, "MCP_ACTOR_DENIED",
+                    "MCP 工作流仅允许当前租户管理员执行，不接受分享或 API Key 身份", versionId);
+        }
+        return new WorkflowExecutionAdmissionView(true, "ALLOWED",
+                "环境准入通过；启动和派发前仍会复查资源绑定、工具审批及实际权限", versionId);
+    }
+
+    private String planExecutionDeniedReason(WorkflowExecutionPlan plan, WorkflowDefinition definition) {
+        for (var node : plan.getNodes()) {
+            String denied = properties.nodeExecutionDeniedReason(node.getType(), node.getHandlerVersion(),
+                    node.getSideEffect(), definition.getTenantId(), definition.getWorkflowCode());
+            if (denied != null) return denied;
+        }
+        return null;
+    }
+
+    private void requirePlanAdmission(WorkflowExecutionPlan plan, WorkflowDefinition definition) {
+        String denied = planExecutionDeniedReason(plan, definition);
+        if (denied != null) throw new ServiceException(denied);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkflowExecutionView start(WorkflowExecutionStartCommand command) {
         requireStartEnabled();
@@ -198,6 +251,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             String requestedEnvironment,
             String requestedIdempotencyKey,
             JsonNode approvalSimulation) {
+        currentPrincipal(definition);
         String versionId = requestedVersionId;
         if (versionId == null || versionId.isBlank()) {
             versionId = definition.getCurrentPublishedVersionId();
@@ -214,11 +268,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("执行计划哈希不一致，拒绝运行");
         }
-        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
-                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
-                definition.getTenantId(), definition.getWorkflowCode()))) {
-            throw new ServiceException("当前环境未启用有副作用的工作流节点");
-        }
+        requirePlanAdmission(plan, definition);
         JsonNode input = requestedInput == null
                 ? objectMapper.createObjectNode() : requestedInput;
         String inputJson = writeJson(input);
@@ -352,11 +402,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("子工作流执行计划哈希不一致");
         }
-        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
-                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
-                definition.getTenantId(), definition.getWorkflowCode()))) {
-            throw new ServiceException("当前环境未启用子工作流中的写节点");
-        }
+        requirePlanAdmission(plan, definition);
         JsonNode safeInput = input == null ? objectMapper.createObjectNode() : input;
         String inputJson = writeJson(safeInput);
         if (inputJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INPUT_BYTES) {

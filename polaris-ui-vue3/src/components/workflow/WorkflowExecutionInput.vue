@@ -29,7 +29,7 @@
         </el-form>
         <el-empty
           v-else
-          description="该工作流没有声明输入字段，可直接运行"
+          description="该工作流没有声明输入字段，无需填写参数"
           :image-size="64"
         >
           <el-button type="primary" plain @click="mode = 'json'">切换到 JSON 模式</el-button>

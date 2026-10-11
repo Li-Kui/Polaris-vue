@@ -74,6 +74,14 @@ export function getWorkflowVersion(definitionId, versionId) {
   })
 }
 
+export function getWorkflowExecutionAdmission(definitionId, workflowVersionId) {
+  return request({
+    url: `/ai/workflow/definitions/${definitionId}/execution-admission`,
+    method: 'get',
+    params: {workflowVersionId}
+  })
+}
+
 export function rollbackWorkflowDraft(definitionId, versionId, expectedRevision) {
   return request({
     url: `/ai/workflow/definitions/${definitionId}/versions/${versionId}/rollback`,

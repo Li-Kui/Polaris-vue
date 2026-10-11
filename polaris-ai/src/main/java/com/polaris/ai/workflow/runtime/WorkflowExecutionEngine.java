@@ -440,7 +440,7 @@ public class WorkflowExecutionEngine {
                     input, compensation.getConfig(),
                     resourceResolver.forNode(compensation, resources), compensationCancellation,
                     toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
-                            nodeRunId, compensation.getId()));
+                            nodeRunId, compensation.getId()), execution.getWorkflowCode());
             try {
                 long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(
                         Math.min(compensation.getTimeoutSeconds(), 900));
@@ -744,7 +744,7 @@ public class WorkflowExecutionEngine {
                 execution.getTenantId(), execution.getPrincipalType(), execution.getPrincipalId(),
                 input, node.getConfig(), resourceResolver.forNode(node, resources), cancellation,
                 toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
-                        nodeRunId, node.getId()));
+                        nodeRunId, node.getId()), execution.getWorkflowCode());
         Future<WorkflowNodeResult> future = nodeExecutor.submit(() -> handler.execute(context));
         long nodeDeadline = Math.min(workflowDeadline,
                 System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(node.getTimeoutSeconds()));
@@ -1199,7 +1199,7 @@ public class WorkflowExecutionEngine {
                     resourceResolver.forNode(node, resources),
                     cancellation,
                     toolCallObserver(execution.getExecutionId(), runnerId, fencingToken,
-                            nodeRunId, node.getId()));
+                            nodeRunId, node.getId()), execution.getWorkflowCode());
             try {
                 WorkflowNodeResult result = executeWithHeartbeat(
                         handler, context, node.getTimeoutSeconds(), execution.getExecutionId(),
@@ -1221,8 +1221,9 @@ public class WorkflowExecutionEngine {
                 run.setErrorCode(cancelled
                         ? WorkflowErrorCode.NODE_CANCELLED.name() : errorCode(e));
                 run.setErrorMessage(safeMessage(e));
+                boolean notDispatched = e instanceof WorkflowNodeExecutionException failure && failure.notDispatched();
                 run.setSideEffectStatus("WRITE".equals(node.getSideEffect())
-                        ? "UNCONFIRMED" : "NONE");
+                        ? (notDispatched ? "NOT_DISPATCHED" : "UNCONFIRMED") : "NONE");
                 run.setFinishTime(new Date());
                 persistence.failNode(execution.getExecutionId(), runnerId, fencingToken, run);
                 if (cancelled) {
@@ -1230,8 +1231,12 @@ public class WorkflowExecutionEngine {
                             "工作流执行已取消", false);
                 }
                 if ("WRITE".equals(node.getSideEffect())) {
+                    // 明确的派发前失败不伪装成外部结果未知，但写节点仍不自动重试。
+                    if (notDispatched) throw new NodeFailure(run.getErrorCode(), run.getErrorMessage(), false);
                     throw new NodeFailure(WorkflowErrorCode.SIDE_EFFECT_UNCONFIRMED.name(),
-                            "写节点执行结果不确定，需要人工确认", true);
+                            e instanceof WorkflowNodeExecutionException
+                                    ? "写节点执行结果不确定，需要人工确认；" + run.getErrorCode() + "：" + run.getErrorMessage()
+                                    : "写节点执行结果不确定，需要人工确认", true);
                 }
                 if (attempt < maxAttempts && isRetryable(node, errorCode(e))) {
                     long delayMs = retryDelay(node, attempt);
@@ -2052,6 +2057,7 @@ public class WorkflowExecutionEngine {
 
     private String errorCode(Throwable error) {
         if (error instanceof NodeFailure failure) return failure.code;
+        if (error instanceof WorkflowNodeExecutionException failure) return failure.code();
         return WorkflowErrorCode.INTERNAL_ERROR.name();
     }
 

@@ -179,6 +179,12 @@ export const constantRoutes = [
         meta: { title: 'API 连接器', icon: 'connection' }
       },
       {
+        path: 'mcp',
+        component: () => import('@/views/platform/mcp/index.vue'),
+        name: 'PlatformMcp',
+        meta: { title: 'MCP 连接', icon: 'connection' }
+      },
+      {
         path: 'user',
         component: () => import('@/views/platform/user/index.vue'),
         name: 'PlatformUser',

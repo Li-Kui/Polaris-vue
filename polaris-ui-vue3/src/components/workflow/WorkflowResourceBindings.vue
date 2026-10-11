@@ -113,6 +113,7 @@
             <el-option label="知识库" value="KNOWLEDGE_BASE" />
             <el-option label="API 连接器" value="API_CONNECTOR" />
             <el-option label="外部数据源" value="DATASOURCE" />
+            <el-option label="MCP 工具" value="MCP_TOOL" />
           </el-select>
         </el-form-item>
         <el-form-item label="逻辑键">
@@ -271,7 +272,7 @@ export default {
       await this.loadBindings()
     },
     async loadCatalogs() {
-      const kinds = ['MODEL', 'IMAGE_MODEL', 'AGENT', 'KNOWLEDGE_BASE', 'API_CONNECTOR', 'DATASOURCE']
+      const kinds = ['MODEL', 'IMAGE_MODEL', 'AGENT', 'KNOWLEDGE_BASE', 'API_CONNECTOR', 'DATASOURCE', 'MCP_TOOL']
       const responses = await Promise.all(kinds.map(kind => listWorkflowResources({
         kind,
         environment: this.environment
@@ -316,7 +317,8 @@ export default {
         AGENT: 'AI 智能体',
         KNOWLEDGE_BASE: '知识库',
         API_CONNECTOR: 'API 连接器',
-        DATASOURCE: '外部数据源'
+        DATASOURCE: '外部数据源',
+        MCP_TOOL: 'MCP 工具'
       }
       return labels[resourceKind] || resourceKind
     }
