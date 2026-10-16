@@ -1521,7 +1521,8 @@ public class WorkflowDefinitionValidator {
                 return;
             }
             boolean expression = !isBlank(binding.getExpression());
-            boolean literal = binding.getValue() != null;
+            // POJO 往返序列化会为表达式补上 value:null；仍保留独立 null 常量的语义。
+            boolean literal = binding.getValue() != null && (!expression || !binding.getValue().isNull());
             if (expression == literal) {
                 diagnostics.add(error("VALUE_BINDING_AMBIGUOUS", nodeId, path + "." + key,
                         "映射必须且只能配置expression或value之一"));

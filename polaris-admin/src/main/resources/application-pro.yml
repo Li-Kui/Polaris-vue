@@ -101,6 +101,8 @@ spring:
 
 #兜底的AI配置
 ai:
+    knowledge:
+        vector-cleanup-retention-minutes: 1440
     tools:
         web-search:
             api-key: ${AI_WEB_SEARCH_API_KEY:}

@@ -10,6 +10,9 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface WorkflowResourceBindingMapper extends BaseMapper<WorkflowResourceBinding> {
 
+    @Select("SELECT * FROM ai_workflow_resource_binding WHERE id = #{id} FOR UPDATE")
+    WorkflowResourceBinding selectByIdForUpdate(@Param("id") Long id);
+
     @Select("SELECT * FROM ai_workflow_resource_binding "
             + "WHERE owner_type = #{ownerType} AND owner_id = #{ownerId} "
             + "AND scope_type = #{scopeType} AND scope_id = #{scopeId} "

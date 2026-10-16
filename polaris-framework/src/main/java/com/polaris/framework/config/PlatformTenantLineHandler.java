@@ -16,7 +16,7 @@ public class PlatformTenantLineHandler implements TenantLineHandler {
     /** 需要强制租户隔离的数据表（严格租户隔离，各租户数据完全独立） */
     private static final Set<String> TENANT_TABLES = Set.of(
         "ai_model_config", "ai_provider_connection", "ai_knowledge_base",
-        "ai_agent", "ai_conversation",
+        "ai_agent", "ai_conversation", "ai_document_index_snapshot", "ai_knowledge_rebuild_task", "ai_knowledge_vector_collection",
         "platform_api_key", "platform_datasource", "platform_datasource_version",
         "platform_api_connector",
         "platform_mcp_connection",

@@ -23,6 +23,19 @@ public class DocumentRecognitionResult implements Serializable {
     @Schema(description = "是否有识别挂载的文档")
     private boolean hasRecognizedDocs;
 
+    private List<KnowledgeCitation> knowledgeCitations = List.of();
+    private String retrievalStrategy = "VECTOR_V1";
+    private List<String> missingRelatedDocumentIds = List.of();
+    public String getRetrievalStrategy() {return retrievalStrategy;}
+    public void setRetrievalStrategy(String value) {retrievalStrategy = value;}
+    public List<String> getMissingRelatedDocumentIds() {return missingRelatedDocumentIds;}
+    public void setMissingRelatedDocumentIds(List<String> value) {missingRelatedDocumentIds = List.copyOf(value);}
+
+    public List<KnowledgeCitation> getKnowledgeCitations() {return knowledgeCitations;}
+    public void setKnowledgeCitations(List<KnowledgeCitation> citations) {
+        knowledgeCitations = citations == null ? List.of() : List.copyOf(citations);
+    }
+
     public DocumentRecognitionResult() {
     }
 

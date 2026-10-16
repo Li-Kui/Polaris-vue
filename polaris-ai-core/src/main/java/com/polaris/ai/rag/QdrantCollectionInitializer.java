@@ -46,6 +46,48 @@ final class QdrantCollectionInitializer
         }
     }
 
+    /** 独立重建候选只接受本次创建成功；超时或同名冲突不复核接管、不自动重试。 */
+    static void initializeNew(QdrantClient client, AiVectorStoreProperties.QdrantProperties properties, String ownershipMarker)
+    {
+        validate(properties);
+        if (ownershipMarker == null || !ownershipMarker.matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("新候选归属标记无效");
+        if (!properties.isInitializeSchema()) {
+            throw new IllegalStateException("新候选要求 initialize-schema=true");
+        }
+        Collections.VectorParams params = Collections.VectorParams.newBuilder()
+                .setSize(properties.getDimension()).setDistance(Collections.Distance.Cosine)
+                .setOnDisk(properties.isOnDisk()).build();
+        Collections.CreateCollection request = Collections.CreateCollection.newBuilder()
+                .setCollectionName(properties.getCollectionName())
+                .setVectorsConfig(Collections.VectorsConfig.newBuilder().setParams(params))
+                .putMetadata(OWNERSHIP_FIELD, io.qdrant.client.ValueFactory.value(ownershipMarker)).build();
+        Collections.CollectionOperationResponse created = await(client.createCollectionAsync(request,
+                properties.getTimeout()), "创建全新 Qdrant 候选");
+        if (created == null || !created.getResult()) {
+            throw new IllegalStateException("全新 Qdrant 候选未确认创建成功");
+        }
+        Collections.CollectionInfo info = await(client.getCollectionInfoAsync(properties.getCollectionName(),
+                properties.getTimeout()), "核验全新 Qdrant 候选");
+        validateCollection(info, properties);
+        if (ownerMatches(info,ownershipMarker) != AiVectorStoreResolver.OwnershipCheck.MATCHED)
+            throw new IllegalStateException("远端归属标记未确认，停止新候选；不会降级接管");
+        if (properties.isCreatePayloadIndexes()) {
+            createPayloadIndexIfMissing(client, info, properties.getCollectionName(), KNOWLEDGE_BASE_ID, properties.getTimeout());
+            createPayloadIndexIfMissing(client, info, properties.getCollectionName(), DOCUMENT_ID, properties.getTimeout());
+        }
+    }
+
+    static final String OWNERSHIP_FIELD = "polaris_knowledge_owner_v1";
+
+    static AiVectorStoreResolver.OwnershipCheck ownerMatches(Collections.CollectionInfo info,String expected) {
+        if (info == null || !info.hasConfig() || !info.getConfig().containsMetadata(OWNERSHIP_FIELD))
+            return AiVectorStoreResolver.OwnershipCheck.MARKER_MISSING;
+        var actual = info.getConfig().getMetadataOrThrow(OWNERSHIP_FIELD);
+        return actual.hasStringValue() && expected.equals(actual.getStringValue())
+                ? AiVectorStoreResolver.OwnershipCheck.MATCHED : AiVectorStoreResolver.OwnershipCheck.MARKER_MISMATCH;
+    }
+
     private static void createCollection(QdrantClient client, AiVectorStoreProperties.QdrantProperties properties)
     {
         Collections.VectorParams vectorParams = Collections.VectorParams.newBuilder()

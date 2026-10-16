@@ -27,7 +27,9 @@ public class AiVectorStoreResolver
     private final AiVectorStoreProperties properties;
     private final EmbeddingRuntimeGateway runtimeGateway;
     private final QdrantClient qdrantClient;
+    private final StorageIdentity storageIdentity;
     private final Map<String, StoreBinding> stores = new ConcurrentHashMap<>();
+    private final Map<String, String> localOwnership = new ConcurrentHashMap<>();
 
     public AiVectorStoreResolver(
             AiVectorStoreProperties properties,
@@ -38,6 +40,12 @@ public class AiVectorStoreResolver
         this.properties = properties;
         this.runtimeGateway = runtimeGateway;
         this.qdrantClient = qdrantClientProvider.getIfAvailable();
+        // 冻结客户端初始化时的路由；不保存 API key，不将主机摘要冒充不可变集群身份。
+        String route = properties.getType() == AiVectorStoreProperties.Type.MEMORY
+                ? "MEMORY|" + java.util.UUID.randomUUID()
+                : "QDRANT|" + properties.getQdrant().getHost().trim().toLowerCase(java.util.Locale.ROOT)
+                    + "|" + properties.getQdrant().getPort() + "|" + properties.getQdrant().isUseTls();
+        this.storageIdentity = new StorageIdentity(properties.getType().name(), routeDigest(route));
         if (properties.getType() == AiVectorStoreProperties.Type.MEMORY) {
             this.stores.put(properties.getQdrant().getCollectionName(),
                     new StoreBinding(defaultStore, properties.getQdrant().getDimension()));
@@ -76,6 +84,107 @@ public class AiVectorStoreResolver
                         binding.descriptor().dimension()),
                 collectionName.trim());
     }
+
+    /** 仅用于已登记的新重建候选，不能复用本机缓存或接管远端同名集合。 */
+    public VectorContext resolveNewCollection(AiKnowledgeBase knowledgeBase, String collectionName, String ownershipMarker)
+    {
+        if (knowledgeBase == null || collectionName == null || !collectionName.matches("[A-Za-z0-9_-]{1,255}")) {
+            throw new IllegalArgumentException("新候选标识无效");
+        }
+        if (ownershipMarker == null || !ownershipMarker.matches("[a-f0-9]{64}"))
+            throw new IllegalArgumentException("新候选归属标记无效");
+        requireStorageRoute();
+        if (stores.containsKey(collectionName)) throw new IllegalStateException("新候选不能复用已有 collection");
+        EmbeddingRuntimeBinding binding = resolveBinding(knowledgeBase);
+        EmbeddingStore<TextSegment> store;
+        if (properties.getType() == AiVectorStoreProperties.Type.MEMORY) {
+            store = new InMemoryEmbeddingStore<>();
+        } else {
+            if (qdrantClient == null) throw new IllegalStateException("Qdrant 客户端未初始化");
+            var copy = copyQdrantProperties();
+            copy.setCollectionName(collectionName); copy.setDimension(binding.descriptor().dimension());
+            QdrantCollectionInitializer.initializeNew(qdrantClient, copy, ownershipMarker);
+            store = buildQdrantStore(collectionName);
+        }
+        if (stores.putIfAbsent(collectionName, new StoreBinding(store, binding.descriptor().dimension())) != null)
+            throw new IllegalStateException("新候选本机绑定已变化");
+        if (properties.getType() == AiVectorStoreProperties.Type.MEMORY) localOwnership.put(collectionName,ownershipMarker);
+        return new VectorContext(binding.descriptor(), binding.model(), store, collectionName);
+    }
+
+    /** 只读取一个已登记集合的配置，不解析模型、不创建集合、不补写标记、不读取文档正文。 */
+    public OwnershipCheck verifyCollectionOwner(String collectionName,String ownershipMarker) {
+        if (collectionName == null || !collectionName.matches("[A-Za-z0-9_-]{1,255}")
+                || ownershipMarker == null || !ownershipMarker.matches("[a-f0-9]{64}")) return OwnershipCheck.UNVERIFIED;
+        try {
+            requireStorageRoute();
+            if (properties.getType() == AiVectorStoreProperties.Type.MEMORY)
+                return ownershipMarker.equals(localOwnership.get(collectionName)) && stores.containsKey(collectionName)
+                        ? OwnershipCheck.LOCAL_MATCHED : OwnershipCheck.LOCAL_MISSING;
+            if (qdrantClient == null) return OwnershipCheck.UNAVAILABLE;
+            var info = qdrantClient.getCollectionInfoAsync(collectionName,properties.getQdrant().getTimeout())
+                    .get(properties.getQdrant().getTimeout().toMillis(),java.util.concurrent.TimeUnit.MILLISECONDS);
+            return QdrantCollectionInitializer.ownerMatches(info,ownershipMarker);
+        } catch (InterruptedException e) {Thread.currentThread().interrupt();return OwnershipCheck.UNAVAILABLE;}
+        catch (RuntimeException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            // 404/权限/网络/不支持等不确定结果均不能解释为安全可删，不复制远端异常正文。
+            return OwnershipCheck.UNAVAILABLE;
+        }
+    }
+
+    public enum OwnershipCheck {MATCHED, LOCAL_MATCHED, LOCAL_MISSING, MARKER_MISSING, MARKER_MISMATCH, UNVERIFIED, UNAVAILABLE}
+
+    /** 仅由已持久领取的清理任务调用；必须处于可信、无外部改名/恢复/替换的受控存储窗口。 */
+    public CollectionDeletion deleteOwnedCollection(String name,String marker,java.util.function.BooleanSupplier dispatchGuard) {
+        if (name==null || !name.matches("[A-Za-z0-9_-]{1,255}") || marker==null || !marker.matches("[a-f0-9]{64}") || dispatchGuard==null)
+            return CollectionDeletion.OWNERSHIP_REJECTED;
+        try {requireStorageRoute();} catch(RuntimeException e) {return CollectionDeletion.OWNERSHIP_REJECTED;}
+        if (properties.getType()!=AiVectorStoreProperties.Type.QDRANT) return CollectionDeletion.OWNERSHIP_REJECTED;
+        if (qdrantClient==null) return CollectionDeletion.PRECHECK_UNAVAILABLE;
+        var configured=properties.getQdrant().getTimeout();
+        var timeout=configured==null || configured.isNegative() || configured.isZero() || configured.compareTo(java.time.Duration.ofSeconds(10))>0
+                ?java.time.Duration.ofSeconds(10):configured;
+        try {
+            var info=qdrantClient.getCollectionInfoAsync(name,timeout).get(Math.max(1,timeout.toMillis()),java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (QdrantCollectionInitializer.ownerMatches(info,marker)!=OwnershipCheck.MATCHED) return CollectionDeletion.OWNERSHIP_REJECTED;
+        } catch(InterruptedException e) {Thread.currentThread().interrupt();return CollectionDeletion.PRECHECK_UNAVAILABLE;}
+        catch(RuntimeException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {return CollectionDeletion.PRECHECK_UNAVAILABLE;}
+        // guard 必须独立提交派发意图；提交异常也不能当作“确定没有派发，可以重试”。
+        try {if (!dispatchGuard.getAsBoolean()) return CollectionDeletion.PRECHECK_CHANGED;}
+        catch(RuntimeException e) {return CollectionDeletion.DELETE_UNCONFIRMED;}
+        try {
+            requireStorageRoute();
+            var result=qdrantClient.deleteCollectionAsync(name,timeout).get(Math.max(1,timeout.toMillis()),java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (result==null || !result.getResult()) return CollectionDeletion.DELETE_UNCONFIRMED;
+            Boolean exists=qdrantClient.collectionExistsAsync(name,timeout).get(Math.max(1,timeout.toMillis()),java.util.concurrent.TimeUnit.MILLISECONDS);
+            if (!Boolean.FALSE.equals(exists)) return CollectionDeletion.DELETE_UNCONFIRMED;
+            stores.remove(name);localOwnership.remove(name);
+            return CollectionDeletion.DELETED;
+        } catch(InterruptedException e) {Thread.currentThread().interrupt();return CollectionDeletion.DELETE_UNCONFIRMED;}
+        catch(RuntimeException | java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {return CollectionDeletion.DELETE_UNCONFIRMED;}
+    }
+    public enum CollectionDeletion {DELETED, PRECHECK_UNAVAILABLE, OWNERSHIP_REJECTED, PRECHECK_CHANGED, DELETE_UNCONFIRMED}
+
+    private void requireStorageRoute() {
+        String configuredRoute = properties.getType() == AiVectorStoreProperties.Type.QDRANT
+                ? "QDRANT|" + properties.getQdrant().getHost().trim().toLowerCase(java.util.Locale.ROOT)
+                    + "|" + properties.getQdrant().getPort() + "|" + properties.getQdrant().isUseTls() : null;
+        if (!storageIdentity.type().equals(properties.getType().name())
+                || configuredRoute != null && !storageIdentity.key().equals(routeDigest(configuredRoute)))
+            throw new IllegalStateException("向量存储路由已变化，请重启后再提交新构建");
+    }
+
+    public StorageIdentity storageIdentity() {return storageIdentity;}
+
+    private static String routeDigest(String value)
+    {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {throw new IllegalStateException(e);}
+    }
+
+    public record StorageIdentity(String type, String key) { }
 
     /**
      * Resolves an already active collection without requiring the currently configured model.

@@ -1,12 +1,11 @@
 package com.polaris.ai.workflow.service;
 
 import com.polaris.ai.workflow.node.WorkflowKnowledgeResourceHandle;
+import com.polaris.ai.knowledge.KnowledgeRetrievalService;
 import com.polaris.ai.workflow.spi.ResolvedWorkflowResource;
 import com.polaris.ai.workflow.spi.WorkflowNodeContext;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingMatch;
-import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
-import dev.langchain4j.store.embedding.filter.Filter;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -18,8 +17,6 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 
-import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
-
 /** 知识库节点的检索编排服务；节点处理器不直接依赖具体向量库查询细节。 */
 @Service
 public class WorkflowKnowledgeRetrievalService {
@@ -28,9 +25,11 @@ public class WorkflowKnowledgeRetrievalService {
     private static final int MAX_CANDIDATE_LIMIT = 50;
 
     private final ObjectMapper objectMapper;
+    private final KnowledgeRetrievalService retrievalService;
 
-    public WorkflowKnowledgeRetrievalService(ObjectMapper objectMapper) {
+    public WorkflowKnowledgeRetrievalService(ObjectMapper objectMapper, KnowledgeRetrievalService retrievalService) {
         this.objectMapper = objectMapper;
+        this.retrievalService = retrievalService;
     }
 
     public ObjectNode retrieve(WorkflowNodeContext context) {
@@ -42,6 +41,8 @@ public class WorkflowKnowledgeRetrievalService {
         JsonNode config = context.config() == null ? objectMapper.createObjectNode() : context.config();
         String mode = retrievalMode(config);
         int resultLimit = bounded(config.path("resultLimit").asInt(5), 1, MAX_RESULT_LIMIT);
+        List<String> related = relatedDocumentIds(context.input());
+        KnowledgeRetrievalService.validateRelatedPlan(related, documentIds, resultLimit);
         int candidateLimit = bounded(Math.max(resultLimit * 4, 12), resultLimit, MAX_CANDIDATE_LIMIT);
         int maxChunksPerDocument = bounded(config.path("maxChunksPerDocument").asInt(3), 1, 10);
         int maxContextTokens = contextTokenBudget(config);
@@ -56,6 +57,7 @@ public class WorkflowKnowledgeRetrievalService {
         if (resources.isEmpty()) {
             throw new IllegalArgumentException("请至少选择一个可用的知识库");
         }
+        if (!related.isEmpty() && resources.size() != 1) throw new IllegalArgumentException("显式关联补全仅支持单一知识库，不能跨库扩张范围");
 
         List<Candidate> candidates = new ArrayList<>();
         Map<String, String> indexRevisions = new LinkedHashMap<>();
@@ -67,20 +69,10 @@ public class WorkflowKnowledgeRetrievalService {
                 throw new IllegalArgumentException("知识库资源无法用于检索: " + resource.key());
             }
             try {
-                var embedding = handle.vectorContext().embeddingModel().embed(searchText).content();
-                Filter filter = metadataKey("knowledge_base_id")
-                        .isEqualTo(handle.knowledge().getId().toString());
-                if (!documentIds.isEmpty()) {
-                    filter = filter.and(metadataKey("doc_id").isIn(documentIds));
-                }
-                EmbeddingSearchRequest request = EmbeddingSearchRequest.builder()
-                        .queryEmbedding(embedding)
-                        .maxResults(candidateLimit)
-                        .minScore(minScore)
-                        .filter(filter)
-                        .build();
-                List<EmbeddingMatch<TextSegment>> matches = handle.vectorContext()
-                        .embeddingStore().search(request).matches();
+                List<EmbeddingMatch<TextSegment>> matches = (related.isEmpty() ? retrievalService.search(
+                        handle.knowledge(), handle.vectorContext(), searchText, candidateLimit, minScore,
+                        documentIds) : retrievalService.search(handle.knowledge(), handle.vectorContext(), searchText,
+                        candidateLimit, minScore, documentIds, related)).matches();
                 if (matches != null) {
                     for (EmbeddingMatch<TextSegment> match : matches) {
                         if (match == null || match.embedded() == null
@@ -88,12 +80,12 @@ public class WorkflowKnowledgeRetrievalService {
                                 || !Double.isFinite(match.score())
                                 || match.embedded().text() == null
                                 || match.embedded().text().isBlank()) continue;
-                        candidates.add(candidate(resource, handle, match));
+                        candidates.add(candidate(resource, handle, match, !related.isEmpty()));
                     }
                 }
                 successfulSourceCount++;
             } catch (RuntimeException error) {
-                if (!allowDegradation) throw error;
+                if (!allowDegradation || !related.isEmpty()) throw error;
                 sourceFailures.add(new SourceFailure(resource.key(), "SOURCE_UNAVAILABLE"));
             }
             Object revision = resource.attributes().get("indexVersion");
@@ -110,15 +102,25 @@ public class WorkflowKnowledgeRetrievalService {
                 config.path("emptyPolicy").asString("CONTINUE"))) {
             throw new IllegalStateException("没有找到符合条件的知识库资料");
         }
-        return output(context, query, mode, traceId, resources.size(), successfulSourceCount,
+        ObjectNode result = output(context, query, mode, traceId, resources.size(), successfulSourceCount,
                 indexRevisions, sourceFailures, selected, selection.truncationReasons(),
                 maxContextTokens, elapsedMillis(startedAt));
+        if (!related.isEmpty()) {
+            List<String> selectedIds = selected.stream().map(Candidate::documentId).distinct().toList();
+            List<String> missing = related.stream().filter(id -> !selectedIds.contains(id)).toList();
+            ObjectNode coverage = ((ObjectNode) result.path("retrievalInfo")).putObject("relatedCoverage");
+            coverage.put("strategy", "EXPLICIT_RELATED_V1"); coverage.put("requestedDocuments", related.size());
+            coverage.put("selectedDocuments", related.size() - missing.size()); coverage.put("evidenceSupportVerified", false);
+            ArrayNode missingIds = coverage.putArray("missingDocumentIds"); missing.forEach(missingIds::add);
+            if (!missing.isEmpty()) { result.put("complete", false); if (!selected.isEmpty()) result.put("state", "PARTIAL"); }
+        }
+        return result;
     }
 
     private Candidate candidate(
             ResolvedWorkflowResource resource,
             WorkflowKnowledgeResourceHandle handle,
-            EmbeddingMatch<TextSegment> match) {
+            EmbeddingMatch<TextSegment> match, boolean relatedCoverage) {
         var metadata = match.embedded().metadata();
         String documentId = metadata == null ? "" : text(metadata.getString("doc_id"));
         String documentName = metadata == null ? "" : text(metadata.getString("doc_name"));
@@ -130,12 +132,17 @@ public class WorkflowKnowledgeRetrievalService {
         }
         String stableKey = knowledgeId + ":" + documentId + ":" + chunkNo + ":"
                 + digest(match.embedded().text());
+        int priority = 99;
+        if (relatedCoverage && metadata != null) {
+            String value = Objects.toString(metadata.toMap().get("coverage_priority"), "99");
+            if (value.matches("[0-3]")) priority = Integer.parseInt(value);
+        }
         return new Candidate(
                 stableKey, bounded(match.score(), 0, 1), match.embedded().text(), resource.key(),
                 knowledgeId, text(handle.knowledge().getName()),
                 documentId, documentName, chunkNo,
                 handle.knowledge().getIndexVersion() == null
-                        ? "" : String.valueOf(handle.knowledge().getIndexVersion()));
+                        ? "" : String.valueOf(handle.knowledge().getIndexVersion()), priority);
     }
 
     private Selection selectCandidates(
@@ -145,7 +152,7 @@ public class WorkflowKnowledgeRetrievalService {
             int maxContextTokens) {
         Map<String, Candidate> unique = new LinkedHashMap<>();
         candidates.stream()
-                .sorted(Comparator.comparingDouble(Candidate::score).reversed())
+                .sorted(Comparator.comparingInt(Candidate::priority).thenComparing(Comparator.comparingDouble(Candidate::score).reversed()))
                 .forEach(candidate -> unique.putIfAbsent(
                         candidate.knowledgeSourceId() + ":" + candidate.documentId() + ":"
                                 + digest(candidate.content()), candidate));
@@ -185,7 +192,7 @@ public class WorkflowKnowledgeRetrievalService {
         return new Candidate(candidate.id(), candidate.score(), content, candidate.resourceKey(),
                 candidate.knowledgeSourceId(), candidate.knowledgeSourceName(),
                 candidate.documentId(), candidate.documentName(), candidate.chunkNo(),
-                candidate.indexRevision());
+                candidate.indexRevision(), candidate.priority());
     }
 
     private ObjectNode output(
@@ -312,6 +319,18 @@ public class WorkflowKnowledgeRetrievalService {
         return List.copyOf(result);
     }
 
+    private static List<String> relatedDocumentIds(JsonNode input) {
+        JsonNode values = input == null ? null : input.get("relatedDocumentIds");
+        if (values == null || values.isNull()) return List.of();
+        if (!values.isArray() || values.size() > 3) throw new IllegalArgumentException("关联资料须为最多三个文档 ID 的数组");
+        List<String> result = new ArrayList<>();
+        values.forEach(value -> {
+            if (!value.isString()) throw new IllegalArgumentException("关联文档 ID 须为字符串");
+            result.add(value.asString());
+        });
+        return List.copyOf(result);
+    }
+
     private static String retrievalMode(JsonNode config) {
         String mode = config == null ? "BALANCED" : config.path("retrievalMode").asString("BALANCED");
         return switch (mode.toUpperCase()) {
@@ -386,7 +405,8 @@ public class WorkflowKnowledgeRetrievalService {
             String documentId,
             String documentName,
             String chunkNo,
-            String indexRevision) {
+            String indexRevision,
+            int priority) {
     }
 
     private record SourceFailure(String resourceKey, String reasonCode) {

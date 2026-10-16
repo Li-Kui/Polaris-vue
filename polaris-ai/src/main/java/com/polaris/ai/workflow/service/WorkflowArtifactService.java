@@ -9,6 +9,7 @@ import com.polaris.ai.workflow.config.WorkflowProperties;
 import com.polaris.ai.workflow.domain.WorkflowArtifact;
 import com.polaris.ai.workflow.domain.WorkflowExecution;
 import com.polaris.ai.workflow.mapper.WorkflowArtifactMapper;
+import com.polaris.ai.workflow.mapper.WorkflowDefinitionMapper;
 import com.polaris.ai.workflow.mapper.WorkflowExecutionMapper;
 import com.polaris.ai.workflow.security.WorkflowDataRedactor;
 import com.polaris.ai.workflow.spi.WorkflowArtifactStorage;
@@ -51,6 +52,7 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
     private final WorkflowDataRedactor dataRedactor;
     private final WorkflowArtifactStorage artifactStorage;
     private final WorkflowProperties workflowProperties;
+    private final WorkflowDefinitionMapper definitionMapper;
 
     public WorkflowArtifactService(
             WorkflowArtifactMapper artifactMapper,
@@ -58,13 +60,15 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
             ObjectMapper objectMapper,
             WorkflowDataRedactor dataRedactor,
             WorkflowArtifactStorage artifactStorage,
-            WorkflowProperties workflowProperties) {
+            WorkflowProperties workflowProperties,
+            WorkflowDefinitionMapper definitionMapper) {
         this.artifactMapper = artifactMapper;
         this.executionMapper = executionMapper;
         this.objectMapper = objectMapper;
         this.dataRedactor = dataRedactor;
         this.artifactStorage = artifactStorage;
         this.workflowProperties = workflowProperties;
+        this.definitionMapper = definitionMapper;
     }
 
     /** 保存节点内容；同一逻辑节点运行只允许产生一个内容一致的产物。 */
@@ -320,6 +324,11 @@ public class WorkflowArtifactService implements WorkflowArtifactApplicationFacad
         WorkflowExecution execution = executionMapper.selectByExecutionId(executionId);
         if (execution == null) {
             throw new ServiceException("工作流执行不存在或无权访问");
+        }
+        var definition = definitionMapper.selectById(execution.getDefinitionId());
+        if (definition == null || !"0".equals(definition.getDelFlag())
+                || !Objects.equals(definition.getTenantId(), execution.getTenantId())) {
+            throw new ServiceException("工作流执行不存在或无权访问", 404);
         }
         return execution;
     }

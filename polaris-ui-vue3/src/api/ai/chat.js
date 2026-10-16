@@ -60,6 +60,14 @@ export function listMessages(conversationId) {
   })
 }
 
+// 只读本条回答实际引用的片段；服务端重新校验会话归属和资料状态。
+export function getKnowledgeCitation(conversationId, messageId, citationId) {
+  return request({
+    url: `/ai/chat/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/citations/${encodeURIComponent(citationId)}`,
+    method: 'get'
+  })
+}
+
 // 取消当前会话正在生成的普通 AI 回复
 export function cancelChatGeneration(conversationId) {
   return request({

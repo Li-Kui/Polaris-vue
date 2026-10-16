@@ -2058,6 +2058,8 @@ public class WorkflowExecutionEngine {
     private String errorCode(Throwable error) {
         if (error instanceof NodeFailure failure) return failure.code;
         if (error instanceof WorkflowNodeExecutionException failure) return failure.code();
+        if (error instanceof com.polaris.common.exception.ServiceException failure
+                && Integer.valueOf(403).equals(failure.getCode())) return WorkflowErrorCode.PERMISSION_DENIED.name();
         return WorkflowErrorCode.INTERNAL_ERROR.name();
     }
 

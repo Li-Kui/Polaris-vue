@@ -2,6 +2,9 @@ package com.polaris.ai.pivot;
 
 import com.polaris.ai.runtime.ModelHttpClientProperties;
 import com.polaris.ai.runtime.ModelRuntimeSpec;
+import com.polaris.ai.runtime.ModelHttpDiagnostics;
+import com.polaris.ai.runtime.RuntimePolicySpec;
+import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -44,7 +47,7 @@ public class AiModelFactory {
         RuntimeChatSettings settings = runtimeChatSettings(runtime);
         OpenAiChatModel.OpenAiChatModelBuilder builder =
                 OpenAiChatModel.builder()
-                        .httpClientBuilder(httpClientBuilder())
+                        .httpClientBuilder(httpClientBuilder(runtime))
                         .baseUrl(settings.baseUrl())
                         .apiKey(settings.apiKey())
                         .modelName(settings.modelName())
@@ -65,7 +68,7 @@ public class AiModelFactory {
         RuntimeChatSettings settings = runtimeChatSettings(runtime);
         OpenAiStreamingChatModel.OpenAiStreamingChatModelBuilder builder =
                 OpenAiStreamingChatModel.builder()
-                        .httpClientBuilder(httpClientBuilder())
+                        .httpClientBuilder(httpClientBuilder(runtime))
                         .baseUrl(settings.baseUrl())
                         .apiKey(settings.apiKey())
                         .modelName(settings.modelName())
@@ -86,7 +89,7 @@ public class AiModelFactory {
         requireOpenAiCompatible(runtime, "Embedding");
         OpenAiEmbeddingModel.OpenAiEmbeddingModelBuilder builder =
                 OpenAiEmbeddingModel.builder()
-                        .httpClientBuilder(httpClientBuilder())
+                        .httpClientBuilder(httpClientBuilder(runtime))
                         .baseUrl(requiredString(runtime.baseUrl(), "baseUrl"))
                         .apiKey(requiredString(
                                 runtime.credentials().get("apiKey"), "apiKey"))
@@ -119,10 +122,33 @@ public class AiModelFactory {
         return builder.build();
     }
 
-    private JdkHttpClientBuilder httpClientBuilder() {
+    private JdkHttpClientBuilder httpClientBuilder(ModelRuntimeSpec runtime) {
         HttpClient.Builder builder = HttpClient.newBuilder();
         httpProperties.applyProxy(builder);
-        return new JdkHttpClientBuilder().httpClientBuilder(builder);
+        ModelHttpDiagnostics diagnostics = ModelHttpDiagnostics.current();
+        if (diagnostics != null) builder = diagnostics.instrument(builder);
+        return new RuntimePolicyHttpClientBuilder(builder, runtime.runtimePolicy(), diagnostics);
+    }
+
+    /** SDK 的统一 timeout 会覆盖 Builder 的两项预算，故在最终构建时应用请求级策略。 */
+    private static final class RuntimePolicyHttpClientBuilder extends JdkHttpClientBuilder {
+        private final Duration connectBudget;
+        private final Duration readBudget;
+        private final ModelHttpDiagnostics diagnostics;
+
+        private RuntimePolicyHttpClientBuilder(HttpClient.Builder builder, RuntimePolicySpec policy, ModelHttpDiagnostics diagnostics) {
+            httpClientBuilder(builder);
+            connectBudget = Duration.ofMillis(policy.connectTimeoutMs());
+            readBudget = Duration.ofMillis(policy.readTimeoutMs());
+            this.diagnostics = diagnostics;
+        }
+
+        @Override
+        public JdkHttpClient build() {
+            super.connectTimeout(connectBudget);
+            super.readTimeout(readBudget);
+            return diagnostics == null ? super.build() : diagnostics.client(this);
+        }
     }
 
     private RuntimeChatSettings runtimeChatSettings(ModelRuntimeSpec runtime) {

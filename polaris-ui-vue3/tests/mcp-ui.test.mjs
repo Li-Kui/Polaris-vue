@@ -2,12 +2,16 @@ import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
-import {parse} from '@vue/compiler-sfc'
+import {compileScript, parse} from '@vue/compiler-sfc'
 
 // 直接测试现有 Options API 方法；不引入额外测试框架，也不连接后端。
 const source = readFileSync(new URL('../src/views/platform/mcp/index.vue', import.meta.url), 'utf8')
 const { descriptor } = parse(source)
-const script = descriptor.script.content.replace(/^import .*$/gm, '').replace('export default {', 'const component = {')
+// 按 AST 移除整个 import；单行正则会留下现有多行导入的尾部，导致用例无法执行。
+const script = compileScript(descriptor, {id: 'mcp-ui-test'}).scriptAst
+  .filter(node => node.type === 'ImportDeclaration').sort((a, b) => b.start - a.start)
+  .reduce((content, node) => content.slice(0, node.start) + content.slice(node.end), descriptor.script.content)
+  .replace('export default {', 'const component = {')
 
 function methods(listMcpConnection = async () => ({ data: { rows: [], total: 0 } })) {
   return vm.runInNewContext(`${script}\ncomponent.methods`, {

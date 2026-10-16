@@ -14,5 +14,11 @@ public record ChatStreamRequest(
         String message,
         List<String> attachmentTokens,
         String agentCode,
-        Boolean enableSearch
-) {}
+        Boolean enableSearch,
+        @Size(max = 3, message = "关联补全最多指定 3 份文档")
+        List<String> relatedDocumentIds
+) {
+    public ChatStreamRequest(Long conversationId, String message, List<String> attachmentTokens, String agentCode, Boolean enableSearch) {
+        this(conversationId, message, attachmentTokens, agentCode, enableSearch, List.of());
+    }
+}

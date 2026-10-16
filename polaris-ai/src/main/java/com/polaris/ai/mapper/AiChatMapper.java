@@ -107,6 +107,8 @@ public interface AiChatMapper extends BaseMapper<AiConversation>
      */
     int insertMessage(AiMessage message);
 
+    AiMessage selectMessageByIdAndConversation(@Param("id") Long id, @Param("conversationId") Long conversationId);
+
     /**
      * 查询指定会话下的所有消息
      * 按 id 升序排列（即时间正序），最多返回 100 条

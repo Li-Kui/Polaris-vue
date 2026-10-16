@@ -520,6 +520,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (status != null && !status.isBlank()) {
             query.eq(WorkflowExecution::getStatus, status.trim().toUpperCase(Locale.ROOT));
         }
+        // 已归档定义的执行历史不通过通用运行列表重新公开。
+        query.inSql(WorkflowExecution::getDefinitionId,
+                "SELECT id FROM ai_workflow_definition WHERE del_flag = '0'");
         query.orderByDesc(WorkflowExecution::getCreateTime).last("LIMIT 200");
         return executionMapper.selectList(query).stream().map(this::view).toList();
     }
@@ -737,6 +740,11 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         }
         WorkflowExecution execution = executionMapper.selectByExecutionId(executionId);
         if (execution == null || !Objects.equals(execution.getTenantId(), currentTenantId())) {
+            throw new ServiceException("工作流执行不存在或无权访问", 404);
+        }
+        WorkflowDefinition definition = definitionMapper.selectById(execution.getDefinitionId());
+        if (definition == null || !"0".equals(definition.getDelFlag())
+                || !Objects.equals(definition.getTenantId(), execution.getTenantId())) {
             throw new ServiceException("工作流执行不存在或无权访问", 404);
         }
         String username = CallerUtils.getUsername();

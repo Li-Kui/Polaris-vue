@@ -505,7 +505,8 @@
                     v-else
                     :class="{ 'typing-cursor': msg.streaming }"
                     class="markdown-body"
-                    v-html="renderMarkdown(msg.content)"
+                    v-html="renderKnowledgeMarkdown(msg)"
+                    @click="handleKnowledgeCitationClick($event, msg)"
                   ></div>
                   <div v-if="msg.searchSources && msg.searchSources.length" class="search-sources-panel">
                     <div class="search-sources-header" @click="toggleSearchSources(msg)">
@@ -538,27 +539,22 @@
                   </div>
 
                   <!-- 自动关联识别挂载文档标签 -->
-                  <div v-if="msg.attachedDocs && msg.attachedDocs.length" class="attached-docs-panel">
-                    <div class="attached-docs-title">
-                      <el-icon><document /></el-icon>
-                      <span>已自动挂载参考文档（{{ msg.attachedDocs.length }}）</span>
-                    </div>
-                    <div class="attached-docs-tags">
-                      <el-tag
-                        v-for="doc in msg.attachedDocs"
-                        :key="doc.docId || doc.docName"
-                        size="small"
-                        type="success"
-                        effect="light"
-                        class="attached-doc-tag"
-                      >
-                        <el-icon style="margin-right: 3px;"><paperclip /></el-icon>
-                        {{ doc.docName }}
-                        <span v-if="doc.matchType === 'MENTION'" class="doc-match-type">(提及)</span>
-                        <span v-else-if="doc.confidence" class="doc-match-type">({{ Math.round(doc.confidence * 100) }}%)</span>
-                      </el-tag>
-                    </div>
-                  </div>
+                  <KnowledgeCitationValidationNotice :validation="msg.citationValidation" :streaming="msg.streaming"
+                                                     :has-sources="Boolean(msg.attachedDocs?.length)" :hide-checked="Boolean(msg.attachedDocs?.length)" />
+                  <el-alert
+                    v-if="msg.knowledgeRetrievalEmpty"
+                    class="knowledge-empty-notice"
+                    :title="msg.knowledgeAnswerStopped ? '本轮未找到可引用依据，已停止回答生成。你可以调整问题或指定文件，或取消知识库关联后使用普通聊天。' : '本轮知识库检索未找到可引用依据；不代表库中不存在相关资料，以下回答不应视为知识库事实。'"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                  />
+                  <ChatKnowledgeSources v-if="msg.attachedDocs?.length" :message="msg" @open="openKnowledgeCitation(msg, $event.citationId)" />
+                  <p v-if="msg.knowledgeCoverage" class="knowledge-coverage-note" role="status">
+                    本轮显式补全 {{ msg.knowledgeCoverage.requestedDocumentCount }} 份关联资料，实际入选 {{ msg.knowledgeCoverage.mountedDocumentCount }} 份。
+                    <span v-if="msg.knowledgeCoverage.mountedDocumentCount < msg.knowledgeCoverage.requestedDocumentCount">部分指定资料未命中或未进入上下文，不能据此视为联合问题完整。</span>
+                    片段入选不代表证据支持度已经核验。
+                  </p>
 
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
@@ -742,6 +738,8 @@
             />
           </div>
 
+          <KnowledgeRelatedDocumentPicker v-if="selectedKbId && !selectedWorkflowCode" v-model="relatedDocumentIds"
+                                          :knowledge-id="selectedKbId" :disabled="canStop || creatingConv" @ready="relatedReady = $event" />
           <!-- 下层：操作工具栏 -->
           <div class="input-modern-tools-wrapper">
             <div class="tools-left">
@@ -999,7 +997,7 @@
               <!-- 发送按钮 -->
               <el-button
                 v-else
-                :disabled="canStop || creatingConv || !inputText.trim() || uploadingAttachment"
+                :disabled="canStop || creatingConv || !inputText.trim() || uploadingAttachment || (relatedDocumentIds.length > 0 && !relatedReady)"
                 class="btn-send-modern"
                 @click="handleSendMessage"
               >
@@ -1090,6 +1088,8 @@
       </div>
     </transition>
 
+    <ChatKnowledgeCitationDialog v-if="citationSelection" :selection="citationSelection" @close="citationSelection = null" />
+
     <!-- ========== 重命名弹窗 ========== -->
     <el-dialog
       :close-on-click-modal="false"
@@ -1134,6 +1134,11 @@ import {
   updateConversationConfig
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
+import {decorateKnowledgeCitations, knowledgeSourceGroups} from '@/utils/knowledgeEvidence'
+import ChatKnowledgeCitationDialog from '@/components/knowledge/ChatKnowledgeCitationDialog.vue'
+import ChatKnowledgeSources from '@/components/knowledge/ChatKnowledgeSources.vue'
+import KnowledgeRelatedDocumentPicker from '@/components/knowledge/KnowledgeRelatedDocumentPicker.vue'
+import KnowledgeCitationValidationNotice from '@/components/knowledge/KnowledgeCitationValidationNotice.vue'
 import {getCapabilityDefault, listAvailableModel} from '@/api/ai/model'
 import {getAvailableTools} from '@/api/ai/agent'
 import {
@@ -1152,6 +1157,10 @@ import {parseImageUrlList} from '@/utils/aiImage'
 export default {
   name: 'AiChat',
   components: {
+    ChatKnowledgeCitationDialog,
+    ChatKnowledgeSources,
+    KnowledgeRelatedDocumentPicker,
+    KnowledgeCitationValidationNotice,
     PolarisReportEngine
   },
   data() {
@@ -1159,6 +1168,8 @@ export default {
       // 知识库选项与当前选择
       knowledgeBases: [],
       selectedKbId: null,
+      relatedDocumentIds: [],
+      relatedReady: false,
 
       // 可选大模型与当前选择
       models: [],
@@ -1192,6 +1203,7 @@ export default {
       messages: [],
       loadingMessages: false,
       messageLoadVersion: 0,
+      citationSelection: null,
       inputText: '',
       inputFocused: false,
       isStreaming: false,
@@ -1305,8 +1317,10 @@ export default {
   },
   watch: {
     currentConvId() {
+      this.relatedDocumentIds = []
       this.$nextTick(() => this.syncSelectedModelFromConversation())
     },
+    selectedWorkflowCode() {this.relatedDocumentIds = []},
     conversations() {
       this.$nextTick(() => this.syncSelectedModelFromConversation())
     },
@@ -1348,6 +1362,21 @@ export default {
     document.body.classList.remove('ai-chat-page')
   },
   methods: {
+    renderKnowledgeMarkdown(message) {
+      return decorateKnowledgeCitations(this.renderMarkdown(message.content), message)
+    },
+    handleKnowledgeCitationClick(event, message) {
+      const button = event.target.closest?.('button[data-knowledge-citation]')
+      if (!button || !event.currentTarget.contains(button)) return
+      this.openKnowledgeCitation(message, button.dataset.knowledgeCitation)
+    },
+    openKnowledgeCitation(message, citationId) {
+      if (!message.id || message.streaming || message.moderationStatus === 'INTERRUPTED_BLOCKED') return
+      const group = knowledgeSourceGroups(message.attachedDocs, message.content).find(doc => doc.citationIds.includes(citationId))
+      if (!group) return
+      this.citationSelection = {conversationId: this.currentConvId, messageId: message.id, citationId,
+        citationIds: group.citationIds, documentName: group.docName}
+    },
     getBoundConversationModel() {
       if (!this.currentConvId || !this.models.length || !this.conversations.length) return null
       const conversation = this.conversations.find(
@@ -2073,6 +2102,7 @@ export default {
     },
 
     async selectConversation(id) {
+      this.citationSelection = null
       const loadVersion = ++this.messageLoadVersion
       this.currentConvId = id
       const c = this.conversations.find(conv => conv.id === id)
@@ -2174,6 +2204,10 @@ export default {
         const res = await listMessages(convId)
         if (res.code === 200) {
           const loadedMessages = (res.data || []).map(m => ({
+            id: m.id,
+            attachedDocs: Array.isArray(m.attachedDocs) ? m.attachedDocs : [],
+            moderationStatus: m.moderationStatus,
+            citationValidation: m.citationValidation || null,
             role: m.role,
             content: m.content,
             reasoningContent: m.reasoningContent || '',
@@ -2328,6 +2362,11 @@ export default {
     },
 
     async handleSendMessage() {
+      if (this.relatedDocumentIds.length && !this.relatedReady) {
+        this.$message.warning('关联资料尚未核对，请刷新或显式清空选择后发送')
+        return
+      }
+      const relatedForRequest = [...this.relatedDocumentIds]
       if (this.isStreaming || this.creatingConv || !this.currentConvId || this.uploadingAttachment) return
       const text = this.inputText.trim()
       if (!text) return
@@ -2384,7 +2423,8 @@ export default {
           message: text,
           enableSearch: enableSearchParam,
           agentCode: this.selectedAgentCode || null,
-          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean)
+          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean),
+          ...(relatedForRequest.length ? {relatedDocumentIds: relatedForRequest} : {})
         }
 
         const chatController = new AbortController()
@@ -2472,6 +2512,22 @@ export default {
                 } catch (err) {
                   console.warn('解析联网搜索来源失败', err)
                 }
+              } else if (event === 'knowledge_retrieval') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  aiMessage.knowledgeRetrievalEmpty = payload.state === 'EMPTY'
+                  aiMessage.knowledgeAnswerStopped = payload.answerStopped === true
+                } catch (err) {
+                  console.warn('解析知识库检索状态失败', err)
+                }
+              } else if (event === 'knowledge_coverage') {
+                try {
+                  const coverage = JSON.parse(data || '{}')
+                  if (coverage.strategy === 'EXPLICIT_RELATED_V1' && coverage.evidenceSupportVerified === false
+                      && Number.isInteger(coverage.requestedDocumentCount) && coverage.requestedDocumentCount >= 1 && coverage.requestedDocumentCount <= 3
+                      && Number.isInteger(coverage.mountedDocumentCount) && coverage.mountedDocumentCount >= 0 && coverage.mountedDocumentCount <= coverage.requestedDocumentCount)
+                    aiMessage.knowledgeCoverage = coverage
+                } catch {aiMessage.knowledgeCoverage = null}
               } else if (event === 'doc_recognized') {
                 try {
                   const docs = JSON.parse(data || '[]')
@@ -2479,6 +2535,19 @@ export default {
                   this.$nextTick(() => this.scrollToBottom())
                 } catch (err) {
                   console.warn('解析自动识别挂载文档失败', err)
+                }
+              } else if (event === 'citation_validation') {
+                try {
+                  aiMessage.citationValidation = JSON.parse(data || 'null')
+                } catch (err) {
+                  aiMessage.citationValidation = null
+                }
+              } else if (event === 'message_saved') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  if (/^[1-9][0-9]{0,18}$/.test(String(payload.messageId))) aiMessage.id = payload.messageId
+                } catch (err) {
+                  console.warn('解析回答保存状态失败')
                 }
               } else if (event === 'done') {
                 aiMessage.streaming = false
@@ -7353,33 +7422,55 @@ html.dark .ai-chat-wrapper .btn-start-chat:disabled {
 }
 
 /* 自动关联挂载文档面板样式 */
-.attached-docs-panel {
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: rgba(103, 194, 58, 0.08);
-  border: 1px dashed rgba(103, 194, 58, 0.3);
-  border-radius: 8px;
+.knowledge-empty-notice {
+  margin: 10px 0;
 }
-.attached-docs-title {
-  display: flex;
+.knowledge-coverage-note {margin: 10px 0; font-size: 12px; line-height: 1.8; color: var(--el-text-color-regular); overflow-wrap: anywhere}
+
+.markdown-body {
+  --citation-link-color: #3730a3;
+  --citation-link-hover-color: #312e81;
+  --citation-link-bg: #eef2ff;
+  --citation-link-hover-bg: #e0e7ff;
+  --citation-link-border: #c7d2fe;
+  --citation-link-disabled-color: #475569;
+  --citation-link-focus: #4f46e5;
+}
+.markdown-body .knowledge-inline-citation {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 0 5px;
+  min-height: 24px;
+  vertical-align: baseline;
+  font-family: inherit;
   font-size: 12px;
-  color: #67c23a;
-  font-weight: 600;
-  margin-bottom: 6px;
+  line-height: 1.5;
+  border: 1px solid var(--citation-link-border) !important;
+  border-radius: 4px;
+  background: var(--citation-link-bg) !important;
+  color: var(--citation-link-color) !important;
+  cursor: pointer;
 }
-.attached-docs-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.markdown-body .knowledge-inline-citation:hover,
+.markdown-body .knowledge-inline-citation:active,
+.markdown-body .knowledge-inline-citation:focus-visible {
+  background: var(--citation-link-hover-bg) !important;
+  color: var(--citation-link-hover-color) !important;
+  text-decoration: underline;
 }
-.attached-doc-tag {
-  border-radius: 6px;
+.markdown-body .knowledge-inline-citation:focus-visible {
+  outline: 2px solid var(--citation-link-focus);
+  outline-offset: 2px;
 }
-.doc-match-type {
-  opacity: 0.75;
-  margin-left: 3px;
-  font-size: 11px;
+html.dark .markdown-body {
+  --citation-link-color: #c7d2fe;
+  --citation-link-hover-color: #e0e7ff;
+  --citation-link-bg: #252544;
+  --citation-link-hover-bg: #37305d;
+  --citation-link-border: #6366f1;
+  --citation-link-disabled-color: #94a3b8;
+  --citation-link-focus: #a5b4fc;
 }
 </style>

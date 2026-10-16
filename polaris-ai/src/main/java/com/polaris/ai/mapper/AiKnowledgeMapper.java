@@ -64,4 +64,9 @@ public interface AiKnowledgeMapper extends BaseMapper<AiKnowledgeBase>
      */
     @DataScope(deptAlias = "kb")
     AiKnowledgeBase selectAccessibleKnowledgeBaseById(AiKnowledgeBase knowledgeBase);
+
+    /** 清理不依赖被删除的页面入口；仍走同一租户与部门范围，不能访问别人的已删库。 */
+    @DataScope(deptAlias = "kb")
+    @Select("SELECT kb.* FROM ai_knowledge_base kb WHERE kb.id = #{id} AND kb.del_flag IN ('0', '2') ${params.dataScope}")
+    AiKnowledgeBase selectAccessibleCleanupParent(AiKnowledgeBase knowledgeBase);
 }
