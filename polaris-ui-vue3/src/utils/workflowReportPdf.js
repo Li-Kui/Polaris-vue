@@ -79,6 +79,7 @@ export async function exportRuntimeReportPdf(element, { title, rows } = {}) {
   holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:186mm;pointer-events:none;'
   const report = element.cloneNode(true)
   report.classList.add('runtime-report-pdf')
+  report.classList.remove('dark')
   report.querySelector('.report-toolbar')?.remove()
   report.querySelectorAll('.dark').forEach(node => node.classList.remove('dark'))
   report.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'))

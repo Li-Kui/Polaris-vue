@@ -2,7 +2,7 @@
   <div class="workflow-execution-input" :class="{ 'is-simple': simple }">
     <el-skeleton v-if="loading" :rows="5" animated />
     <template v-else>
-      <el-radio-group v-model="mode" class="input-mode-switch" @change="modeChanged">
+      <el-radio-group v-if="!simple" v-model="mode" class="input-mode-switch" @change="modeChanged">
         <el-radio-button value="form">{{ simple ? '填写参数' : '参数表单' }}</el-radio-button>
         <el-radio-button value="json">{{ simple ? '高级 JSON' : 'JSON 模式' }}</el-radio-button>
       </el-radio-group>
@@ -23,6 +23,8 @@
             :errors="fieldErrors"
             :show-type="!simple"
             :nested-objects="simple"
+            :compact="simple"
+            :teleported="!simple"
             @update:model-value="structuredInputChanged"
             @validation="schemaValidationChanged"
           />
@@ -42,11 +44,11 @@
             <strong>输入 JSON</strong>
             <small>{{ simple ? '粘贴完整参数，也可以切回填写参数' : '适合粘贴完整对象或调试复杂结构' }}</small>
           </div>
-          <el-button-group>
+          <div class="json-actions">
             <el-button @click="resetToExample(true)">生成示例</el-button>
             <el-button @click="formatJson">格式化</el-button>
             <el-button @click="clearJson">清空</el-button>
-          </el-button-group>
+          </div>
         </div>
         <el-input
           :model-value="jsonDraft"
@@ -67,12 +69,16 @@
           <span v-for="hint in schemaHints" :key="hint">{{ hint }}</span>
         </div>
       </section>
+      <div v-if="simple" class="simple-input-toolbar">
+        <el-button link @click="switchSimpleMode">{{ mode === 'form' ? '高级 JSON' : '返回填写参数' }}</el-button>
+      </div>
     </template>
   </div>
 </template>
 
 <script>
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
+import {workflowDisplayLabel, workflowDisplayPath} from '@/utils/workflowDisplayLabels'
 import {runtimeInputFormSchema} from '@/utils/workflowInputMapping'
 
 export default {
@@ -245,6 +251,10 @@ export default {
       this.jsonError = ''
       this.commit({}, false)
     },
+    switchSimpleMode() {
+      this.mode = this.mode === 'form' ? 'json' : 'form'
+      this.modeChanged(this.mode)
+    },
     modeChanged(value) {
       if (value === 'json' && !this.formValidation.valid) {
         this.mode = 'form'
@@ -306,7 +316,7 @@ export default {
       const unexpected = message.match(/Unexpected token\s+'([^']+)'/i)
       const offset = position ? Number(position[1])
         : unexpected ? text.lastIndexOf(unexpected[1]) : -1
-      if (offset < 0) return `JSON 格式错误：${message}`
+      if (offset < 0) return this.simple ? 'JSON 格式错误，请检查引号、逗号和括号' : `JSON 格式错误：${message}`
       const before = text.slice(0, offset)
       const line = before.split('\n').length
       const column = offset - before.lastIndexOf('\n')
@@ -316,19 +326,20 @@ export default {
       if (!schema || typeof schema !== 'object') return []
       const errors = []
       const type = schema.type
+      const label = this.simple ? workflowDisplayPath(path, this.normalizedSchema) : path
       if (type && !this.matchesType(value, type)) {
-        errors.push({path, message: `${path} 应为 ${this.typeLabel(schema)}`})
+        errors.push({path, message: `${label} 应为 ${this.typeLabel(schema)}`})
         return errors
       }
       if (Array.isArray(schema.enum) && !schema.enum.some(item => this.equalValue(item, value))) {
-        errors.push({path, message: `${path} 只能选择契约中允许的值`})
+        errors.push({path, message: `${label} 只能选择契约中允许的值`})
       }
       if (this.isObject(value)) {
         const required = Array.isArray(schema.required) ? schema.required : []
         required.forEach(name => {
           if (!Object.prototype.hasOwnProperty.call(value, name)
             || value[name] === undefined || value[name] === null) {
-            const title = schema.properties?.[name]?.title || name
+            const title = this.simple ? workflowDisplayLabel(name, schema.properties?.[name]?.title) : schema.properties?.[name]?.title || name
             errors.push({path: `${path}.${name}`, message: `${title} 为必填项`})
           }
         })
@@ -340,10 +351,10 @@ export default {
       }
       if (Array.isArray(value)) {
         if (schema.minItems !== undefined && value.length < schema.minItems) {
-          errors.push({path, message: `${path} 至少需要 ${schema.minItems} 项`})
+          errors.push({path, message: `${label} 至少需要 ${schema.minItems} 项`})
         }
         if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-          errors.push({path, message: `${path} 最多允许 ${schema.maxItems} 项`})
+          errors.push({path, message: `${label} 最多允许 ${schema.maxItems} 项`})
         }
         if (schema.items) {
           value.forEach((item, index) => {
@@ -353,15 +364,15 @@ export default {
       }
       if (typeof value === 'string') {
         if (schema.minLength !== undefined && value.length < schema.minLength) {
-          errors.push({path, message: `${path} 至少需要 ${schema.minLength} 个字符`})
+          errors.push({path, message: `${label} 至少需要 ${schema.minLength} 个字符`})
         }
         if (schema.maxLength !== undefined && value.length > schema.maxLength) {
-          errors.push({path, message: `${path} 最多允许 ${schema.maxLength} 个字符`})
+          errors.push({path, message: `${label} 最多允许 ${schema.maxLength} 个字符`})
         }
         if (schema.pattern) {
           try {
             if (!new RegExp(schema.pattern).test(value)) {
-              errors.push({path, message: `${path} 不符合要求的格式`})
+              errors.push({path, message: `${label} 不符合要求的格式`})
             }
           } catch (error) {
             // 契约中的无效正则由后端发布校验负责，这里不阻断运行。
@@ -370,10 +381,10 @@ export default {
       }
       if (typeof value === 'number') {
         if (schema.minimum !== undefined && value < schema.minimum) {
-          errors.push({path, message: `${path} 不能小于 ${schema.minimum}`})
+          errors.push({path, message: `${label} 不能小于 ${schema.minimum}`})
         }
         if (schema.maximum !== undefined && value > schema.maximum) {
-          errors.push({path, message: `${path} 不能大于 ${schema.maximum}`})
+          errors.push({path, message: `${label} 不能大于 ${schema.maximum}`})
         }
       }
       return errors
@@ -400,7 +411,8 @@ export default {
         string: 'String',
         null: 'Null'
       }
-      return labels[type] || type || 'Any'
+      const displayTypes = {object: '对象', array: '数组', integer: '整数', number: '数字', boolean: '是或否', string: '文本', null: '空值'}
+      return this.simple ? (displayTypes[type] || '指定类型') : labels[type] || type || 'Any'
     },
     initialValueForSchema(schema) {
       if (schema?.default !== undefined) return this.deepClone(schema.default)
@@ -498,6 +510,9 @@ export default {
   outline-offset: 2px;
 }
 
+.simple-input-toolbar { display: flex; justify-content: flex-end; margin-top: 8px; }
+.simple-input-toolbar :deep(.el-button) { font-size: 12px; }
+
 .input-mode-panel {
   margin-top: 16px;
 }
@@ -527,6 +542,11 @@ export default {
 .json-toolbar small {
   color: var(--el-text-color-secondary);
 }
+
+.json-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.json-actions :deep(.el-button) { margin: 0; }
+.is-simple .json-toolbar { flex-direction: column; align-items: stretch; gap: 12px; }
+.is-simple .json-actions :deep(.el-button) { flex: 1 1 auto; }
 
 .json-editor :deep(textarea) {
   font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;

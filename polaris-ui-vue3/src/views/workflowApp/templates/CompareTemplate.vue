@@ -43,7 +43,7 @@
 
 <script setup>
 import {computed, ref} from 'vue'
-import {ElMessage} from 'element-plus'
+import {runtimeMessage as ElMessage} from '@/components/workflow-app/runtimeMessage'
 import RuntimeWorkflowRunner from '@/components/workflow-app/RuntimeWorkflowRunner.vue'
 import RuntimeResult from '@/components/workflow-app/RuntimeResult.vue'
 import ImageCompare from '@/components/workflow-app/ImageCompare.vue'

@@ -1,7 +1,7 @@
 <template>
   <dl v-if="value && typeof value === 'object' && !Array.isArray(value) && depth < 8" class="object-value">
     <div v-for="(item, key) in value" :key="key" class="object-field">
-      <dt>{{ key }}</dt>
+      <dt>{{ workflowDisplayLabel(key) }}</dt>
       <dd><RuntimeObjectValue :value="item" :depth="depth + 1" /></dd>
     </div>
   </dl>
@@ -12,6 +12,8 @@
 </template>
 
 <script setup>
+import {workflowDisplayLabel} from '@/utils/workflowDisplayLabels'
+
 defineProps({ value: { default: null }, depth: { type: Number, default: 0 } })
 const formatValue = value => value == null ? '—' : typeof value === 'boolean' ? (value ? '是' : '否')
   : typeof value === 'object' ? JSON.stringify(value) : String(value)

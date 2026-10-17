@@ -24,7 +24,7 @@
       <el-table v-loading="loading" :data="triggers" class="polaris-el-table">
         <el-table-column prop="triggerType" label="类型" width="120">
           <template #default="{row}">
-            <el-tag :type="typeStyle(row.triggerType)">{{ typeLabel(row.triggerType) }}</el-tag>
+            <el-tag class="trigger-type-tag" :type="typeStyle(row.triggerType)">{{ typeLabel(row.triggerType) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="triggerId" label="触发器 ID" min-width="250" show-overflow-tooltip />
@@ -37,14 +37,14 @@
         <el-table-column label="最近结果" width="130">
           <template #default="{row}">
             <el-tag v-if="row.lastTriggerStatus" :type="row.lastTriggerStatus === 'DISPATCHED' ? 'success' : 'danger'" size="small">
-              {{ row.lastTriggerStatus }}
+              {{ resultLabel(row.lastTriggerStatus) }}
             </el-tag>
             <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="110" align="center">
           <template #default="{row}">
-            <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'">{{ row.status }}</el-tag>
+            <el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'">{{ statusLabel(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column v-if="canEdit" label="操作" width="120" align="center" fixed="right">
@@ -256,6 +256,12 @@ export default {
     typeLabel(type) {
       return {SCHEDULE: '定时', WEBHOOK: 'Webhook', EVENT: '事件'}[type] || type
     },
+    statusLabel(status) {
+      return {ACTIVE: '已启用', DISABLED: '已停用'}[status] || status
+    },
+    resultLabel(status) {
+      return {DISPATCHED: '已派发', FAILED: '派发失败', DEAD: '重试已耗尽'}[status] || status
+    },
     typeStyle(type) {
       return {SCHEDULE: 'primary', WEBHOOK: 'success', EVENT: 'warning'}[type] || 'info'
     }
@@ -265,6 +271,11 @@ export default {
 
 <style scoped>
 .trigger-page {
+  --trigger-type-text: #574be8;
+  --trigger-success-text: #15803d;
+  --trigger-warning-text: #a16207;
+  --trigger-danger-text: #b91c1c;
+  --trigger-info-text: #475569;
   padding: 24px;
   border: 1px solid var(--workflow-border, var(--el-border-color-light));
   border-radius: var(--workflow-radius, 18px);
@@ -302,6 +313,29 @@ export default {
 
 .table-shell :deep(.el-table__inner-wrapper::before) {
   display: none;
+}
+
+/* Use workflow tokens: a custom global accent can be white, including all its tints. */
+.trigger-page :deep(.trigger-type-tag.el-tag--primary) {
+  --el-tag-text-color: var(--trigger-type-text);
+  --el-tag-bg-color: var(--workflow-primary-soft, #eeecff);
+  --el-tag-border-color: color-mix(in srgb, var(--workflow-primary, #6d5dfc) 28%, var(--workflow-border, #dbe2ea));
+  color: var(--el-tag-text-color);
+  background: var(--el-tag-bg-color);
+  border-color: var(--el-tag-border-color);
+}
+
+.trigger-page :deep(.el-tag--success) { color: var(--trigger-success-text); }
+.trigger-page :deep(.el-tag--warning) { color: var(--trigger-warning-text); }
+.trigger-page :deep(.el-tag--danger) { color: var(--trigger-danger-text); }
+.trigger-page :deep(.el-tag--info) { color: var(--trigger-info-text); }
+
+html.dark .trigger-page {
+  --trigger-type-text: #c4b5fd;
+  --trigger-success-text: #86efac;
+  --trigger-warning-text: #fcd34d;
+  --trigger-danger-text: #fca5a5;
+  --trigger-info-text: #cbd5e1;
 }
 
 @media (max-width: 760px) {
