@@ -35,6 +35,10 @@ public class AiMessage
     /** 关联的工作流执行 ID，用于精确更新流式回复。 */
     @Schema(description = "关联的工作流执行 ID")
     private String workflowExecutionId;
+    /** 协作运行关联，历史读取不会因此重新执行。 */
+    private String agentRunId;
+    @JsonIgnore
+    private String historyDependencies;
 
     /**
      * 消息角色

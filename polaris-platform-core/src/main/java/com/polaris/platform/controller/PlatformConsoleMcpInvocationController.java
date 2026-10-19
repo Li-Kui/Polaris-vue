@@ -29,7 +29,19 @@ public class PlatformConsoleMcpInvocationController {
 
     @GetMapping("/invocations/list")
     public ResultData<Page<PlatformMcpInvocation>> list(Long connectionId, Long toolId, String status, Integer pageNum, Integer pageSize) {
-        return ResultData.ok(service.selectList(connectionId, toolId, status, pageNum, pageSize));
+        return ResultData.ok(service.selectList(connectionId, toolId, status, pageNum, pageSize, null, null));
+    }
+
+    @Operation(summary = "按工作流执行查询本租户MCP调用元数据，仅管理员可用")
+    @GetMapping("/invocations/workflow/{executionId}")
+    public ResultData<Page<PlatformMcpInvocation>> workflowRecords(@PathVariable String executionId, String status, Integer pageNum, Integer pageSize) {
+        return ResultData.ok(service.selectList(null, null, status, pageNum, pageSize, executionId, null));
+    }
+
+    @GetMapping("/invocations/workflow/{executionId}/nodes/{nodeRunId}")
+    public ResultData<Page<PlatformMcpInvocation>> nodeRecords(@PathVariable String executionId, @PathVariable String nodeRunId,
+                                                            String status, Integer pageNum, Integer pageSize) {
+        return ResultData.ok(service.selectList(null, null, status, pageNum, pageSize, executionId, nodeRunId));
     }
 
     /** 避免通用异常处理器把JSON解析异常中的原始调用参数写入日志。 */

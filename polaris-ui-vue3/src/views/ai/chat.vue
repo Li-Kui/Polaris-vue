@@ -160,11 +160,11 @@
       <div v-if="currentConvId" class="chat-header-bar">
         <span class="chat-header-indicator">
           <el-icon><chat-line-round /></el-icon>
-          AI 助手对话中
+          {{ collaboration.enabled ? '协作对话' : 'AI 助手对话中' }}
         </span>
         <div class="header-tags-row">
           <el-tag
-            v-if="currentConvModel"
+            v-if="currentConvModel && !collaboration.enabled"
             class="model-indicator-tag"
             effect="plain"
             size="default"
@@ -174,7 +174,9 @@
             <span>模型: {{ currentConvModel }}</span>
           </el-tag>
           <el-tag
-            v-if="selectedAgentCode"
+            v-if="collaboration.enabled" effect="light" type="primary">协作：{{ collaborationAgentName }}</el-tag>
+          <el-tag
+            v-else-if="selectedAgentCode"
             effect="light"
             size="default"
             type="primary"
@@ -550,6 +552,9 @@
                     show-icon
                   />
                   <ChatKnowledgeSources v-if="msg.attachedDocs?.length" :message="msg" @open="openKnowledgeCitation(msg, $event.citationId)" />
+                  <AgentChatMessage v-if="msg.agentRunId && msg.id && !msg.streaming" :conversation-id="currentConvId" :message="msg"
+                                    @sources="msg.attachedDocs = $event.knowledge || []; msg.collaborationSources = $event"
+                                    @open-history="citationSelection = $event" />
                   <p v-if="msg.knowledgeCoverage" class="knowledge-coverage-note" role="status">
                     本轮显式补全 {{ msg.knowledgeCoverage.requestedDocumentCount }} 份关联资料，实际入选 {{ msg.knowledgeCoverage.mountedDocumentCount }} 份。
                     <span v-if="msg.knowledgeCoverage.mountedDocumentCount < msg.knowledgeCoverage.requestedDocumentCount">部分指定资料未命中或未进入上下文，不能据此视为联合问题完整。</span>
@@ -684,6 +689,13 @@
 
       <!-- 输入区域 -->
       <div v-show="currentConvId" class="input-area">
+        <AgentChatComposer v-if="collaborationAllowed" v-model="collaboration" :agents="agents" :models="models" :messages="messages"
+                          :busy="isStreaming || collaborationPending" :stopping="collaborationStopping" :confirmation="collaborationConfirmation"
+                          :observed="collaborationObserved" :knowledge-name="currentKbName"
+                          @confirm="sendConfirmedCollaboration" @dismiss="dismissCollaboration" @refresh="refreshCollaboration" @stop="stopCollaboration" />
+        <el-alert v-if="collaboration.enabled && relatedDocumentIds.length" type="warning" :closable="false" title="协作对话暂不接收指定资料，请先清空选择；所选知识库仍可使用。">
+          <el-button :disabled="canStop" @click="relatedDocumentIds = []">清空指定资料</el-button>
+        </el-alert>
         <!-- 待发送附件预览栏 -->
         <div v-if="attachments && attachments.length" class="attachment-preview-bar">
           <div v-for="(item, index) in attachments" :key="index" class="attachment-tag">
@@ -738,13 +750,14 @@
             />
           </div>
 
-          <KnowledgeRelatedDocumentPicker v-if="selectedKbId && !selectedWorkflowCode" v-model="relatedDocumentIds"
+          <KnowledgeRelatedDocumentPicker v-if="selectedKbId && !selectedWorkflowCode && !collaboration.enabled" v-model="relatedDocumentIds"
                                           :knowledge-id="selectedKbId" :disabled="canStop || creatingConv" @ready="relatedReady = $event" />
           <!-- 下层：操作工具栏 -->
           <div class="input-modern-tools-wrapper">
             <div class="tools-left">
               <!-- 附件上传按钮 -->
               <el-upload
+                v-if="!collaboration.enabled"
                 :action="uploadUrl"
                 :before-upload="beforeAttachmentUpload"
                 :disabled="isStreaming || creatingConv || uploadingAttachment"
@@ -778,6 +791,7 @@
 
               <!-- 模型选择药丸 -->
               <el-popover
+                v-if="!collaboration.enabled"
                 v-model:visible="showModelPopover"
                 placement="top-start"
                 title="选择 AI 核心大脑"
@@ -857,6 +871,7 @@
 
               <!-- 智能体与工作流选择药丸 -->
               <el-popover
+                v-if="!collaboration.enabled"
                 v-model:visible="showWorkflowPopover"
                 placement="top-start"
                 width="340"
@@ -974,7 +989,7 @@
 
               <!-- 联网搜索快速切换按钮 -->
               <button
-                v-if="currentModelSupportsSearch"
+                v-if="currentModelSupportsSearch && !collaboration.enabled"
                 :class="['config-pill-btn pill-search', { 'is-active': enableWebSearch }]"
                 :disabled="isStreaming || creatingConv"
                 @click="toggleWebSearch"
@@ -997,7 +1012,7 @@
               <!-- 发送按钮 -->
               <el-button
                 v-else
-                :disabled="canStop || creatingConv || !inputText.trim() || uploadingAttachment || (relatedDocumentIds.length > 0 && !relatedReady)"
+                :disabled="canStop || collaborationPending || creatingConv || !inputText.trim() || uploadingAttachment || (!collaboration.enabled && relatedDocumentIds.length > 0 && !relatedReady)"
                 class="btn-send-modern"
                 @click="handleSendMessage"
               >
@@ -1121,6 +1136,10 @@
 
 <script>
 import * as echarts from 'echarts'
+import agentChatMixin from '@/components/agent/agentChatMixin'
+import AgentChatComposer from '@/components/agent/AgentChatComposer.vue'
+import AgentChatMessage from '@/components/agent/AgentChatMessage.vue'
+import {decorateAgentHistoryCitations} from '@/components/agent/agentChat'
 import {getAuthHeaders} from '@/utils/auth'
 import {
   cancelChatGeneration,
@@ -1156,7 +1175,10 @@ import {parseImageUrlList} from '@/utils/aiImage'
 
 export default {
   name: 'AiChat',
+  mixins: [agentChatMixin],
   components: {
+    AgentChatComposer,
+    AgentChatMessage,
     ChatKnowledgeCitationDialog,
     ChatKnowledgeSources,
     KnowledgeRelatedDocumentPicker,
@@ -1309,6 +1331,7 @@ export default {
       )
     },
     canStop() {
+      if (this.collaborationObserved?.status === 'RUNNING') return true
       if (this.isStreaming) return true
       if (!this.messages || this.messages.length === 0) return false
       const lastMsg = this.messages[this.messages.length - 1]
@@ -1363,9 +1386,17 @@ export default {
   },
   methods: {
     renderKnowledgeMarkdown(message) {
-      return decorateKnowledgeCitations(this.renderMarkdown(message.content), message)
+      return decorateAgentHistoryCitations(decorateKnowledgeCitations(this.renderMarkdown(message.content), message), message)
     },
     handleKnowledgeCitationClick(event, message) {
+      const historyButton = event.target.closest?.('button[data-agent-history]')
+      if (historyButton && event.currentTarget.contains(historyButton) && !message.streaming) {
+        const ref = message.collaborationSources?.history?.find(old => old.available && String(old.reference.messageId) === historyButton.dataset.agentHistory
+          && old.reference.citationId === historyButton.dataset.agentCitation && old.knowledge?.length)
+        if (ref) this.citationSelection = {conversationId: this.currentConvId, messageId: message.id, originId: ref.reference.messageId,
+          citationId: ref.reference.citationId, documentName: ref.knowledge[0].docName}
+        return
+      }
       const button = event.target.closest?.('button[data-knowledge-citation]')
       if (!button || !event.currentTarget.contains(button)) return
       this.openKnowledgeCitation(message, button.dataset.knowledgeCitation)
@@ -2205,6 +2236,7 @@ export default {
         if (res.code === 200) {
           const loadedMessages = (res.data || []).map(m => ({
             id: m.id,
+            agentRunId: m.agentRunId || null,
             attachedDocs: Array.isArray(m.attachedDocs) ? m.attachedDocs : [],
             moderationStatus: m.moderationStatus,
             citationValidation: m.citationValidation || null,
@@ -2223,6 +2255,8 @@ export default {
             return
           }
           this.messages = loadedMessages
+          await this.restoreCollaboration(convId, loadedMessages)
+          if (loadVersion !== this.messageLoadVersion || String(this.currentConvId) !== String(convId)) return
           this.$nextTick(() => {
             this.scrollToBottom(true)
             this.focusInput()
@@ -2362,6 +2396,8 @@ export default {
     },
 
     async handleSendMessage() {
+      if (this.canStop || this.collaborationPending) return
+      if (this.collaboration.enabled) return this.prepareCollaboration()
       if (this.relatedDocumentIds.length && !this.relatedReady) {
         this.$message.warning('关联资料尚未核对，请刷新或显式清空选择后发送')
         return
@@ -2590,6 +2626,7 @@ export default {
     },
 
     async handleStopMessage() {
+      if (this.collaborationPreparing || this.collaborationController || this.collaborationConfirmation || this.collaborationPending) return this.stopCollaboration()
       const conversationId = this.currentConvId
       const stoppingChat = !!this.chatAbortController
       if (stoppingChat && conversationId) {

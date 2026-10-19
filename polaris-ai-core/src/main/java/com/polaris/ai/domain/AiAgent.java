@@ -29,6 +29,9 @@ public class AiAgent extends BaseEntity {
     @Schema(description = "所属中台租户")
     private Long tenantId;
 
+    /** 配置与协作工具绑定共同修订，修改时必须提供读取到的版本。 */
+    private Long definitionRevision;
+
     /** 智能体唯一编码 */
     @Schema(description = "智能体唯一编码")
     private String agentCode;

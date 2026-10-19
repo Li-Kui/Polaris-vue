@@ -42,5 +42,12 @@ export function invokeMcpTool(toolId, data) {
 }
 
 export function listMcpInvocations(query) {
+  if (query?.executionId != null) {
+    const {executionId, nodeRunId, status, pageNum, pageSize} = query
+    // Dedicated route makes an older backend fail instead of ignoring a scope filter.
+    const nodePath = nodeRunId == null ? '' : `/nodes/${encodeURIComponent(nodeRunId)}`
+    return request({ url: `/platform/console/mcp/invocations/workflow/${encodeURIComponent(executionId)}${nodePath}`,
+      method: 'get', params: {status, pageNum, pageSize} })
+  }
   return request({ url: '/platform/console/mcp/invocations/list', method: 'get', params: query })
 }

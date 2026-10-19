@@ -12,5 +12,6 @@ public interface PlatformMcpInvocationMapper {
     int markDispatched(@Param("tenantId") Long tenantId, @Param("invocationId") String invocationId);
     int finish(PlatformMcpInvocation invocation);
     List<PlatformMcpInvocation> selectList(@Param("tenantId") Long tenantId,
-            @Param("connectionId") Long connectionId, @Param("toolId") Long toolId, @Param("status") String status);
+            @Param("connectionId") Long connectionId, @Param("toolId") Long toolId, @Param("status") String status,
+            @Param("executionId") String executionId, @Param("nodeRunId") String nodeRunId);
 }

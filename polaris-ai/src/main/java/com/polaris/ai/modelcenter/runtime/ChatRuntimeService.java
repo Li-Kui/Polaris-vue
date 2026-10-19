@@ -3,6 +3,7 @@ package com.polaris.ai.modelcenter.runtime;
 import com.polaris.ai.runtime.CapabilityExecutor;
 import com.polaris.ai.runtime.ModelExecutionResult;
 import com.polaris.ai.runtime.ModelRuntimeSpec;
+import com.polaris.ai.runtime.RuntimePolicySpec;
 import com.polaris.ai.runtime.chat.ChatCapabilityInvocation;
 import com.polaris.ai.runtime.stream.ModelStreamEvent;
 import com.polaris.common.exception.ServiceException;
@@ -69,6 +70,54 @@ public class ChatRuntimeService {
                         requestedFeatures(request, activeFeatures, true),
                         overrides));
         return capabilityExecutor.stream(runtime, invocation);
+    }
+
+    /** 有限协作只读预检，不创建 Provider 请求；每轮调用仍须重新解析当前定义。 */
+    public void validateAgentOnce(Long modelId, ChatRequest request, String expectedHash) {
+        resolveAgentOnce(modelId, request, expectedHash);
+    }
+    public void validateAgentOnce(Long modelId, ChatRequest request, String expectedHash, List<CapabilityParameterOverride> overrides) {
+        resolveAgentOnce(modelId, request, expectedHash, overrides);
+    }
+
+    /** 每轮协作使用独立有界流请求；不修改模型定义或全局重试、超时策略。 */
+    public Flow.Publisher<ModelStreamEvent> streamAgentOnce(
+            Long modelId, ChatRequest request, String expectedHash, long remainingMillis) {
+        return streamAgentOnce(modelId, request, expectedHash, remainingMillis, List.of());
+    }
+    public Flow.Publisher<ModelStreamEvent> streamAgentOnce(
+            Long modelId, ChatRequest request, String expectedHash, long remainingMillis, List<CapabilityParameterOverride> overrides) {
+        ModelRuntimeSpec runtime = resolveAgentOnce(modelId, request, expectedHash, overrides);
+        if (remainingMillis < 100) throw new ServiceException("AGENT_DEADLINE_EXCEEDED");
+        RuntimePolicySpec policy = runtime.runtimePolicy();
+        int limit = (int) Math.min(300_000L, remainingMillis);
+        RuntimePolicySpec bounded = new RuntimePolicySpec(policy.maxConcurrency(),
+                Math.min(policy.connectTimeoutMs(), limit), Math.min(policy.readTimeoutMs(), limit),
+                0, policy.qpsLimit(), policy.priority());
+        ModelRuntimeSpec single = new ModelRuntimeSpec(runtime.modelId(), runtime.modelCode(), runtime.modelRevision(),
+                runtime.connectionId(), runtime.connectionRevision(), runtime.providerCode(), runtime.protocolCode(),
+                runtime.networkMode(), runtime.baseUrl(), runtime.modelName(), runtime.capabilityCode(),
+                runtime.invocationParameters(), runtime.featureParameters(), runtime.activeFeatures(), runtime.providerExtraConfig(),
+                runtime.credentials(), bounded, runtime.schemaVersion(), runtime.schemaHash(), runtime.runtimeDefinitionHash());
+        return capabilityExecutor.stream(single, new ChatCapabilityInvocation(request));
+    }
+
+    private ModelRuntimeSpec resolveAgentOnce(Long modelId, ChatRequest request, String expectedHash) {
+        return resolveAgentOnce(modelId, request, expectedHash, List.of());
+    }
+    private ModelRuntimeSpec resolveAgentOnce(Long modelId, ChatRequest request, String expectedHash, List<CapabilityParameterOverride> overrides) {
+        if (request == null || expectedHash == null || !expectedHash.matches("[a-f0-9]{64}")) {
+            throw new ServiceException("AGENT_MODEL_SNAPSHOT_INVALID");
+        }
+        ModelRuntimeSpec runtime = runtimeResolver.resolve(new ModelRuntimeRequest<>(modelId,
+                new ChatCapabilityInvocation(request), requestedFeatures(request, Set.of(), true), overrides));
+        if (!Objects.equals(modelId, runtime.modelId()) || !Objects.equals(expectedHash, runtime.runtimeDefinitionHash())
+                || !"CHAT_COMPLETION".equals(runtime.capabilityCode()) || !runtime.activeFeatures().contains(STREAMING)
+                || request.toolSpecifications() != null && !request.toolSpecifications().isEmpty()
+                && !runtime.activeFeatures().contains("TOOL_CALLING")) {
+            throw new ServiceException("AGENT_MODEL_SNAPSHOT_CHANGED");
+        }
+        return runtime;
     }
 
     /** 仅显式 QA 审阅使用：对已解析的单次 Runtime 检查后追加固定扩展，不写回模型配置。 */

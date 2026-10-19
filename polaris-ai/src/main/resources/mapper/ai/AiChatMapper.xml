@@ -24,6 +24,8 @@
         <id     property="id"             column="id"/>
         <result property="conversationId" column="conversation_id"/>
         <result property="workflowExecutionId" column="workflow_execution_id"/>
+        <result property="agentRunId" column="agent_run_id"/>
+        <result property="historyDependencies" column="history_dependencies"/>
         <result property="role"           column="role"/>
         <result property="content"        column="content"/>
         <result property="reasoningContent" column="reasoning_content"/>

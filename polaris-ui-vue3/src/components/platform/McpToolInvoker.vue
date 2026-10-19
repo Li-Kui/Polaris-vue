@@ -37,6 +37,8 @@
               type="info" :closable="false" class="invoke-notice" />
     <el-alert v-if="recordsError" title="调用记录加载失败，不代表没有记录。请检查网络或服务状态后重试。"
               type="error" :closable="false" class="invoke-notice" />
+    <p v-if="query.executionId" class="invoke-meta">仅查看执行：<code>{{ query.executionId }}</code></p>
+    <p v-if="query.nodeRunId" class="invoke-meta">节点尝试：<code>{{ query.nodeRunId }}</code></p>
     <div class="record-actions">
       <el-select v-model="query.status" clearable placeholder="全部调用状态" aria-label="调用状态" style="width: 200px"
                  :disabled="recordsLoading" @change="searchRecords">
@@ -55,17 +57,27 @@
             <div><dt>调用 ID</dt><dd>{{ scope.row.invocationId }}</dd></div>
             <div><dt>调用主体</dt><dd>{{ scope.row.actorName || '—' }}</dd></div>
             <div><dt>派发阶段</dt><dd>{{ scope.row.callDispatched === '1' ? '已准备派发（不代表远端完成）' : '未派发' }}</dd></div>
-            <template v-if="scope.row.source === 'WORKFLOW'">
+            <template v-if="scope.row.source === 'AGENT_CHAT'">
+              <div><dt>对话会话 ID</dt><dd>{{ scope.row.conversationId || '—' }}</dd></div>
+              <div><dt>协作请求 ID</dt><dd>{{ scope.row.chatRequestId || '—' }}</dd></div>
+              <div><dt>智能体运行 ID</dt><dd>{{ scope.row.agentRunId || '—' }}</dd></div>
+              <div><dt>查询序号</dt><dd>{{ scope.row.agentCallNo ?? '—' }}</dd></div>
+            </template>
+            <template v-if="isWorkflowInvocation(scope.row.source)">
               <div><dt>执行 ID</dt><dd>{{ scope.row.executionId || '—' }}</dd></div>
               <div><dt>节点尝试 ID</dt><dd>{{ scope.row.nodeRunId || '—' }}</dd></div>
               <div><dt>尝试次数</dt><dd>{{ scope.row.attemptNo ?? '—' }}</dd></div>
+              <template v-if="scope.row.source === 'AGENT_WORKFLOW'">
+                <div><dt>智能体运行 ID</dt><dd>{{ scope.row.agentRunId || '—' }}</dd></div>
+                <div><dt>查询序号</dt><dd>{{ scope.row.agentCallNo ?? '—' }}</dd></div>
+              </template>
             </template>
           </dl>
         </template>
       </el-table-column>
       <el-table-column label="状态" width="150"><template #default="scope"><el-tag size="small" :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag></template></el-table-column>
       <el-table-column label="错误码" min-width="180" show-overflow-tooltip><template #default="scope"><span class="record-error">{{ scope.row.errorCode || '—' }}</span></template></el-table-column>
-      <el-table-column label="来源 / 主体" width="110"><template #default="scope"><div>{{ scope.row.source === 'WORKFLOW' ? '工作流' : '手工' }}</div><small class="record-tip">{{ scope.row.actorName || '—' }}</small></template></el-table-column>
+      <el-table-column label="来源 / 主体" width="110"><template #default="scope"><div>{{ invocationSourceLabel(scope.row.source) }}</div><small class="record-tip">{{ scope.row.actorName || '—' }}</small></template></el-table-column>
       <el-table-column label="工具 / 修订" width="100"><template #default="scope">#{{ scope.row.toolId }} · v{{ scope.row.toolRevision }}</template></el-table-column>
       <el-table-column label="耗时(ms)" width="90"><template #default="scope">{{ scope.row.durationMs ?? '—' }}</template></el-table-column>
       <el-table-column label="开始时间" prop="startedTime" min-width="165" />
@@ -76,12 +88,13 @@
 </template>
 
 <script>
+import {invocationSourceLabel, isWorkflowInvocation} from '@/components/agent/agentBindings'
 import {ElMessage} from 'element-plus'
 import {invokeMcpTool, listMcpInvocations} from '@/api/platform/mcp'
 
 export default {
   name: 'McpToolInvoker',
-  emits: ['changed', 'busy'],
+  emits: ['changed', 'busy', 'records-loaded'],
   data() {
     return {
       open: false, tool: null, connectionId: null, argumentsJson: '{}', confirmed: false,
@@ -91,7 +104,13 @@ export default {
       statuses: ['STARTED', 'SUCCESS', 'FAILED', 'REJECTED', 'TOOL_ERROR', 'TIMEOUT', 'CANCELLED']
     }
   },
+  watch: {
+    recordsOpen(value) { if (!value) { this.recordsSequence++; this.recordsLoading = false } }
+  },
+  beforeUnmount() { this.recordsSequence++ },
   methods: {
+    isWorkflowInvocation,
+    invocationSourceLabel,
     show(tool, connectionId) {
       if (this.invoking) return
       this.tool = { ...tool }
@@ -127,8 +146,21 @@ export default {
         this.$emit('changed')
       }
     },
-    showRecords(connectionId, toolId = null) {
+    showWorkflowRecords(executionId, nodeRunId = null) {
+      if (!executionId) return
+      this.showRecords(null, null, executionId, nodeRunId)
+    },
+    closeRecords() {
+      this.recordsSequence++
+      this.recordsOpen = false
+      this.recordsLoading = false
+      this.records = []
+      this.total = 0
+    },
+    showRecords(connectionId, toolId = null, executionId = null, nodeRunId = null) {
       this.query = { connectionId, toolId, status: '', pageNum: 1, pageSize: 20 }
+      if (executionId != null) this.query.executionId = executionId
+      if (executionId != null && nodeRunId != null) this.query.nodeRunId = nodeRunId
       this.records = []
       this.total = 0
       this.recordsError = false
@@ -138,14 +170,21 @@ export default {
     searchRecords() { this.query.pageNum = 1; this.loadRecords() },
     async loadRecords() {
       const sequence = ++this.recordsSequence
+      const query = {...this.query}
       this.recordsLoading = true
       this.recordsError = false
       try {
-        const { data } = await listMcpInvocations({ ...this.query })
+        const { data } = await listMcpInvocations(query)
         if (sequence !== this.recordsSequence) return
+        if (!Array.isArray(data?.rows) || !Number.isSafeInteger(data.total) || data.total < data.rows.length
+            || (query.executionId && data.rows.some(row => row.executionId !== query.executionId
+              || !isWorkflowInvocation(row.source) || (query.nodeRunId && row.nodeRunId !== query.nodeRunId)))) {
+          throw new Error('审计记录范围或格式不一致')
+        }
         this.records = data.rows
         this.total = data.total
-      } catch { if (sequence === this.recordsSequence) this.recordsError = true }
+        this.$emit('records-loaded', {...query, records: data.rows, total: data.total})
+      } catch { if (sequence === this.recordsSequence) { this.recordsError = true; this.records = []; this.total = 0 } }
       finally { if (sequence === this.recordsSequence) this.recordsLoading = false }
     },
     pretty(value) { return JSON.stringify(value, null, 2) },

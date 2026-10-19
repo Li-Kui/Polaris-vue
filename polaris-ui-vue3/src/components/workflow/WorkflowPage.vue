@@ -36,6 +36,7 @@
     <WorkflowExecutionMonitor
       v-else-if="pageMode === 'executions'"
       :can-execute="canExecute"
+      :can-view-mcp-records="canViewMcpRecords"
       :definition-id="executionTarget.id"
       :workflow-name="executionTarget.workflowName"
       :workflow-code="executionTarget.workflowCode"
@@ -249,6 +250,7 @@ export default {
     SharePanel
   },
   props: {
+    canViewMcpRecords: {type: Boolean, default: false},
     canEdit: {
       type: Boolean,
       default: false

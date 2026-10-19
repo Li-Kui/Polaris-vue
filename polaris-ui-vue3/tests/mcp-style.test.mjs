@@ -1,3 +1,4 @@
+import {invocationSourceLabel, isWorkflowInvocation} from '../src/components/agent/agentBindings.js'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import test from 'node:test'
@@ -65,7 +66,7 @@ test('调用结果与错误码优先展示，完整审计标识保留在展开�
   assert.ok(template.indexOf('label="状态"') < template.indexOf('label="开始时间"'))
   assert.ok(template.indexOf('label="错误码"') < template.indexOf('label="来源 / 主体"'))
   const script = descriptor.script.content.replace(/^import .*$/gm, '').replace('export default {', 'const component = {')
-  const methods = vm.runInNewContext(`${script}\ncomponent.methods`)
+  const methods = vm.runInNewContext(`${script}\ncomponent.methods`, {isWorkflowInvocation, invocationSourceLabel})
   assert.equal(methods.statusType('SUCCESS'), 'success')
   assert.equal(methods.statusType('REJECTED'), 'danger')
   assert.equal(methods.statusType('TIMEOUT'), 'warning')

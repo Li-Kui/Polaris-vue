@@ -259,6 +259,23 @@ public class WorkflowDefinitionValidator {
             WorkflowDefinitionSpec.Node node, String path,
             List<WorkflowDiagnostic> diagnostics) {
         if (!"agent".equals(node.getType()) || node.getConfig() == null) return;
+        if ("2.0".equals(node.getTypeVersion())) {
+            if (node.getRetryPolicy() != null && !Integer.valueOf(1).equals(node.getRetryPolicy().getMaxAttempts()))
+                diagnostics.add(error("AGENT_RETRY_NOT_ALLOWED", node.getId(), path + ".retryPolicy", "协作智能体只能尝试一次，不允许自动重试"));
+            if (node.getOutputSchemaOverride() != null && !node.getOutputSchemaOverride().isNull())
+                diagnostics.add(error("AGENT_OUTPUT_OVERRIDE_NOT_ALLOWED", node.getId(), path + ".outputSchemaOverride", "协作输出契约不能被覆盖或以历史样本替代"));
+            try { com.polaris.ai.workflow.contract.WorkflowAgentNodeContract.snapshotVersion(node.getConfig()); }
+            catch (RuntimeException invalid) { diagnostics.add(error("AGENT_SNAPSHOT_INVALID", node.getId(), path + ".config", "请确认当前 Agent 及知识快照")); }
+            var refs = node.getResourceRefs() == null ? List.<WorkflowDefinitionSpec.ResourceRef>of() : node.getResourceRefs();
+            if (refs.stream().filter(ref -> "AGENT".equals(ref.getKind())).count() != 1
+                    || refs.stream().filter(ref -> "KNOWLEDGE_BASE".equals(ref.getKind())).count() > 1
+                    || refs.stream().anyMatch(ref -> !Set.of("AGENT", "KNOWLEDGE_BASE").contains(ref.getKind()) || !Boolean.TRUE.equals(ref.getRequired()))
+                    || node.getConfig().has("knowledgeId") != refs.stream().anyMatch(ref -> "KNOWLEDGE_BASE".equals(ref.getKind())))
+                diagnostics.add(error("AGENT_RESOURCE_SCOPE_INVALID", node.getId(), path + ".resourceRefs", "仅允许一个必需 Agent 和至多一个显式绑定的必需知识库"));
+            if (node.getInputMapping() == null || !node.getInputMapping().containsKey("question"))
+                diagnostics.add(error("AGENT_QUESTION_REQUIRED", node.getId(), path + ".inputMapping", "请显式映射本次问题 question"));
+            return;
+        }
         boolean hasTask = !node.getConfig().path("task").asString("").trim().isEmpty();
         boolean hasInput = node.getInputMapping() != null && !node.getInputMapping().isEmpty();
         if (!hasTask && !hasInput) {

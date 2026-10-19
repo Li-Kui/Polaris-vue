@@ -72,3 +72,20 @@ export function getAvailableTools() {
     method: 'get'
   })
 }
+
+export function getAgentMcpBindings(id) {
+  return request({url: `/ai/agent/${id}/mcp-bindings`, method: 'get'})
+}
+export function saveAgentMcpBindings(id, data) {
+  return request({url: `/ai/agent/${id}/mcp-bindings`, method: 'put', data})
+}
+export function preflightAgentMcpBindings(id, data) {
+  return request({url: `/ai/agent/${id}/mcp-bindings/preflight`, method: 'post', data})
+}
+
+export function getAgentNodeRun(executionId, nodeRunId) {
+  return request({url: `/ai/agent/collaboration/executions/${encodeURIComponent(executionId)}/nodes/${encodeURIComponent(nodeRunId)}`, method: 'get'})
+}
+export function getAgentContractImpact() {
+  return request({url: '/ai/agent/collaboration/contract-impact', method: 'get'})
+}

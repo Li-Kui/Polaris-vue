@@ -1,6 +1,8 @@
 package com.polaris.platform.mcp;
 
 import com.polaris.common.exception.ServiceException;
+import com.polaris.ai.agent.collaboration.AgentCallControl;
+import com.polaris.ai.agent.collaboration.BoundedAgentContracts.Failure;
 import com.polaris.platform.connector.ConnectorCredentialCipher;
 import com.polaris.platform.domain.PlatformMcpConnection;
 import com.polaris.platform.dto.McpConnectionProbeResult;
@@ -55,24 +57,30 @@ public class McpConnectionProbe {
 
     <T> T withSession(PlatformMcpConnection connection, boolean discoverTools, boolean invocation,
             SessionOperation<T> operation) {
+        return withSession(connection, discoverTools, invocation, operation, null);
+    }
+
+    <T> T withSession(PlatformMcpConnection connection, boolean discoverTools, boolean invocation,
+            SessionOperation<T> operation, AgentCallControl control) {
         if (!probeSlots.tryAcquire()) {
             if (invocation) throw new McpInvocationException(McpInvocationException.Code.RATE_LIMITED);
             throw new ServiceException("MCP测试/发现正在繁忙，请稍后重试");
         }
         try {
-            return performSession(connection, discoverTools, invocation, operation);
+            return performSession(connection, discoverTools, invocation, operation, control);
         } finally {
             probeSlots.release();
         }
     }
 
     private <T> T performSession(PlatformMcpConnection connection, boolean discoverTools, boolean invocation,
-            SessionOperation<T> operation) {
+            SessionOperation<T> operation, AgentCallControl control) {
         long started = System.nanoTime();
         URI endpoint = policy.validate(connection);
-        long deadline = started + TimeUnit.MILLISECONDS.toNanos(connection.getTimeoutMs());
+        long timeoutMs = control == null ? connection.getTimeoutMs() : Math.min(connection.getTimeoutMs(), control.remainingMillis());
+        long deadline = started + TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         String secret = credential(connection);
-        Duration timeout = Duration.ofMillis(connection.getTimeoutMs());
+        Duration timeout = Duration.ofMillis(timeoutMs);
         Sinks.One<String> sessionProtocol = Sinks.one();
         McpAsyncClient client = null;
         try (McpManagedHttpClient.ManagedBuilder httpBuilder = new McpManagedHttpClient.ManagedBuilder()) {
@@ -80,7 +88,7 @@ public class McpConnectionProbe {
                 HttpClientStreamableHttpTransport transport = HttpClientStreamableHttpTransport
                         .builder(endpoint.toString()).endpoint(endpoint.toString())
                         .clientBuilder(httpBuilder)
-                        .connectTimeout(Duration.ofMillis(Math.min(connection.getTimeoutMs(), 10000)))
+                        .connectTimeout(Duration.ofMillis(Math.min(timeoutMs, 10000)))
                         .jsonMapper(invocation ? new McpStrictJsonMapper(JSON_MAPPER) : new JacksonMcpJsonMapper(JSON_MAPPER))
                         .openConnectionOnStartup(false).resumableStreams(false)
                         .supportedProtocolVersions(PROTOCOL_VERSIONS)
@@ -92,6 +100,7 @@ public class McpConnectionProbe {
                                     : Mono.just(builder.build().headers().firstValue("MCP-Protocol-Version")
                                             .orElse("2025-11-25"));
                             return version.flatMap(protocol -> Mono.fromCallable(() -> {
+                                if (control != null && !"DELETE".equals(method)) control.check();
                                 if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) {
                                     throw new IllegalStateException("MCP_PROBE_CANCELLED");
                                 }
@@ -112,7 +121,7 @@ public class McpConnectionProbe {
                 client = McpClient.async(transport).requestTimeout(timeout).initializationTimeout(timeout)
                         .clientInfo(new McpSchema.Implementation("Polaris", "3.9.2"))
                         .enableCallToolSchemaCaching(false).build();
-                McpSchema.InitializeResult initialized = await(client.initialize(), deadline);
+                McpSchema.InitializeResult initialized = await(client.initialize(), deadline, control);
                 if (!PROTOCOL_VERSIONS.contains(initialized.protocolVersion())) {
                     throw new ServiceException("MCP服务协商了不支持的协议版本");
                 }
@@ -120,7 +129,7 @@ public class McpConnectionProbe {
                 boolean toolsSupported = initialized.capabilities() != null
                         && initialized.capabilities().tools() != null;
                 List<McpConnectionProbeResult.ToolPreview> tools = discoverTools && toolsSupported
-                        ? discover(client, deadline) : List.of();
+                        ? discover(client, deadline, control) : List.of();
                 return operation.execute(client, initialized, tools, deadline, started);
             } finally {
                 sessionProtocol.tryEmitEmpty();
@@ -139,6 +148,10 @@ public class McpConnectionProbe {
                     }
                 }
             }
+        } catch (Failure safe) {
+            throw new McpInvocationException(safe.code() == com.polaris.ai.agent.collaboration.BoundedAgentContracts.Code.DEADLINE_EXCEEDED
+                    ? McpInvocationException.Code.TIMEOUT : safe.code() == com.polaris.ai.agent.collaboration.BoundedAgentContracts.Code.CANCELLED
+                    ? McpInvocationException.Code.CANCELLED : McpInvocationException.Code.POLICY_CHANGED);
         } catch (McpInvocationException e) {
             if (!invocation) throw new ServiceException("MCP连接失败，请检查端点、凭证、协议版本或远端服务状态");
             throw e;
@@ -174,7 +187,7 @@ public class McpConnectionProbe {
         }
     }
 
-    private List<McpConnectionProbeResult.ToolPreview> discover(McpAsyncClient client, long deadline)
+    private List<McpConnectionProbeResult.ToolPreview> discover(McpAsyncClient client, long deadline, AgentCallControl control)
             throws ExecutionException, InterruptedException, TimeoutException {
         List<McpConnectionProbeResult.ToolPreview> tools = new ArrayList<>();
         Set<String> cursors = new HashSet<>();
@@ -182,7 +195,7 @@ public class McpConnectionProbe {
         String cursor = null;
         int totalBytes = 0;
         for (int page = 0; page < MAX_PAGES; page++) {
-            McpSchema.ListToolsResult result = await(client.listTools(cursor), deadline);
+            McpSchema.ListToolsResult result = await(client.listTools(cursor), deadline, control);
             if (result.tools() == null || result.tools().size() + tools.size() > MAX_TOOLS) {
                 throw new ServiceException("MCP工具数量无效或超过200个预览上限");
             }
@@ -228,14 +241,25 @@ public class McpConnectionProbe {
 
     static <T> T await(Mono<T> operation, long deadline)
             throws ExecutionException, InterruptedException, TimeoutException {
+        return await(operation, deadline, null);
+    }
+
+    static <T> T await(Mono<T> operation, long deadline, AgentCallControl control)
+            throws ExecutionException, InterruptedException, TimeoutException {
+        if (control != null) control.check();
         CompletableFuture<T> future = operation.toFuture();
+        Runnable cancel = () -> future.cancel(true);
         try {
-            long remaining = deadline - System.nanoTime();
-            if (remaining <= 0) {
-                throw new TimeoutException();
+            if (control != null) control.registerCancellation(cancel);
+            while (true) {
+                if (control != null) control.check();
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw new TimeoutException();
+                try { return future.get(control == null ? remaining : Math.min(remaining, TimeUnit.MILLISECONDS.toNanos(25)), TimeUnit.NANOSECONDS); }
+                catch (TimeoutException waiting) { if (control == null) throw waiting; }
             }
-            return future.get(remaining, TimeUnit.NANOSECONDS);
         } finally {
+            if (control != null) control.clearCancellation(cancel);
             if (!future.isDone()) {
                 future.cancel(true);
             }

@@ -9,5 +9,5 @@ import com.polaris.platform.dto.McpInvokeResult;
 public interface IPlatformMcpInvocationService {
     McpInvokeResult invoke(Long toolId, McpInvokeRequest request);
     McpInvokeResult invokeWorkflow(Long toolId, McpInvokeRequest request, WorkflowNodeContext context);
-    Page<PlatformMcpInvocation> selectList(Long connectionId, Long toolId, String status, Integer pageNum, Integer pageSize);
+    Page<PlatformMcpInvocation> selectList(Long connectionId, Long toolId, String status, Integer pageNum, Integer pageSize, String executionId, String nodeRunId);
 }

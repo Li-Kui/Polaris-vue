@@ -7,7 +7,9 @@ import * as sass from 'sass'
 
 const source=readFileSync(new URL('../src/components/knowledge/KnowledgeVectorCleanupExecution.vue',import.meta.url),'utf8')
 const {descriptor}=parse(source),compiled=compileScript(descriptor,{id:'vector-execution'})
-const script=descriptor.script.content.replace(/^import .*$/gm,'').replace('export default {','const component = {')
+const script = compiled.scriptAst.filter(node => node.type === 'ImportDeclaration').sort((a, b) => b.start - a.start)
+  .reduce((content, node) => content.slice(0, node.start) + content.slice(node.end), descriptor.script.content)
+  .replace('export default {', 'const component = {')
 const candidate=()=>({indexVersion:1,buildGeneration:2,state:'RETIRED',reason:'LOCAL_CANDIDATE'})
 const plan=()=>({indexVersion:1,buildGeneration:2,planId:'synthetic-plan',expiresAt:new Date(Date.now()+300000).toISOString(),blocked:false})
 const result=(state='SUCCEEDED')=>({indexVersion:1,buildGeneration:2,state,attempts:1,errorCode:null,leaseExpired:false})

@@ -7,6 +7,8 @@ import java.util.Date;
 /** 脱敏元数据，不接受或保存参数、响应、认证信息和远端异常原文。 */
 @Data
 public class PlatformMcpInvocation {
+    private String chatRequestId;
+    private Long conversationId;
     private String invocationId;
     private Long tenantId;
     private Long actorUserId;
@@ -15,6 +17,8 @@ public class PlatformMcpInvocation {
     private String executionId;
     private String nodeRunId;
     private Integer attemptNo;
+    private String agentRunId;
+    private Integer agentCallNo = 0;
     private Long connectionId;
     private Long toolId;
     private Long connectionRevision;

@@ -165,6 +165,7 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
   --mc-accent: #2563eb;
   --mc-accent-hover: #1d4ed8;
   --mc-accent-soft: #eff6ff;
+  --mc-on-accent: #ffffff;
   --mc-surface: #ffffff;
   --mc-surface-muted: #f8fafc;
   --mc-page-bg: #f5f7fb;
@@ -173,6 +174,12 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
   --mc-border: #dbe3ef;
   --mc-danger: #dc2626;
   --el-color-primary: var(--mc-accent);
+  --el-color-primary-light-3: color-mix(in srgb, var(--mc-accent) 70%, var(--mc-surface));
+  --el-color-primary-light-5: color-mix(in srgb, var(--mc-accent) 50%, var(--mc-surface));
+  --el-color-primary-light-7: color-mix(in srgb, var(--mc-accent) 30%, var(--mc-surface));
+  --el-color-primary-light-8: color-mix(in srgb, var(--mc-accent) 20%, var(--mc-surface));
+  --el-color-primary-light-9: var(--mc-accent-soft);
+  --el-color-primary-dark-2: var(--mc-accent-hover);
   min-height: calc(100vh - 84px);
   padding: 22px 28px 36px;
   color: var(--mc-text);
@@ -182,6 +189,7 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
   --mc-accent: #60a5fa;
   --mc-accent-hover: #93c5fd;
   --mc-accent-soft: #172554;
+  --mc-on-accent: #0f172a;
   --mc-surface: #171b24;
   --mc-surface-muted: #11151d;
   --mc-page-bg: #0e1118;
@@ -189,6 +197,20 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
   --mc-muted: #a8b3c5;
   --mc-border: #303949;
   --mc-danger: #fb7185;
+}
+.model-center-page :deep(.el-button--primary:not(.is-link):not(.is-text):not(.is-plain)) {
+  --el-button-bg-color: var(--mc-accent);
+  --el-button-border-color: var(--mc-accent);
+  --el-button-text-color: var(--mc-on-accent);
+  --el-button-hover-bg-color: var(--mc-accent-hover);
+  --el-button-hover-border-color: var(--mc-accent-hover);
+  --el-button-hover-text-color: var(--mc-on-accent);
+  --el-button-active-bg-color: var(--mc-accent-hover);
+  --el-button-active-border-color: var(--mc-accent-hover);
+  --el-button-active-text-color: var(--mc-on-accent);
+  --el-button-disabled-bg-color: color-mix(in srgb, var(--mc-accent) 35%, var(--mc-surface));
+  --el-button-disabled-border-color: color-mix(in srgb, var(--mc-accent) 35%, var(--mc-surface));
+  --el-button-disabled-text-color: var(--mc-muted);
 }
 .hero { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; padding: 28px 30px; border: 1px solid var(--mc-border); border-radius: 20px; background: linear-gradient(125deg, var(--mc-accent-soft), var(--mc-surface) 52%, rgba(16, 185, 129, .08)); box-shadow: 0 14px 38px rgba(15, 23, 42, .08); }
 .hero::after { position: absolute; right: -50px; top: -90px; width: 240px; height: 240px; border: 36px solid rgba(64, 158, 255, .08); border-radius: 50%; content: ''; }

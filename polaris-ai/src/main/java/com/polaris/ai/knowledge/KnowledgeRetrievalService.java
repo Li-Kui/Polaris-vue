@@ -42,6 +42,14 @@ public class KnowledgeRetrievalService {
     public SearchResult search(AiKnowledgeBase snapshot, AiVectorStoreResolver.VectorContext vector,
                                String query, int candidateLimit, double minScore, List<String> documentIds,
                                List<String> relatedDocumentIds) {
+        return search(snapshot, vector, query, candidateLimit, minScore, documentIds, relatedDocumentIds, () -> { });
+    }
+
+    /** 协作节点在每个外部检索阶段之间复查预算与取消，不改变原有检索范围。 */
+    public SearchResult search(AiKnowledgeBase snapshot, AiVectorStoreResolver.VectorContext vector,
+                               String query, int candidateLimit, double minScore, List<String> documentIds,
+                               List<String> relatedDocumentIds, Runnable activeCheck) {
+        activeCheck.run();
         List<String> related = validateRelatedPlan(relatedDocumentIds, documentIds, candidateLimit);
         if (query == null || query.isBlank() || query.length() > 16000
                 || candidateLimit < 1 || candidateLimit > 50
@@ -58,6 +66,7 @@ public class KnowledgeRetrievalService {
             throw new ServiceException("知识库向量快照已变化，请刷新后重试", 409);
         }
         long started = System.nanoTime();
+        activeCheck.run();
         Embedding embedding;
         try {
             embedding = vector.embeddingModel().embed(query).content();
@@ -68,9 +77,11 @@ public class KnowledgeRetrievalService {
             throw new ServiceException("问题向量化失败，请检查当前向量模型后重试", 502);
         }
         long embeddingMs = elapsed(started);
+        activeCheck.run();
         requireCurrent(snapshot);
         long searchStarted = System.nanoTime();
         QueryResult primary = queryStore(snapshot, vector, embedding, candidateLimit, minScore, documentIds);
+        activeCheck.run();
         if (related.isEmpty()) return new SearchResult(primary.matches(), primary.candidateCount(), primary.filteredCount(),
                 embeddingMs, elapsed(searchStarted), elapsed(started));
         List<EmbeddingMatch<TextSegment>> selected = new ArrayList<>();
@@ -79,6 +90,7 @@ public class KnowledgeRetrievalService {
         int count = primary.candidateCount(), filtered = primary.filteredCount(), vectorQueries = 1;
         List<String> missing = new ArrayList<>();
         for (int i = 0; i < related.size(); i++) {
+            activeCheck.run();
             requireCurrent(snapshot);
             String id = related.get(i);
             var existing = primary.matches().stream().filter(match -> id.equals(match.embedded().metadata().getString("doc_id"))).findFirst();
@@ -94,6 +106,7 @@ public class KnowledgeRetrievalService {
             addCoverage(selected, seen, match, 99);
         }
         validateSources(snapshot, selected.stream().map(match -> Long.valueOf(match.embedded().metadata().getString("doc_id"))).toList());
+        activeCheck.run();
         return new SearchResult(List.copyOf(selected), count, filtered, embeddingMs, elapsed(searchStarted), elapsed(started),
                 vectorQueries, List.copyOf(missing));
     }

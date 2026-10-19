@@ -1,6 +1,7 @@
 package com.polaris.platform.mcp;
 
 import com.polaris.platform.domain.PlatformMcpConnection;
+import com.polaris.ai.agent.collaboration.AgentCallControl;
 import com.polaris.platform.domain.PlatformMcpTool;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,11 @@ public class McpToolExecutor {
 
     public Result execute(PlatformMcpConnection connection, PlatformMcpTool tool,
             JsonNode arguments, Runnable beforeCall) {
+        return execute(connection, tool, arguments, beforeCall, null);
+    }
+
+    public Result execute(PlatformMcpConnection connection, PlatformMcpTool tool,
+            JsonNode arguments, Runnable beforeCall, AgentCallControl control) {
         return sessions.withSession(connection, true, true, (client, initialized, discovered, deadline, started) -> {
             var remote = discovered.stream().filter(next -> tool.getToolName().equals(next.name())).findFirst()
                     .orElseThrow(() -> new McpInvocationException(McpInvocationException.Code.DEFINITION_CHANGED));
@@ -37,7 +43,7 @@ public class McpToolExecutor {
             beforeCall.run();
             Map<String, Object> parameters = JSON.convertValue(arguments, OBJECT);
             McpSchema.CallToolResult result = McpConnectionProbe.await(client.callTool(
-                    new McpSchema.CallToolRequest(tool.getToolName(), parameters, null)), deadline);
+                    new McpSchema.CallToolRequest(tool.getToolName(), parameters, null)), deadline, control);
             if (result == null || result.content() == null || result.content().stream().anyMatch(Objects::isNull)) {
                 throw new McpInvocationException(McpInvocationException.Code.PROTOCOL_ERROR);
             }
@@ -53,7 +59,7 @@ public class McpToolExecutor {
                 throw new McpInvocationException(McpInvocationException.Code.PROTOCOL_ERROR);
             }
             return new Result(error, JSON.valueToTree(result.content()), structured);
-        });
+        }, control);
     }
 
     public record Result(boolean isError, JsonNode content, JsonNode structuredContent) {

@@ -3,6 +3,9 @@ package com.polaris.platform.service.impl;
 import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.agent.collaboration.AgentCallControl;
+import com.polaris.ai.agent.collaboration.AgentInvocationGuard;
+import com.polaris.ai.agent.collaboration.BoundedAgentContracts;
 import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.observability.AiObservability;
 import com.polaris.ai.workflow.config.WorkflowProperties;
@@ -54,6 +57,8 @@ public class PlatformMcpInvocationServiceImpl implements IPlatformMcpInvocationS
     private final TransactionTemplate transactions;
     private final PlatformMcpWorkflowResourceProvider workflowResources;
     private final WorkflowProperties workflowProperties;
+    @Autowired(required = false)
+    private AgentInvocationGuard agentGuard;
 
     public PlatformMcpInvocationServiceImpl(PlatformMcpConnectionMapper connections, PlatformMcpToolMapper tools,
             PlatformMcpInvocationMapper invocations, McpToolContractPolicy contracts, McpToolExecutor executor,
@@ -113,38 +118,100 @@ public class PlatformMcpInvocationServiceImpl implements IPlatformMcpInvocationS
     }
 
     private McpInvokeResult invokeAs(Long tenantId, Long toolId, McpInvokeRequest request, WorkflowNodeContext context) {
+        return invokeAs(tenantId, toolId, request, context, null, null);
+    }
+
+    /** 有类型的委托入口，不能伪造显式 MCP 节点上下文或通过管理接口调用。 */
+    public McpInvokeResult invokeAgent(BoundedAgentContracts.ToolIntent intent, AgentCallControl control) {
+        if (intent == null || control == null || agentGuard == null || workflowResources == null)
+            throw new BoundedAgentContracts.Failure(BoundedAgentContracts.Code.ACCESS_DENIED, BoundedAgentContracts.Dispatch.NOT_DISPATCHED);
+        try { checkAgent(intent, control); }
+        catch (BoundedAgentContracts.Failure safe) {
+            throw new BoundedAgentContracts.Failure(safe.code(), BoundedAgentContracts.Dispatch.NOT_DISPATCHED);
+        }
+        catch (RuntimeException denied) {
+            throw new BoundedAgentContracts.Failure(BoundedAgentContracts.Code.ACCESS_DENIED, BoundedAgentContracts.Dispatch.NOT_DISPATCHED);
+        }
+        var previous = CallerContextHolder.get();
+        try {
+            var actor = workflowResources.requireActor(intent.context().tenantId(), "PLATFORM_USER", String.valueOf(intent.context().actorUserId()));
+            CallerContextHolder.set(actor);
+            McpInvokeRequest request = new McpInvokeRequest();
+            request.setRevision(intent.tool().revision()); request.setConnectionRevision(intent.tool().connectionRevision());
+            request.setCatalogRevision(intent.tool().catalogRevision()); request.setStructureHash(intent.tool().structureHash());
+            request.setArguments(JSON.readTree(intent.argumentsJson()));
+            return invokeAs(intent.context().tenantId(), intent.tool().toolId(), request, null, intent, control);
+        } catch (BoundedAgentContracts.Failure safe) { throw safe; }
+        catch (RuntimeException unavailable) {
+            // invokeAs 返回前出现异常只能证明没有正常结果，不能推断远端未收到请求。
+            throw new BoundedAgentContracts.Failure(BoundedAgentContracts.Code.AUDIT_INCOMPLETE, BoundedAgentContracts.Dispatch.UNKNOWN);
+        } finally { CallerContextHolder.set(previous); }
+    }
+
+    private void checkAgent(BoundedAgentContracts.ToolIntent intent, AgentCallControl control) {
+        if (intent == null) return;
+        control.check();
+        agentGuard.checkReserved(intent);
+        workflowResources.requireActor(intent.context().tenantId(), "PLATFORM_USER", String.valueOf(intent.context().actorUserId()));
+    }
+
+    private McpInvokeResult invokeAs(Long tenantId, Long toolId, McpInvokeRequest request, WorkflowNodeContext context,
+            BoundedAgentContracts.ToolIntent agent, AgentCallControl control) {
         long started = System.nanoTime();
         Snapshot snapshot;
         try {
             snapshot = transactions.execute(status -> {
+                checkAgent(agent, control);
                 PlatformMcpTool initial = requireTool(tools.selectById(tenantId, toolId), tenantId);
                 PlatformMcpConnection connection = requireConnection(connections.lockById(tenantId, initial.getConnectionId()), tenantId);
                 PlatformMcpTool tool = requireTool(tools.selectById(tenantId, toolId), tenantId);
                 PlatformMcpInvocation audit = audit(connection, tool, context);
+                if (agent != null) {
+                    if(agent.context().entry() instanceof com.polaris.ai.agent.collaboration.AgentEntryIdentity.Chat chat) {
+                        audit.setSource("AGENT_CHAT");audit.setChatRequestId(chat.requestId());audit.setConversationId(chat.conversationId());
+                    } else {
+                        audit.setSource("AGENT_WORKFLOW"); audit.setExecutionId(agent.context().executionId());
+                        audit.setNodeRunId(agent.context().nodeRunId()); audit.setAttemptNo(agent.context().attemptNo());
+                    }
+                    audit.setAgentRunId(agent.context().runId()); audit.setAgentCallNo(agent.callNo());
+                }
                 if (invocations.insert(audit) != 1) throw new IllegalStateException();
                 return new Snapshot(connection, tool, audit);
             });
+        } catch (BoundedAgentContracts.Failure safe) {
+            throw new BoundedAgentContracts.Failure(safe.code(), BoundedAgentContracts.Dispatch.NOT_DISPATCHED);
         } catch (ServiceException denied) {
             throw denied;
         } catch (RuntimeException unavailable) {
             // 审计表缺失或不可写时拒绝网络调用；不能先执行再补记录。
-            throw new ServiceException("MCP调用审计不可用或已有相同节点尝试，请确认10、11号SQL已执行；未发起远端调用");
+            if (agent != null) throw new BoundedAgentContracts.Failure(BoundedAgentContracts.Code.AUDIT_INCOMPLETE, BoundedAgentContracts.Dispatch.NOT_DISPATCHED);
+            throw new ServiceException("MCP调用审计不可用或已有相同节点尝试，请确认MCP结构脚本已执行；未发起远端调用");
         }
         Code failure = null;
         McpToolExecutor.Result result = null;
         try (McpInvocationLimiter.Lease ignored = limiter.acquire(tenantId)) {
             checkWorkflow(context);
+            checkAgent(agent, control);
             validateSnapshot(snapshot, request);
             recheckContract(snapshot.tool());
             JsonNode arguments = request.getArguments();
             if (arguments == null || !arguments.isObject() || !bounded(arguments, 0, new int[]{0})
                     || JSON.writeValueAsBytes(arguments).length > 64 * 1024) throw new McpInvocationException(Code.INPUT_INVALID);
             contracts.validateValue(snapshot.tool().getInputSchema(), JSON.convertValue(arguments, OBJECT), false);
-            result = executor.execute(snapshot.connection(), snapshot.tool(), arguments, () -> {
+            Runnable before = () -> {
                 checkWorkflow(context);
+                checkAgent(agent, control);
                 beforeCall(snapshot, request);
-            });
+            };
+            result = agent == null ? executor.execute(snapshot.connection(), snapshot.tool(), arguments, before)
+                    : executor.execute(snapshot.connection(), snapshot.tool(), arguments, before, control);
             if (result.isError()) failure = Code.TOOL_ERROR;
+        } catch (BoundedAgentContracts.Failure safe) {
+            failure = switch (safe.code()) {
+                case CANCELLED -> Code.CANCELLED;
+                case DEADLINE_EXCEEDED -> Code.TIMEOUT;
+                default -> Code.POLICY_CHANGED;
+            };
         } catch (McpInvocationException safe) {
             failure = safe.code();
         } catch (RuntimeException unexpected) {
@@ -266,11 +333,13 @@ public class PlatformMcpInvocationServiceImpl implements IPlatformMcpInvocationS
     }
 
     @Override
-    public Page<PlatformMcpInvocation> selectList(Long connectionId, Long toolId, String status, Integer pageNum, Integer pageSize) {
+    public Page<PlatformMcpInvocation> selectList(Long connectionId, Long toolId, String status, Integer pageNum, Integer pageSize, String executionId, String nodeRunId) {
         Long tenantId = requireAdmin();
         if (status != null && !status.isBlank() && !STATUSES.contains(status)) throw new ServiceException("调用记录状态无效");
+        if (executionId != null && !validRunId(executionId)) throw new ServiceException("工作流执行 ID 无效");
+        if (nodeRunId != null && (executionId == null || !validRunId(nodeRunId))) throw new ServiceException("节点尝试范围无效");
         PageHelper.startPage(pageNum == null ? 1 : Math.max(1, pageNum), pageSize == null ? 20 : Math.max(1, Math.min(50, pageSize)));
-        try { return Page.of(PageInfo.of(invocations.selectList(tenantId, connectionId, toolId, status))); }
+        try { return Page.of(PageInfo.of(invocations.selectList(tenantId, connectionId, toolId, status, executionId, nodeRunId))); }
         catch (RuntimeException unavailable) { throw new ServiceException("MCP审计查询失败，请确认10、11号SQL已执行"); }
         finally { PageHelper.clearPage(); }
     }

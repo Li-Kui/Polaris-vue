@@ -1,6 +1,7 @@
 <template>
   <el-drawer :model-value="true" class="knowledge-citation-drawer" modal-class="knowledge-citation-overlay" title="参考片段" size="min(560px, 100vw)" direction="rtl" append-to-body
              :close-on-click-modal="false" @close="emit('close')">
+    <p v-if="selection.originId" class="citation-note">这是前文回答的原知识片段，本轮未重新检索。</p>
     <p class="citation-note">仅展示这条回答实际入选的片段；来源编号不等于结论已经核实。不会调用模型或重建索引。</p>
     <p v-if="preview?.documentName || selection.documentName" class="citation-heading">{{ preview?.documentName || selection.documentName }}</p>
     <nav v-if="selection.citationIds?.length > 1" class="citation-tabs" aria-label="切换同文档参考片段">
@@ -34,6 +35,7 @@
 <script setup>
 import {onBeforeUnmount, ref, watch} from 'vue'
 import {getKnowledgeCitation} from '@/api/ai/chat'
+import {getAgentChatHistoryCitation} from '@/api/ai/agentChat'
 
 const props = defineProps({selection: {type: Object, required: true}})
 const emit = defineEmits(['close'])
@@ -44,7 +46,9 @@ async function loadPreview(selection, citationId) {
   activeCitation.value = citationId
   preview.value = null; error.value = ''; loading.value = true
   try {
-    const result = await getKnowledgeCitation(selection.conversationId, selection.messageId, citationId)
+    const result = selection.originId
+      ? await getAgentChatHistoryCitation(selection.conversationId, selection.messageId, selection.originId, citationId)
+      : await getKnowledgeCitation(selection.conversationId, selection.messageId, citationId)
     if (version !== requestVersion) return
     if (result.code !== 200 || !result.data) throw new Error('引用片段暂不可用，请关闭后重试')
     preview.value = result.data

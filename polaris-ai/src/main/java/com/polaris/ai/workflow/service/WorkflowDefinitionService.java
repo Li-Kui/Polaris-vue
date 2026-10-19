@@ -272,6 +272,8 @@ public class WorkflowDefinitionService implements WorkflowDefinitionApplicationF
         }
         List<WorkflowDiagnostic> mcpDiagnostics = WorkflowMcpNodeContract.validatePublication(compilation.plan(), schemaSnapshots);
         if (!mcpDiagnostics.isEmpty()) return new WorkflowPublishResult(false, null, mcpDiagnostics);
+        List<WorkflowDiagnostic> agentDiagnostics = com.polaris.ai.workflow.contract.WorkflowAgentNodeContract.validatePublication(compilation.plan(), schemaSnapshots);
+        if (!agentDiagnostics.isEmpty()) return new WorkflowPublishResult(false, null, agentDiagnostics);
         List<WorkflowDiagnostic> approvalDirectoryDiagnostics = validateApprovalTargets(
                 definition.getDraftJson(), definition.getTenantId());
         if (!approvalDirectoryDiagnostics.isEmpty()) {

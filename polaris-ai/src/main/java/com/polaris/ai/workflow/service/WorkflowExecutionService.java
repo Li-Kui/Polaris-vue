@@ -110,6 +110,12 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (denied != null) {
             return new WorkflowExecutionAdmissionView(false, "NODE_EXECUTION_DISABLED", denied, versionId);
         }
+        if (plan.getNodes().stream().anyMatch(node -> "agent".equals(node.getType()))
+                && (!CallerUtils.getContext().isTenantAdmin()
+                || !"PLATFORM_USER".equals(currentPrincipal(definition).type()))) {
+            return new WorkflowExecutionAdmissionView(false, "AGENT_ACTOR_DENIED",
+                    "协作智能体工作流仅允许当前租户管理员执行，不接受分享或 API Key 身份", versionId);
+        }
         if (plan.getNodes().stream().anyMatch(node -> "mcp_tool".equals(node.getType()))
                 && (!CallerUtils.getContext().isTenantAdmin()
                 || !"PLATFORM_USER".equals(currentPrincipal(definition).type()))) {
@@ -530,11 +536,12 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
     @Override
     public List<WorkflowNodeRunView> listNodeRuns(String executionId) {
         requireEnabled();
-        requireExecution(executionId);
+        WorkflowExecution execution = requireExecution(executionId);
+        Map<String, JsonNode> descriptions = nodeDescriptions(execution);
         return nodeRunMapper.selectList(new LambdaQueryWrapper<WorkflowNodeRun>()
                         .eq(WorkflowNodeRun::getExecutionId, executionId)
                         .orderByAsc(WorkflowNodeRun::getId))
-                .stream().map(this::nodeRunView).toList();
+                .stream().map(run -> nodeRunView(run, descriptions.get(run.getNodeId()))).toList();
     }
 
     @Override
@@ -929,12 +936,41 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 execution.getFinishTime());
     }
 
-    private WorkflowNodeRunView nodeRunView(WorkflowNodeRun run) {
+    /** Only the bound immutable version can supply labels; never read the latest draft. */
+    private Map<String, JsonNode> nodeDescriptions(WorkflowExecution execution) {
+        WorkflowVersion version = versionMapper.selectByVersionId(execution.getWorkflowVersionId());
+        if (version == null || !Objects.equals(version.getVersionId(), execution.getWorkflowVersionId())
+                || !Objects.equals(version.getTenantId(), execution.getTenantId())
+                || !Objects.equals(version.getDefinitionId(), execution.getDefinitionId())
+                || !Objects.equals(version.getVersionNo(), execution.getVersionNo())) return Map.of();
+        try {
+            JsonNode nodes = objectMapper.readTree(version.getDefinitionJson()).path("nodes");
+            if (!nodes.isArray()) return Map.of();
+            Map<String, JsonNode> result = new LinkedHashMap<>();
+            for (JsonNode node : nodes) {
+                String id = node.path("id").asString("");
+                if (id.isBlank() || result.putIfAbsent(id, node) != null) return Map.of();
+            }
+            return result;
+        } catch (RuntimeException unavailable) {
+            return Map.of();
+        }
+    }
+
+    private WorkflowNodeRunView nodeRunView(WorkflowNodeRun run, JsonNode description) {
+        List<WorkflowNodeRunView.Resource> resources = new ArrayList<>();
+        if (description != null && description.path("resourceRefs").isArray()) {
+            for (JsonNode ref : description.path("resourceRefs")) {
+                resources.add(new WorkflowNodeRunView.Resource(ref.path("kind").asString(""), ref.path("key").asString("")));
+            }
+        }
         return new WorkflowNodeRunView(
                 run.getNodeRunId(), run.getNodeId(), run.getBranchPath(), run.getAttemptNo(),
                 run.getHandlerVersion(), run.getStatus(), run.getSideEffect(),
                 run.getSideEffectStatus(), dataRedactor.redactJson(run.getOutputJson()), run.getErrorCode(),
-                run.getErrorMessage(), run.getStartTime(), run.getFinishTime());
+                run.getErrorMessage(), run.getStartTime(), run.getFinishTime(),
+                description == null ? null : description.path("name").asString(null),
+                description == null ? null : description.path("type").asString(null), List.copyOf(resources));
     }
 
     private WorkflowExecutionEventView eventView(WorkflowEvent event) {

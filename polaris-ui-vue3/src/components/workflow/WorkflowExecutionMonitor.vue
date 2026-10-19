@@ -78,7 +78,7 @@
       class="workflow-execution-drawer"
       size="min(1180px, 88%)"
       destroy-on-close
-      @closed="stopEventStream"
+      @close="closeDetail"
     >
       <template #header>
         <div class="detail-heading">
@@ -91,6 +91,7 @@
           </span>
         </div>
       </template>
+      <p v-if="detailLoading" role="status">正在加载执行详情…</p>
       <template v-if="selected">
         <div :class="['stream-state', {
           'stream-state--connected': streamConnected,
@@ -99,6 +100,7 @@
           <span class="stream-indicator"><i></i>{{ streamStateLabel }}</span>
           <span class="stream-sequence">已同步至事件 #{{ lastSequence }}</span>
         </div>
+        <WorkflowProblemOverview :execution="selected" :nodes="nodeRuns" @inspect="inspectNode" @events="showExecutionEvents" @summary="previewSummary" />
         <el-descriptions :column="2" border class="execution-summary">
           <el-descriptions-item label="执行 ID"><code>{{ selected.executionId }}</code></el-descriptions-item>
           <el-descriptions-item label="状态">
@@ -117,7 +119,7 @@
           <el-tab-pane name="nodes">
             <template #label><span class="detail-tab-label">节点运行<em>{{ nodeRuns.length }}</em></span></template>
             <el-table :data="nodeRuns" size="small" class="detail-table">
-              <el-table-column prop="nodeId" label="节点" min-width="130" />
+              <el-table-column label="节点" min-width="160"><template #default="{row}"><strong>{{ row.nodeName || row.nodeId }}</strong><br><small>{{ row.nodeId }}</small></template></el-table-column>
               <el-table-column prop="attemptNo" label="尝试次数" width="90" />
               <el-table-column label="状态" width="140">
                 <template #default="{row}">
@@ -130,11 +132,19 @@
                 <template #default="{row}">{{ nodeWriteStatusLabel(row) }}</template>
               </el-table-column>
               <el-table-column prop="errorMessage" label="错误" min-width="220" show-overflow-tooltip />
+              <el-table-column label="诊断" width="110"><template #default="{row}"><el-button class="diagnostic-action" size="small" @click="inspectNode(row)">查看尝试</el-button></template></el-table-column>
             </el-table>
+            <WorkflowNodeDiagnostics v-if="selectedNode" ref="nodeDiagnostics" :node="selectedNode" :events="events"
+              :execution-id="selected.executionId"
+              :history-cursor="historyCursor" :latest-sequence="selected.eventSequence" :can-view-mcp-records="canViewMcpRecords"
+              @mcp="openNodeMcpRecords" @events="showNodeEvents" />
           </el-tab-pane>
           <el-tab-pane name="events">
-            <template #label><span class="detail-tab-label">事件日志<em>{{ events.length }}</em></span></template>
-            <el-table :data="events" size="small" class="detail-table">
+            <template #label><span class="detail-tab-label">事件日志<em>{{ visibleEvents.length }}</em></span></template>
+            <div v-if="eventNodeRunId" class="tool-record-actions"><span>仅查看节点尝试：{{ eventNodeRunId }}</span><el-button class="diagnostic-action" @click="showExecutionEvents">查看全部已加载事件</el-button></div>
+            <div class="tool-record-actions"><span>已读取历史至 #{{ historyCursor }} · 执行最新 #{{ selected.eventSequence ?? '未知' }}</span>
+              <el-button v-if="hasMoreHistory" class="diagnostic-action" :loading="historyLoading" @click="loadMoreEvents">加载后续历史事件</el-button></div>
+            <el-table :data="visibleEvents" size="small" class="detail-table">
               <el-table-column prop="sequenceNo" label="#" width="70" />
               <el-table-column prop="eventType" label="事件" min-width="190" />
               <el-table-column prop="nodeId" label="节点" min-width="120" />
@@ -143,7 +153,11 @@
             </el-table>
           </el-tab-pane>
           <el-tab-pane name="tools">
-            <template #label><span class="detail-tab-label">工具调用<em>{{ toolCallCount }}</em></span></template>
+            <template #label><span class="detail-tab-label">工具调用</span></template>
+            <div class="tool-record-actions">
+              <span>智能体工具事件 {{ toolCallCount }} 条；MCP 调用在独立记录中查看。</span>
+              <el-button v-if="canViewMcpRecords" type="primary" plain @click="openMcpRecords">查看本次执行的 MCP 记录</el-button>
+            </div>
             <el-empty v-if="!toolCalls.length" description="本次执行没有调用智能体工具" />
             <el-table v-else :data="toolCalls" size="small" class="detail-table">
               <el-table-column prop="sequenceNo" label="#" width="70" />
@@ -205,6 +219,10 @@
             </el-table>
           </el-tab-pane>
           <el-tab-pane label="输入 / 输出" name="io">
+            <div class="usage-summary" aria-label="执行用量摘要">
+              <div v-for="item in usageSummary" :key="item.key"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div>
+            </div>
+            <p class="usage-note">用量按执行已记录数据展示；未记录的字段不补零，总量不从其他字段推算。</p>
             <div class="json-grid">
               <div><strong>输入</strong><pre>{{ prettyJson(selected.inputJson) }}</pre></div>
               <div><strong>输出</strong><pre>{{ prettyJson(selected.outputJson) }}</pre></div>
@@ -215,6 +233,12 @@
         </el-tabs>
       </template>
     </el-drawer>
+    <McpToolInvoker v-if="canViewMcpRecords" ref="mcpRecords" @records-loaded="rememberMcpRecords" />
+    <el-dialog v-model="summaryOpen" title="诊断摘要预览" width="min(850px, calc(100vw - 32px))" append-to-body class="workflow-diagnostic-dialog">
+      <p>以下为当前读取记录的元数据快照，不含输入、输出、提示词、凭据或原始错误正文。复制前请核对标识；分页及截断范围见 coverage 字段。</p>
+      <el-input :model-value="summaryText" type="textarea" :rows="16" readonly aria-label="诊断摘要" />
+      <template #footer><el-button @click="summaryOpen = false">关闭</el-button><el-button :loading="copyingSummary" @click="copySummary">复制摘要</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -233,11 +257,18 @@ import {
 import {ArrowLeft, Refresh} from '@element-plus/icons-vue'
 import {agentToolCalls, agentToolEventReason, agentToolEventStatus, agentToolEventType} from './workflowAgent'
 import {workflowStatusLabel} from './workflowStatus'
+import McpToolInvoker from '@/components/platform/McpToolInvoker.vue'
+import {workflowUsageSummary} from './workflowUsage'
+import WorkflowProblemOverview from './WorkflowProblemOverview.vue'
+import WorkflowNodeDiagnostics from './WorkflowNodeDiagnostics.vue'
+import {buildDiagnosticSummary} from './workflowDiagnostics'
+import frontendPackage from '../../../package.json'
 
 export default {
   name: 'WorkflowExecutionMonitor',
-  components: {ArrowLeft, Refresh},
+  components: {ArrowLeft, Refresh, McpToolInvoker, WorkflowProblemOverview, WorkflowNodeDiagnostics},
   props: {
+    canViewMcpRecords: {type: Boolean, default: false},
     canExecute: {
       type: Boolean,
       default: false
@@ -263,6 +294,10 @@ export default {
   data() {
     return {
       loading: false,
+      detailLoading: false,
+      detailSequence: 0,
+      selectedNodeRunId: '', eventNodeRunId: '', historyCursor: 0, historyLoading: false,
+      mcpAuditSnapshot: null, summaryOpen: false, summaryText: '', copyingSummary: false,
       executions: [],
       selected: null,
       nodeRuns: [],
@@ -279,6 +314,10 @@ export default {
     }
   },
   computed: {
+    visibleEvents() { return this.eventNodeRunId ? this.events.filter(event => event.nodeRunId === this.eventNodeRunId) : this.events },
+    selectedNode() { return this.nodeRuns.find(node => node.nodeRunId === this.selectedNodeRunId) || null },
+    hasMoreHistory() { return this.historyCursor < Number(this.selected?.eventSequence || 0) },
+    usageSummary() { return workflowUsageSummary(this.selected?.usageJson) },
     streamStateLabel() {
       if (this.terminal(this.selected?.status)) return '执行已结束'
       return this.streamConnected ? '事件实时连接' : '事件重连中'
@@ -298,11 +337,82 @@ export default {
     window.addEventListener('focus', this.refreshWhenVisible)
   },
   beforeUnmount() {
+    this.detailSequence++
     this.stopEventStream()
     document.removeEventListener('visibilitychange', this.refreshWhenVisible)
     window.removeEventListener('focus', this.refreshWhenVisible)
   },
   methods: {
+    showExecutionEvents() { this.eventNodeRunId = ''; this.detailTab = 'events' },
+    showNodeEvents(node) {
+      if (!node?.nodeRunId || !this.nodeRuns.some(item => item.nodeRunId === node.nodeRunId)) return
+      this.eventNodeRunId = node.nodeRunId
+      this.detailTab = 'events'
+    },
+    inspectNode(node) {
+      if (!node?.nodeRunId || !this.nodeRuns.some(item => item.nodeRunId === node.nodeRunId)) return
+      this.selectedNodeRunId = node.nodeRunId
+      this.detailTab = 'nodes'
+      this.$nextTick(() => this.$refs.nodeDiagnostics?.$el?.scrollIntoView({behavior: 'smooth', block: 'start'}))
+    },
+    openNodeMcpRecords(node) {
+      if (!this.canViewMcpRecords || !this.selected?.executionId || !node?.nodeRunId
+          || !this.nodeRuns.some(item => item.nodeRunId === node.nodeRunId)) return
+      this.$refs.mcpRecords?.showWorkflowRecords(this.selected.executionId, node.nodeRunId)
+    },
+    rememberMcpRecords(snapshot) {
+      if (snapshot.executionId === this.selected?.executionId) this.mcpAuditSnapshot = snapshot
+    },
+    previewSummary() {
+      if (!this.selected) return
+      this.summaryText = JSON.stringify(buildDiagnosticSummary({execution: this.selected, nodes: this.nodeRuns,
+        events: this.events, historyCursor: this.historyCursor, mcpSnapshot: this.mcpAuditSnapshot,
+        frontendVersion: frontendPackage.version}), null, 2)
+      this.summaryOpen = true
+    },
+    async copySummary() {
+      if (!this.summaryOpen || !this.summaryText || this.copyingSummary) return
+      const text = this.summaryText
+      this.copyingSummary = true
+      try {
+        await navigator.clipboard.writeText(text)
+        if (this.summaryOpen && this.summaryText === text) this.$message.success('诊断摘要已复制，请核对后自行分享')
+      } catch {
+        if (this.summaryOpen && this.summaryText === text) this.$message.warning('无法访问剪贴板，请在预览中手动选择并复制')
+      } finally { this.copyingSummary = false }
+    },
+    async loadMoreEvents() {
+      if (!this.selected || this.historyLoading || !this.hasMoreHistory) return
+      const executionId = this.selected.executionId, sequence = this.detailSequence
+      this.historyLoading = true
+      try {
+        const response = await listWorkflowExecutionEvents(executionId, this.historyCursor, 200)
+        if (sequence !== this.detailSequence || executionId !== this.selected?.executionId) return
+        const page = response.data || []
+        if (!page.length) { this.$message.info('本次没有读取到后续事件，请稍后刷新'); return }
+        const merged = new Map(this.events.map(event => [event.sequenceNo, event]))
+        page.forEach(event => merged.set(event.sequenceNo, event))
+        this.events = [...merged.values()].sort((a, b) => a.sequenceNo - b.sequenceNo)
+        this.historyCursor = Math.max(this.historyCursor, ...page.map(event => event.sequenceNo || 0))
+        this.lastSequence = Math.max(this.lastSequence, this.historyCursor)
+      } catch {
+        if (sequence === this.detailSequence) this.$message.error('历史事件加载失败，已读取记录保留')
+      } finally { if (sequence === this.detailSequence) this.historyLoading = false }
+    },
+    openMcpRecords() {
+      if (this.canViewMcpRecords && this.selected?.executionId) {
+        this.$refs.mcpRecords?.showWorkflowRecords(this.selected.executionId)
+      }
+    },
+    closeDetail() {
+      this.detailSequence++
+      this.detailLoading = false
+      this.stopEventStream()
+      this.$refs.mcpRecords?.closeRecords()
+      this.selected = null
+      this.selectedNodeRunId = ''; this.eventNodeRunId = ''; this.historyLoading = false
+      this.mcpAuditSnapshot = null; this.summaryOpen = false; this.summaryText = ''
+    },
     async initialize() {
       await this.loadExecutions()
       if (!this.initialExecutionId) return
@@ -356,22 +466,37 @@ export default {
       }
     },
     async openDetail(row) {
-      const [detail, runs, events, artifacts] = await Promise.all([
-        getWorkflowExecution(row.executionId),
-        listWorkflowNodeRuns(row.executionId),
-        listWorkflowExecutionEvents(row.executionId),
-        listWorkflowArtifacts(row.executionId)
-      ])
-      this.selected = detail.data
-      this.nodeRuns = runs.data || []
-      this.events = events.data || []
-      this.artifacts = artifacts.data || []
-      this.lastSequence = this.events.reduce((maximum, item) =>
-        Math.max(maximum, item.sequenceNo || 0), 0)
-      this.detailTab = 'nodes'
+      const sequence = ++this.detailSequence
+      this.stopEventStream()
+      this.$refs.mcpRecords?.closeRecords()
+      this.selected = null
+      this.nodeRuns = []; this.events = []; this.artifacts = []
+      this.selectedNodeRunId = ''; this.eventNodeRunId = ''; this.historyCursor = 0; this.historyLoading = false
+      this.mcpAuditSnapshot = null; this.summaryOpen = false; this.summaryText = ''
       this.drawerOpen = true
-      this.reconnectAttempt = 0
-      this.startEventStream()
+      this.detailLoading = true
+      try {
+        const [detail, runs, events, artifacts] = await Promise.all([
+          getWorkflowExecution(row.executionId),
+          listWorkflowNodeRuns(row.executionId),
+          listWorkflowExecutionEvents(row.executionId),
+          listWorkflowArtifacts(row.executionId)
+        ])
+        if (sequence !== this.detailSequence) return
+        this.selected = detail.data
+        this.nodeRuns = runs.data || []
+        this.events = events.data || []
+        this.artifacts = artifacts.data || []
+        this.lastSequence = this.events.reduce((maximum, item) => Math.max(maximum, item.sequenceNo || 0), 0)
+        this.historyCursor = this.lastSequence
+        this.detailTab = 'nodes'
+        this.reconnectAttempt = 0
+        this.startEventStream()
+      } catch {
+        if (sequence === this.detailSequence) this.$message.error('执行详情加载失败，请重新打开')
+      } finally {
+        if (sequence === this.detailSequence) this.detailLoading = false
+      }
     },
     async cancel(row) {
       await this.$confirm('确认取消该工作流执行？', '取消执行', {type: 'warning'})
@@ -515,6 +640,21 @@ export default {
 </script>
 
 <style scoped>
+:global(.workflow-execution-drawer .diagnostic-action) {
+  margin-left:0; color:var(--el-text-color-primary) !important; background:var(--el-bg-color) !important; border-color:var(--el-border-color) !important;
+}
+:global(.workflow-execution-drawer .diagnostic-action:hover), :global(.workflow-execution-drawer .diagnostic-action:focus-visible) {
+  color:var(--el-text-color-primary) !important; background:var(--el-fill-color) !important; border-color:#6366f1 !important;
+}
+:global(.workflow-execution-drawer .diagnostic-action:focus-visible) {outline:2px solid #6366f1; outline-offset:2px}
+:global(.workflow-diagnostic-dialog p) {font-size:13px; line-height:1.7; color:var(--el-text-color-regular)}
+:global(.workflow-diagnostic-dialog textarea) {font-family:ui-monospace,monospace; font-size:12px}
+.tool-record-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; color: var(--el-text-color-secondary); }
+.usage-summary { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.usage-summary > div { flex: 1 1 160px; padding: 16px; border: 1px solid var(--el-border-color-light); border-radius: 12px; }
+.usage-summary span { display: block; color: var(--el-text-color-secondary); margin-bottom: 8px; }
+.usage-summary strong { font-size: 20px; }
+.usage-note { color: var(--el-text-color-secondary); font-size: 12px; }
 .execution-monitor {
   padding: 24px;
   border: 1px solid var(--workflow-border, var(--el-border-color-light));
@@ -924,6 +1064,27 @@ export default {
 
 :global(.workflow-execution-drawer .el-drawer__body) {
   padding: 20px 24px 32px;
+  container: workflow-detail / inline-size;
+}
+
+@container workflow-detail (max-width: 600px) {
+  .execution-summary :deep(.el-descriptions__table),
+  .execution-summary :deep(tbody) {
+    display: block;
+  }
+
+  .execution-summary :deep(tr) {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr);
+  }
+
+  .execution-summary :deep(.el-descriptions__cell) {
+    min-width: 0;
+  }
+
+  .execution-summary :deep(.el-descriptions__label.el-descriptions__cell) {
+    width: auto;
+  }
 }
 
 @media (max-width: 760px) {

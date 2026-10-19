@@ -316,10 +316,15 @@
                   :config="selectedNode.config"
                   :selected-agent="selectedAgentResource"
                   :input-mapping="selectedNode.inputMapping || {}"
-                  :test-succeeded="agentTestSucceeded"
+                  :legacy="selectedNode.typeVersion !== '2.0'"
+                  :knowledge-resources="resourceCatalog.KNOWLEDGE_BASE || []"
+                  :selected-knowledge="selectedAgentKnowledge"
+                  :selected-knowledge-id="selectedNode.config?.knowledgeId || ''"
                   :disabled="!canEdit"
                   @update:config="agentConfigChanged"
                   @select-agent="selectedInspectorTab = 'resource'"
+                  @reconfirm-agent="selectAgentResource(selectedResourceId(agentReference))"
+                  @select-knowledge="selectAgentKnowledge"
                   @configure-input="selectedInspectorTab = 'mapping'"
                 />
                 <WorkflowKnowledgeRetrievalEditor
@@ -1456,9 +1461,13 @@ import {
 } from './workflowParallel'
 import {
   agentConfigurationState,
+  agentKnowledgeSnapshot,
+  agentNodeSchema,
   agentTaskSummary,
   agentTestResultView,
   agentToolUsageView,
+  confirmAgentKnowledge,
+  confirmAgentSnapshot,
   normalizeAgentConfig
 } from './workflowAgent'
 import {ARTIFACT_DEFAULT_CONFIG, artifactConfigurationState, artifactSummary} from './workflowArtifact'
@@ -1959,6 +1968,10 @@ export default {
     selectedAgentResource() {
       return this.agentReference ? this.selectedResource(this.agentReference) : null
     },
+    selectedAgentKnowledge() {
+      const reference = this.selectedNode?.resourceRefs?.find(item => item.kind === 'KNOWLEDGE_BASE')
+      return reference ? this.selectedResource(reference) : null
+    },
     knowledgeReferences() {
       return this.isKnowledgeNode
         ? (this.selectedNode?.resourceRefs || []).filter(reference => reference.kind === 'KNOWLEDGE_BASE')
@@ -1993,7 +2006,7 @@ export default {
         selectedAgent: this.selectedAgentResource,
         config: this.selectedNode?.config,
         inputMapping: this.selectedNode?.inputMapping,
-        testSucceeded: this.agentTestSucceeded
+        selectedKnowledge: this.selectedAgentKnowledge, legacy: this.selectedNode?.typeVersion !== '2.0'
       })
     },
     artifactConfiguration() {
@@ -2032,6 +2045,7 @@ export default {
       if ((!this.currentDefinition?.id || this.dirty) && !this.canEdit) {
         return {available: false, reason: '当前修改尚未保存，暂无权限同步草稿'}
       }
+      if (this.isAgentNode) return {available: false, reason: '协作智能体使用正式工作流的调用台账；请保存并发布后运行，不支持隔离试调用'}
       if (this.isAgentNode && !['READY', 'VERIFIED'].includes(this.agentConfiguration.code)) {
         return {available: false, reason: this.agentConfiguration.issues[0] || '请先完成智能体配置'}
       }
@@ -2091,6 +2105,13 @@ export default {
     },
     resolvedNodeSchemas() {
       const result = (this.definition.nodes || []).reduce((schemas, node) => {
+        if (node.type === 'agent' && node.typeVersion === '2.0') {
+          const reference = (node.resourceRefs || []).find(item => item.kind === 'AGENT')
+          const knowledge = (node.resourceRefs || []).find(item => item.kind === 'KNOWLEDGE_BASE')
+          const descriptor = this.descriptors.find(item => item.type === 'agent' && item.handlerVersion === '2.0')
+          schemas[node.id] = agentNodeSchema(node.config, reference ? this.selectedResource(reference) : null, knowledge ? this.selectedResource(knowledge) : null, descriptor)
+          return schemas
+        }
         if (node.type === 'mcp_tool') {
           const reference = (node.resourceRefs || []).find(item => item.kind === 'MCP_TOOL')
           const resource = reference ? this.selectedResource(reference) : null
@@ -2150,7 +2171,7 @@ export default {
       }, {...this.backendResolvedNodeSchemas})
       const nodes = this.definition.nodes || []
       nodes.forEach(node => {
-        if (node.type === 'mcp_tool') return
+        if (['mcp_tool', 'agent'].includes(node.type)) return
         if (!node.outputSchemaOverride) return
         const descriptor = this.descriptors.find(item => item.type === node.type
           && item.handlerVersion === node.typeVersion)
@@ -2175,7 +2196,7 @@ export default {
           return outputs
         }, new Map())
       nodes.forEach(node => {
-        if (node.type === 'mcp_tool') return
+        if (['mcp_tool', 'agent'].includes(node.type)) return
         const outputJson = latestRuntimeOutputs.get(node.id)
         if (!outputJson) return
         try {
@@ -2201,7 +2222,7 @@ export default {
         }
       })
       nodes.forEach(node => {
-        if (node.type === 'mcp_tool') return
+        if (['mcp_tool', 'agent'].includes(node.type)) return
         const inferred = node.ui?.inferredOutputSchema
         if (!inferred?.schema) return
         const descriptor = this.descriptors.find(item => item.type === node.type
@@ -2738,8 +2759,7 @@ export default {
             selectedAgent: resource,
             config: node.config,
             inputMapping: node.inputMapping,
-            testSucceeded: this.nodeTestNodeId === node.id
-              && this.nodeTestResult?.status === 'SUCCEEDED'
+            legacy: node.typeVersion !== '2.0', selectedKnowledge: this.selectedResource((node.resourceRefs || []).find(ref => ref.kind === 'KNOWLEDGE_BASE'))
           })
         : null
       const classifierBranches = node.type === 'llm_classifier'
@@ -3552,7 +3572,7 @@ export default {
     },
     normalizeAgentNodeConfigs() {
       ;(this.definition.nodes || []).forEach(node => {
-        if (node.type !== 'agent') return
+        if (node.type !== 'agent' || node.typeVersion !== '2.0') return
         const current = node.config && typeof node.config === 'object' && !Array.isArray(node.config)
           ? node.config : {}
         node.config = normalizeAgentConfig(current)
@@ -4041,6 +4061,7 @@ export default {
       return this.bindingForReference(reference)?.resourceId || ''
     },
     selectedResource(reference) {
+      if (!reference) return null
       const resourceId = this.selectedResourceId(reference)
       return (this.resourceCatalog[reference.kind] || [])
         .find(resource => resource.resourceId === resourceId) || null
@@ -4129,6 +4150,7 @@ export default {
         NODE_CONTRACT: '节点契约',
         API_CONNECTOR: '连接器 Schema',
         MCP_TOOL: 'MCP 工具契约',
+        AGENT_COLLABORATION: '协作智能体契约',
         OPENAPI: 'OpenAPI',
         DATABASE_METADATA: '数据库元数据',
         LLM_STRUCTURED_OUTPUT: '结构化输出',
@@ -4237,9 +4259,35 @@ export default {
       this.markDirty()
     },
     async selectAgentResource(resourceId) {
-      if (!this.agentReference) return
+      if (!this.agentReference || !this.canEdit || this.resourceLoading) return
+      const node = this.selectedNode
+      if (node.typeVersion !== '2.0') {this.$message.warning('旧节点不会自动迁移，请添加协作智能体 2.0'); return}
+      const resource = (this.resourceCatalog.AGENT || []).find(item => item.resourceId === resourceId)
+      const config = confirmAgentSnapshot(node.config, resource)
+      if (!config) {this.$message.warning('当前智能体快照不可用，请刷新资源目录'); return}
       const selected = await this.bindResource(this.agentReference, resourceId)
-      if (selected) this.selectedInspectorTab = 'config'
+      if (!selected) return
+      node.config = config
+      this.selectedNodeConfig = JSON.stringify(config, null, 2)
+      this.invalidateSelectedInferredSchema(); this.refreshCanvasNodeData(); this.markDirty()
+      this.selectedInspectorTab = 'config'
+    },
+    async selectAgentKnowledge(resourceId) {
+      if (!this.isAgentNode || this.selectedNode.typeVersion !== '2.0' || !this.canEdit || this.resourceLoading) return
+      const node = this.selectedNode
+      const resource = resourceId ? (this.resourceCatalog.KNOWLEDGE_BASE || []).find(item => item.resourceId === resourceId) : null
+      if (resourceId && !agentKnowledgeSnapshot(resource)) {this.$message.warning('当前知识快照不可用'); return}
+      const config = confirmAgentKnowledge(node.config, resource)
+      if (!config) return
+      let reference = (node.resourceRefs || []).find(item => item.kind === 'KNOWLEDGE_BASE')
+      if (resourceId) {
+        if (!reference) {reference = {kind: 'KNOWLEDGE_BASE', key: `knowledge.${node.id}`, required: true}; node.resourceRefs.push(reference)}
+        const selected = await this.bindResource(reference, resourceId)
+        if (!selected) return
+      } else {node.resourceRefs = (node.resourceRefs || []).filter(item => item.kind !== 'KNOWLEDGE_BASE')}
+      node.config = config
+      this.selectedNodeConfig = JSON.stringify(config, null, 2)
+      this.invalidateSelectedInferredSchema(); this.refreshCanvasNodeData(); this.markDirty()
     },
     async selectKnowledgeResources(resourceIds) {
       if (!this.isKnowledgeNode || !this.canEdit) return

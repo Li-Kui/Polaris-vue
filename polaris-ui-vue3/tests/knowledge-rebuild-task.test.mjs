@@ -7,7 +7,9 @@ import * as sass from 'sass'
 
 const source = readFileSync(new URL('../src/components/knowledge/KnowledgeRebuildTask.vue', import.meta.url), 'utf8')
 const {descriptor} = parse(source), compiled = compileScript(descriptor, {id: 'rebuild-task'})
-const script = descriptor.script.content.replace(/^import .*$/m, '').replace('export default {', 'const component = {')
+const script = compiled.scriptAst.filter(node => node.type === 'ImportDeclaration').sort((a, b) => b.start - a.start)
+  .reduce((content, node) => content.slice(0, node.start) + content.slice(node.end), descriptor.script.content)
+  .replace('export default {', 'const component = {')
 function state(api = async () => ({data: null}), recovery = async () => ({data: null})) {
   let timers = 0, cleared = 0
   const component = vm.runInNewContext(`${script}\ncomponent`, {getLatestKnowledgeRebuildTask: api, recoverKnowledgeRebuildTask: recovery,

@@ -60,6 +60,9 @@ import java.util.Map;
 @Slf4j
 @Service
 public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation> implements IAiChatService {
+    @Autowired
+    private com.polaris.ai.agent.collaboration.ChatGenerationFence chatGenerationFence;
+    private static final java.util.concurrent.ConcurrentHashMap<Long,com.polaris.ai.agent.collaboration.ChatGenerationFence.Frame> ACTIVE_GENERATION_FRAMES=new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 流式聊天语言模型
@@ -223,6 +226,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (ownedConversation == null) {
             return 0;
         }
+        if(chatGenerationFence!=null)chatGenerationFence.cancelForDeletion(id,userId);
         aiChatMapper.deleteMessagesByConversationId(id);
         return aiChatMapper.deleteConversation(id, userId);
     }
@@ -237,6 +241,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (ownedIds == null || ownedIds.isEmpty()) {
             return 0;
         }
+        if(chatGenerationFence!=null)ownedIds.forEach(id->chatGenerationFence.cancelForDeletion(id,userId));
         aiChatMapper.deleteMessagesByConversationIds(ownedIds);
         return aiChatMapper.deleteConversationsBatch(ownedIds, userId);
     }
@@ -246,9 +251,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (conversationId == null || aiChatMapper.selectConversationById(conversationId, userId) == null) {
             return false;
         }
+        boolean persisted=chatGenerationFence!=null && chatGenerationFence.cancel(conversationId,userId);
         java.util.concurrent.atomic.AtomicBoolean cancellation = ACTIVE_CONVERSATIONS.get(conversationId);
         if (cancellation == null) {
-            return false;
+            return persisted;
         }
         cancellation.set(true);
         AiObservability.recordTerminal("cancelled");
@@ -258,6 +264,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
         // 使用 value 条件删除，防止旧流的完成回调误删随后启动的新流。
         ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+        closeGenerationFrame(conversationId,cancellation);
         return true;
     }
 
@@ -273,6 +280,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (cancelAction != null) {
             cancelAction.run();
         }
+        closeGenerationFrame(conversationId,cancellation);
     }
 
     // ----------------------------------------------------------------
@@ -346,6 +354,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
 
         boolean streamStarted = false;
+        final java.util.concurrent.atomic.AtomicReference<com.polaris.ai.agent.collaboration.ChatGenerationFence.Frame> generationFrame=new java.util.concurrent.atomic.AtomicReference<>();
         try {
             // 1. 鉴权：会话必须属于当前用户
             AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
@@ -356,6 +365,11 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 } catch (Exception ignored) {
                 }
                 return;
+            }
+
+            if(chatGenerationFence!=null) {
+                var frame=chatGenerationFence.enter(conversationId,userId,cancellation,()->cancelStream(conversationId,cancellation));
+                generationFrame.set(frame);if(frame!=null)ACTIVE_GENERATION_FRAMES.put(conversationId,frame);
             }
 
             // 2. 输入前置安全检测与附件准备
@@ -710,11 +724,14 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                 return;
                             }
                             try {
+                                if(generationFrame.get()!=null)generationFrame.get().check();
+                                throwIfChatCancelled(cancellation);
                                 moderatedHandler.onComplete(totalTokens);
                             } finally {
                                 clearActiveChatCall(conversationId, activeCallRef);
                                 com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                                 ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                                closeGenerationFrame(conversationId,cancellation);
                                 try {
                                     emitter.complete();
                                 } catch (Exception ignored) {
@@ -738,6 +755,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     }
                     com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                     ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                    closeGenerationFrame(conversationId,cancellation);
                     if (!cancellation.get() && sseHelper != null) {
                         sseHelper.sendSse(emitter, "error", chatErrorMessage(error));
                     }
@@ -815,6 +833,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             }
             com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
             ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+            closeGenerationFrame(conversationId,cancellation);
             if (!cancelled) sseHelper.sendSse(emitter, "error", chatErrorMessage(e));
             try {
                 emitter.complete();
@@ -824,7 +843,15 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             // 异步流启动成功后由 onComplete/onError 释放；所有前置校验、审核拦截和初始化失败路径在此释放。
             if (!streamStarted) {
                 ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                closeGenerationFrame(conversationId,cancellation);
             }
+        }
+    }
+
+    private void closeGenerationFrame(Long conversation,java.util.concurrent.atomic.AtomicBoolean cancellation) {
+        var frame=ACTIVE_GENERATION_FRAMES.get(conversation);
+        if(frame!=null && frame.owns(cancellation) && ACTIVE_GENERATION_FRAMES.remove(conversation,frame)) {
+            try {frame.close();}catch(RuntimeException unavailable) { /* 许可已经本地失效，数据库占用按原租约到期收敛，不重跑。 */ }
         }
     }
 

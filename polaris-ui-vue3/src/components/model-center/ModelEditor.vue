@@ -8,7 +8,7 @@
       </div>
       <div class="editor-actions">
         <el-button class="secondary-action" @click="cancel">取消</el-button>
-        <el-button class="secondary-action" :disabled="!testable" :loading="testing" @click="testDraft">测试连接</el-button>
+        <el-button class="secondary-action" :disabled="!testable" @click="testPanel?.scrollIntoView({behavior: 'smooth', block: 'center'})">能力测试</el-button>
         <el-button class="primary-action" type="primary" :loading="saving" @click="save">保存模型</el-button>
       </div>
     </div>
@@ -89,6 +89,29 @@
       />
     </div>
 
+    <section v-if="testCapabilities.length" ref="testPanel" class="section-card capability-tests" aria-label="模型能力测试">
+      <h3>能力测试</h3>
+      <p class="field-tip">每次仅测试所选调用能力，会真实请求服务商并可能产生费用。测试不验证全部能力或附加特性；修改配置后需重新测试。</p>
+      <div class="capability-test-actions">
+        <el-select v-model="selectedTestKey" aria-label="待测试能力" :disabled="testing" placeholder="选择测试能力">
+          <el-option v-for="item in testCapabilities" :key="item.key" :value="item.key" :label="item.schema.name" />
+        </el-select>
+        <el-button type="primary" :loading="testing" :disabled="!testable" @click="testDraft">测试所选能力</el-button>
+      </div>
+      <ul class="capability-test-results" aria-live="polite">
+        <li v-for="item in testCapabilities" :key="item.key">
+          <strong>{{ item.schema.name }}</strong>
+          <el-tag :type="testResults[item.key] ? (testResults[item.key].success ? 'success' : 'danger') : 'info'" size="small">
+            {{ testingKey === item.key ? '测试中' : testResults[item.key] ? (testResults[item.key].success ? '已通过' : '未通过') : '未测试' }}
+          </el-tag>
+          <template v-if="testResults[item.key] && testingKey !== item.key">
+            <span>{{ testResults[item.key].message }}</span>
+            <small>总耗时 {{ testResults[item.key].elapsedMs }} ms<span v-if="testResults[item.key].latencyMs != null"> · 服务商响应 {{ testResults[item.key].latencyMs }} ms</span></small>
+          </template>
+        </li>
+      </ul>
+    </section>
+
     <el-collapse v-model="advancedSections" class="advanced-settings">
       <el-collapse-item title="高级设置（通常无需修改）" name="advanced">
         <el-card shadow="never" class="section-card advanced-card">
@@ -151,6 +174,7 @@ import {ElMessage, ElMessageBox} from 'element-plus'
 import CapabilitySelector from './CapabilitySelector.vue'
 import CapabilityCard from './CapabilityCard.vue'
 import RuntimePolicyEditor from './RuntimePolicyEditor.vue'
+import {useCapabilityTests} from './useCapabilityTests'
 import {
   createModelAggregate,
   getModelAggregate,
@@ -166,7 +190,7 @@ const emit = defineEmits(['saved', 'cancel'])
 const baseForm = ref()
 const loading = ref(false)
 const saving = ref(false)
-const testing = ref(false)
+const testPanel = ref()
 const discovering = ref(false)
 const discoveryError = ref('')
 const discoverySucceeded = ref(false)
@@ -271,7 +295,25 @@ const visibleSchemas = computed(() => {
 })
 const enabledCapabilities = computed(() => state.capabilities.filter(item => item.enabled))
 const enabledCapabilityKeys = computed(() => enabledCapabilities.value.map(item => item.key))
-const testable = computed(() => !!state.connectionId && !!state.modelName && enabledCapabilities.value.some(item => item.schema.kind === 'INVOCATION'))
+const testCapabilities = computed(() => enabledCapabilities.value.filter(item => item.schema.kind === 'INVOCATION'))
+const testFingerprint = computed(() => JSON.stringify({
+  connectionId: state.connectionId, connectionRevision: selectedConnection.value?.revision,
+  modelName: state.modelName, capabilities: enabledCapabilities.value.map(item => ({
+    key: item.key, schemaVersion: item.schemaVersion, config: item.config
+  })), runtimePolicy: state.runtimePolicies[0]
+}))
+const {selectedKey: selectedTestKey, selected: selectedTest, testingKey, results: testResults, run: testDraft} = useCapabilityTests({
+  capabilities: testCapabilities, fingerprint: testFingerprint,
+  makeRequest: item => ({
+    connectionId: state.connectionId, modelName: state.modelName,
+    capabilityCode: item.capabilityCode, schemaVersion: item.schemaVersion,
+    capabilityConfig: compactConfig(item.config, item.schema?.schema),
+    runtimePolicy: JSON.parse(JSON.stringify(state.runtimePolicies[0])), testCapability: item.capabilityCode
+  }),
+  request: async data => unwrap(await testModelDraft(data))
+})
+const testing = computed(() => !!testingKey.value)
+const testable = computed(() => !loading.value && !!state.connectionId && !!state.modelName?.trim() && !!selectedTest.value)
 const recommendedCapabilityCode = computed(() => recommendCapabilityCode(state.modelName))
 const capabilityRecommendation = computed(() => {
   if (!state.modelName || !recommendedCapabilityCode.value) return ''
@@ -600,29 +642,6 @@ function providerDescription(code) {
   })[code] || ''
 }
 
-async function testDraft() {
-  if (testing.value) return
-  const invocation = enabledCapabilities.value.find(item => item.schema.kind === 'INVOCATION')
-  if (!invocation) return
-  testing.value = true
-  try {
-    const result = unwrap(await testModelDraft({
-      connectionId: state.connectionId,
-      modelName: state.modelName,
-      capabilityCode: invocation.capabilityCode,
-      schemaVersion: invocation.schemaVersion,
-      capabilityConfig: compactConfig(invocation.config, invocation.schema?.schema),
-      runtimePolicy: state.runtimePolicies[0],
-      testCapability: invocation.capabilityCode
-    }))
-    ElMessage.success(result?.message || '模型测试成功')
-  } catch {
-    // 请求层已经展示服务端返回的可读错误，避免事件处理器继续抛出未处理异常。
-  } finally {
-    testing.value = false
-  }
-}
-
 async function cancel() {
   if (JSON.stringify(buildPersistableRequest()) !== initialPersistable.value) {
     await ElMessageBox.confirm('存在未保存的更改，确认离开？', '提示', { type: 'warning' })
@@ -720,6 +739,13 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
 .secondary-action { border-color: var(--mc-border) !important; color: var(--mc-text) !important; background: var(--mc-surface) !important; }
 .secondary-action.is-disabled { color: var(--mc-muted) !important; background: var(--mc-surface-muted) !important; opacity: .7; }
 .section-card { margin-bottom: 18px; border-color: var(--mc-border); border-radius: 16px; color: var(--mc-text); background: var(--mc-surface); box-shadow: 0 8px 28px rgba(15, 23, 42, .05); }
+.capability-tests { padding: 20px; border: 1px solid var(--mc-border); }
+.capability-tests h3 { margin: 0 0 10px; }
+.capability-test-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.capability-test-actions :deep(.el-select) { width: min(280px, 100%); }
+.capability-test-results { list-style: none; padding: 0; margin: 0; }
+.capability-test-results li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-top: 1px solid var(--mc-border); overflow-wrap: anywhere; }
+.capability-test-results small { color: var(--mc-muted); }
 .section-card :deep(.el-card__header) { border-bottom-color: var(--mc-border); color: var(--mc-text); background: var(--mc-surface-muted); }
 .section-card :deep(.el-card__body) { color: var(--mc-text); background: var(--mc-surface); }
 .section-card :deep(.el-form-item__label) { color: var(--mc-text) !important; font-weight: 600; }

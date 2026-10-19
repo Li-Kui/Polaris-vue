@@ -68,9 +68,15 @@ public class WorkflowProperties {
         imageNodeAllowedWorkflowCodes = codes == null ? new LinkedHashSet<>() : new LinkedHashSet<>(codes);
     }
 
-    /** MCP 复用连接启停与工具审批，不受全局写节点开关控制；实际资源及权限由调用链复查。 */
+    /** 受控 Agent／MCP 单独准入；实际资源及权限由调用链复查，退役契约不因写节点开关放行。 */
     public String nodeExecutionDeniedReason(String type, String version, String sideEffect,
             Long tenantId, String workflowCode) {
+        if ("agent".equals(type)) {
+            if (!"2.0".equals(version)) return "旧版或未知 Agent 节点契约不可执行，请重新添加协作智能体 2.0 并发布";
+            if (!"WRITE".equals(sideEffect) || tenantId == null || tenantId <= 0 || workflowCode == null || workflowCode.isBlank())
+                return "协作智能体必须具备有效租户、工作流身份和受控派发契约";
+            return null;
+        }
         if ("mcp_tool".equals(type)) {
             if (!"1.0".equals(version) || !"WRITE".equals(sideEffect)) return "MCP 节点执行契约不受支持";
             if (tenantId == null || tenantId <= 0 || workflowCode == null || workflowCode.isBlank()) {

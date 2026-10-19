@@ -29,6 +29,7 @@
           <!-- 中间共享操作行：新增智能体按钮与视图切换器 (独立于检索卡片，错落有致) -->
           <div class="matrix-actions-bar" style="margin-top: 0; width: 100%;">
             <div class="actions-left">
+              <el-button v-if="canManageCollaboration" @click="impactOpen = true">旧工作流检查</el-button>
               <el-button type="primary" class="action-btn-primary" icon="Plus" @click="handleAdd">
                 新增智能体
               </el-button>
@@ -169,6 +170,7 @@
                     <el-icon><edit /></el-icon>
                     <span>编辑</span>
                   </el-button>
+                  <el-button v-if="canManageCollaboration" type="primary" link @click="collaborationAgent = item">协作工具</el-button>
                   <el-button type="danger" link class="card-op-delete-pill" @click="handleDelete(item)">
                     <el-icon><delete /></el-icon>
                     <span>删除</span>
@@ -193,6 +195,7 @@
           <!-- 中间共享操作行：新增智能体按钮与视图切换器 (独立于检索卡片，错落有致) -->
           <div class="matrix-actions-bar" style="margin-top: 0; width: 100%;">
             <div class="actions-left">
+              <el-button v-if="canManageCollaboration" @click="impactOpen = true">旧工作流检查</el-button>
               <el-button type="primary" class="action-btn-primary" icon="Plus" @click="handleAdd">
                 新增智能体
               </el-button>
@@ -257,10 +260,11 @@
                 <span>{{ formatDate(row.updateTime || row.createTime) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
+            <el-table-column label="操作" :width="canManageCollaboration ? 220 : 140" fixed="right">
               <template #default="{ row }">
                 <div class="table-op-actions">
                   <el-button type="primary" link class="op-btn-edit" @click="handleUpdate(row)">编辑</el-button>
+                  <el-button v-if="canManageCollaboration" type="primary" link @click="collaborationAgent = row">协作工具</el-button>
                   <el-button type="danger" link class="op-btn-delete" @click="handleDelete(row)">删除</el-button>
                 </div>
               </template>
@@ -416,18 +420,30 @@
           </div>
         </div>
       </transition>
+      <el-dialog v-model="impactOpen" title="旧 Agent 工作流检查" width="min(1000px, 94vw)" destroy-on-close>
+        <AgentContractImpact v-if="impactOpen" />
+      </el-dialog>
+      <el-dialog :model-value="!!collaborationAgent" :title="`协作工具 · ${collaborationAgent?.agentName || ''}`" width="min(760px, 94vw)" destroy-on-close @close="collaborationAgent = null">
+        <AgentMcpBindings v-if="collaborationAgent" :agent-id="collaborationAgent.id" @saved="getList" />
+      </el-dialog>
     </div>
   </div>
 </template>
 
 <script>
 import {addAgent, delAgent, getAgent, getAvailableTools, listAgent, updateAgent} from "@/api/ai/agent";
+import AgentMcpBindings from '@/components/agent/AgentMcpBindings.vue';
+import AgentContractImpact from '@/components/agent/AgentContractImpact.vue';
+import usePlatformUserStore from '@/store/modules/platformUser';
+import {isPlatformConsolePath} from '@/utils/consoleRoute';
 import {listAvailableModel} from "@/api/ai/model";
 import {Cpu, Delete, DocumentCopy, Edit, Link as LinkIcon} from '@element-plus/icons-vue'
 
 export default {
   name: "AiAgentManager",
   components: {
+    AgentMcpBindings,
+    AgentContractImpact,
     LinkIcon,
     Cpu,
     Edit,
@@ -436,6 +452,8 @@ export default {
   },
   data() {
     return {
+      collaborationAgent: null,
+      impactOpen: false,
       loading: true,
       total: 0,
       agentList: [],
@@ -459,6 +477,11 @@ export default {
         systemPrompt: [{ required: true, message: "智能体 System Prompt 不能为空", trigger: "blur" }]
       }
     };
+  },
+  computed: {
+    canManageCollaboration() {
+      return isPlatformConsolePath(this.$route.path) && usePlatformUserStore().user?.role === 'admin';
+    }
   },
   watch: {
     'form.modelConfigId'() {
@@ -540,6 +563,7 @@ export default {
         const res = await updateAgent(row);
         if (res.code === 200) {
           this.$message.success(text + "成功");
+          await this.getList();
         } else {
           this.$message.error(res.msg || "操作失败");
           row.status = row.status === "1" ? "0" : "1";
