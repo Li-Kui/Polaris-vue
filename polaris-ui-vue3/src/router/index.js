@@ -86,6 +86,18 @@ export const constantRoutes = [
     ]
   },
   {
+    path: '/platform/visitor/:code',
+    component: () => import('@/views/platform/customerService/CustomerVisitorEntry.vue'),
+    hidden: true,
+    meta: { title: '在线客服' }
+  },
+  {
+    path: '/platform/customer/:code',
+    component: () => import('@/views/platform/customerService/CustomerEntry.vue'),
+    hidden: true,
+    meta: { title: '客服文字接待' }
+  },
+  {
     path: '/app/:shareCode',
     component: () => import('@/views/workflowApp/RuntimePage.vue'),
     hidden: true,
@@ -147,6 +159,12 @@ export const constantRoutes = [
         component: () => import('@/views/ai/agent.vue'),
         name: 'PlatformAgent',
         meta: { title: '智能体编排', icon: 'user' }
+      },
+      {
+        path: 'customer-service',
+        component: () => import('@/views/platform/customerService/index.vue'),
+        name: 'PlatformCustomerService',
+        meta: { title: '数字人客服', icon: 'chat', requiresTenantAdmin: true }
       },
       {
         path: 'workflow',

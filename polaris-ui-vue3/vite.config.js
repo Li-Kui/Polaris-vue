@@ -47,6 +47,17 @@ export default defineConfig(({ mode, command }) => {
       host: true,
       open: true,
       proxy: {
+        '/dev-api/platform/runtime/customer-visitors': {
+          target: baseUrl,
+          changeOrigin: false,
+          rewrite: (p) => p.replace(/^\/dev-api/, '')
+        },
+        '/dev-api/platform/runtime/customer-speech-stream': {
+          target: baseUrl,
+          ws: true,
+          changeOrigin: false,
+          rewrite: (p) => p.replace(/^\/dev-api/, '')
+        },
         // https://cn.vitejs.dev/config/#server-proxy
         '/dev-api': {
           target: baseUrl,

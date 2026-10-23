@@ -10,6 +10,7 @@ import com.polaris.ai.dto.KnowledgeCitation;
 import com.polaris.ai.dto.RecognizedDoc;
 import com.polaris.ai.knowledge.ChatKnowledgeRetrievalException;
 import com.polaris.ai.knowledge.KnowledgeDocumentSnapshotStore;
+import com.polaris.ai.knowledge.KnowledgePreparationTrace;
 import com.polaris.ai.knowledge.KnowledgeRetrievalService;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.rag.AiVectorStoreResolver;
@@ -91,9 +92,12 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
             }
             KnowledgeRetrievalService.validateRelatedPlan(related, documentIds, topK);
             if (!related.isEmpty()) retrieval.validateRelatedSources(knowledge, related, documentIds, topK);
+            long resolving = System.nanoTime();
             var vector = vectorResolver.resolve(knowledge);
+            long resolved = System.nanoTime();
             var found = related.isEmpty() ? retrieval.search(knowledge, vector, userInput, topK, minScore, documentIds)
                     : retrieval.search(knowledge, vector, userInput, topK, minScore, documentIds, related);
+            long searched = System.nanoTime();
             requireAccessible(knowledgeId);
             DocumentRecognitionResult result = format(found, knowledge, mentions.isEmpty() ? "AUTO_SEMANTIC" : "MENTION", !related.isEmpty());
             if (!related.isEmpty()) {
@@ -103,6 +107,7 @@ public class AiDocumentRecognitionServiceImpl implements IAiDocumentRecognitionS
                 if (!result.getMissingRelatedDocumentIds().isEmpty()) result.setFormattedContextPrompt(
                         "本轮部分显式指定的关联资料未进入上下文，不能据此声称联合问题已完整核实。\n" + result.getFormattedContextPrompt());
             }
+            KnowledgePreparationTrace.retrieval((resolved-resolving)/1_000_000, found.embeddingMs(), found.searchMs(), (System.nanoTime()-searched)/1_000_000);
             return result;
         } catch (ChatKnowledgeRetrievalException e) {
             throw e;

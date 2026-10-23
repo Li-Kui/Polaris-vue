@@ -78,6 +78,7 @@
         @toggle="toggleCapability"
       />
       <el-empty v-else description="先选择或新增服务商连接，再配置该服务商支持的模型能力" :image-size="72" />
+      <el-alert v-if="schemaError" :title="schemaError" type="warning" :closable="false" />
     </el-card>
 
     <div v-if="enabledCapabilities.length" class="capability-list">
@@ -179,6 +180,7 @@ import {
   createModelAggregate,
   getModelAggregate,
   getModelEditorContext,
+  getModelSchemaContext,
   resolveSchemaOptions,
   testModelDraft,
   updateModelAggregate
@@ -194,6 +196,9 @@ const testPanel = ref()
 const discovering = ref(false)
 const discoveryError = ref('')
 const discoverySucceeded = ref(false)
+const schemaLoading = ref(false), schemaReady = ref(false), schemaError = ref('')
+let schemaGeneration = 0
+const optionRequests = new Map()
 const connections = ref([])
 const schemas = ref([])
 const providerProfiles = ref([])
@@ -313,7 +318,7 @@ const {selectedKey: selectedTestKey, selected: selectedTest, testingKey, results
   request: async data => unwrap(await testModelDraft(data))
 })
 const testing = computed(() => !!testingKey.value)
-const testable = computed(() => !loading.value && !!state.connectionId && !!state.modelName?.trim() && !!selectedTest.value)
+const testable = computed(() => !loading.value && !schemaLoading.value && schemaReady.value && !!state.connectionId && !!state.modelName?.trim() && !!selectedTest.value)
 const recommendedCapabilityCode = computed(() => recommendCapabilityCode(state.modelName))
 const capabilityRecommendation = computed(() => {
   if (!state.modelName || !recommendedCapabilityCode.value) return ''
@@ -352,6 +357,7 @@ async function load() {
         capabilities: (detail.capabilities || []).map(item => ({ ...item, options: {}, key: capabilityKey(item.capabilityCode, item.appliesToCapabilityCode) })),
         runtimePolicies: detail.runtimePolicies?.length ? detail.runtimePolicies.map(item => ({ ...item })) : [emptyPolicy()]
       })
+      await refreshSchemas()
       await discover(false)
       syncRemoteFamily()
       await Promise.all(enabledCapabilities.value.map(loadDynamicOptions))
@@ -378,6 +384,7 @@ async function toggleCapability(schema, appliesTo, value) {
       options: {}
     }
     state.capabilities.push(item)
+    item = state.capabilities[state.capabilities.length - 1]
   }
   item.enabled = !!value
   if (item.enabled) await loadDynamicOptions(item)
@@ -397,6 +404,7 @@ async function connectionChanged() {
   remoteModels.value = []
   discoveryError.value = ''
   discoverySucceeded.value = false
+  if (!await refreshSchemas()) return
   await enableRecommendedCapability()
   await discover(true)
 }
@@ -404,6 +412,7 @@ async function connectionChanged() {
 async function remoteModelChanged() {
   syncRemoteFamily()
   ensureModelCode()
+  if (!await refreshSchemas()) return
   await applyModelCapabilityRecommendation()
   applyModelParameterRecommendations()
   await Promise.all(enabledCapabilities.value.map(loadDynamicOptions))
@@ -417,20 +426,41 @@ function applyModelParameterRecommendations() {
   if (chat && Number(chat.config?.maxTokens) === 2048) chat.config.maxTokens = 8192
 }
 
+async function refreshSchemas() {
+  if (!state.connectionId) return false
+  const connectionId = state.connectionId, modelName = state.modelName || '', ticket = ++schemaGeneration
+  schemaLoading.value = true; schemaReady.value = false; schemaError.value = ''
+  try {
+    const resolved = unwrap(await getModelSchemaContext(connectionId, modelName))
+    if (ticket !== schemaGeneration || connectionId !== state.connectionId || modelName !== (state.modelName || '')) return false
+    schemas.value = resolved || []
+    for (const item of state.capabilities) {
+      const schema = schemas.value.find(value => value.code === item.capabilityCode && value.schemaVersion === item.schemaVersion)
+      if (schema) item.schema = schema
+    }
+    schemaReady.value = true
+    return true
+  } catch (_) {
+    if (ticket === schemaGeneration) schemaError.value = '模型参数加载失败，请重新选择服务商连接或刷新页面后重试。'
+    return false
+  } finally { if (ticket === schemaGeneration) schemaLoading.value = false }
+}
 async function loadDynamicOptions(item) {
   if (!state.connectionId || !state.modelName) return
-  const entries = Object.entries(item.schema?.uiSchema || {})
-    .filter(([, ui]) => ui.optionsResolver)
+  const connectionId = state.connectionId, modelName = state.modelName
+  const entries = Object.entries(item.schema?.uiSchema || {}).filter(([, ui]) => ui.optionsResolver)
   for (const [field] of entries) {
+    const key = JSON.stringify([connectionId, modelName, item.capabilityCode, field])
+    if (!optionRequests.has(key)) {
+      const request = resolveSchemaOptions({ connectionId, modelName, capability: item.capabilityCode, field })
+      optionRequests.set(key, request)
+      request.finally(() => { if (optionRequests.get(key) === request) optionRequests.delete(key) }).catch(() => {})
+    }
     try {
-      item.options[field] = unwrap(await resolveSchemaOptions({
-        connectionId: state.connectionId,
-        modelName: state.modelName,
-        capability: item.capabilityCode,
-        field
-      })) || []
+      const options = unwrap(await optionRequests.get(key)) || []
+      if (connectionId === state.connectionId && modelName === state.modelName) item.options[field] = options
     } catch (_) {
-      item.options[field] = []
+      if (connectionId === state.connectionId && modelName === state.modelName) item.options[field] = []
     }
   }
 }
@@ -494,6 +524,7 @@ function buildPersistableRequest() {
 }
 
 async function save() {
+  if (schemaLoading.value || !schemaReady.value) return ElMessage.warning('模型参数尚未就绪，请加载成功后再保存')
   ensureModelCode()
   await baseForm.value?.validate()
   if (!enabledCapabilities.value.some(item => item.schema.kind === 'INVOCATION')) {
@@ -626,7 +657,7 @@ function ensureModelCode() {
 
 function profileLabel(code) {
   return ({
-    OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
+    DASHSCOPE_AUDIO: '阿里云百炼语音（Qwen）', DOUBAO_SPEECH: '豆包语音', OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
     SILICONFLOW: '硅基流动（第三方平台）', ARK: '火山方舟', CUSTOM: '自定义兼容服务'
   })[code] || code
 }
@@ -637,7 +668,7 @@ function providerDescription(code) {
     DASHSCOPE: '通义千问与百炼模型',
     DEEPSEEK: 'DeepSeek 官方接口',
     SILICONFLOW: '第三方平台，支持多种开源模型',
-    ARK: '火山引擎模型服务',
+    DASHSCOPE_AUDIO: 'Qwen3 识别／合成与 Qwen-Audio 3.1 Flash 合成；新版使用同地域业务空间 API Host', DOUBAO_SPEECH: '一句话识别与 V3 合成，使用豆包语音控制台 API Key', ARK: '火山引擎模型服务',
     CUSTOM: '自建服务或其他兼容接口'
   })[code] || ''
 }

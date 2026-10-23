@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.CustomerServiceOperationMapper">
+    <resultMap id="Operation" type="com.polaris.platform.domain.CustomerServiceOperation">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="sessionId" column="session_id" />
+        <result property="requestId" column="request_id" />
+        <result property="capabilityCode" column="capability_code" />
+        <result property="definitionId" column="definition_id" />
+        <result property="workflowVersionId" column="workflow_version_id" />
+        <result property="executionId" column="execution_id" />
+        <result property="inputJson" column="input_json" />
+        <result property="createTime" column="create_time" />
+    </resultMap>
+    <select id="selectRequest" resultMap="Operation">
+        select * from platform_customer_operation
+        where tenant_id = #{tenantId} and session_id = #{sessionId} and request_id = #{requestId}
+    </select>
+    <select id="selectSession" resultMap="Operation">
+        select * from platform_customer_operation where tenant_id = #{tenantId} and session_id = #{sessionId}
+        order by create_time, id limit 50
+    </select>
+    <select id="countSession" resultType="int">
+        select count(*) from platform_customer_operation where tenant_id = #{tenantId} and session_id = #{sessionId}
+    </select>
+    <insert id="insert">
+        insert into platform_customer_operation
+            (id, tenant_id, session_id, request_id, capability_code, definition_id, workflow_version_id,
+             execution_id, input_json, create_time)
+        values (#{id}, #{tenantId}, #{sessionId}, #{requestId}, #{capabilityCode}, #{definitionId},
+                #{workflowVersionId}, #{executionId}, #{inputJson}, #{createTime})
+    </insert>
+</mapper>

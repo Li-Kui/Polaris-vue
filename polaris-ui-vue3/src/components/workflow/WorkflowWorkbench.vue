@@ -957,6 +957,7 @@
               <small class="field-hint">字母开头，只能包含字母、数字、点、横线和下划线；创建后不可修改。</small>
             </el-form-item>
             <el-form-item label="描述"><el-input v-model="definition.metadata.description" type="textarea" :rows="4" :disabled="!canEdit" @input="markDirty" /></el-form-item>
+            <el-form-item label="流程输入输出"><el-button :disabled="!canEdit" @click="contractEditorOpen = true">编辑输入输出契约</el-button></el-form-item>
             <el-form-item label="最大节点运行数"><el-input-number v-model="definition.policies.maxNodeRuns" :min="1" :max="10000" :disabled="!canEdit" style="width: 100%" @change="markDirty" /></el-form-item>
             <el-form-item label="最大并行数"><el-input-number v-model="definition.policies.maxParallelism" :min="1" :max="100" :disabled="!canEdit" style="width: 100%" @change="markDirty" /></el-form-item>
           </el-form>
@@ -989,6 +990,8 @@
         </button>
       </nav>
     </div>
+
+    <WorkflowContractDialog v-model="contractEditorOpen" :inputs="definition.inputs" :outputs="definition.outputs" @apply="applyWorkflowContract" />
 
     <section v-if="diagnostics.length" class="diagnostic-panel">
       <div class="diagnostic-header">
@@ -1420,6 +1423,7 @@ import {
   ZoomOut
 } from '@element-plus/icons-vue'
 import WorkflowSchemaConfig from './WorkflowSchemaConfig.vue'
+import WorkflowContractDialog from './WorkflowContractDialog.vue'
 import WorkflowCanvasNode from './WorkflowCanvasNode.vue'
 import WorkflowApiConnectionStep from './WorkflowApiConnectionStep.vue'
 import WorkflowAgentEditor from './WorkflowAgentEditor.vue'
@@ -1488,6 +1492,7 @@ export default {
     VueFlow,
     Background,
     WorkflowSchemaConfig,
+    WorkflowContractDialog,
     WorkflowSubWorkflowEditor,
     WorkflowSubWorkflowTest,
     WorkflowCanvasNode,
@@ -1573,6 +1578,7 @@ export default {
   emits: ['back', 'saved', 'published'],
   data() {
     return {
+      contractEditorOpen: false,
       currentDefinition: this.modelValue,
       definition: this.createEmptyDefinition(),
       canvasNodes: [],
@@ -2429,6 +2435,12 @@ export default {
     window.removeEventListener('pointerup', this.stopInspectorResize)
   },
   methods: {
+    applyWorkflowContract({inputs, outputs}) {
+      if (!this.canEdit) return
+      this.definition.inputs = inputs
+      this.definition.outputs = outputs
+      this.markDirty()
+    },
     handleWorkflowVisibility() {
       if (document.hidden) {
         this.stopExecutionStream(false)

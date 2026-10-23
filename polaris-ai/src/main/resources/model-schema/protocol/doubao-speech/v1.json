@@ -1,0 +1,14 @@
+{
+  "layer": "PROTOCOL",
+  "code": "DOUBAO_SPEECH",
+  "profileVersion": 1,
+  "capabilityOverlays": {
+    "AUDIO_STT": {
+      "uiSchema": {
+        "language": {
+          "placeholder": "留空自动识别；语言编码按供应商语音协议配置"
+        }
+      }
+    }
+  }
+}

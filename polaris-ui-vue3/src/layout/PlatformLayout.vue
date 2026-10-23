@@ -1,7 +1,7 @@
 <template>
-  <div class="platform-layout" :class="{ 'is-dark': isDark }">
+  <div class="platform-layout" :class="{ 'is-dark': isDark, 'customer-module': isCustomerModule, 'customer-nav-open': mobileNavigation }" @keydown.esc="mobileNavigation = false">
     <!-- 左侧中台专属现代侧边栏 -->
-    <aside class="platform-sidebar">
+    <aside class="platform-sidebar" @click="mobileNavigation = false">
       <!-- 顶部品牌区 -->
       <div class="brand-header">
         <div class="logo-wrapper">
@@ -48,6 +48,10 @@
         <router-link to="/platform/console/agent" class="nav-item" :class="{ active: isCurrent('/platform/console/agent') }">
           <el-icon class="nav-icon"><UserFilled /></el-icon>
           <span class="nav-text">智能体编排</span>
+        </router-link>
+        <router-link v-if="currentUser.role === 'admin'" to="/platform/console/customer-service" class="nav-item" :class="{ active: isCurrent('/platform/console/customer-service') }">
+          <el-icon class="nav-icon"><ChatDotRound /></el-icon>
+          <span class="nav-text">数字人客服</span>
         </router-link>
         <router-link to="/platform/console/workflow" class="nav-item" :class="{ active: isCurrent('/platform/console/workflow') }">
           <el-icon class="nav-icon"><Share /></el-icon>
@@ -102,11 +106,12 @@
       </div>
     </aside>
 
+    <button v-if="isCustomerModule && mobileNavigation" class="customer-nav-backdrop" aria-label="关闭导航" @click="mobileNavigation = false"></button>
     <!-- 右侧主界面 -->
     <div class="platform-main-wrapper">
       <!-- 现代毛玻璃顶栏 -->
       <header class="platform-topbar">
-        <div class="topbar-left">
+        <div class="topbar-left"><button v-if="isCustomerModule" class="customer-nav-toggle" aria-label="切换导航菜单" :aria-expanded="mobileNavigation" @click="mobileNavigation = !mobileNavigation"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg></button>
           <div class="breadcrumb-trail">
             <span class="crumb-root">控制台</span>
             <span class="crumb-sep">/</span>
@@ -180,7 +185,7 @@
 </template>
 
 <script setup>
-import {computed, onMounted} from 'vue'
+import {computed, onMounted, ref, watch} from 'vue'
 import {useRoute, useRouter} from 'vue-router'
 import {useDark} from '@vueuse/core'
 import {ElMessage, ElMessageBox} from 'element-plus'
@@ -207,6 +212,9 @@ import usePlatformUserStore from '@/store/modules/platformUser'
 
 const route = useRoute()
 const router = useRouter()
+const mobileNavigation = ref(false)
+const isCustomerModule = computed(() => route.path === '/platform/console/customer-service')
+watch(() => route.path, () => { mobileNavigation.value = false })
 const platformUserStore = usePlatformUserStore()
 
 const isDark = useDark({
@@ -273,6 +281,7 @@ function handleCommand(cmd) {
 
 <style lang="scss" scoped>
 .platform-layout {
+  --platform-accent: #4f46e5;
   display: flex;
   height: 100vh;
   width: 100vw;
@@ -833,6 +842,23 @@ function handleCommand(cmd) {
   &::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.12);
     border-radius: 6px;
+  }
+}
+.customer-nav-toggle, .customer-nav-backdrop { display: none; }
+@media (max-width: 800px) {
+  .customer-module {
+    .platform-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 40; transform: translateX(-100%); visibility: hidden; transition: transform .2s; }
+    &.customer-nav-open .platform-sidebar { transform: translateX(0); visibility: visible; }
+    .customer-nav-backdrop { display: block; position: fixed; inset: 0; z-index: 35; background: rgba(5, 10, 20, .5); border: 0; }
+    .customer-nav-toggle { display: inline-grid; place-items: center; padding: 7px; background: transparent; color: inherit; border: 1px solid currentColor; border-radius: 8px; cursor: pointer; }
+    .platform-main-wrapper { width: 100%; min-width: 0; }
+    .platform-content-view { padding: 0; }
+    .platform-topbar { padding: 0 14px; }
+    .topbar-left { display: flex; gap: 10px; align-items: center; min-width: 0; }
+    .breadcrumb-trail { font-size: 12px; gap: 5px; }
+    .quota-pill, .user-meta, .user-profile-btn .arrow, .topbar-right > .el-tooltip__trigger:first-child { display: none; }
+    .topbar-right { gap: 7px; }
+    .user-profile-btn { padding: 3px; }
   }
 }
 </style>

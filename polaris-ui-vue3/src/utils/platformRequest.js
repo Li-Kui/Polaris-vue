@@ -16,6 +16,12 @@ const service = axios.create({
 })
 
 function showReloginDialog() {
+  // 分享接待页必须在新窗口登录，不能在外站 iframe 内跳转到管理员登录表单。
+  if (window.location.pathname.startsWith('/platform/customer/')) {
+    removePlatformToken()
+    usePlatformUserStore().$reset()
+    return
+  }
   if (isRelogin.show) return
   isRelogin.show = true
   ElMessageBox.confirm('登录状态已过期，请重新登录后继续操作', '系统提示', {
@@ -73,6 +79,7 @@ service.interceptors.response.use(res => {
     return Promise.resolve(res.data)
   }
 }, error => {
+  if (axios.isCancel(error) && error.config?.silentCancellation) return Promise.reject(error)
   if (error.response?.status === 401) {
     showReloginDialog()
     const message = error.response?.data?.msg || '登录状态已过期，请重新登录。'

@@ -17,6 +17,7 @@ public record ProviderHttpRequest(
     public ProviderHttpRequest {
         endpoint = Objects.requireNonNull(endpoint, "endpoint");
         timeout = Objects.requireNonNull(timeout, "timeout");
+        if (endpoint.method() == ProtocolHttpMethod.WEBSOCKET) throw new IllegalArgumentException("WebSocket 只能由原生语音适配器处理");
         if (timeout.isZero() || timeout.isNegative()
                 || timeout.compareTo(Duration.ofMinutes(5)) > 0) {
             throw new IllegalArgumentException("Provider 请求超时必须在 0..5 分钟内");

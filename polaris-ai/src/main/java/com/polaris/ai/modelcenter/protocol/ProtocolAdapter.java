@@ -14,5 +14,10 @@ public interface ProtocolAdapter {
 
     Optional<ProtocolEndpoint> findEndpoint(String capabilityCode);
 
+    /** 同一协议内不同模型代际可映射不同的固定路径；默认保持既有映射。 */
+    default Optional<ProtocolEndpoint> findEndpoint(String capabilityCode, String modelName) {
+        return findEndpoint(capabilityCode);
+    }
+
     Optional<ProtocolEndpoint> modelDiscoveryEndpoint();
 }

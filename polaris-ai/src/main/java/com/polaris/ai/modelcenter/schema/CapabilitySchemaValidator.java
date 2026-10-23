@@ -95,7 +95,7 @@ public class CapabilitySchemaValidator {
         }
 
         if (!schema.enumValues().isEmpty()
-                && schema.enumValues().stream().noneMatch(value::equals)) {
+                && schema.enumValues().stream().noneMatch(expected -> SchemaEnumValues.equal(expected, value))) {
             errors.add(path + " 不在允许的 enum 中");
         }
         switch (schema.type()) {

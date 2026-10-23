@@ -8,7 +8,7 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
-/** 面向已支持 JSON Schema 契约子集的轻量确定性输入校验器。 */
+/** 面向已支持 JSON Schema 契约子集的轻量确定性输入校验器；客服预检和原执行入口共用。 */
 @Component
 public class WorkflowInputValidator {
 

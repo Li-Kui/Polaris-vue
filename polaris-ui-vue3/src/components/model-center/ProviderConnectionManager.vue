@@ -106,7 +106,7 @@ function providerChanged(code) {
 }
 function profileLabel(code) {
   return ({
-    OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
+    DASHSCOPE_AUDIO: '阿里云百炼语音（Qwen）', DOUBAO_SPEECH: '豆包语音', OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
     SILICONFLOW: '硅基流动', ARK: '火山方舟', CUSTOM: '自定义兼容服务'
   })[code] || code
 }
@@ -115,7 +115,7 @@ function providerDescription(code) {
     OPENAI: 'OpenAI 官方接口', DASHSCOPE: '通义千问与百炼模型',
     DEEPSEEK: 'DeepSeek 官方接口',
     SILICONFLOW: '第三方平台，支持多种开源模型',
-    ARK: '火山引擎模型服务', CUSTOM: '自建服务或其他兼容接口'
+    DASHSCOPE_AUDIO: 'Qwen3 识别／合成与 Qwen-Audio 3.1 Flash 合成；新版使用同地域业务空间 API Host', DOUBAO_SPEECH: '一句话识别与 V3 合成，使用豆包语音控制台 API Key', ARK: '火山引擎模型服务', CUSTOM: '自建服务或其他兼容接口'
   })[code] || ''
 }
 function accessModeLabel(mode) { return String(mode).toUpperCase() === 'RELAY' ? '兼容中转' : '直连厂商' }

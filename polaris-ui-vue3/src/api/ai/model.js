@@ -25,6 +25,10 @@ export function getModelEditorContext() {
   return request({ url: '/ai/model-center/editor-context', method: 'get' })
 }
 
+export function getModelSchemaContext(connectionId, modelName) {
+  return request({ url: '/ai/model-center/schema-context', method: 'get', params: { connectionId, modelName } })
+}
+
 export function getModelAggregate(id) {
   return request({ url: `/ai/model-center/models/${id}`, method: 'get' })
 }

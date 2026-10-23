@@ -39,6 +39,10 @@
             <groupId>org.springframework</groupId>
             <artifactId>spring-webmvc</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-websocket</artifactId>
+        </dependency>
 
         <!-- 工作流外部数据源使用的小型隔离连接池 -->
         <dependency>

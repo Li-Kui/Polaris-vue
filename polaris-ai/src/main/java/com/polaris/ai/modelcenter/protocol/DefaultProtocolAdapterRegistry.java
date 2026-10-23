@@ -76,9 +76,10 @@ public class DefaultProtocolAdapterRegistry implements ProtocolAdapterRegistry {
             ProtocolEndpoint endpoint = adapter.findEndpoint(capability)
                     .orElseThrow(() -> new IllegalStateException(
                             "Protocol Capability 缺少 Endpoint: " + capability));
-            if (endpoint.method() != ProtocolHttpMethod.POST) {
+            if (endpoint.method() != ProtocolHttpMethod.POST
+                    && !(endpoint.method() == ProtocolHttpMethod.WEBSOCKET && "AUDIO_STT".equals(capability))) {
                 throw new IllegalStateException(
-                        "Capability Endpoint 第一版必须使用 POST: " + capability);
+                        "Capability Endpoint 必须使用 POST，AUDIO_STT 可使用 WEBSOCKET: " + capability);
             }
         }
         adapter.modelDiscoveryEndpoint().ifPresent(endpoint -> {

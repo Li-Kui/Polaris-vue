@@ -1,0 +1,73 @@
+{
+  "layer": "PROVIDER",
+  "code": "DOUBAO_SPEECH",
+  "profileVersion": 1,
+  "protocolCode": "DOUBAO_SPEECH",
+  "defaultBaseUrl": "https://openspeech.bytedance.com",
+  "modelDiscoverySupported": false,
+  "supportedCapabilities": [
+    "AUDIO_STT",
+    "AUDIO_TTS"
+  ],
+  "credentialSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "apiKey"
+    ],
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    }
+  },
+  "connectionConfigSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "capabilityOverlays": {
+    "AUDIO_TTS": {
+      "schema": {
+        "properties": {
+          "format": {
+            "enum": [
+              "mp3"
+            ],
+            "default": "mp3"
+          },
+          "pitch": {
+            "minimum": 0,
+            "maximum": 0,
+            "default": 0
+          },
+          "speed": {
+            "minimum": 0.5,
+            "maximum": 2,
+            "default": 1
+          }
+        }
+      }
+    },
+    "AUDIO_STT": {
+      "schema": {
+        "properties": {
+          "timestamps": {
+            "enum": [
+              false
+            ],
+            "default": false
+          },
+          "speakerDiarization": {
+            "enum": [
+              false
+            ],
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,4 +8,5 @@ export function isPlatformConsolePath(pathname = '') {
   return pathname === '/platform/login'
     || pathname === '/platform/console'
     || pathname.startsWith('/platform/console/')
+    || pathname.startsWith('/platform/customer/')
 }

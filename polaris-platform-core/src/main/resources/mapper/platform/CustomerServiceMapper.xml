@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.CustomerServiceMapper">
+    <resultMap id="App" type="com.polaris.platform.domain.CustomerServiceApp">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="name" column="name" />
+        <result property="configJson" column="config_json" />
+        <result property="revision" column="revision" />
+        <result property="runtimeEpoch" column="runtime_epoch" />
+        <result property="status" column="status" />
+        <result property="currentReleaseId" column="current_release_id" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+    <resultMap id="Release" type="com.polaris.platform.domain.CustomerServiceRelease">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="appId" column="app_id" />
+        <result property="sourceRevision" column="source_revision" />
+        <result property="configJson" column="config_json" />
+        <result property="modelHash" column="model_hash" />
+        <result property="speechModelHash" column="speech_model_hash" /><result property="playbackModelHash" column="playback_model_hash" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+    </resultMap>
+    <resultMap id="Session" type="com.polaris.platform.domain.CustomerServiceSession">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="appId" column="app_id" />
+        <result property="releaseId" column="release_id" />
+        <result property="userId" column="user_id" /><result property="visitorTokenHash" column="visitor_token_hash" />
+        <result property="runtimeEpoch" column="runtime_epoch" />
+        <result property="status" column="status" />
+        <result property="turnCount" column="turn_count" />
+        <result property="channelId" column="channel_id" />
+        <result property="channelRevision" column="channel_revision" />
+        <result property="createTime" column="create_time" />
+        <result property="expiresAt" column="expires_at" />
+    </resultMap>
+    <resultMap id="Turn" type="com.polaris.platform.domain.CustomerServiceTurn">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="sessionId" column="session_id" />
+        <result property="requestId" column="request_id" />
+        <result property="turnNo" column="turn_no" />
+        <result property="question" column="question" />
+        <result property="answer" column="answer" />
+        <result property="citationsJson" column="citations_json" />
+        <result property="answerPartsJson" column="answer_parts_json" />
+        <result property="intentJson" column="intent_json" />
+        <result property="status" column="status" />
+        <result property="errorCode" column="error_code" />
+        <result property="inputTokens" column="input_tokens" />
+        <result property="outputTokens" column="output_tokens" />
+        <result property="totalTokens" column="total_tokens" />
+        <result property="usageSource" column="usage_source" />
+        <result property="createTime" column="create_time" />
+        <result property="deadline" column="deadline" />
+        <result property="finishedTime" column="finished_time" />
+    </resultMap>
+
+    <select id="selectApps" resultMap="App">
+        select * from platform_customer_service where tenant_id = #{tenantId} order by id desc limit 200
+    </select>
+    <select id="selectApp" resultMap="App">
+        select * from platform_customer_service where tenant_id = #{tenantId} and id = #{id}
+    </select>
+    <select id="lockApp" resultMap="App">
+        select * from platform_customer_service where tenant_id = #{tenantId} and id = #{id} for update
+    </select>
+    <insert id="insertApp" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_customer_service
+            (tenant_id, name, config_json, revision, status, create_by, create_time, update_time)
+        values (#{tenantId}, #{name}, #{configJson}, 1, 'ACTIVE', #{createBy}, #{createTime}, #{updateTime})
+    </insert>
+    <update id="updateApp">
+        update platform_customer_service set name = #{name}, config_json = #{configJson},
+            status = #{status}, runtime_epoch = #{runtimeEpoch}, current_release_id = #{currentReleaseId},
+            revision = revision + 1, update_time = #{updateTime}
+        where tenant_id = #{tenantId} and id = #{id} and revision = #{revision}
+    </update>
+    <insert id="insertRelease">
+        insert into platform_customer_release
+            (id, tenant_id, app_id, source_revision, config_json, model_hash, speech_model_hash, playback_model_hash, create_by, create_time)
+        values (#{id}, #{tenantId}, #{appId}, #{sourceRevision}, #{configJson}, #{modelHash}, #{speechModelHash}, #{playbackModelHash}, #{createBy}, #{createTime})
+    </insert>
+    <select id="selectRelease" resultMap="Release">
+        select * from platform_customer_release where tenant_id = #{tenantId} and id = #{id}
+    </select>
+    <insert id="insertSession">
+        insert into platform_customer_session
+            (id, tenant_id, app_id, release_id, user_id, runtime_epoch, status, turn_count, create_time, expires_at, channel_id, channel_revision, visitor_token_hash)
+        values (#{id}, #{tenantId}, #{appId}, #{releaseId}, #{userId}, #{runtimeEpoch}, 'ACTIVE', 0, #{createTime}, #{expiresAt}, #{channelId}, #{channelRevision}, #{visitorTokenHash})
+    </insert>
+    <select id="countOpenSessions" resultType="int">
+        select count(*) from platform_customer_session s
+        join platform_customer_service a on a.tenant_id = s.tenant_id and a.id = s.app_id and a.runtime_epoch = s.runtime_epoch
+        left join platform_customer_channel c on c.tenant_id = s.tenant_id and c.id = s.channel_id
+        where s.tenant_id = #{tenantId} and s.user_id = #{userId} and s.app_id = #{appId}
+            and s.status = 'ACTIVE' and s.expires_at &gt; #{now}
+            and (s.channel_id is null or (c.status = 'ACTIVE' and c.expires_at &gt; #{now}
+                and c.revision = s.channel_revision and c.app_id = s.app_id and c.release_id = s.release_id))
+    </select>
+    <select id="selectSession" resultMap="Session">
+        select * from platform_customer_session
+        where tenant_id = #{tenantId} and user_id = #{userId} and id = #{id}
+    </select>
+    <select id="selectSessionRecords" resultMap="Session">
+        select * from platform_customer_session
+        where tenant_id = #{tenantId} and (user_id = #{userId} or (user_id = 0 and visitor_token_hash is not null)) and app_id = #{appId}
+        <if test="before != null">
+            and (create_time &lt; #{before.createTime}
+                or (create_time = #{before.createTime} and id &lt; #{before.id}))
+        </if>
+        order by create_time desc, id desc limit 21
+    </select>
+    <select id="lockSession" resultMap="Session">
+        select * from platform_customer_session
+        where tenant_id = #{tenantId} and user_id = #{userId} and id = #{id} for update
+    </select>
+    <update id="advanceSession">
+        update platform_customer_session set turn_count = turn_count + 1
+        where tenant_id = #{tenantId} and user_id = #{userId} and id = #{id}
+            and status = 'ACTIVE' and turn_count = #{turnCount}
+    </update>
+    <update id="closeSession">
+        update platform_customer_session set status = 'CLOSED'
+        where tenant_id = #{tenantId} and user_id = #{userId} and id = #{id}
+    </update>
+    <select id="selectTurns" resultMap="Turn">
+        select * from platform_customer_turn
+        where tenant_id = #{tenantId} and session_id = #{sessionId} order by turn_no limit 50
+    </select>
+    <select id="selectRequest" resultMap="Turn">
+        select * from platform_customer_turn
+        where tenant_id = #{tenantId} and session_id = #{sessionId} and request_id = #{requestId}
+    </select>
+    <insert id="insertTurn">
+        insert into platform_customer_turn
+            (id, tenant_id, session_id, request_id, turn_no, question, status, create_time, deadline)
+        values (#{id}, #{tenantId}, #{sessionId}, #{requestId}, #{turnNo}, #{question},
+            'RUNNING', #{createTime}, #{deadline})
+    </insert>
+    <update id="saveAnswerParts">
+        update platform_customer_turn set answer_parts_json = #{answerPartsJson}
+        where tenant_id = #{tenantId} and session_id = #{sessionId} and id = #{id}
+            and status = 'RUNNING' and deadline &gt; #{finishedTime}
+    </update>
+    <update id="finishTurn">
+        update platform_customer_turn set status = #{status}, answer = #{answer},
+            citations_json = #{citationsJson}, intent_json = #{intentJson}, error_code = #{errorCode},
+            input_tokens = #{inputTokens}, output_tokens = #{outputTokens},
+            total_tokens = #{totalTokens}, usage_source = #{usageSource}, finished_time = #{finishedTime}
+        where tenant_id = #{tenantId} and session_id = #{sessionId} and id = #{id}
+            and status = 'RUNNING' and deadline &gt; #{finishedTime}
+    </update>
+    <update id="expireTurns">
+        update platform_customer_turn set status = 'INTERRUPTED', error_code = 'TURN_EXPIRED', finished_time = #{now}
+        where tenant_id = #{tenantId} and session_id = #{sessionId}
+            and status = 'RUNNING' and deadline &lt;= #{now}
+    </update>
+    <update id="interruptTurns">
+        update platform_customer_turn set status = 'INTERRUPTED', error_code = 'TURN_INTERRUPTED', finished_time = #{now}
+        where tenant_id = #{tenantId} and session_id = #{sessionId} and status = 'RUNNING'
+        <if test="id != null">and id = #{id}</if>
+    </update>
+    <select id="countActiveSpeech" resultType="int">
+        select count(*) from platform_customer_speech where tenant_id=#{tenantId} and session_id=#{sessionId}
+            and status='RUNNING' and deadline &gt; #{now}
+    </select>
+    <select id="countActive" resultType="int">
+        select count(*) from platform_customer_turn t
+        join platform_customer_session s on s.tenant_id = t.tenant_id and s.id = t.session_id
+        join platform_customer_service a on a.tenant_id = s.tenant_id and a.id = s.app_id
+        left join platform_customer_channel c on c.tenant_id = s.tenant_id and c.id = s.channel_id
+        where t.tenant_id = #{tenantId} and t.session_id = #{sessionId} and t.id = #{turnId}
+            and t.status = 'RUNNING' and t.deadline &gt; #{now}
+            and s.user_id = #{userId} and s.status = 'ACTIVE' and s.expires_at &gt; #{now}
+            and a.status = 'ACTIVE' and a.runtime_epoch = s.runtime_epoch
+            and (s.channel_id is null or (c.status = 'ACTIVE' and c.expires_at &gt; #{now}
+                and c.revision = s.channel_revision and c.app_id = s.app_id and c.release_id = s.release_id))
+    </select>
+</mapper>

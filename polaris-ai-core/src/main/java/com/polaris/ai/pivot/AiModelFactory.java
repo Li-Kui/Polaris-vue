@@ -1,8 +1,8 @@
 package com.polaris.ai.pivot;
 
 import com.polaris.ai.runtime.ModelHttpClientProperties;
-import com.polaris.ai.runtime.ModelRuntimeSpec;
 import com.polaris.ai.runtime.ModelHttpDiagnostics;
+import com.polaris.ai.runtime.ModelRuntimeSpec;
 import com.polaris.ai.runtime.RuntimePolicySpec;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
@@ -32,6 +32,7 @@ public class AiModelFactory {
     private static final String OPENAI_COMPATIBLE = "OPENAI_COMPATIBLE";
 
     private final ModelHttpClientProperties httpProperties;
+    private final EmbeddingHttpTransportPool embeddingTransports = new EmbeddingHttpTransportPool();
 
     /** 兼容不启动 Spring 容器的运行时单元测试。 */
     public AiModelFactory() {
@@ -127,6 +128,8 @@ public class AiModelFactory {
         httpProperties.applyProxy(builder);
         ModelHttpDiagnostics diagnostics = ModelHttpDiagnostics.current();
         if (diagnostics != null) builder = diagnostics.instrument(builder);
+        else if ("TEXT_EMBEDDING".equals(runtime.capabilityCode()) && "DIRECT".equals(runtime.networkMode()) && (httpProperties.getProxyMode() == null
+                || httpProperties.getProxyMode() == ModelHttpClientProperties.ProxyMode.DIRECT)) builder = embeddingTransports.wrap(builder);
         return new RuntimePolicyHttpClientBuilder(builder, runtime.runtimePolicy(), diagnostics);
     }
 
