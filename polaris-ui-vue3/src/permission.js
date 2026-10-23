@@ -23,6 +23,9 @@ const isWhiteList = (path) => {
 router.beforeEach(async (to, from) => {
   NProgress.start()
 
+  // 受控客服入口自行显示登录引导；iframe 内不跳转到登录表单。服务端逐请求鉴权。
+  if (to.path.startsWith('/platform/customer/') || to.path.startsWith('/platform/visitor/')) return true
+
   if (to.path.startsWith('/app/')) {
     return true  // 分享页面直接放行
   }
@@ -51,6 +54,11 @@ router.beforeEach(async (to, from) => {
           NProgress.done()
           return `/platform/login?redirect=${to.fullPath}`
         }
+      }
+      if (to.meta.requiresTenantAdmin && platformUserStore.user.role !== 'admin') {
+        ElMessage.error('只有租户管理员可以配置和预览数字人客服')
+        NProgress.done()
+        return { path: '/platform/console/dashboard' }
       }
       return true
     } else {

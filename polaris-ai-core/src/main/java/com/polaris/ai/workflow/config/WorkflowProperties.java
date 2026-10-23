@@ -68,14 +68,34 @@ public class WorkflowProperties {
         imageNodeAllowedWorkflowCodes = codes == null ? new LinkedHashSet<>() : new LinkedHashSet<>(codes);
     }
 
-    /** Independent, fail-closed image admission; never enables HTTP/Agent write tools. */
-    public boolean isNodeExecutionAllowed(String type, String version, String sideEffect,
+    /** 受控 Agent／MCP 单独准入；实际资源及权限由调用链复查，退役契约不因写节点开关放行。 */
+    public String nodeExecutionDeniedReason(String type, String version, String sideEffect,
             Long tenantId, String workflowCode) {
-        if (!"WRITE".equals(sideEffect) || writeNodesEnabled) return true;
-        return imageNodesEnabled && "image".equals(type) && "1.0".equals(version)
+        if ("agent".equals(type)) {
+            if (!"2.0".equals(version)) return "旧版或未知 Agent 节点契约不可执行，请重新添加协作智能体 2.0 并发布";
+            if (!"WRITE".equals(sideEffect) || tenantId == null || tenantId <= 0 || workflowCode == null || workflowCode.isBlank())
+                return "协作智能体必须具备有效租户、工作流身份和受控派发契约";
+            return null;
+        }
+        if ("mcp_tool".equals(type)) {
+            if (!"1.0".equals(version) || !"WRITE".equals(sideEffect)) return "MCP 节点执行契约不受支持";
+            if (tenantId == null || tenantId <= 0 || workflowCode == null || workflowCode.isBlank()) {
+                return "MCP 工作流必须具备有效的租户和工作流身份";
+            }
+            return null;
+        }
+        if (!"WRITE".equals(sideEffect) || writeNodesEnabled) return null;
+        if (imageNodesEnabled && "image".equals(type) && "1.0".equals(version)
                 && tenantId != null && workflowCode != null
                 && imageNodeAllowedTenantIds.contains(tenantId)
-                && imageNodeAllowedWorkflowCodes.contains(workflowCode);
+                && imageNodeAllowedWorkflowCodes.contains(workflowCode)) return null;
+        return "当前环境未启用有副作用的工作流节点";
+    }
+
+    /** 准入与副作用分类分离，不会赋予 MCP 自动重试或重放能力。 */
+    public boolean isNodeExecutionAllowed(String type, String version, String sideEffect,
+            Long tenantId, String workflowCode) {
+        return nodeExecutionDeniedReason(type, version, sideEffect, tenantId, workflowCode) == null;
     }
 
     public boolean isCodeNodeEnabled() {

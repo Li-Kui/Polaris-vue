@@ -58,10 +58,12 @@ class OpenAiCompatibleAudioProtocolClient implements AudioProtocolClient {
                             objectMapper.writeValueAsString(body),
                             StandardCharsets.UTF_8))
                     .build();
-            HttpResponse<byte[]> response = client(runtime).send(
-                    request, HttpResponse.BodyHandlers.ofByteArray());
-            requireSuccess(response.statusCode(), response.body().length);
-            if (response.body().length > MAX_AUDIO_RESPONSE_BYTES) {
+            HttpResponse<InputStream> response = client(runtime).send(
+                    request, HttpResponse.BodyHandlers.ofInputStream());
+            byte[] audio;
+            try (InputStream input = response.body()) { audio = input.readNBytes(MAX_AUDIO_RESPONSE_BYTES + 1); }
+            requireSuccess(response.statusCode(), audio.length);
+            if (audio.length > MAX_AUDIO_RESPONSE_BYTES) {
                 throw new ServiceException("AUDIO_RESPONSE_TOO_LARGE");
             }
             String contentType = response.headers().firstValue("content-type")
@@ -71,7 +73,7 @@ class OpenAiCompatibleAudioProtocolClient implements AudioProtocolClient {
                     null, null, null, (long) invocation.text().length(),
                     null, null, Map.of(), UsageSource.CHAR_ESTIMATED);
             return new AudioProtocolResult<>(
-                    new AudioTtsResult(response.body(), contentType, sampleRate),
+                    new AudioTtsResult(audio, contentType, sampleRate),
                     usage, requestId(response));
         } catch (ServiceException e) {
             throw e;
@@ -84,6 +86,7 @@ class OpenAiCompatibleAudioProtocolClient implements AudioProtocolClient {
     public AudioProtocolResult<AudioSttResult> transcribe(
             ModelRuntimeSpec runtime,
             AudioSttInvocation invocation) {
+        if (!invocation.vocabulary().isEmpty()) throw new ServiceException("SPEECH_VOCABULARY_UNSUPPORTED: 当前协议不支持识别术语");
         String boundary = "polaris-" + UUID.randomUUID();
         try {
             Map<String, Object> parameters = merged(

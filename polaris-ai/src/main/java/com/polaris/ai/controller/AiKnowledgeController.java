@@ -2,7 +2,6 @@ package com.polaris.ai.controller;
 
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
-import com.polaris.ai.safety.service.PrivateStoragePaths;
 import com.polaris.ai.service.IAiKnowledgeService;
 import com.polaris.common.annotation.ApiGroup;
 import com.polaris.common.annotation.Log;
@@ -17,8 +16,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.file.Path;
-import java.util.Date;
 import java.util.List;
 
 /**
@@ -35,7 +32,7 @@ public class AiKnowledgeController extends BaseController {
     private IAiKnowledgeService aiKnowledgeService;
 
     @Autowired
-    private PrivateStoragePaths privateStoragePaths;
+    private com.polaris.ai.knowledge.KnowledgeRebuildTaskService rebuildTasks;
 
     // ================================================================
     //  知识库管理接口
@@ -131,35 +128,9 @@ public class AiKnowledgeController extends BaseController {
     @PostMapping("/document/upload")
     public ResultData uploadDocument(
             @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
-            @RequestParam("file") MultipartFile file) {
-        if (aiKnowledgeService.selectAccessibleKnowledgeBaseById(knowledgeBaseId) == null) {
-            return fail("知识库不存在或无上传权限");
-        }
-        if (file.isEmpty()) {
-            return fail("上传文件不可为空");
-        }
-
-        try {
-            // 1. 上传文件到私有知识库暂存目录
-            Path stagedPath = privateStoragePaths.stageKnowledgeFile(file);
-
-            // 2. 插入文档记录到数据库
-            AiDocument document = new AiDocument();
-            document.setKnowledgeBaseId(knowledgeBaseId);
-            document.setName(file.getOriginalFilename());
-            document.setFileUrl(stagedPath.toAbsolutePath().toString());
-            document.setModerationStatus("WAIT_SCAN");
-            document.setCreateBy(com.polaris.ai.core.context.CallerUtils.getUsername());
-            document.setCreateTime(new Date());
-            aiKnowledgeService.insertDocument(document);
-
-            // 3. 异步触发向量化入库
-            aiKnowledgeService.importDocumentAsync(document.getId());
-
-            return ResultData.ok(document, "上传成功，后台开始执行安全检测与向量化导入");
-        } catch (Exception e) {
-            return fail("文档上传及导入失败: " + e.getMessage());
-        }
+            @RequestParam("file") MultipartFile file,
+            @RequestHeader(value = "Idempotency-Key", required = false) String requestKey) {
+        return ResultData.ok(rebuildTasks.upload(knowledgeBaseId, file, requestKey), "文件和任务已保存，请以任务状态为准");
     }
 
     /**
@@ -183,14 +154,14 @@ public class AiKnowledgeController extends BaseController {
     @Operation(summary = "重新构建单个文档的向量索引")
     @Log(title = "知识库文档管理", businessType = BusinessType.UPDATE)
     @PostMapping("/document/{id}/rebuild")
-    public ResultData rebuildDocument(@PathVariable Long id) {
+    public ResultData rebuildDocument(@PathVariable Long id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String requestKey) {
         AiDocument document = aiKnowledgeService.selectDocumentById(id);
         if (document == null
                 || aiKnowledgeService.selectAccessibleKnowledgeBaseById(document.getKnowledgeBaseId()) == null) {
             return fail("文档不存在或无重建权限");
         }
-        aiKnowledgeService.rebuildKnowledgeBaseAsync(document.getKnowledgeBaseId());
-        return ok("已加入知识库安全重建任务");
+        return ok(rebuildTasks.submit(document.getKnowledgeBaseId(), requestKey, null));
     }
 
     /**
@@ -199,11 +170,8 @@ public class AiKnowledgeController extends BaseController {
     @Operation(summary = "重建知识库向量索引")
     @Log(title = "知识库管理", businessType = BusinessType.UPDATE)
     @PostMapping("/{id}/rebuild")
-    public ResultData rebuildKnowledgeBase(@PathVariable Long id) {
-        if (aiKnowledgeService.selectAccessibleKnowledgeBaseById(id) == null) {
-            return fail("知识库不存在或无重建权限");
-        }
-        aiKnowledgeService.rebuildKnowledgeBaseAsync(id);
-        return ok("已加入知识库重建任务");
+    public ResultData rebuildKnowledgeBase(@PathVariable Long id,
+            @RequestHeader(value = "Idempotency-Key", required = false) String requestKey) {
+        return ok(rebuildTasks.submit(id, requestKey, null));
     }
 }

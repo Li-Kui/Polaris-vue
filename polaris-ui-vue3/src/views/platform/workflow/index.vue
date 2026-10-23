@@ -7,6 +7,7 @@
       :can-execute="canExecute"
       :can-debug="canDebug"
       :can-approve="canApprove"
+      :can-view-mcp-records="platformUserStore.user?.role === 'admin'"
     />
   </div>
 </template>

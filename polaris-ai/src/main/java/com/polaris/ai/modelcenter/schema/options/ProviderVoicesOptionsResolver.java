@@ -21,8 +21,12 @@ public class ProviderVoicesOptionsResolver implements SchemaOptionsResolver {
             case "OPENAI", "CUSTOM" -> options(
                     "alloy", "ash", "ballad", "coral", "echo",
                     "fable", "nova", "onyx", "sage", "shimmer", "verse");
-            case "DASHSCOPE" -> options(
-                    "Cherry", "Serena", "Ethan", "Chelsie");
+            case "DASHSCOPE", "DASHSCOPE_AUDIO" -> "DASHSCOPE_AUDIO".equals(provider)
+                    && com.polaris.ai.modelcenter.audio.DashScopeSpeechModels.qwenAudioTts(context.modelName())
+                    ? options(com.polaris.ai.modelcenter.audio.DashScopeSpeechModels.qwenAudioVoices().toArray(String[]::new))
+                    : options("Cherry", "Serena", "Ethan", "Chelsie");
+            case "DOUBAO_SPEECH" -> "seed-tts-2.0".equals(context.modelName())
+                    ? options("zh_female_vv_uranus_bigtts") : options("zh_female_shuangkuaisisi_moon_bigtts");
             default -> List.of();
         };
     }

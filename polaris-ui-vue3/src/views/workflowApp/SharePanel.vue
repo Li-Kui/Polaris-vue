@@ -103,7 +103,7 @@
           默认配置加载失败，请重试后保存。
           <el-button link class="share-action-button" @click="getDefinition">重新加载</el-button>
         </div>
-        <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="116px" class="share-create-form">
           <el-form-item v-if="!editingDefaults" label="分享名称" prop="shareName">
             <el-input v-model="form.shareName" placeholder="请输入分享名称" />
           </el-form-item>
@@ -133,7 +133,7 @@
               <el-option label="批量任务" value="task" />
               <el-option label="数据查询" value="query" />
             </el-select>
-            <div v-if="definition" class="share-toolbar__description">
+            <div v-if="definition" class="share-toolbar__description share-current-value">
               当前使用：{{ pageTypeLabel(resolvedPageType) }}{{ editingDefaults ? '（工作流默认配置）' : !form.pageType ? (definition.defaultPageType ? '（工作流默认）' : '（根据已发布工作流自动推荐）') : '（当前分享覆盖）' }}
             </div>
           </el-form-item>
@@ -189,9 +189,9 @@
               </el-form-item>
             </el-collapse-item>
           </el-collapse>
-          <el-form-item>
-            <el-button type="primary" class="share-submit-button" @click="submitCreate" :loading="submitLoading" :disabled="definitionLoading || definitionError">{{ editingDefaults ? '保存默认配置' : form.id != null ? '保存修改' : '创建分享' }}</el-button>
+          <el-form-item class="share-form-actions">
             <el-button class="share-cancel-button" @click="cancelCreate" :disabled="submitLoading">取消</el-button>
+            <el-button type="primary" class="share-submit-button" @click="submitCreate" :loading="submitLoading" :disabled="definitionLoading || definitionError">{{ editingDefaults ? '保存默认配置' : form.id != null ? '保存修改' : '创建分享' }}</el-button>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -496,11 +496,48 @@ export default {
   font-size: 12px;
   line-height: 1.7;
 }
-.share-context, .share-form-summary {
+.share-context {
   color: var(--el-text-color-secondary);
   font-size: 12px;
   line-height: 1.7;
   margin-bottom: 14px;
+}
+.share-form-summary {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(79, 70, 229, 0.12);
+  border-radius: 12px;
+  background: rgba(79, 70, 229, 0.045);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.share-create-form {
+  padding: 20px 20px 6px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--el-bg-color) 76%, transparent);
+}
+.share-create-form :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+.share-create-form :deep(.el-form-item__label) {
+  align-items: center;
+  height: 40px;
+  padding-right: 18px;
+  line-height: 20px;
+}
+.share-create-form :deep(.el-form-item__content) {
+  min-width: 0;
+}
+.share-create-form :deep(.el-input__wrapper),
+.share-create-form :deep(.el-select__wrapper) {
+  min-height: 40px;
+}
+.share-current-value {
+  width: 100%;
+  margin-top: 7px;
+  padding-left: 2px;
 }
 .share-mobile-list { display: none; }
 .share-mobile-card { padding: 16px; border: 1px solid var(--el-border-color-lighter); border-radius: 12px; background: var(--el-bg-color); }
@@ -508,10 +545,54 @@ export default {
 .share-mobile-card__heading strong { overflow-wrap: anywhere; font-size: 14px; line-height: 1.7; }
 .share-mobile-card__heading .el-tag { flex-shrink: 0; }
 .share-mobile-card .share-actions { flex-wrap: wrap; margin-top: 12px; }
-.share-advanced { margin-bottom: 20px; }
-.share-advanced :deep(.el-collapse-item__header) { color: var(--el-text-color-primary); background: transparent; }
-.share-advanced :deep(.el-collapse-item__wrap) { background: transparent; }
+.share-advanced {
+  width: calc(100% - 116px);
+  margin: 2px 0 20px 116px;
+  border: 0;
+}
+.share-advanced :deep(.el-collapse-item) {
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  background: var(--el-fill-color-extra-light);
+}
+.share-advanced :deep(.el-collapse-item__header) {
+  height: 52px;
+  padding: 0 16px;
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  font-weight: 700;
+}
+.share-advanced :deep(.el-collapse-item__arrow) {
+  margin-right: 0;
+}
+.share-advanced :deep(.el-collapse-item__wrap) {
+  border: 0;
+  background: transparent;
+}
+.share-advanced :deep(.el-collapse-item__content) {
+  padding: 4px 16px 16px;
+}
+.share-advanced :deep(.el-collapse-item.is-active) {
+  border-color: rgba(79, 70, 229, 0.22);
+  background: rgba(79, 70, 229, 0.035);
+}
 .share-advanced .share-toolbar__description { margin-bottom: 10px; }
+.share-form-actions {
+  padding-top: 2px;
+}
+.share-form-actions :deep(.el-form-item__content) {
+  justify-content: flex-end;
+  gap: 10px;
+}
+.share-form-actions :deep(.el-button) {
+  min-width: 96px;
+  height: 40px;
+  margin: 0;
+  border-radius: 10px;
+}
 .share-toolbar {
   display: flex;
   align-items: center;
@@ -548,8 +629,40 @@ export default {
   box-shadow: none !important;
 }
 
+:global(.workflow-share-dialog.el-dialog) {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
+  margin: 20px auto !important;
+  overflow: hidden;
+}
+
+:global(.workflow-share-dialog .el-dialog__header) {
+  flex-shrink: 0;
+}
+
 :global(.workflow-share-dialog .el-dialog__body) {
+  flex: 1;
+  min-height: 0;
   padding-top: 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 116, 139, 0.34) transparent;
+}
+
+:global(.workflow-share-dialog .el-dialog__body::-webkit-scrollbar) {
+  width: 8px;
+}
+
+:global(.workflow-share-dialog .el-dialog__body::-webkit-scrollbar-thumb) {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.34);
+  background-clip: padding-box;
 }
 
 :global(html:not(.dark) .workflow-share-dialog .el-dialog__title) {
@@ -602,6 +715,18 @@ export default {
 :global(html.dark .workflow-share-dialog .el-tabs__item),
 :global(html.theme-dark .workflow-share-dialog .el-tabs__item) {
   color: #94a3b8 !important;
+}
+
+:global(html.dark .workflow-share-dialog .share-form-summary),
+:global(html.theme-dark .workflow-share-dialog .share-form-summary) {
+  border-color: rgba(56, 189, 248, 0.16);
+  background: rgba(56, 189, 248, 0.06);
+}
+
+:global(html.dark .workflow-share-dialog .share-advanced .el-collapse-item.is-active),
+:global(html.theme-dark .workflow-share-dialog .share-advanced .el-collapse-item.is-active) {
+  border-color: rgba(56, 189, 248, 0.24);
+  background: rgba(56, 189, 248, 0.055);
 }
 
 :global(html.dark .workflow-share-dialog .el-dialog__title),
@@ -724,6 +849,12 @@ export default {
 }
 
 @media (max-width: 720px) {
+  :global(.workflow-share-dialog.el-dialog) {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+    margin: 8px auto !important;
+  }
+
   :global(.workflow-share-dialog .share-table) { display: none; }
   .share-mobile-list { display: grid; gap: 12px; }
   .share-toolbar {
@@ -733,6 +864,39 @@ export default {
 
   :global(.workflow-share-dialog .el-dialog__body) {
     padding: 14px 16px 20px;
+  }
+
+  .share-create-form {
+    padding: 16px 14px 4px;
+  }
+
+  .share-create-form :deep(.el-form-item) {
+    display: block;
+  }
+
+  .share-create-form :deep(.el-form-item__label) {
+    justify-content: flex-start;
+    width: 100% !important;
+    height: auto;
+    margin-bottom: 7px;
+    padding: 0;
+  }
+
+  .share-create-form :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+
+  .share-advanced {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .share-form-actions :deep(.el-form-item__content) {
+    display: flex;
+  }
+
+  .share-form-actions :deep(.el-button) {
+    flex: 1;
   }
 
   :global(.workflow-share-dialog .share-table .el-table__cell.el-table-fixed-column--right) {

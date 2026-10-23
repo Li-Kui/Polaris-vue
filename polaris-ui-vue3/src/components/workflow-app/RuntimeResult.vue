@@ -10,9 +10,7 @@
     </div>
     <RuntimeContent v-else-if="outputType === 'text'" :content="String(singleValue)" />
     <div v-else-if="outputType === 'table'" class="result-table">
-      <el-table :data="pageRows" border style="width: 100%" max-height="480">
-        <el-table-column v-for="col in tableColumns" :key="col" :prop="col" :label="col" min-width="140" show-overflow-tooltip />
-      </el-table>
+      <RuntimeRecordList :rows="pageRows" />
       <el-pagination v-if="tableData.length > 20" v-model:current-page="page" :page-size="20" :total="tableData.length" layout="prev, pager, next" small />
     </div>
     <RuntimeObjectValue v-else :value="value" />
@@ -21,9 +19,10 @@
 
 <script setup>
 import {computed, ref, watch} from 'vue'
-import {ElMessage} from 'element-plus'
+import {runtimeMessage as ElMessage} from '@/components/workflow-app/runtimeMessage'
 import RuntimeContent from './RuntimeContent.vue'
 import RuntimeObjectValue from './RuntimeObjectValue.vue'
+import RuntimeRecordList from './RuntimeRecordList.vue'
 import {copyRuntimeText, isRuntimeImageUrl, runtimeRows, unwrapRuntimeOutput} from '@/utils/workflowRuntime'
 import {resolveWorkflowAssetUrl} from '@/utils/workflowAssetUrl'
 
@@ -48,7 +47,6 @@ const outputType = computed(() => {
   if (singleValue.value == null || typeof singleValue.value !== 'object') return 'text'
   return tableData.value.length && tableData.value.every(row => row && typeof row === 'object' && !Array.isArray(row)) ? 'table' : 'json'
 })
-const tableColumns = computed(() => [...new Set(tableData.value.flatMap(row => Object.keys(row || {})))])
 const pageRows = computed(() => tableData.value.slice((page.value - 1) * 20, page.value * 20))
 const copyResult = async () => {
   try {

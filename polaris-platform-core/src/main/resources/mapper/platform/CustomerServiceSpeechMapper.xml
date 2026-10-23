@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.CustomerServiceSpeechMapper">
+    <resultMap id="Speech" type="com.polaris.platform.domain.CustomerServiceSpeech">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" /><result property="sessionId" column="session_id" />
+        <result property="requestId" column="request_id" /><result property="inputHash" column="input_hash" />
+        <result property="kind" column="kind" /><result property="turnId" column="turn_id" />
+        <result property="partNo" column="part_no" />
+        <result property="audioMillis" column="audio_millis" /><result property="status" column="status" />
+        <result property="transcript" column="transcript" /><result property="errorCode" column="error_code" />
+        <result property="usageJson" column="usage_json" /><result property="createTime" column="create_time" />
+        <result property="deadline" column="deadline" /><result property="finishedTime" column="finished_time" />
+    </resultMap>
+    <select id="select" resultMap="Speech">
+        select * from platform_customer_speech where tenant_id=#{tenantId} and session_id=#{sessionId} and request_id=#{requestId}
+    </select>
+    <select id="count" resultType="int">
+        select count(*) from platform_customer_speech where tenant_id=#{tenantId} and session_id=#{sessionId}
+    </select>
+    <select id="selectSession" resultMap="Speech">
+        select * from platform_customer_speech where tenant_id=#{tenantId} and session_id=#{sessionId}
+        order by create_time, id limit 40
+    </select>
+    <insert id="insert">
+        insert into platform_customer_speech (id,tenant_id,session_id,request_id,input_hash,kind,turn_id,part_no,audio_millis,status,create_time,deadline)
+        values (#{id},#{tenantId},#{sessionId},#{requestId},#{inputHash},#{kind},#{turnId},#{partNo},#{audioMillis},'RUNNING',#{createTime},#{deadline})
+    </insert>
+    <update id="finish">
+        update platform_customer_speech set status=#{status},transcript=#{transcript},error_code=#{errorCode},
+            usage_json=#{usageJson},finished_time=#{finishedTime},audio_millis=#{audioMillis},input_hash=#{inputHash}
+        where tenant_id=#{tenantId} and session_id=#{sessionId} and id=#{id} and status='RUNNING' and deadline &gt; #{finishedTime}
+    </update>
+    <update id="saveUsage">
+        update platform_customer_speech set usage_json=#{usageJson}
+        where tenant_id=#{tenantId} and session_id=#{sessionId} and id=#{id} and usage_json is null
+    </update>
+    <update id="interrupt">
+        update platform_customer_speech set status='INTERRUPTED',transcript=null,error_code='SPEECH_INTERRUPTED',finished_time=#{now}
+        where tenant_id=#{tenantId} and session_id=#{sessionId} and request_id=#{requestId} and status='RUNNING'
+    </update>
+    <update id="expire">
+        update platform_customer_speech set status='INTERRUPTED',transcript=null,error_code='SPEECH_EXPIRED',finished_time=#{now}
+        where tenant_id=#{tenantId} and session_id=#{sessionId} and status='RUNNING' and deadline &lt;= #{now}
+    </update>
+</mapper>

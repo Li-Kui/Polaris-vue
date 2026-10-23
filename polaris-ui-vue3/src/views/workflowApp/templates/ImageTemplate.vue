@@ -11,12 +11,10 @@
   >
     <template #before-input="{ input, setInputField, running }">
       <el-alert v-if="mappingError" :title="mappingError" type="error" :closable="false" show-icon />
-      <div v-if="modeField || sizeField || countField" class="image-options">
-        <label v-if="modeField">生成方式
-          <el-select v-model="input[modeField]" :disabled="running" :teleported="false" placeholder="选择生成方式">
-            <el-option v-for="mode in modes" :key="mode" :label="modeLabels[mode] || mode" :value="mode" />
-          </el-select>
-        </label>
+      <el-radio-group v-if="modeField" v-model="input[modeField]" class="image-modes" :disabled="running" aria-label="生成方式">
+        <el-radio-button v-for="mode in modes" :key="mode" :value="mode">{{ modeLabels[mode] || mode }}</el-radio-button>
+      </el-radio-group>
+      <div v-if="sizeField || countField" class="image-options">
         <label v-if="sizeField">图片尺寸
           <el-select v-model="input[sizeField]" :disabled="running" :teleported="false" placeholder="选择尺寸">
             <el-option v-for="size in sizes" :key="size" :label="size" :value="size" />
@@ -27,7 +25,7 @@
         </label>
       </div>
       <el-upload
-        v-if="imageInputName"
+        v-if="imageInputName && (!modeField || input[modeField] !== 'text_to_image')"
         class="image-upload"
         :show-file-list="false"
         :http-request="options => upload(options, setInputField)"
@@ -37,7 +35,7 @@
         <el-button :disabled="running" :loading="uploading">{{ inputImage(input) ? '更换输入图片' : '上传输入图片' }}</el-button>
         <span v-if="inputImage(input)" class="upload-success">已上传</span>
       </el-upload>
-      <el-image v-if="inputImage(input)" class="source-preview" :src="assetUrl(inputImage(input))" fit="contain" alt="输入图片预览" />
+      <el-image v-if="inputImage(input) && (!modeField || input[modeField] !== 'text_to_image')" class="source-preview" :src="assetUrl(inputImage(input))" fit="contain" alt="输入图片预览" />
     </template>
     <template #default="{ result }">
       <RuntimeImageGrid v-if="imageUrls(result).length" :urls="imageUrls(result)" :show-download="manifest.pageConfig?.showDownload !== false" />
@@ -49,7 +47,7 @@
 
 <script setup>
 import {computed, ref} from 'vue'
-import {ElMessage} from 'element-plus'
+import {runtimeMessage as ElMessage} from '@/components/workflow-app/runtimeMessage'
 import RuntimeWorkflowRunner from '@/components/workflow-app/RuntimeWorkflowRunner.vue'
 import RuntimeResult from '@/components/workflow-app/RuntimeResult.vue'
 import RuntimeImageGrid from '@/components/workflow-app/RuntimeImageGrid.vue'
@@ -124,4 +122,6 @@ const upload = async (options, setInputField) => {
 .image-options label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--runtime-text, #1e293b); }
 .image-options :deep(.el-select), .image-options :deep(.el-input-number) { width: 100%; }
 .source-preview { width: 100%; height: 160px; margin-bottom: 16px; background: var(--runtime-muted, #f1f5f9); border-radius: 8px; }
+.image-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+.image-modes :deep(.el-radio-button__inner) { padding: 11px 13px; border-radius: 8px !important; border: 1px solid var(--runtime-border); font-size: 12px; box-shadow: none; }
 </style>

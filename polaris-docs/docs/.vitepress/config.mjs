@@ -20,6 +20,7 @@ export default defineConfig({
           { text: '鉴权机制与 API Key', link: '/guide/auth' },
           { text: '工作流页面与 iframe 分享', link: '/guide/workflow-sharing' },
           { text: '模型支持与参数说明', link: '/api/models' },
+          { text: '模型能力测试与工作流排错', link: '/guide/model-testing-and-workflow-diagnostics' },
           { text: 'SSE 流式响应对接', link: '/guide/streaming' },
           { text: '错误处理与状态码', link: '/guide/errors' }
         ]

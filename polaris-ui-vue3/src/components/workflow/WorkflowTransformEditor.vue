@@ -1036,8 +1036,10 @@ export default {
       this.updateConfig({rules: [...this.rules, ...added.slice(0, capacity)]})
     },
     addRule(operation) {
-      const source = this.mode === 'VALUE' ? null : this.availableFields.find(field =>
-        !this.rules.some(rule => rule.sourcePath === field.path))
+      const source = this.mode === 'VALUE'
+        ? this.selectedRuleField({sourceKey: 'source', sourcePath: ''})
+        : this.availableFields.find(field =>
+          !this.rules.some(rule => rule.sourcePath === field.path))
       const targetPath = operation === 'CONSTANT'
         ? this.nextTargetName() : (source ? this.targetPathFromSource(source.path) : this.nextTargetName())
       const rule = {

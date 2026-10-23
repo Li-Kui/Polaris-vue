@@ -75,6 +75,9 @@ public class WorkflowResourceBindingService
             query.eq(WorkflowResourceBinding::getEnvironment,
                     normalizeEnvironment(environment));
         }
+        query.and(wrapper -> wrapper.eq(WorkflowResourceBinding::getScopeType, "OWNER")
+                .or(workflow -> workflow.inSql(WorkflowResourceBinding::getScopeId,
+                        "SELECT id FROM ai_workflow_definition WHERE del_flag = '0'")));
         query.orderByAsc(WorkflowResourceBinding::getEnvironment)
                 .orderByDesc(WorkflowResourceBinding::getScopeType)
                 .orderByAsc(WorkflowResourceBinding::getResourceKind)
@@ -97,7 +100,11 @@ public class WorkflowResourceBindingService
             throw new ServiceException("中台资源必须绑定到具体工作流，不能创建租户共享绑定");
         }
         Long scopeId = scopeId(scopeType, command.definitionId(), scope);
+        WorkflowResourceBinding before = command.id() == null ? null : requireBinding(command.id(), scope);
         validateResource(scope.tenantId(), environment, kind, key, resourceId);
+        // 外部资源校验在锁外；涉及多个定义时按 ID 排序加锁，绑定随后重新读取。
+        lockDefinitions(scope, before, scopeType, scopeId);
+        WorkflowResourceBinding locked = before == null ? null : lockBinding(before, scope);
         if (command.id() == null) {
             WorkflowResourceBinding duplicate = bindingMapper.selectOne(
                     new LambdaQueryWrapper<WorkflowResourceBinding>()
@@ -108,7 +115,7 @@ public class WorkflowResourceBindingService
                             .eq(WorkflowResourceBinding::getEnvironment, environment)
                             .eq(WorkflowResourceBinding::getResourceKind, kind)
                             .eq(WorkflowResourceBinding::getResourceKey, key)
-                            .last("LIMIT 1"));
+                            .last("LIMIT 1 FOR UPDATE"));
             if (duplicate != null) {
                 throw new ServiceException("同一环境、类型和逻辑键的资源绑定已存在");
             }
@@ -132,7 +139,7 @@ public class WorkflowResourceBindingService
             }
             return view(binding);
         }
-        WorkflowResourceBinding existing = requireBinding(command.id(), scope);
+        WorkflowResourceBinding existing = locked;
         if (command.expectedLockVersion() == null
                 || !command.expectedLockVersion().equals(existing.getLockVersion())) {
             throw new ServiceException("资源绑定已被其他用户修改，请刷新后重试");
@@ -157,7 +164,9 @@ public class WorkflowResourceBindingService
     public WorkflowResourceBindingView disable(Long bindingId) {
         requireEnabled();
         OwnerScope scope = currentScope();
-        WorkflowResourceBinding binding = requireBinding(bindingId, scope);
+        WorkflowResourceBinding before = requireBinding(bindingId, scope);
+        lockDefinitions(scope, before, null, null);
+        WorkflowResourceBinding binding = lockBinding(before, scope);
         binding.setStatus("DISABLED");
         binding.setBindingVersion(binding.getBindingVersion() + 1);
         binding.setUpdateBy(CallerUtils.getUsername());
@@ -180,6 +189,35 @@ public class WorkflowResourceBindingService
         }
     }
 
+    private void lockDefinitions(OwnerScope scope, WorkflowResourceBinding before, String targetType, Long targetId) {
+        var ids = new java.util.TreeSet<Long>();
+        if (before != null && "WORKFLOW".equals(before.getScopeType())) ids.add(before.getScopeId());
+        if ("WORKFLOW".equals(targetType)) ids.add(targetId);
+        for (Long id : ids) {
+            WorkflowDefinition definition = definitionMapper.selectByIdForUpdate(id);
+            if (definition == null || !"0".equals(definition.getDelFlag())
+                    || !java.util.Objects.equals(definition.getTenantId(), scope.tenantId())) {
+                throw new ServiceException("工作流不存在或无权访问", 404);
+            }
+        }
+    }
+
+    private WorkflowResourceBinding lockBinding(WorkflowResourceBinding before, OwnerScope scope) {
+        WorkflowResourceBinding current = bindingMapper.selectByIdForUpdate(before.getId());
+        // 等待锁期间绑定可能已被移动；不能用旧作用域的锁修改新作用域的绑定。
+        if (current == null || !java.util.Objects.equals(current.getOwnerType(), before.getOwnerType())
+                || !java.util.Objects.equals(current.getOwnerId(), before.getOwnerId())
+                || !java.util.Objects.equals(current.getScopeType(), before.getScopeType())
+                || !java.util.Objects.equals(current.getScopeId(), before.getScopeId())
+                || !java.util.Objects.equals(current.getLockVersion(), before.getLockVersion())) {
+            throw new ServiceException("资源绑定已发生变化，请刷新后重试", 409);
+        }
+        if (!scope.ownerType().equals(current.getOwnerType()) || !scope.ownerId().equals(current.getOwnerId())) {
+            throw new ServiceException("资源绑定不存在或无权访问", 404);
+        }
+        return current;
+    }
+
     private WorkflowResourceBinding requireBinding(Long id, OwnerScope scope) {
         if (id == null) throw new ServiceException("资源绑定ID不能为空");
         WorkflowResourceBinding binding = bindingMapper.selectById(id);
@@ -187,6 +225,9 @@ public class WorkflowResourceBindingService
                 || !scope.ownerType().equals(binding.getOwnerType())
                 || !scope.ownerId().equals(binding.getOwnerId())) {
             throw new ServiceException("资源绑定不存在或无权访问");
+        }
+        if ("WORKFLOW".equals(binding.getScopeType())) {
+            requireDefinition(binding.getScopeId(), scope);
         }
         return binding;
     }

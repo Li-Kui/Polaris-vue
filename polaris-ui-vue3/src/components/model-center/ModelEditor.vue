@@ -8,7 +8,7 @@
       </div>
       <div class="editor-actions">
         <el-button class="secondary-action" @click="cancel">取消</el-button>
-        <el-button class="secondary-action" :disabled="!testable" :loading="testing" @click="testDraft">测试连接</el-button>
+        <el-button class="secondary-action" :disabled="!testable" @click="testPanel?.scrollIntoView({behavior: 'smooth', block: 'center'})">能力测试</el-button>
         <el-button class="primary-action" type="primary" :loading="saving" @click="save">保存模型</el-button>
       </div>
     </div>
@@ -78,6 +78,7 @@
         @toggle="toggleCapability"
       />
       <el-empty v-else description="先选择或新增服务商连接，再配置该服务商支持的模型能力" :image-size="72" />
+      <el-alert v-if="schemaError" :title="schemaError" type="warning" :closable="false" />
     </el-card>
 
     <div v-if="enabledCapabilities.length" class="capability-list">
@@ -88,6 +89,29 @@
         @update-config="item.config = $event"
       />
     </div>
+
+    <section v-if="testCapabilities.length" ref="testPanel" class="section-card capability-tests" aria-label="模型能力测试">
+      <h3>能力测试</h3>
+      <p class="field-tip">每次仅测试所选调用能力，会真实请求服务商并可能产生费用。测试不验证全部能力或附加特性；修改配置后需重新测试。</p>
+      <div class="capability-test-actions">
+        <el-select v-model="selectedTestKey" aria-label="待测试能力" :disabled="testing" placeholder="选择测试能力">
+          <el-option v-for="item in testCapabilities" :key="item.key" :value="item.key" :label="item.schema.name" />
+        </el-select>
+        <el-button type="primary" :loading="testing" :disabled="!testable" @click="testDraft">测试所选能力</el-button>
+      </div>
+      <ul class="capability-test-results" aria-live="polite">
+        <li v-for="item in testCapabilities" :key="item.key">
+          <strong>{{ item.schema.name }}</strong>
+          <el-tag :type="testResults[item.key] ? (testResults[item.key].success ? 'success' : 'danger') : 'info'" size="small">
+            {{ testingKey === item.key ? '测试中' : testResults[item.key] ? (testResults[item.key].success ? '已通过' : '未通过') : '未测试' }}
+          </el-tag>
+          <template v-if="testResults[item.key] && testingKey !== item.key">
+            <span>{{ testResults[item.key].message }}</span>
+            <small>总耗时 {{ testResults[item.key].elapsedMs }} ms<span v-if="testResults[item.key].latencyMs != null"> · 服务商响应 {{ testResults[item.key].latencyMs }} ms</span></small>
+          </template>
+        </li>
+      </ul>
+    </section>
 
     <el-collapse v-model="advancedSections" class="advanced-settings">
       <el-collapse-item title="高级设置（通常无需修改）" name="advanced">
@@ -151,10 +175,12 @@ import {ElMessage, ElMessageBox} from 'element-plus'
 import CapabilitySelector from './CapabilitySelector.vue'
 import CapabilityCard from './CapabilityCard.vue'
 import RuntimePolicyEditor from './RuntimePolicyEditor.vue'
+import {useCapabilityTests} from './useCapabilityTests'
 import {
   createModelAggregate,
   getModelAggregate,
   getModelEditorContext,
+  getModelSchemaContext,
   resolveSchemaOptions,
   testModelDraft,
   updateModelAggregate
@@ -166,10 +192,13 @@ const emit = defineEmits(['saved', 'cancel'])
 const baseForm = ref()
 const loading = ref(false)
 const saving = ref(false)
-const testing = ref(false)
+const testPanel = ref()
 const discovering = ref(false)
 const discoveryError = ref('')
 const discoverySucceeded = ref(false)
+const schemaLoading = ref(false), schemaReady = ref(false), schemaError = ref('')
+let schemaGeneration = 0
+const optionRequests = new Map()
 const connections = ref([])
 const schemas = ref([])
 const providerProfiles = ref([])
@@ -271,7 +300,25 @@ const visibleSchemas = computed(() => {
 })
 const enabledCapabilities = computed(() => state.capabilities.filter(item => item.enabled))
 const enabledCapabilityKeys = computed(() => enabledCapabilities.value.map(item => item.key))
-const testable = computed(() => !!state.connectionId && !!state.modelName && enabledCapabilities.value.some(item => item.schema.kind === 'INVOCATION'))
+const testCapabilities = computed(() => enabledCapabilities.value.filter(item => item.schema.kind === 'INVOCATION'))
+const testFingerprint = computed(() => JSON.stringify({
+  connectionId: state.connectionId, connectionRevision: selectedConnection.value?.revision,
+  modelName: state.modelName, capabilities: enabledCapabilities.value.map(item => ({
+    key: item.key, schemaVersion: item.schemaVersion, config: item.config
+  })), runtimePolicy: state.runtimePolicies[0]
+}))
+const {selectedKey: selectedTestKey, selected: selectedTest, testingKey, results: testResults, run: testDraft} = useCapabilityTests({
+  capabilities: testCapabilities, fingerprint: testFingerprint,
+  makeRequest: item => ({
+    connectionId: state.connectionId, modelName: state.modelName,
+    capabilityCode: item.capabilityCode, schemaVersion: item.schemaVersion,
+    capabilityConfig: compactConfig(item.config, item.schema?.schema),
+    runtimePolicy: JSON.parse(JSON.stringify(state.runtimePolicies[0])), testCapability: item.capabilityCode
+  }),
+  request: async data => unwrap(await testModelDraft(data))
+})
+const testing = computed(() => !!testingKey.value)
+const testable = computed(() => !loading.value && !schemaLoading.value && schemaReady.value && !!state.connectionId && !!state.modelName?.trim() && !!selectedTest.value)
 const recommendedCapabilityCode = computed(() => recommendCapabilityCode(state.modelName))
 const capabilityRecommendation = computed(() => {
   if (!state.modelName || !recommendedCapabilityCode.value) return ''
@@ -310,6 +357,7 @@ async function load() {
         capabilities: (detail.capabilities || []).map(item => ({ ...item, options: {}, key: capabilityKey(item.capabilityCode, item.appliesToCapabilityCode) })),
         runtimePolicies: detail.runtimePolicies?.length ? detail.runtimePolicies.map(item => ({ ...item })) : [emptyPolicy()]
       })
+      await refreshSchemas()
       await discover(false)
       syncRemoteFamily()
       await Promise.all(enabledCapabilities.value.map(loadDynamicOptions))
@@ -336,6 +384,7 @@ async function toggleCapability(schema, appliesTo, value) {
       options: {}
     }
     state.capabilities.push(item)
+    item = state.capabilities[state.capabilities.length - 1]
   }
   item.enabled = !!value
   if (item.enabled) await loadDynamicOptions(item)
@@ -355,6 +404,7 @@ async function connectionChanged() {
   remoteModels.value = []
   discoveryError.value = ''
   discoverySucceeded.value = false
+  if (!await refreshSchemas()) return
   await enableRecommendedCapability()
   await discover(true)
 }
@@ -362,6 +412,7 @@ async function connectionChanged() {
 async function remoteModelChanged() {
   syncRemoteFamily()
   ensureModelCode()
+  if (!await refreshSchemas()) return
   await applyModelCapabilityRecommendation()
   applyModelParameterRecommendations()
   await Promise.all(enabledCapabilities.value.map(loadDynamicOptions))
@@ -375,20 +426,41 @@ function applyModelParameterRecommendations() {
   if (chat && Number(chat.config?.maxTokens) === 2048) chat.config.maxTokens = 8192
 }
 
+async function refreshSchemas() {
+  if (!state.connectionId) return false
+  const connectionId = state.connectionId, modelName = state.modelName || '', ticket = ++schemaGeneration
+  schemaLoading.value = true; schemaReady.value = false; schemaError.value = ''
+  try {
+    const resolved = unwrap(await getModelSchemaContext(connectionId, modelName))
+    if (ticket !== schemaGeneration || connectionId !== state.connectionId || modelName !== (state.modelName || '')) return false
+    schemas.value = resolved || []
+    for (const item of state.capabilities) {
+      const schema = schemas.value.find(value => value.code === item.capabilityCode && value.schemaVersion === item.schemaVersion)
+      if (schema) item.schema = schema
+    }
+    schemaReady.value = true
+    return true
+  } catch (_) {
+    if (ticket === schemaGeneration) schemaError.value = '模型参数加载失败，请重新选择服务商连接或刷新页面后重试。'
+    return false
+  } finally { if (ticket === schemaGeneration) schemaLoading.value = false }
+}
 async function loadDynamicOptions(item) {
   if (!state.connectionId || !state.modelName) return
-  const entries = Object.entries(item.schema?.uiSchema || {})
-    .filter(([, ui]) => ui.optionsResolver)
+  const connectionId = state.connectionId, modelName = state.modelName
+  const entries = Object.entries(item.schema?.uiSchema || {}).filter(([, ui]) => ui.optionsResolver)
   for (const [field] of entries) {
+    const key = JSON.stringify([connectionId, modelName, item.capabilityCode, field])
+    if (!optionRequests.has(key)) {
+      const request = resolveSchemaOptions({ connectionId, modelName, capability: item.capabilityCode, field })
+      optionRequests.set(key, request)
+      request.finally(() => { if (optionRequests.get(key) === request) optionRequests.delete(key) }).catch(() => {})
+    }
     try {
-      item.options[field] = unwrap(await resolveSchemaOptions({
-        connectionId: state.connectionId,
-        modelName: state.modelName,
-        capability: item.capabilityCode,
-        field
-      })) || []
+      const options = unwrap(await optionRequests.get(key)) || []
+      if (connectionId === state.connectionId && modelName === state.modelName) item.options[field] = options
     } catch (_) {
-      item.options[field] = []
+      if (connectionId === state.connectionId && modelName === state.modelName) item.options[field] = []
     }
   }
 }
@@ -452,6 +524,7 @@ function buildPersistableRequest() {
 }
 
 async function save() {
+  if (schemaLoading.value || !schemaReady.value) return ElMessage.warning('模型参数尚未就绪，请加载成功后再保存')
   ensureModelCode()
   await baseForm.value?.validate()
   if (!enabledCapabilities.value.some(item => item.schema.kind === 'INVOCATION')) {
@@ -584,7 +657,7 @@ function ensureModelCode() {
 
 function profileLabel(code) {
   return ({
-    OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
+    DASHSCOPE_AUDIO: '阿里云百炼语音（Qwen）', DOUBAO_SPEECH: '豆包语音', OPENAI: 'OpenAI', DASHSCOPE: '阿里云百炼', DEEPSEEK: 'DeepSeek',
     SILICONFLOW: '硅基流动（第三方平台）', ARK: '火山方舟', CUSTOM: '自定义兼容服务'
   })[code] || code
 }
@@ -595,32 +668,9 @@ function providerDescription(code) {
     DASHSCOPE: '通义千问与百炼模型',
     DEEPSEEK: 'DeepSeek 官方接口',
     SILICONFLOW: '第三方平台，支持多种开源模型',
-    ARK: '火山引擎模型服务',
+    DASHSCOPE_AUDIO: 'Qwen3 识别／合成与 Qwen-Audio 3.1 Flash 合成；新版使用同地域业务空间 API Host', DOUBAO_SPEECH: '一句话识别与 V3 合成，使用豆包语音控制台 API Key', ARK: '火山引擎模型服务',
     CUSTOM: '自建服务或其他兼容接口'
   })[code] || ''
-}
-
-async function testDraft() {
-  if (testing.value) return
-  const invocation = enabledCapabilities.value.find(item => item.schema.kind === 'INVOCATION')
-  if (!invocation) return
-  testing.value = true
-  try {
-    const result = unwrap(await testModelDraft({
-      connectionId: state.connectionId,
-      modelName: state.modelName,
-      capabilityCode: invocation.capabilityCode,
-      schemaVersion: invocation.schemaVersion,
-      capabilityConfig: compactConfig(invocation.config, invocation.schema?.schema),
-      runtimePolicy: state.runtimePolicies[0],
-      testCapability: invocation.capabilityCode
-    }))
-    ElMessage.success(result?.message || '模型测试成功')
-  } catch {
-    // 请求层已经展示服务端返回的可读错误，避免事件处理器继续抛出未处理异常。
-  } finally {
-    testing.value = false
-  }
 }
 
 async function cancel() {
@@ -720,6 +770,13 @@ function unwrap(response) { return response?.data?.data ?? response?.data ?? res
 .secondary-action { border-color: var(--mc-border) !important; color: var(--mc-text) !important; background: var(--mc-surface) !important; }
 .secondary-action.is-disabled { color: var(--mc-muted) !important; background: var(--mc-surface-muted) !important; opacity: .7; }
 .section-card { margin-bottom: 18px; border-color: var(--mc-border); border-radius: 16px; color: var(--mc-text); background: var(--mc-surface); box-shadow: 0 8px 28px rgba(15, 23, 42, .05); }
+.capability-tests { padding: 20px; border: 1px solid var(--mc-border); }
+.capability-tests h3 { margin: 0 0 10px; }
+.capability-test-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+.capability-test-actions :deep(.el-select) { width: min(280px, 100%); }
+.capability-test-results { list-style: none; padding: 0; margin: 0; }
+.capability-test-results li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; border-top: 1px solid var(--mc-border); overflow-wrap: anywhere; }
+.capability-test-results small { color: var(--mc-muted); }
 .section-card :deep(.el-card__header) { border-bottom-color: var(--mc-border); color: var(--mc-text); background: var(--mc-surface-muted); }
 .section-card :deep(.el-card__body) { color: var(--mc-text); background: var(--mc-surface); }
 .section-card :deep(.el-form-item__label) { color: var(--mc-text) !important; font-weight: 600; }

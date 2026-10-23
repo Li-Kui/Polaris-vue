@@ -1,34 +1,35 @@
 <template>
-  <div ref="pageRef" class="runtime-page" :class="[`theme-${theme}`]">
-    <!-- 加载中 -->
-    <div v-if="loading" class="runtime-loading">
-      <el-skeleton :rows="5" animated />
-    </div>
-    <!-- 错误 -->
-    <div v-else-if="error" class="runtime-error">
-      <el-result icon="error" :title="error" sub-title="请检查链接是否正确或联系管理员">
-        <template #extra>
-          <el-button @click="loadManifest">重试</el-button>
-        </template>
-      </el-result>
-    </div>
-    <!-- 正常 -->
-    <template v-else>
-      <RuntimeHeader v-if="!isEmbed" :title="manifest.pageConfig?.title || manifest.shareName || '应用'">
-        <el-button class="runtime-theme-toggle" :aria-label="theme === 'dark' ? '切换亮色模式' : '切换暗色模式'" @click="themeOverride = theme === 'dark' ? 'light' : 'dark'">
-          <el-icon><Sunny v-if="theme === 'dark'" /><Moon v-else /></el-icon><span>{{ theme === 'dark' ? '亮色模式' : '暗色模式' }}</span>
-        </el-button>
+  <div ref="pageRef" class="runtime-page" :class="[`theme-${theme}`, `page-${pageType}`, { 'is-embed': isEmbed }]">
+    <div class="runtime-shell">
+      <RuntimeHeader v-if="!isEmbed">
+        <el-dropdown placement="bottom-end" trigger="click" :teleported="false" popper-class="runtime-theme-menu" @command="changeTheme">
+          <el-button class="runtime-theme-toggle" :aria-label="`切换主题，当前${themeLabel}`" :title="`当前${themeLabel}`">
+            <el-icon><Sunny v-if="theme === 'dark'" /><Moon v-else /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item v-for="choice in themeChoices" :key="choice.value" :command="choice.value" :class="{ 'is-selected': themeMode === choice.value }">
+                <el-icon><component :is="choice.icon" /></el-icon><span>{{ choice.label }}</span>
+                <el-icon v-if="themeMode === choice.value"><Check /></el-icon>
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </RuntimeHeader>
-      <div class="runtime-body" :class="{ 'is-embed': isEmbed }">
-        <component
-          :is="currentTemplate"
-          v-if="currentTemplate"
-          :manifest="manifest"
-          :share-code="shareCode"
-          @completed="notifyCompleted"
-        />
+      <div v-if="loading" class="runtime-loading" aria-label="正在加载应用"><el-skeleton :rows="5" animated /></div>
+      <div v-else-if="error" class="runtime-error">
+        <el-result icon="error" :title="error" sub-title="请检查链接是否正确或联系管理员">
+          <template #extra><el-button @click="loadManifest">重试</el-button></template>
+        </el-result>
       </div>
-    </template>
+      <template v-else>
+        <RuntimeAppIntro :page-type="pageType" :title="manifest.pageConfig?.title || manifest.shareName" :description="manifest.pageConfig?.description" />
+        <main class="runtime-body">
+          <component :is="currentTemplate" v-if="currentTemplate" :manifest="manifest" :share-code="shareCode" @completed="notifyCompleted" />
+        </main>
+      </template>
+      <footer v-if="!isEmbed" class="runtime-footer">由北辰 AI 提供支持</footer>
+    </div>
   </div>
 </template>
 
@@ -36,8 +37,9 @@
 import {computed, defineAsyncComponent, onMounted, onUnmounted, provide, ref} from 'vue'
 import {useRoute} from 'vue-router'
 import {getShareManifest} from '@/api/workflowApp/runtime'
-import {Moon, Sunny} from '@element-plus/icons-vue'
+import {Check, Monitor, Moon, Sunny} from '@element-plus/icons-vue'
 import RuntimeHeader from '@/components/workflow-app/RuntimeHeader.vue'
+import RuntimeAppIntro from '@/components/workflow-app/RuntimeAppIntro.vue'
 
 const route = useRoute()
 const shareCode = computed(() => route.params.shareCode)
@@ -127,14 +129,20 @@ const notifyCompleted = payload => {
   })
 }
 
-const theme = computed(() => {
-  if (themeOverride.value) return themeOverride.value
-  const configured = manifest.value?.pageConfig?.theme || 'auto'
-  return configured === 'auto' ? (systemDark.value ? 'dark' : 'light') : configured
-})
+const configuredTheme = computed(() => ['light', 'dark'].includes(manifest.value?.pageConfig?.theme) ? manifest.value.pageConfig.theme : 'auto')
+const themeMode = computed(() => themeOverride.value || configuredTheme.value)
+const theme = computed(() => themeMode.value === 'auto' ? (systemDark.value ? 'dark' : 'light') : themeMode.value)
+const themeChoices = [
+  { value: 'auto', label: '跟随系统', icon: Monitor },
+  { value: 'light', label: '亮色模式', icon: Sunny },
+  { value: 'dark', label: '暗色模式', icon: Moon }
+]
+const themeLabel = computed(() => themeChoices.find(choice => choice.value === themeMode.value)?.label)
+const changeTheme = value => { if (themeChoices.some(choice => choice.value === value)) themeOverride.value = value }
+const pageType = computed(() => Object.hasOwn(templateMap, manifest.value?.pageType) ? manifest.value.pageType : 'form')
 
 const currentTemplate = computed(() => {
-  return templateMap[manifest.value?.pageType] || templateMap.form
+  return templateMap[pageType.value]
 })
 provide('runtimeTheme', theme)
 </script>
@@ -153,6 +161,7 @@ provide('runtimeTheme', theme)
   --workflow-primary-text: #ffffff;
   --workflow-success: #15803d;
   --workflow-danger: #b91c1c;
+  --workflow-warning: #a16207;
   --el-color-primary: #4f46e5;
   --el-bg-color: #ffffff;
   --el-bg-color-overlay: #ffffff;
@@ -167,13 +176,18 @@ provide('runtimeTheme', theme)
   --el-fill-color: #f1f5f9;
   --el-fill-color-lighter: #f8fafc;
   --el-fill-color-extra-light: #f8fafc;
-  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: 24px 16px;
+  color-scheme: light;
   background: linear-gradient(180deg, #f2f1fc 0, #f6f7fb 300px);
   color: var(--runtime-text);
   display: flex;
   flex-direction: column;
+  align-items: center;
 }
 .theme-dark {
+  color-scheme: dark;
   --runtime-surface: #172033;
   --runtime-muted: #0f172a;
   --runtime-text: #f1f5f9;
@@ -186,6 +200,7 @@ provide('runtimeTheme', theme)
   --workflow-primary-text: #0f172a;
   --workflow-success: #86efac;
   --workflow-danger: #fca5a5;
+  --workflow-warning: #fcd34d;
   --el-color-primary: #38bdf8;
   --el-bg-color: #172033;
   --el-bg-color-overlay: #172033;
@@ -296,16 +311,12 @@ provide('runtimeTheme', theme)
   color: var(--runtime-text);
   border-color: var(--runtime-border);
 }
-.runtime-page :deep(.title),
 .runtime-page :deep(.form-description),
 .runtime-page :deep(.runner-description),
 .runtime-page :deep(.events-list) {
   color: var(--runtime-secondary);
 }
-.runtime-theme-toggle {
-  border-radius: 10px;
-  gap: 6px;
-}
+.runtime-theme-toggle { width: 38px; height: 38px; padding: 0; border-radius: 10px; font-size: 18px; }
 .runtime-page :deep(.form-section .el-button--primary) {
   width: 100%;
 }
@@ -320,9 +331,9 @@ provide('runtimeTheme', theme)
 .runtime-page :deep(.is-simple .input-mode-switch) { background: var(--runtime-muted); width: auto; display: inline-flex; padding: 4px; }
 .runtime-page :deep(.is-simple .input-mode-switch .el-radio-button) { width: auto; }
 .runtime-page :deep(.is-simple .input-mode-switch .el-radio-button__inner) { font-size: 12px; padding: 9px 16px; }
-.runtime-page :deep(.is-simple .input-mode-panel .schema-config) { margin-top: 20px; }
+.runtime-page :deep(.is-simple .input-mode-panel), .runtime-page :deep(.is-simple .input-mode-panel .schema-config) { margin-top: 0; }
 .runtime-page :deep(.el-button:not(.el-button--primary):hover:not(.is-disabled)) { border-color: var(--workflow-primary) !important; color: var(--workflow-primary) !important; }
-@media (max-width: 600px) { .runtime-theme-toggle span { display: none; } }
+
 .runtime-page :deep(.json-toolbar) {
   flex-wrap: wrap;
 }
@@ -336,15 +347,55 @@ provide('runtimeTheme', theme)
   background: var(--runtime-surface) !important;
 }
 .runtime-loading, .runtime-error {
-  padding: 50px;
+  padding: 32px 22px;
   display: flex;
   justify-content: center;
 }
-.runtime-body {
-  flex: 1;
-  overflow: auto;
+.runtime-shell { display: flex; flex-direction: column; width: 420px; max-width: 100%; min-height: calc(100dvh - 48px); background: var(--runtime-surface); border: 1px solid var(--runtime-border); border-radius: 22px; box-shadow: var(--runtime-shadow); overflow: visible; }
+.runtime-body { flex: 1; min-width: 0; }
+.runtime-footer { flex-shrink: 0; margin: auto 22px 0; padding: 18px 0 max(18px, env(safe-area-inset-bottom)); border-top: 1px solid var(--runtime-border); color: var(--runtime-secondary); text-align: center; font-size: 12px; line-height: 1.5; }
+.page-chat .runtime-shell { height: calc(100dvh - 48px); min-height: 620px; }
+.page-chat .runtime-body { display: flex; min-height: 0; overflow: hidden; }
+.page-chat :deep(.runtime-app-intro) { flex-shrink: 0; padding-top: 20px; padding-bottom: 18px; }
+.runtime-page.is-embed { padding: 0; min-height: 0; background: var(--runtime-surface); }
+.is-embed .runtime-shell { width: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+.page-chat.is-embed .runtime-shell { height: 100dvh; min-height: 0; }
+@media (max-width: 480px) {
+  .runtime-page { padding: 0; }
+  .runtime-shell { width: 100%; min-height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
+  .page-chat .runtime-shell { height: 100dvh; min-height: 0; }
 }
-.runtime-body.is-embed {
-  height: 100vh;
-}
+.runtime-page :deep(.runtime-theme-menu) { min-width: 160px; max-width: calc(100vw - 32px); background: var(--runtime-surface); border-color: var(--runtime-border); }
+.runtime-page :deep(.runtime-theme-menu .el-dropdown-menu) { padding: 6px; background: var(--runtime-surface); }
+.runtime-page :deep(.runtime-theme-menu .el-dropdown-menu__item) { display: flex; gap: 9px; min-height: 40px; border-radius: 7px; color: var(--runtime-text) !important; background: transparent !important; }
+.runtime-page :deep(.runtime-theme-menu .el-dropdown-menu__item:hover), .runtime-page :deep(.runtime-theme-menu .is-selected), .runtime-page :deep(.runtime-theme-menu .el-dropdown-menu__item:focus) { background: var(--runtime-primary-soft) !important; color: var(--workflow-primary) !important; }
+.runtime-page :deep(.runtime-theme-menu .el-popper__arrow::before) { background: var(--runtime-surface); border-color: var(--runtime-border); }
+.runtime-page :deep(.el-input__wrapper), .runtime-page :deep(.el-select__wrapper), .runtime-page :deep(.el-textarea__inner) { box-shadow: 0 0 0 1px var(--runtime-border) inset; }
+.runtime-page :deep(.el-input__wrapper.is-focus), .runtime-page :deep(.el-select__wrapper.is-focused), .runtime-page :deep(.el-textarea__inner:focus) { box-shadow: 0 0 0 1px var(--workflow-primary) inset; }
+.runtime-page :deep(.el-input__inner::placeholder), .runtime-page :deep(.el-textarea__inner::placeholder), .runtime-page :deep(.el-select__placeholder.is-transparent) { color: var(--runtime-secondary); opacity: .85; }
+.runtime-page :deep(.el-form-item) { margin-bottom: 22px; }
+.runtime-page :deep(.el-input__count), .runtime-page :deep(.el-input-number__decrease), .runtime-page :deep(.el-input-number__increase) { background: var(--runtime-muted); color: var(--runtime-secondary); border-color: var(--runtime-border); }
+.runtime-page :deep(.el-select-dropdown), .runtime-page :deep(.el-select__popper), .runtime-page :deep(.el-popper__arrow::before) { background: var(--runtime-surface); border-color: var(--runtime-border); }
+.runtime-page :deep(.el-select-dropdown__item.is-hovering) { background: var(--runtime-primary-soft) !important; }
+.runtime-page :deep(.el-select__popper .el-select-dropdown__item.is-disabled) { opacity: .5; }
+.runtime-page :deep(.runner-actions .el-button--primary) { box-shadow: 0 4px 12px color-mix(in srgb, var(--workflow-primary) 16%, transparent); }
+.runtime-page :deep(.el-button:disabled) { cursor: not-allowed; }
+.runtime-page :deep(.el-switch) { --el-switch-on-color: var(--workflow-primary); --el-switch-off-color: var(--runtime-border); }
+.runtime-page :deep(.el-alert) { overflow-wrap: anywhere; }
+.runtime-page :deep(.el-skeleton) { --el-skeleton-color: var(--runtime-muted); --el-skeleton-to-color: var(--runtime-border); width: 100%; }
+.runtime-page :deep(.el-result__title p) { color: var(--runtime-text); }
+.runtime-page :deep(.el-result__subtitle p) { color: var(--runtime-secondary); }
+@media (prefers-reduced-motion: reduce) { .runtime-page :deep(*) { scroll-behavior: auto; transition: none !important; } }
+.runtime-page :deep(.el-button.is-link) { min-height: 32px; padding: 4px 0; background: transparent !important; border-color: transparent !important; box-shadow: none !important; color: var(--runtime-secondary) !important; }
+.runtime-page :deep(.task-item-actions .el-button.is-link) { color: var(--workflow-primary) !important; }
+.runtime-page :deep(.el-tag--warning) { background: var(--runtime-muted) !important; color: var(--workflow-warning) !important; }
+.runtime-page :deep(.el-tag--info) { background: var(--runtime-primary-soft) !important; color: var(--workflow-primary) !important; }
+.runtime-page :deep(.el-message) { --el-message-bg-color: var(--runtime-surface); --el-message-border-color: var(--runtime-border); --el-message-text-color: var(--runtime-text); max-width: calc(100vw - 32px); background: var(--runtime-surface); border-color: var(--runtime-border); }
+.runtime-page :deep(.el-message__content) { color: var(--runtime-text); overflow-wrap: anywhere; }
+.runtime-page :deep(.el-form-item__content) { min-width: 0; }
+.runtime-page :deep(.el-form-item__label) { height: auto; line-height: 1.6; margin-bottom: 8px; }
+.runtime-page :deep(.field-label) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.runtime-page :deep(.el-button) { max-width: 100%; }
+.runtime-page :deep(.el-button > span) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.runtime-page :deep(.query-toolbar), .runtime-page :deep(.result-toolbar) { flex-wrap: wrap; }
 </style>

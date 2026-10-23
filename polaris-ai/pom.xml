@@ -115,6 +115,20 @@
 		    <scope>test</scope>
 		</dependency>
 
+		<!-- 验证与应用入口一致的 Jackson 3 自动配置和构造器注入。 -->
+		<dependency>
+		    <groupId>org.springframework.boot</groupId>
+		    <artifactId>spring-boot-jackson</artifactId>
+		    <scope>test</scope>
+		</dependency>
+
+		<!-- 索引发布条件 SQL 的本地合成事务回归，不连接业务数据库。 -->
+		<dependency>
+		    <groupId>com.h2database</groupId>
+		    <artifactId>h2</artifactId>
+		    <scope>test</scope>
+		</dependency>
+
     </dependencies>
 
 	<build>

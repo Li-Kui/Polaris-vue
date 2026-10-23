@@ -82,6 +82,65 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
     }
 
     @Override
+    public WorkflowExecutionAdmissionView getAdmission(Long definitionId, String workflowVersionId) {
+        WorkflowDefinition definition = definitionId == null ? null : definitionMapper.selectById(definitionId);
+        if (definition == null || !"0".equals(definition.getDelFlag())) {
+            throw new ServiceException("工作流定义不存在或无权访问", 404);
+        }
+        currentPrincipal(definition);
+        String versionId = workflowVersionId == null || workflowVersionId.isBlank()
+                ? definition.getCurrentPublishedVersionId() : workflowVersionId;
+        if (versionId == null || versionId.isBlank()) {
+            return new WorkflowExecutionAdmissionView(false, "NOT_PUBLISHED", "请先发布工作流版本", null);
+        }
+        WorkflowVersion version = versionMapper.selectByVersionId(versionId);
+        if (version == null || !definition.getId().equals(version.getDefinitionId())
+                || !"PUBLISHED".equals(version.getStatus())) {
+            throw new ServiceException("工作流发布版本不存在、已退役或不属于当前定义");
+        }
+        WorkflowExecutionPlan plan = readPlan(version.getExecutionPlanJson());
+        if (!Objects.equals(version.getContentHash(), plan.getContentHash())) {
+            throw new ServiceException("执行计划哈希不一致，拒绝运行");
+        }
+        try { requireStartEnabled(); }
+        catch (ServiceException denied) {
+            return new WorkflowExecutionAdmissionView(false, "ENVIRONMENT_DISABLED", denied.getMessage(), versionId);
+        }
+        String denied = planExecutionDeniedReason(plan, definition);
+        if (denied != null) {
+            return new WorkflowExecutionAdmissionView(false, "NODE_EXECUTION_DISABLED", denied, versionId);
+        }
+        if (plan.getNodes().stream().anyMatch(node -> "agent".equals(node.getType()))
+                && (!CallerUtils.getContext().isTenantAdmin()
+                || !"PLATFORM_USER".equals(currentPrincipal(definition).type()))) {
+            return new WorkflowExecutionAdmissionView(false, "AGENT_ACTOR_DENIED",
+                    "协作智能体工作流仅允许当前租户管理员执行，不接受分享或 API Key 身份", versionId);
+        }
+        if (plan.getNodes().stream().anyMatch(node -> "mcp_tool".equals(node.getType()))
+                && (!CallerUtils.getContext().isTenantAdmin()
+                || !"PLATFORM_USER".equals(currentPrincipal(definition).type()))) {
+            return new WorkflowExecutionAdmissionView(false, "MCP_ACTOR_DENIED",
+                    "MCP 工作流仅允许当前租户管理员执行，不接受分享或 API Key 身份", versionId);
+        }
+        return new WorkflowExecutionAdmissionView(true, "ALLOWED",
+                "环境准入通过；启动和派发前仍会复查资源绑定、工具审批及实际权限", versionId);
+    }
+
+    private String planExecutionDeniedReason(WorkflowExecutionPlan plan, WorkflowDefinition definition) {
+        for (var node : plan.getNodes()) {
+            String denied = properties.nodeExecutionDeniedReason(node.getType(), node.getHandlerVersion(),
+                    node.getSideEffect(), definition.getTenantId(), definition.getWorkflowCode());
+            if (denied != null) return denied;
+        }
+        return null;
+    }
+
+    private void requirePlanAdmission(WorkflowExecutionPlan plan, WorkflowDefinition definition) {
+        String denied = planExecutionDeniedReason(plan, definition);
+        if (denied != null) throw new ServiceException(denied);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public WorkflowExecutionView start(WorkflowExecutionStartCommand command) {
         requireStartEnabled();
@@ -198,6 +257,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
             String requestedEnvironment,
             String requestedIdempotencyKey,
             JsonNode approvalSimulation) {
+        currentPrincipal(definition);
         String versionId = requestedVersionId;
         if (versionId == null || versionId.isBlank()) {
             versionId = definition.getCurrentPublishedVersionId();
@@ -214,11 +274,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("执行计划哈希不一致，拒绝运行");
         }
-        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
-                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
-                definition.getTenantId(), definition.getWorkflowCode()))) {
-            throw new ServiceException("当前环境未启用有副作用的工作流节点");
-        }
+        requirePlanAdmission(plan, definition);
         JsonNode input = requestedInput == null
                 ? objectMapper.createObjectNode() : requestedInput;
         String inputJson = writeJson(input);
@@ -352,11 +408,7 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (!version.getContentHash().equals(plan.getContentHash())) {
             throw new ServiceException("子工作流执行计划哈希不一致");
         }
-        if (plan.getNodes().stream().anyMatch(node -> !properties.isNodeExecutionAllowed(
-                node.getType(), node.getHandlerVersion(), node.getSideEffect(),
-                definition.getTenantId(), definition.getWorkflowCode()))) {
-            throw new ServiceException("当前环境未启用子工作流中的写节点");
-        }
+        requirePlanAdmission(plan, definition);
         JsonNode safeInput = input == null ? objectMapper.createObjectNode() : input;
         String inputJson = writeJson(safeInput);
         if (inputJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_INPUT_BYTES) {
@@ -474,6 +526,9 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (status != null && !status.isBlank()) {
             query.eq(WorkflowExecution::getStatus, status.trim().toUpperCase(Locale.ROOT));
         }
+        // 已归档定义的执行历史不通过通用运行列表重新公开。
+        query.inSql(WorkflowExecution::getDefinitionId,
+                "SELECT id FROM ai_workflow_definition WHERE del_flag = '0'");
         query.orderByDesc(WorkflowExecution::getCreateTime).last("LIMIT 200");
         return executionMapper.selectList(query).stream().map(this::view).toList();
     }
@@ -481,11 +536,12 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
     @Override
     public List<WorkflowNodeRunView> listNodeRuns(String executionId) {
         requireEnabled();
-        requireExecution(executionId);
+        WorkflowExecution execution = requireExecution(executionId);
+        Map<String, JsonNode> descriptions = nodeDescriptions(execution);
         return nodeRunMapper.selectList(new LambdaQueryWrapper<WorkflowNodeRun>()
                         .eq(WorkflowNodeRun::getExecutionId, executionId)
                         .orderByAsc(WorkflowNodeRun::getId))
-                .stream().map(this::nodeRunView).toList();
+                .stream().map(run -> nodeRunView(run, descriptions.get(run.getNodeId()))).toList();
     }
 
     @Override
@@ -693,6 +749,11 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
         if (execution == null || !Objects.equals(execution.getTenantId(), currentTenantId())) {
             throw new ServiceException("工作流执行不存在或无权访问", 404);
         }
+        WorkflowDefinition definition = definitionMapper.selectById(execution.getDefinitionId());
+        if (definition == null || !"0".equals(definition.getDelFlag())
+                || !Objects.equals(definition.getTenantId(), execution.getTenantId())) {
+            throw new ServiceException("工作流执行不存在或无权访问", 404);
+        }
         String username = CallerUtils.getUsername();
         assertPrincipalOwnership(execution, username, "apikey:", "API_KEY");
         assertPrincipalOwnership(execution, username, "share:", "SHARE");
@@ -875,12 +936,41 @@ public class WorkflowExecutionService implements WorkflowExecutionApplicationFac
                 execution.getFinishTime());
     }
 
-    private WorkflowNodeRunView nodeRunView(WorkflowNodeRun run) {
+    /** Only the bound immutable version can supply labels; never read the latest draft. */
+    private Map<String, JsonNode> nodeDescriptions(WorkflowExecution execution) {
+        WorkflowVersion version = versionMapper.selectByVersionId(execution.getWorkflowVersionId());
+        if (version == null || !Objects.equals(version.getVersionId(), execution.getWorkflowVersionId())
+                || !Objects.equals(version.getTenantId(), execution.getTenantId())
+                || !Objects.equals(version.getDefinitionId(), execution.getDefinitionId())
+                || !Objects.equals(version.getVersionNo(), execution.getVersionNo())) return Map.of();
+        try {
+            JsonNode nodes = objectMapper.readTree(version.getDefinitionJson()).path("nodes");
+            if (!nodes.isArray()) return Map.of();
+            Map<String, JsonNode> result = new LinkedHashMap<>();
+            for (JsonNode node : nodes) {
+                String id = node.path("id").asString("");
+                if (id.isBlank() || result.putIfAbsent(id, node) != null) return Map.of();
+            }
+            return result;
+        } catch (RuntimeException unavailable) {
+            return Map.of();
+        }
+    }
+
+    private WorkflowNodeRunView nodeRunView(WorkflowNodeRun run, JsonNode description) {
+        List<WorkflowNodeRunView.Resource> resources = new ArrayList<>();
+        if (description != null && description.path("resourceRefs").isArray()) {
+            for (JsonNode ref : description.path("resourceRefs")) {
+                resources.add(new WorkflowNodeRunView.Resource(ref.path("kind").asString(""), ref.path("key").asString("")));
+            }
+        }
         return new WorkflowNodeRunView(
                 run.getNodeRunId(), run.getNodeId(), run.getBranchPath(), run.getAttemptNo(),
                 run.getHandlerVersion(), run.getStatus(), run.getSideEffect(),
                 run.getSideEffectStatus(), dataRedactor.redactJson(run.getOutputJson()), run.getErrorCode(),
-                run.getErrorMessage(), run.getStartTime(), run.getFinishTime());
+                run.getErrorMessage(), run.getStartTime(), run.getFinishTime(),
+                description == null ? null : description.path("name").asString(null),
+                description == null ? null : description.path("type").asString(null), List.copyOf(resources));
     }
 
     private WorkflowExecutionEventView eventView(WorkflowEvent event) {

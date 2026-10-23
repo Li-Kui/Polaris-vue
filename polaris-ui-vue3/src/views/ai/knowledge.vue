@@ -86,7 +86,8 @@
                 {{ getIndexStatusText(currentKb.indexStatus) }}
               </el-tag>
               <el-button
-                :loading="currentKb.indexStatus === 'BUILDING'"
+                :loading="rebuildSubmitting || rebuildTaskActive || currentKb.indexStatus === 'BUILDING'"
+                :disabled="!canTestKnowledge"
                 class="kb-rebuild-button"
                 icon="Refresh"
                 size="small"
@@ -106,20 +107,22 @@
           />
         </header>
 
+        <KnowledgeRebuildTask ref="rebuildTaskPanel" :knowledge="currentKb" :can-manage="canTestKnowledge"
+          @change="onRebuildTaskChange" @settled="refreshAfterRebuild" />
+        <KnowledgeRetrievalTest :knowledge="currentKb" :can-test="canTestKnowledge" />
+        <KnowledgeSnapshotCleanup :knowledge="currentKb" :can-manage="canTestKnowledge" />
+        <KnowledgeVectorCleanup :knowledge="currentKb" :can-manage="canTestKnowledge" />
+
         <!-- 拖拽上传区 -->
         <section class="kb-upload-section">
           <el-upload
-            :action="uploadUrl"
+            action="#"
             :before-upload="beforeUpload"
-            :data="uploadData"
-            :disabled="currentKb.indexStatus === 'BUILDING'"
-            :headers="uploadHeaders"
-            :on-error="handleUploadError"
-            :on-success="handleUploadSuccess"
+            :http-request="uploadDocumentRequest"
+            :disabled="!canTestKnowledge || uploadBusy || !!uploadPending || rebuildTaskActive || currentKb.indexStatus === 'BUILDING'"
             :show-file-list="false"
             class="kb-uploader"
             drag
-            multiple
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
             <div class="el-upload__text">
@@ -127,10 +130,16 @@
             </div>
             <template #tip>
               <div class="el-upload__tip">
-                支持 PDF、Word (.docx)、Excel (.xlsx/.xls)、TXT、MD 等常用纯文本格式，文件大小不超过 20MB。
+                支持 PDF、Word (.docx)、Excel (.xlsx/.xls)、TXT、MD 等常用纯文本格式，单文件解析上限 10MB。
+                每次上传一个文件；受理后可查看导入任务。索引不可用时会构建全库，可能产生向量模型费用。
               </div>
             </template>
           </el-upload>
+          <div v-if="uploadRetry" role="status">
+            上传结果尚未确认，不会自动重试。请先刷新知识库 {{ uploadPending.knowledgeId }} 的任务，或使用同一提交键确认原上传。
+            <el-button :disabled="uploadBusy || !canTestKnowledge || currentKbId !== uploadPending.knowledgeId" @click="retryUpload">确认原上传</el-button>
+            <el-button :disabled="uploadBusy" @click="forgetUpload">放弃本页重试</el-button>
+          </div>
         </section>
 
         <!-- 文档列表区 -->
@@ -186,14 +195,15 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column align="center" label="操作" width="180">
+            <el-table-column align="center" label="操作" width="270">
               <template #default="scope">
+                <el-button v-if="canTestKnowledge" link class="op-btn-edit" @click="openDocumentSnapshot(scope.row)">诊断分块</el-button>
                 <el-button
                   link
                   class="op-btn-edit"
                   icon="RefreshLeft"
                   @click="handleRebuildDoc(scope.row)"
-                >重新生成</el-button>
+                >重建所属库</el-button>
                 <el-button
                   link
                   class="op-btn-delete"
@@ -207,6 +217,7 @@
       </div>
     </main>
 
+    <KnowledgeDocumentSnapshot v-model="snapshotOpen" :document="snapshotDocument" :knowledge-id="currentKbId" />
     <!-- 知识库表单弹窗 -->
     <el-dialog
       :title="dialogTitle"
@@ -252,11 +263,11 @@
             <el-option
               v-for="model in embeddingModels"
               :key="model.id"
-              :disabled="!model.embeddingDimension"
-              :label="`${model.name} / ${model.modelName} / ${model.embeddingDimension ? model.embeddingDimension + '维' : '维度未确认'}`"
+              :label="`${model.name} / ${model.modelName}`"
               :value="model.id"
             />
           </el-select>
+          <div class="el-form-item__help">保存时由后端探测并校验向量维度，可能产生一次向量模型调用。</div>
         </el-form-item>
         <el-row :gutter="16">
           <el-col :span="12">
@@ -298,21 +309,40 @@ import {
   delKnowledge,
   listDocuments,
   listKnowledge,
+  newKnowledgeRebuildRequestKey,
   rebuildDocument,
   rebuildKnowledge,
-  updateKnowledge
+  updateKnowledge,
+  uploadKnowledgeDocument
 } from "@/api/ai/knowledge";
 import {listAvailableEmbeddingModel} from "@/api/ai/model";
-import {getAuthHeaders} from "@/utils/auth";
+import KnowledgeRetrievalTest from '@/components/knowledge/KnowledgeRetrievalTest.vue'
+import KnowledgeDocumentSnapshot from '@/components/knowledge/KnowledgeDocumentSnapshot.vue'
+import KnowledgeRebuildTask from '@/components/knowledge/KnowledgeRebuildTask.vue'
+import KnowledgeSnapshotCleanup from '@/components/knowledge/KnowledgeSnapshotCleanup.vue'
+import KnowledgeVectorCleanup from '@/components/knowledge/KnowledgeVectorCleanup.vue'
+import usePlatformUserStore from '@/store/modules/platformUser'
+import useUserStore from '@/store/modules/user'
+import {isPlatformConsolePath} from '@/utils/consoleRoute'
 
 export default {
   name: "AiKnowledge",
+  components: {KnowledgeRetrievalTest, KnowledgeDocumentSnapshot, KnowledgeRebuildTask, KnowledgeSnapshotCleanup, KnowledgeVectorCleanup},
   data() {
     return {
       // 知识库加载状态
       loadingKb: false,
       // 文档加载状态
       loadingDoc: false,
+      snapshotOpen: false,
+      snapshotDocument: null,
+      rebuildTaskActive: false,
+      rebuildTaskState: null,
+      uploadBusy: false,
+      uploadPending: null,
+      uploadRetry: false,
+      rebuildSubmitting: false,
+      rebuildRequestKeys: {},
       // 知识库数据列表
       kbList: [],
       // 当前选中的知识库ID
@@ -353,18 +383,15 @@ export default {
         chunkSize: [{ required: true, message: "请输入切片大小", trigger: "change" }],
         chunkOverlap: [{ required: true, message: "请输入重叠字符数", trigger: "change" }]
       },
-      // 上传配置
-      uploadUrl: import.meta.env.VITE_APP_BASE_API + "/ai/knowledge/document/upload",
-      uploadHeaders: getAuthHeaders(),
       // 自动刷新的定时器
       timer: null
     };
   },
   computed: {
-    uploadData() {
-      return {
-        knowledgeBaseId: this.currentKbId
-      };
+    canTestKnowledge() {
+      return isPlatformConsolePath(this.$route.path)
+        ? usePlatformUserStore().user.role === 'admin'
+        : Number(useUserStore().id) === 1
     }
   },
   created() {
@@ -375,6 +402,29 @@ export default {
     this.stopStatusPolling();
   },
   methods: {
+    onRebuildTaskChange(task) {
+      this.rebuildTaskState = task?.state || null;
+      this.rebuildTaskActive = ['QUEUED', 'RUNNING'].includes(task?.state);
+      if (this.rebuildTaskActive) this.startStatusPolling();
+      else if (!this.shouldPollStatus()) this.stopStatusPolling();
+    },
+    shouldPollStatus() {
+      return this.rebuildTaskActive || this.currentKb.indexStatus === 'BUILDING'
+        || (!this.rebuildTaskState && ['READY', 'EMPTY'].includes(this.currentKb.indexStatus) && this.docList.some(doc => ['0', '1'].includes(doc.status)));
+    },
+    refreshAfterRebuild() {this.getKbList(); this.getDocList()},
+    rebuildKey(id) {return this.rebuildRequestKeys[id] ||= newKnowledgeRebuildRequestKey()},
+    acceptRebuildTask(response, id) {
+      delete this.rebuildRequestKeys[id];
+      if (this.currentKbId !== id) return;
+      this.$refs.rebuildTaskPanel?.accept(response.data);
+      this.$modal.msgSuccess('已保存重建任务，请以任务状态为准');
+      this.refreshAfterRebuild();
+    },
+    openDocumentSnapshot(document) {
+      if (!this.canTestKnowledge) return
+      this.snapshotDocument = document; this.snapshotOpen = true
+    },
     // 获取知识库列表
     getKbList() {
       this.loadingKb = true;
@@ -417,19 +467,20 @@ export default {
     // 获取文档明细列表
     getDocList() {
       if (!this.currentKbId) return;
+      const knowledgeId = this.currentKbId;
       this.loadingDoc = true;
-      listDocuments({ knowledgeBaseId: this.currentKbId }).then(response => {
+      listDocuments({ knowledgeBaseId: knowledgeId }).then(response => {
+        if (this.currentKbId !== knowledgeId) return;
         this.docList = response.data.rows || [];
         this.loadingDoc = false;
         // 如果列表中包含处于"解析中(1)"状态的文档，则启动定时轮询刷新状态
-        const hasParsing = this.docList.some(doc => doc.status === "1" || doc.status === "0");
-        if (hasParsing || this.currentKb.indexStatus === "BUILDING") {
+        if (this.shouldPollStatus()) {
           this.startStatusPolling();
         } else {
           this.stopStatusPolling();
         }
       }).catch(() => {
-        this.loadingDoc = false;
+        if (this.currentKbId === knowledgeId) this.loadingDoc = false;
       });
     },
     // 状态轮询逻辑
@@ -437,20 +488,20 @@ export default {
       if (this.timer) return;
       this.timer = setInterval(() => {
         if (!this.currentKbId) return;
+        const knowledgeId = this.currentKbId;
         Promise.all([
-          listDocuments({ knowledgeBaseId: this.currentKbId }),
+          listDocuments({ knowledgeBaseId: knowledgeId }),
           listKnowledge(this.queryParams)
         ]).then(([documentResponse, knowledgeResponse]) => {
+          if (this.currentKbId !== knowledgeId) return;
           this.docList = documentResponse.data.rows || [];
           this.kbList = knowledgeResponse.data.rows || [];
           const current = this.kbList.find(item => item.id === this.currentKbId);
           if (current) this.currentKb = current;
-          const stillParsing = this.docList.some(doc => doc.status === "1" || doc.status === "0")
-            || this.currentKb.indexStatus === "BUILDING";
-          if (!stillParsing) {
+          if (!this.shouldPollStatus()) {
             this.stopStatusPolling();
           }
-        });
+        }).catch(() => this.stopStatusPolling());
       }, 5000); // 每5秒自动同步一次状态
     },
     stopStatusPolling() {
@@ -524,31 +575,50 @@ export default {
     },
     // 文件上传前校验
     async beforeUpload(file) {
-      const isLt20M = file.size / 1024 / 1024 < 20;
-      if (!isLt20M) {
-        this.$modal.msgError("上传文件大小不能超过 20MB!");
+      const isWithin10M = file.size <= 10 * 1024 * 1024;
+      if (!isWithin10M) {
+        this.$modal.msgError("单文件解析上限为 10MB，请拆分文件后上传。");
         return false;
       }
-      // 上传组件不经过 axios 拦截器，按当前控制台身份刷新认证头。
-      this.uploadHeaders = getAuthHeaders();
-      await this.$nextTick();
-      this.$modal.loading("文件正在上传并解析中，请稍候...");
+      if (!this.canTestKnowledge || !this.currentKbId || this.uploadBusy || this.uploadPending
+          || this.rebuildTaskActive || this.currentKb.indexStatus === 'BUILDING') return false;
+      // 冻结上传所属库、文件与提交键；切库或网络不明不能改为向新库提交。
+      this.uploadPending = {knowledgeId: this.currentKbId, file, key: newKnowledgeRebuildRequestKey()};
       return true;
     },
-    // 文件上传成功
-    handleUploadSuccess(response) {
-      this.$modal.closeLoading();
-      if (response.code === 200) {
-        this.$modal.msgSuccess("文件上传成功，已加入后台切片向量化任务");
-        this.getDocList();
-      } else {
-        this.$modal.msgError(response.msg || "文件解析服务异常");
-      }
+    uploadDocumentRequest() {return this.sendUpload(this.uploadPending)},
+    retryUpload() {
+      if (!this.canTestKnowledge || this.currentKbId !== this.uploadPending?.knowledgeId) return;
+      return this.sendUpload(this.uploadPending);
     },
-    // 文件上传失败
-    handleUploadError() {
-      this.$modal.closeLoading();
-      this.$modal.msgError("网络连接错误，文件上传失败");
+    async sendUpload(operation) {
+      if (!operation || this.uploadBusy) return;
+      this.uploadBusy = true; this.uploadRetry = false;
+      const data = new FormData(); data.append('knowledgeBaseId', operation.knowledgeId); data.append('file', operation.file);
+      try {
+        const response = await uploadKnowledgeDocument(data, operation.key);
+        if (!response.data?.task || response.data.task.knowledgeBaseId !== operation.knowledgeId) throw new Error('上传回执不一致');
+        this.uploadPending = null;
+        if (this.currentKbId === operation.knowledgeId) {
+          this.$refs.rebuildTaskPanel?.accept(response.data.task);
+          this.refreshAfterRebuild();
+          if (response.data.task.state === 'REJECTED') this.$modal.msgWarning('文件已保存，但队列未受理，请稍后显式重建；不会自动调用模型。');
+          else this.$modal.msgSuccess('文件和导入任务已保存，请以任务状态为准');
+        }
+        return response;
+      } catch (_) {
+        // 包含网络结果不明；保留原文件/库/键，仅留在本页内存，不写入浏览器持久缓存。
+        this.uploadRetry = true;
+        this.$refs.rebuildTaskPanel?.reload();
+      } finally {this.uploadBusy = false}
+    },
+    async forgetUpload() {
+      if (this.uploadBusy) return;
+      const operation = this.uploadPending;
+      try {
+        await this.$modal.confirm('放弃只清除本页重试信息，不会撤销服务端已保存的文档或任务。请先检查原知识库任务，避免重复上传。确认继续吗？');
+        if (!this.uploadBusy && this.uploadPending === operation) {this.uploadPending = null; this.uploadRetry = false}
+      } catch (_) {}
     },
     // 删除单个文档
     handleDeleteDoc(doc) {
@@ -559,22 +629,24 @@ export default {
         this.getDocList();
       }).catch(() => {});
     },
-    // 重构单个文档向量索引
+    // 现有后端入口实际重建所属全库，不伪装成单文档更新。
     handleRebuildDoc(doc) {
-      rebuildDocument(doc.id).then(() => {
-        this.$modal.msgSuccess("已触发重新解析，请耐心等待状态同步");
-        this.getDocList();
-      });
+      const knowledgeId = this.currentKbId, documentId = doc.id;
+      if (!this.canTestKnowledge || this.rebuildSubmitting || this.rebuildTaskActive || !knowledgeId || !documentId || doc.knowledgeBaseId !== knowledgeId) return;
+      this.$modal.confirm(`该操作会重建知识库 "${this.currentKb.name}" 的全部文档，不只是当前文档；可能调用向量模型并产生费用。确认继续吗？`).then(() => {
+        if (this.currentKbId !== knowledgeId) return;
+        this.rebuildSubmitting = true;
+        return rebuildDocument(documentId, this.rebuildKey(knowledgeId)).then(response => this.acceptRebuildTask(response, knowledgeId));
+      }).catch(() => {this.$refs.rebuildTaskPanel?.reload()}).finally(() => {this.rebuildSubmitting = false});
     },
     handleRebuildKb() {
-      if (!this.currentKbId) return;
-      this.$modal.confirm(`确认重建知识库 "${this.currentKb.name}" 的全部向量索引吗？`).then(() => {
-        return rebuildKnowledge(this.currentKbId);
-      }).then(() => {
-        this.currentKb.indexStatus = "BUILDING";
-        this.$modal.msgSuccess("已提交安全重建任务");
-        this.startStatusPolling();
-      }).catch(() => {});
+      if (!this.canTestKnowledge || this.rebuildSubmitting || this.rebuildTaskActive || !this.currentKbId) return;
+      const knowledgeId = this.currentKbId;
+      this.$modal.confirm(`确认重建知识库 "${this.currentKb.name}" 的全部向量索引吗？可能调用向量模型并产生费用。`).then(() => {
+        if (this.currentKbId !== knowledgeId) return;
+        this.rebuildSubmitting = true;
+        return rebuildKnowledge(knowledgeId, this.rebuildKey(knowledgeId)).then(response => this.acceptRebuildTask(response, knowledgeId));
+      }).catch(() => {this.$refs.rebuildTaskPanel?.reload()}).finally(() => {this.rebuildSubmitting = false});
     },
     // 重置表单
     resetForm() {

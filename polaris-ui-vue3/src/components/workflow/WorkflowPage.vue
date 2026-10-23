@@ -36,6 +36,7 @@
     <WorkflowExecutionMonitor
       v-else-if="pageMode === 'executions'"
       :can-execute="canExecute"
+      :can-view-mcp-records="canViewMcpRecords"
       :definition-id="executionTarget.id"
       :workflow-name="executionTarget.workflowName"
       :workflow-code="executionTarget.workflowCode"
@@ -81,6 +82,13 @@
         <el-tag type="success" effect="plain">当前发布版本</el-tag>
       </div>
       <el-alert
+        v-if="runError || runAdmissionLoading || runAdmission"
+        :title="runError || (runAdmissionLoading ? '正在检查发布版本的环境准入…' : runAdmission.reason)"
+        :type="runError || !runAdmission?.allowed ? 'warning' : 'info'"
+        :closable="false"
+        show-icon
+      />
+      <el-alert
         v-if="runSchemaError"
         :title="runSchemaError"
         type="warning"
@@ -119,11 +127,12 @@
         </el-collapse-item>
       </el-collapse>
       <template #footer>
+        <el-button :loading="runAdmissionLoading" :disabled="starting" @click="refreshRunAdmission">重新检查准入</el-button>
         <el-button @click="runDialogOpen = false">取消</el-button>
         <el-button
           type="primary"
           :loading="starting"
-          :disabled="runInputLoading || !runInputValidation.valid"
+          :disabled="!canExecute || runInputLoading || !runInputValidation.valid || runAdmissionLoading || !runAdmission?.allowed"
           @click="startExecution"
         >开始运行</el-button>
       </template>
@@ -219,6 +228,7 @@ import SharePanel from '@/views/workflowApp/SharePanel.vue'
 import {
   cloneWorkflowDefinition,
   getWorkflowDefinition,
+  getWorkflowExecutionAdmission,
   getWorkflowVersion,
   listWorkflowDefinitions,
   listWorkflowNodeDescriptors,
@@ -240,6 +250,7 @@ export default {
     SharePanel
   },
   props: {
+    canViewMcpRecords: {type: Boolean, default: false},
     canEdit: {
       type: Boolean,
       default: false
@@ -284,6 +295,10 @@ export default {
       runInputLoading: false,
       runInputValidation: {valid: false, message: '', errors: []},
       runSchemaError: '',
+      runAdmission: null,
+      runAdmissionLoading: false,
+      runAdmissionSequence: 0,
+      runError: '',
       runAdvancedPanels: [],
       cloneDialogOpen: false,
       cloning: false,
@@ -448,6 +463,35 @@ export default {
         this.rollingBack = false
       }
     },
+    async refreshRunAdmission() {
+      const sequence = ++this.runAdmissionSequence
+      const definitionId = this.runTarget?.id
+      const versionId = this.runTarget?.currentPublishedVersionId
+      this.runAdmission = null
+      this.runAdmissionLoading = false
+      if (!this.canExecute || !definitionId || !versionId) return false
+      this.runAdmissionLoading = true
+      try {
+        const response = await getWorkflowExecutionAdmission(definitionId, versionId)
+        if (sequence !== this.runAdmissionSequence
+          || this.runTarget?.id !== definitionId
+          || this.runTarget?.currentPublishedVersionId !== versionId) return false
+        if (response.data?.workflowVersionId !== versionId || typeof response.data?.allowed !== 'boolean') {
+          throw new Error('INVALID_ADMISSION')
+        }
+        this.runAdmission = response.data
+        this.runError = ''
+        return response.data.allowed
+      } catch (error) {
+        if (sequence === this.runAdmissionSequence) {
+          this.runAdmission = {allowed: false, code: 'CHECK_UNAVAILABLE', workflowVersionId: versionId,
+            reason: '未能完成环境准入检查，请确认后端已更新并重启，再重新检查。'}
+        }
+        return false
+      } finally {
+        if (sequence === this.runAdmissionSequence) this.runAdmissionLoading = false
+      }
+    },
     async openRunDialog(definition) {
       if (!this.canExecute) return
       this.runTarget = definition
@@ -459,9 +503,11 @@ export default {
       this.runInputSchema = {type: 'object', properties: {}}
       this.runInputValidation = {valid: false, message: '', errors: []}
       this.runSchemaError = ''
+      this.runError = ''
       this.runAdvancedPanels = []
       this.runInputLoading = true
       this.runDialogOpen = true
+      this.refreshRunAdmission()
       try {
         const response = await getWorkflowVersion(
           definition.id,
@@ -476,12 +522,14 @@ export default {
       }
     },
     async startExecution() {
+      if (this.starting || !this.canExecute) return
       if (!this.runInputValidation.valid) {
         this.$message.error(this.runInputValidation.message || '请先修正工作流输入')
         return
       }
       this.starting = true
       try {
+        if (!await this.refreshRunAdmission()) return
         const response = await startWorkflowExecution({
           definitionId: this.runTarget.id,
           workflowVersionId: this.runTarget.currentPublishedVersionId,
@@ -496,6 +544,9 @@ export default {
           initialExecutionId: response.data.executionId
         }
         this.pageMode = 'executions'
+      } catch (error) {
+        this.runError = typeof error?.message === 'string' && error.message.trim()
+          ? error.message.slice(0, 300) : '未能启动工作流，请检查执行记录后再操作。'
       } finally {
         this.starting = false
       }
@@ -817,6 +868,26 @@ export default {
 </style>
 
 <style>
+.workflow-dialog.el-dialog {
+  max-width: calc(100vw - 32px);
+  color: var(--el-text-color-primary);
+  background: var(--el-bg-color-overlay) !important;
+  border-color: var(--el-border-color-light) !important;
+  box-shadow: var(--el-box-shadow) !important;
+}
+
+.workflow-dialog.el-dialog .el-dialog__title {
+  color: var(--el-text-color-primary) !important;
+}
+
+.workflow-dialog.el-dialog .el-dialog__body {
+  color: var(--el-text-color-regular);
+}
+
+.workflow-dialog.el-dialog .el-alert {
+  margin-bottom: 12px;
+}
+
 :is(.workflow-page, .workflow-dialog, .workflow-version-drawer, .workflow-execution-drawer) {
   --workflow-control-surface: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 5%, var(--workflow-surface-raised, var(--el-bg-color-overlay)));
   --workflow-control-hover: color-mix(in srgb, var(--workflow-primary, var(--el-color-primary)) 12%, var(--workflow-surface-raised, var(--el-bg-color-overlay)));

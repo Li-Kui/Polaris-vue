@@ -1,0 +1,90 @@
+{
+  "layer": "PROVIDER",
+  "code": "DASHSCOPE_AUDIO",
+  "profileVersion": 1,
+  "protocolCode": "DASHSCOPE_AUDIO",
+  "defaultBaseUrl": "https://dashscope.aliyuncs.com",
+  "modelDiscoverySupported": false,
+  "supportedCapabilities": [
+    "AUDIO_STT",
+    "AUDIO_TTS"
+  ],
+  "credentialSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "apiKey"
+    ],
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4096
+      }
+    }
+  },
+  "connectionConfigSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "capabilityOverlays": {
+    "AUDIO_TTS": {
+      "schema": {
+        "properties": {
+          "format": {
+            "enum": [
+              "wav"
+            ],
+            "default": "wav"
+          },
+          "pitch": {
+            "minimum": 0,
+            "maximum": 0,
+            "default": 0
+          },
+          "speed": {
+            "minimum": 1,
+            "maximum": 1,
+            "default": 1
+          },
+          "sampleRate": {
+            "enum": [
+              24000
+            ],
+            "default": 24000
+          }
+        }
+      }
+    },
+    "AUDIO_STT": {
+      "schema": {
+        "properties": {
+          "timestamps": {
+            "enum": [
+              false
+            ],
+            "default": false
+          },
+          "speakerDiarization": {
+            "enum": [
+              false
+            ],
+            "default": false
+          },
+          "punctuation": {
+            "enum": [
+              true
+            ],
+            "default": true
+          }
+        }
+      },
+      "uiSchema": {
+        "language": {
+          "placeholder": "例如 zh；留空自动识别"
+        }
+      }
+    }
+  }
+}

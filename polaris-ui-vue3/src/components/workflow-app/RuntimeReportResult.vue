@@ -1,14 +1,14 @@
 <template>
-  <div ref="reportElement" class="report-result">
+  <div ref="reportElement" class="report-result" :class="{ dark: theme === 'dark' }">
     <div class="report-toolbar">
       <span>{{ title || '报告内容' }}</span>
       <div>
-        <el-button size="small" @click="copyReport">复制报告</el-button>
-        <el-button size="small" :loading="exportingPdf" :disabled="exportingPdf" @click="exportPdf">导出 PDF</el-button>
-        <el-button size="small" @click="exportReport">导出原始数据</el-button>
+        <el-button size="small" :icon="CopyDocument" @click="copyReport">复制报告</el-button>
+        <el-button size="small" :loading="exportingPdf" :disabled="exportingPdf" :icon="Download" @click="exportPdf">导出 PDF</el-button>
+        <el-button size="small" :icon="Document" @click="exportReport">导出原始数据</el-button>
       </div>
     </div>
-    <PolarisReportEngine v-if="structured" :class="{ dark: theme === 'dark' }" :report-title="title" :content="content" :structured-schema="structured" theme="glass-light" />
+    <PolarisReportEngine v-if="structured" :class="{ dark: theme === 'dark' }" :report-title="title" :content="content" :structured-schema="structured" :color-mode="theme" compact theme="glass-light" />
     <RuntimeContent v-else-if="content" :content="content" />
     <RuntimeResult v-else :output="output" :show-toolbar="false" />
   </div>
@@ -16,7 +16,8 @@
 
 <script setup>
 import {computed, inject, ref} from 'vue'
-import {ElMessage} from 'element-plus'
+import {runtimeMessage as ElMessage} from '@/components/workflow-app/runtimeMessage'
+import {CopyDocument, Document, Download} from '@element-plus/icons-vue'
 import RuntimeContent from './RuntimeContent.vue'
 import RuntimeResult from './RuntimeResult.vue'
 import PolarisReportEngine from '@/views/ai/report/PolarisReportEngine.vue'
@@ -65,7 +66,8 @@ const exportPdf = async () => {
 
 <style scoped>
 .report-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 20px; color: var(--runtime-text, #1e293b); font-size: 14px; font-weight: 600; }
-.report-toolbar > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.report-toolbar > div { display: flex; flex-wrap: wrap; width: 100%; gap: 8px; }
+.report-toolbar > div .el-button { flex: 1 1 auto; }
 .report-toolbar :deep(.el-button) { margin: 0; }
 .report-result :deep(.polaris-report-engine.theme-glass-light) { background: var(--runtime-muted, #f1f5f9); color: var(--runtime-text, #1e293b); padding: 18px; }
 .report-result :deep(.summary-glass-card), .report-result :deep(.kpi-stat-card), .report-result :deep(.compare-matrix-card), .report-result :deep(.chart-block-card), .report-result :deep(.action-plan-card), .report-result :deep(.swot-matrix-card), .report-result :deep(.content-section-card) { background: var(--runtime-surface, #fff) !important; color: var(--runtime-text, #1e293b) !important; border-color: var(--runtime-border, #dbe2ea) !important; }
@@ -74,7 +76,7 @@ const exportPdf = async () => {
 .report-result :deep(.polaris-report-engine.theme-glass-light .el-table th.el-table__cell) { background: var(--runtime-muted, #f1f5f9) !important; }
 .report-result :deep(.polaris-report-engine.theme-glass-light .el-table .cell) { color: var(--runtime-text, #1e293b) !important; }
 .report-result :deep(.kpi-stat-icon) { background: var(--runtime-muted, #f1f5f9) !important; color: var(--workflow-primary, #4f46e5) !important; }
-@media (max-width: 600px) {
+
   .report-result :deep(.polaris-report-engine.theme-glass-light) { padding: 12px; }
   .report-result :deep(.engine-report-banner) { padding: 18px !important; }
   .report-result :deep(.banner-title) { font-size: 20px !important; line-height: 1.5 !important; }
@@ -82,5 +84,12 @@ const exportPdf = async () => {
   .report-result :deep(.card-header) { flex-wrap: wrap; gap: 8px; }
   .report-result :deep(.header-title) { font-size: 14px !important; overflow-wrap: anywhere; }
   .report-result :deep(.kpi-grid-container) { grid-template-columns: 1fr !important; }
-}
+.report-result :deep(.compare-columns-grid), .report-result :deep(.swot-grid) { grid-template-columns: minmax(0, 1fr) !important; }
+.report-result :deep(.summary-glass-card), .report-result :deep(.compare-matrix-card), .report-result :deep(.chart-block-card), .report-result :deep(.swot-matrix-card), .report-result :deep(.action-plan-card), .report-result :deep(.smart-section-card) { padding: 16px !important; min-width: 0; box-shadow: none; }
+.report-result :deep(.smart-section-card), .report-result :deep(.compare-column), .report-result :deep(.swot-box) { background: var(--runtime-surface) !important; border-color: var(--runtime-border) !important; color: var(--runtime-text) !important; }
+.report-result :deep(.compare-column li), .report-result :deep(.swot-box li), .report-result :deep(.markdown-body), .report-result :deep(.highlight-strong), .report-result :deep(.kpi-desc) { color: var(--runtime-text) !important; overflow-wrap: anywhere; }
+.report-result :deep(.banner-top-row) { flex-wrap: wrap; gap: 10px; }
+.report-result :deep(.banner-chip-group) { flex-wrap: wrap; }
+.report-result :deep(.kpi-value-row) { flex-wrap: wrap; }
+.report-result :deep(.chart-mount-container) { min-height: 260px !important; height: 260px !important; }
 </style>

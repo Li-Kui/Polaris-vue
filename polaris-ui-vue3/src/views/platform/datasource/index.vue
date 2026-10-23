@@ -14,8 +14,8 @@
             </el-select>
           </el-form-item>
           <el-form-item>
-            <el-button type="primary" icon="Search" @click="getList">搜索</el-button>
-            <el-button icon="Refresh" @click="resetQuery">重置</el-button>
+            <el-button type="primary" icon="Search" class="polaris-query-btn" @click="getList">搜索</el-button>
+            <el-button icon="Refresh" class="polaris-reset-btn" @click="resetQuery">重置</el-button>
           </el-form-item>
         </el-form>
       </div>
@@ -26,7 +26,7 @@
           <right-toolbar v-model:showSearch="showSearch" @queryTable="getList" />
         </div>
 
-        <el-table v-loading="loading" :data="datasources" class="polaris-el-table">
+        <el-table v-loading="loading" :data="datasources" class="polaris-el-table datasource-table">
           <el-table-column prop="dsName" label="连接名称" min-width="160">
             <template #default="{row}"><strong>{{ row.dsName }}</strong></template>
           </el-table-column>
@@ -47,18 +47,40 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="170" align="center" fixed="right">
+          <el-table-column
+            label="操作"
+            width="152"
+            align="center"
+            fixed="right"
+            class-name="datasource-actions-column"
+            label-class-name="datasource-actions-column"
+          >
             <template #default="{row}">
-              <el-tooltip content="测试连接"><el-button link icon="Connection" @click="handleTest(row)" /></el-tooltip>
-              <el-tooltip content="修改连接"><el-button link icon="Edit" @click="handleUpdate(row)" /></el-tooltip>
-              <el-tooltip content="删除连接"><el-button link type="danger" icon="Delete" @click="handleDelete(row)" /></el-tooltip>
+              <div class="row-actions">
+                <el-tooltip content="测试连接">
+                  <el-button link icon="Connection" aria-label="测试连接" @click="handleTest(row)" />
+                </el-tooltip>
+                <el-tooltip content="修改连接">
+                  <el-button link icon="Edit" aria-label="修改连接" @click="handleUpdate(row)" />
+                </el-tooltip>
+                <el-tooltip content="删除连接">
+                  <el-button link type="danger" icon="Delete" aria-label="删除连接" @click="handleDelete(row)" />
+                </el-tooltip>
+              </div>
             </template>
           </el-table-column>
         </el-table>
       </div>
     </div>
 
-    <el-dialog v-model="open" :title="title" width="680px" append-to-body destroy-on-close>
+    <el-dialog
+      v-model="open"
+      :title="title"
+      width="min(680px, calc(100vw - 32px))"
+      class="datasource-dialog"
+      append-to-body
+      destroy-on-close
+    >
       <DatasourceForm ref="datasourceFormRef" :form="form" :editing="!!form.id" />
       <template #footer>
         <el-button @click="open = false">取消</el-button>
@@ -215,5 +237,60 @@ onMounted(getList)
 code {
   color: var(--el-text-color-regular);
   font-size: 12px;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+
+  :deep(.el-button) {
+    width: 30px;
+    height: 30px;
+    margin: 0;
+    padding: 0;
+    border-radius: 8px;
+  }
+}
+
+/* 固定操作列需要实体背景，避免横向滚动时下层单元格文字透出。 */
+.datasource-table {
+  :deep(.el-table__row) {
+    transform: none;
+  }
+
+  :deep(th.datasource-actions-column) {
+    background: var(--el-fill-color-light) !important;
+  }
+
+  :deep(td.datasource-actions-column) {
+    background: var(--el-bg-color) !important;
+    border-left: 1px solid var(--el-border-color-lighter);
+    box-shadow: -10px 0 18px -16px rgba(15, 23, 42, 0.5);
+  }
+
+  :deep(.el-table__row:hover td.datasource-actions-column) {
+    background: var(--el-fill-color-extra-light) !important;
+  }
+}
+
+:global(.datasource-dialog .el-dialog__body) {
+  max-height: calc(100vh - 190px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 768px) {
+  .app-container.no-sidebar-manage-wrap {
+    padding: 12px !important;
+  }
+
+  :global(.datasource-dialog .el-dialog__header),
+  :global(.datasource-dialog .el-dialog__body),
+  :global(.datasource-dialog .el-dialog__footer) {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
 }
 </style>

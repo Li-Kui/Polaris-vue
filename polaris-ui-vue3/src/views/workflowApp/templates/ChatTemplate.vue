@@ -2,19 +2,19 @@
   <div class="chat-template">
     <div class="chat-toolbar">
       <div class="chat-toolbar-main"><strong>与 AI 助手对话</strong><span>{{ cancelling ? '正在停止生成' : isActive ? '正在思考您的问题' : '在本次对话中保持上下文' }}</span></div>
-      <el-button :icon="Plus" :disabled="isActive || pendingRecovery || status === 'attention' || uploading || (!messages.length && !attachments.length)" @click="newConversation">新对话</el-button>
+      <el-button :icon="Plus" :disabled="isActive || !!pendingRecovery || status === 'attention' || uploading || (!messages.length && !attachments.length)" @click="newConversation">新对话</el-button>
     </div>
     <div ref="messagesRef" class="chat-messages" role="log" aria-label="对话记录" aria-live="polite">
       <div v-if="!messages.length" class="chat-welcome">
-        <el-icon class="welcome-icon"><Monitor /></el-icon>
-        <h2>{{ manifest.pageConfig?.title || manifest.shareName || '开始对话' }}</h2>
-        <p>{{ manifest.pageConfig?.description || manifest.pageConfig?.welcomeMessage || '你好！请问有什么我可以帮你的？' }}</p>
+        <el-icon class="welcome-icon"><ChatDotRound /></el-icon>
+        <h2>有什么可以帮你？</h2>
+        <p>{{ manifest.pageConfig?.welcomeMessage || '你好！请问有什么我可以帮你的？' }}</p>
         <div v-if="suggestedQuestions.length" class="suggested-questions">
           <el-button v-for="question in suggestedQuestions" :key="question" round @click="useSuggestedQuestion(question)">{{ question }}</el-button>
         </div>
       </div>
       <div v-for="(msg, index) in messages" :key="msg.id" :class="['message', msg.role === 'user' ? 'user-msg' : 'system-msg']">
-        <div class="avatar"><el-icon><User v-if="msg.role === 'user'" /><Monitor v-else /></el-icon></div>
+        <div class="avatar"><el-icon><User v-if="msg.role === 'user'" /><ChatDotRound v-else /></el-icon></div>
         <div class="message-body">
           <div class="message-label">{{ msg.role === 'user' ? '你' : 'AI 助手' }}</div>
           <div v-if="msg.attachments?.length" class="message-attachments">
@@ -71,7 +71,7 @@
         <el-button v-else type="primary" :icon="Promotion" :disabled="!canSend" class="send-btn" @click="sendMessage()">发送</el-button>
       </div>
     </div>
-    <div class="chat-input-hint"><span>每条消息最多 5 个附件 · 单文件 10MB · 图片需模型支持视觉</span><span>Enter 发送 · Shift+Enter 换行</span></div>
+    <div class="chat-input-hint"><span>每条消息最多 5 个附件 · 单文件 10MB · 图片需模型支持视觉</span><span>回车发送 · Shift + 回车换行</span></div>
     <el-dialog v-model="previewVisible" :title="previewFile?.name || '附件预览'" width="min(720px, 92vw)" class="chat-attachment-dialog">
       <img v-if="previewFile?.previewUrl" :src="previewFile.previewUrl" :alt="previewFile.name" class="attachment-full-image" />
       <p v-else>文档将由后端解析后交给 AI。可下载核对原文件；扫描版 PDF 暂不支持文字提取。</p>
@@ -82,14 +82,14 @@
 
 <script setup>
 import {computed, nextTick, onUnmounted, reactive, ref, watch} from 'vue'
-import {ElMessage} from 'element-plus'
+import {runtimeMessage as ElMessage} from '@/components/workflow-app/runtimeMessage'
 import {
+  ChatDotRound,
   Close,
   CopyDocument,
   Document,
   Download,
   Loading,
-  Monitor,
   Paperclip,
   Plus,
   Promotion,
@@ -273,7 +273,7 @@ onUnmounted(() => { for (const url of previewUrls) URL.revokeObjectURL(url) })
 </script>
 
 <style scoped>
-.chat-template { display: flex; flex-direction: column; height: calc(100dvh - 112px); min-height: 460px; max-width: 1024px; margin: 24px auto; background: var(--runtime-surface, #fff); border: 1px solid var(--runtime-border, #dbe2ea); border-radius: 24px; box-shadow: var(--runtime-shadow); overflow: hidden; }
+.chat-template { display: flex; flex: 1; flex-direction: column; width: 100%; min-width: 0; min-height: 0; margin: 0; background: var(--runtime-surface); overflow: hidden; }
 .chat-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--runtime-border, #dbe2ea); }
 .chat-toolbar-main { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .chat-toolbar-main strong { font-size: 14px; font-weight: 600; color: var(--runtime-text); }
@@ -318,6 +318,30 @@ button.attachment-card, .attachment-preview { cursor: pointer; }
 .send-btn { min-height: 44px; margin: 0 4px 4px 0; }
 .chat-input-hint { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 2px 32px 20px; color: var(--runtime-secondary, #64748b); font-size: 11px; line-height: 1.5; }
 .chat-recover { padding: 12px 24px; font-size: 12px; color: var(--runtime-secondary, #64748b); display: flex; flex-wrap: wrap; gap: 10px; }
-@media (max-width: 1100px) { .chat-template { margin: 24px; } }
-@media (max-width: 600px) { .chat-template { height: calc(100dvh - 88px); min-height: 0; margin: 12px; border-radius: 18px; } .chat-toolbar, .chat-recover { padding: 14px; } .chat-toolbar-main { gap: 4px; flex-direction: column; align-items: flex-start; } .chat-messages { padding: 20px 14px; } .chat-input { padding: 8px 12px; } .chat-input-hint { padding: 0 16px 14px; } .message { gap: 8px; } .message-body { max-width: calc(100% - 44px); } .bubble { padding: 12px 14px; } .chat-welcome { margin: 28px auto; } .chat-welcome h2 { font-size: 22px; } .chat-composer { gap: 4px; padding: 4px; } .send-btn { padding: 10px; } }
+.chat-toolbar { padding: 14px 22px; }
+.chat-toolbar-main { gap: 4px; flex-direction: column; align-items: flex-start; }
+.chat-toolbar-main strong { font-size: 13px; }
+.chat-toolbar-main span { font-size: 11px; }
+.chat-toolbar > .el-button { flex-shrink: 0; padding: 8px 10px; }
+.chat-messages { padding: 20px 16px; overscroll-behavior: contain; }
+.chat-welcome { margin: 20px auto; }
+.chat-welcome h2 { font-size: 20px; }
+.welcome-icon { width: 44px; height: 44px; border-radius: 14px; font-size: 25px; }
+.message { gap: 8px; margin-bottom: 22px; }
+.avatar { flex-basis: 28px; height: 28px; border-radius: 9px; }
+.message-body { max-width: calc(100% - 36px); }
+.bubble { padding: 12px 14px; }
+.chat-input { padding: 8px 16px; }
+.chat-composer { gap: 4px; padding: 6px; }
+.chat-composer :deep(.el-textarea) { flex: 1; min-width: 0; width: 0; }
+.chat-composer :deep(.el-upload), .send-btn, .attachment-button { flex-shrink: 0; }
+.send-btn :deep(span) { white-space: nowrap; }
+.chat-composer :deep(.el-textarea__inner) { padding: 8px; font-size: 15px; background: transparent !important; }
+.send-btn { padding: 10px; margin: 0 0 4px; }
+.attachment-button { padding: 10px; }
+.chat-input-hint { padding: 0 22px 14px; font-size: 10px; }
+.chat-recover { padding: 12px 22px; }
+.chat-recover > span { overflow-wrap: anywhere; }
+.attachment-info strong { max-width: 145px; }
+@media (max-height: 650px) { .chat-toolbar-main span, .chat-input-hint { display: none; } .chat-welcome { margin: 8px auto; } }
 </style>

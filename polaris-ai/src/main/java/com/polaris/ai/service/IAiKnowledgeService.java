@@ -76,14 +76,15 @@ public interface IAiKnowledgeService extends IService<AiKnowledgeBase>
     // ================================================================
 
     /**
-     * 异步解析文档并向量化
-     */
-    void importDocumentAsync(Long docId);
-
-    /**
      * 在新 collection 中重建整个知识库，成功后切换生效版本。
      */
     void rebuildKnowledgeBaseAsync(Long knowledgeBaseId);
+
+    /** 内部 worker 入口：使用已领取的发布代次，不重新领取，不接受控制器直接调用。 */
+    void runKnowledgeRebuildTask(com.polaris.ai.knowledge.KnowledgeIndexPublisher.Build build);
+
+    /** 内部增量 worker：父库必须 READY，不能隐式等待或另起全库重建。 */
+    void runKnowledgeImportTask(AiKnowledgeBase source, Long documentId);
 
     /**
      * 标记所有绑定指定向量模型的知识库索引为过期。

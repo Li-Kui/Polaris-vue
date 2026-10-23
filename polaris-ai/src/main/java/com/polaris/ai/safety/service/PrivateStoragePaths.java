@@ -70,7 +70,18 @@ public class PrivateStoragePaths {
         assertWithinPrivateRoot(targetPath);
         try (java.io.InputStream in = file.getInputStream()) {
             Files.copy(in, targetPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException | RuntimeException e) {
+            try {discardStagedKnowledgeFile(targetPath);} catch (IOException cleanup) {e.addSuppressed(cleanup);}
+            throw e;
         }
         return targetPath;
+    }
+
+    /** 只清理本次上传返回的单个暂存文件，不能接受目录或其他私有载荷。 */
+    public void discardStagedKnowledgeFile(Path path) throws IOException {
+        assertWithinPrivateRoot(path);
+        Path normalized = path.toAbsolutePath().normalize();
+        if (!stagedKnowledgeDir().equals(normalized.getParent())) throw new SecurityException("不是知识库暂存文件");
+        Files.deleteIfExists(normalized);
     }
 }

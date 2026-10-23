@@ -1,11 +1,16 @@
 package com.polaris.ai.domain;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.polaris.ai.dto.RecognizedDoc;
+import com.polaris.ai.knowledge.ChatKnowledgeCitationValidator;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.util.Date;
+import java.util.List;
 
 /**
  * AI 对话消息实体
@@ -30,6 +35,10 @@ public class AiMessage
     /** 关联的工作流执行 ID，用于精确更新流式回复。 */
     @Schema(description = "关联的工作流执行 ID")
     private String workflowExecutionId;
+    /** 协作运行关联，历史读取不会因此重新执行。 */
+    private String agentRunId;
+    @JsonIgnore
+    private String historyDependencies;
 
     /**
      * 消息角色
@@ -74,6 +83,17 @@ public class AiMessage
      */
     @Schema(description = "安全检测状态：SAFE, INTERRUPTED_BLOCKED")
     private String moderationStatus;
+
+    /** 版本化片段指针 JSON；对外只返回重新鉴权后的来源摘要。 */
+    @JsonIgnore
+    private String knowledgeCitations;
+
+    @TableField(exist = false)
+    private List<RecognizedDoc> attachedDocs = List.of();
+
+    /** 只说明回答编号是否属于原参考来源；不是内容审核状态或证据支持度。 */
+    @TableField(exist = false)
+    private ChatKnowledgeCitationValidator.Result citationValidation;
 
     /** 安全检测事件ID */
     @Schema(description = "安全检测事件ID")

@@ -101,6 +101,10 @@ spring:
 
 #兜底的AI配置
 ai:
+    knowledge:
+        # 本地验收用 5 分钟；生产环境使用 application-pro 的 1440 分钟（24 小时）。
+        # 仅影响向量集合退役保留期，不触发自动清理，不缩短快照文件保留期。
+        vector-cleanup-retention-minutes: 5
     tools:
         web-search:
             api-key: ${AI_WEB_SEARCH_API_KEY:}

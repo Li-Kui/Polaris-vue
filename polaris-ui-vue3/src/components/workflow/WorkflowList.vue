@@ -23,7 +23,7 @@
       </div>
       <div class="overview-card">
         <span class="overview-icon is-active"><el-icon><CircleCheck /></el-icon></span>
-        <div><strong>{{ publishedCount }}</strong><span>已发布可运行</span></div>
+        <div><strong>{{ publishedCount }}</strong><span>已发布</span></div>
       </div>
       <div class="overview-card">
         <span class="overview-icon is-draft"><el-icon><EditPen /></el-icon></span>

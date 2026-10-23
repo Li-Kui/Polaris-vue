@@ -160,11 +160,11 @@
       <div v-if="currentConvId" class="chat-header-bar">
         <span class="chat-header-indicator">
           <el-icon><chat-line-round /></el-icon>
-          AI 助手对话中
+          {{ collaboration.enabled ? '协作对话' : 'AI 助手对话中' }}
         </span>
         <div class="header-tags-row">
           <el-tag
-            v-if="currentConvModel"
+            v-if="currentConvModel && !collaboration.enabled"
             class="model-indicator-tag"
             effect="plain"
             size="default"
@@ -174,7 +174,9 @@
             <span>模型: {{ currentConvModel }}</span>
           </el-tag>
           <el-tag
-            v-if="selectedAgentCode"
+            v-if="collaboration.enabled" effect="light" type="primary">协作：{{ collaborationAgentName }}</el-tag>
+          <el-tag
+            v-else-if="selectedAgentCode"
             effect="light"
             size="default"
             type="primary"
@@ -505,7 +507,8 @@
                     v-else
                     :class="{ 'typing-cursor': msg.streaming }"
                     class="markdown-body"
-                    v-html="renderMarkdown(msg.content)"
+                    v-html="renderKnowledgeMarkdown(msg)"
+                    @click="handleKnowledgeCitationClick($event, msg)"
                   ></div>
                   <div v-if="msg.searchSources && msg.searchSources.length" class="search-sources-panel">
                     <div class="search-sources-header" @click="toggleSearchSources(msg)">
@@ -538,27 +541,25 @@
                   </div>
 
                   <!-- 自动关联识别挂载文档标签 -->
-                  <div v-if="msg.attachedDocs && msg.attachedDocs.length" class="attached-docs-panel">
-                    <div class="attached-docs-title">
-                      <el-icon><document /></el-icon>
-                      <span>已自动挂载参考文档（{{ msg.attachedDocs.length }}）</span>
-                    </div>
-                    <div class="attached-docs-tags">
-                      <el-tag
-                        v-for="doc in msg.attachedDocs"
-                        :key="doc.docId || doc.docName"
-                        size="small"
-                        type="success"
-                        effect="light"
-                        class="attached-doc-tag"
-                      >
-                        <el-icon style="margin-right: 3px;"><paperclip /></el-icon>
-                        {{ doc.docName }}
-                        <span v-if="doc.matchType === 'MENTION'" class="doc-match-type">(提及)</span>
-                        <span v-else-if="doc.confidence" class="doc-match-type">({{ Math.round(doc.confidence * 100) }}%)</span>
-                      </el-tag>
-                    </div>
-                  </div>
+                  <KnowledgeCitationValidationNotice :validation="msg.citationValidation" :streaming="msg.streaming"
+                                                     :has-sources="Boolean(msg.attachedDocs?.length)" :hide-checked="Boolean(msg.attachedDocs?.length)" />
+                  <el-alert
+                    v-if="msg.knowledgeRetrievalEmpty"
+                    class="knowledge-empty-notice"
+                    :title="msg.knowledgeAnswerStopped ? '本轮未找到可引用依据，已停止回答生成。你可以调整问题或指定文件，或取消知识库关联后使用普通聊天。' : '本轮知识库检索未找到可引用依据；不代表库中不存在相关资料，以下回答不应视为知识库事实。'"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                  />
+                  <ChatKnowledgeSources v-if="msg.attachedDocs?.length" :message="msg" @open="openKnowledgeCitation(msg, $event.citationId)" />
+                  <AgentChatMessage v-if="msg.agentRunId && msg.id && !msg.streaming" :conversation-id="currentConvId" :message="msg"
+                                    @sources="msg.attachedDocs = $event.knowledge || []; msg.collaborationSources = $event"
+                                    @open-history="citationSelection = $event" />
+                  <p v-if="msg.knowledgeCoverage" class="knowledge-coverage-note" role="status">
+                    本轮显式补全 {{ msg.knowledgeCoverage.requestedDocumentCount }} 份关联资料，实际入选 {{ msg.knowledgeCoverage.mountedDocumentCount }} 份。
+                    <span v-if="msg.knowledgeCoverage.mountedDocumentCount < msg.knowledgeCoverage.requestedDocumentCount">部分指定资料未命中或未进入上下文，不能据此视为联合问题完整。</span>
+                    片段入选不代表证据支持度已经核验。
+                  </p>
 
                   <!-- 报告操作工具栏 -->
                   <div v-if="!msg.loading && !msg.error && isReportMessage(msg.content)" class="report-action-card" @click="openReportView(msg.content)">
@@ -688,6 +689,13 @@
 
       <!-- 输入区域 -->
       <div v-show="currentConvId" class="input-area">
+        <AgentChatComposer v-if="collaborationAllowed" v-model="collaboration" :agents="agents" :models="models" :messages="messages"
+                          :busy="isStreaming || collaborationPending" :stopping="collaborationStopping" :confirmation="collaborationConfirmation"
+                          :observed="collaborationObserved" :knowledge-name="currentKbName"
+                          @confirm="sendConfirmedCollaboration" @dismiss="dismissCollaboration" @refresh="refreshCollaboration" @stop="stopCollaboration" />
+        <el-alert v-if="collaboration.enabled && relatedDocumentIds.length" type="warning" :closable="false" title="协作对话暂不接收指定资料，请先清空选择；所选知识库仍可使用。">
+          <el-button :disabled="canStop" @click="relatedDocumentIds = []">清空指定资料</el-button>
+        </el-alert>
         <!-- 待发送附件预览栏 -->
         <div v-if="attachments && attachments.length" class="attachment-preview-bar">
           <div v-for="(item, index) in attachments" :key="index" class="attachment-tag">
@@ -742,11 +750,14 @@
             />
           </div>
 
+          <KnowledgeRelatedDocumentPicker v-if="selectedKbId && !selectedWorkflowCode && !collaboration.enabled" v-model="relatedDocumentIds"
+                                          :knowledge-id="selectedKbId" :disabled="canStop || creatingConv" @ready="relatedReady = $event" />
           <!-- 下层：操作工具栏 -->
           <div class="input-modern-tools-wrapper">
             <div class="tools-left">
               <!-- 附件上传按钮 -->
               <el-upload
+                v-if="!collaboration.enabled"
                 :action="uploadUrl"
                 :before-upload="beforeAttachmentUpload"
                 :disabled="isStreaming || creatingConv || uploadingAttachment"
@@ -780,6 +791,7 @@
 
               <!-- 模型选择药丸 -->
               <el-popover
+                v-if="!collaboration.enabled"
                 v-model:visible="showModelPopover"
                 placement="top-start"
                 title="选择 AI 核心大脑"
@@ -859,6 +871,7 @@
 
               <!-- 智能体与工作流选择药丸 -->
               <el-popover
+                v-if="!collaboration.enabled"
                 v-model:visible="showWorkflowPopover"
                 placement="top-start"
                 width="340"
@@ -976,7 +989,7 @@
 
               <!-- 联网搜索快速切换按钮 -->
               <button
-                v-if="currentModelSupportsSearch"
+                v-if="currentModelSupportsSearch && !collaboration.enabled"
                 :class="['config-pill-btn pill-search', { 'is-active': enableWebSearch }]"
                 :disabled="isStreaming || creatingConv"
                 @click="toggleWebSearch"
@@ -999,7 +1012,7 @@
               <!-- 发送按钮 -->
               <el-button
                 v-else
-                :disabled="canStop || creatingConv || !inputText.trim() || uploadingAttachment"
+                :disabled="canStop || collaborationPending || creatingConv || !inputText.trim() || uploadingAttachment || (!collaboration.enabled && relatedDocumentIds.length > 0 && !relatedReady)"
                 class="btn-send-modern"
                 @click="handleSendMessage"
               >
@@ -1090,6 +1103,8 @@
       </div>
     </transition>
 
+    <ChatKnowledgeCitationDialog v-if="citationSelection" :selection="citationSelection" @close="citationSelection = null" />
+
     <!-- ========== 重命名弹窗 ========== -->
     <el-dialog
       :close-on-click-modal="false"
@@ -1121,6 +1136,10 @@
 
 <script>
 import * as echarts from 'echarts'
+import agentChatMixin from '@/components/agent/agentChatMixin'
+import AgentChatComposer from '@/components/agent/AgentChatComposer.vue'
+import AgentChatMessage from '@/components/agent/AgentChatMessage.vue'
+import {decorateAgentHistoryCitations} from '@/components/agent/agentChat'
 import {getAuthHeaders} from '@/utils/auth'
 import {
   cancelChatGeneration,
@@ -1134,6 +1153,11 @@ import {
   updateConversationConfig
 } from '@/api/ai/chat'
 import {listKnowledge} from '@/api/ai/knowledge'
+import {decorateKnowledgeCitations, knowledgeSourceGroups} from '@/utils/knowledgeEvidence'
+import ChatKnowledgeCitationDialog from '@/components/knowledge/ChatKnowledgeCitationDialog.vue'
+import ChatKnowledgeSources from '@/components/knowledge/ChatKnowledgeSources.vue'
+import KnowledgeRelatedDocumentPicker from '@/components/knowledge/KnowledgeRelatedDocumentPicker.vue'
+import KnowledgeCitationValidationNotice from '@/components/knowledge/KnowledgeCitationValidationNotice.vue'
 import {getCapabilityDefault, listAvailableModel} from '@/api/ai/model'
 import {getAvailableTools} from '@/api/ai/agent'
 import {
@@ -1151,7 +1175,14 @@ import {parseImageUrlList} from '@/utils/aiImage'
 
 export default {
   name: 'AiChat',
+  mixins: [agentChatMixin],
   components: {
+    AgentChatComposer,
+    AgentChatMessage,
+    ChatKnowledgeCitationDialog,
+    ChatKnowledgeSources,
+    KnowledgeRelatedDocumentPicker,
+    KnowledgeCitationValidationNotice,
     PolarisReportEngine
   },
   data() {
@@ -1159,6 +1190,8 @@ export default {
       // 知识库选项与当前选择
       knowledgeBases: [],
       selectedKbId: null,
+      relatedDocumentIds: [],
+      relatedReady: false,
 
       // 可选大模型与当前选择
       models: [],
@@ -1192,6 +1225,7 @@ export default {
       messages: [],
       loadingMessages: false,
       messageLoadVersion: 0,
+      citationSelection: null,
       inputText: '',
       inputFocused: false,
       isStreaming: false,
@@ -1297,6 +1331,7 @@ export default {
       )
     },
     canStop() {
+      if (this.collaborationObserved?.status === 'RUNNING') return true
       if (this.isStreaming) return true
       if (!this.messages || this.messages.length === 0) return false
       const lastMsg = this.messages[this.messages.length - 1]
@@ -1305,8 +1340,10 @@ export default {
   },
   watch: {
     currentConvId() {
+      this.relatedDocumentIds = []
       this.$nextTick(() => this.syncSelectedModelFromConversation())
     },
+    selectedWorkflowCode() {this.relatedDocumentIds = []},
     conversations() {
       this.$nextTick(() => this.syncSelectedModelFromConversation())
     },
@@ -1348,6 +1385,29 @@ export default {
     document.body.classList.remove('ai-chat-page')
   },
   methods: {
+    renderKnowledgeMarkdown(message) {
+      return decorateAgentHistoryCitations(decorateKnowledgeCitations(this.renderMarkdown(message.content), message), message)
+    },
+    handleKnowledgeCitationClick(event, message) {
+      const historyButton = event.target.closest?.('button[data-agent-history]')
+      if (historyButton && event.currentTarget.contains(historyButton) && !message.streaming) {
+        const ref = message.collaborationSources?.history?.find(old => old.available && String(old.reference.messageId) === historyButton.dataset.agentHistory
+          && old.reference.citationId === historyButton.dataset.agentCitation && old.knowledge?.length)
+        if (ref) this.citationSelection = {conversationId: this.currentConvId, messageId: message.id, originId: ref.reference.messageId,
+          citationId: ref.reference.citationId, documentName: ref.knowledge[0].docName}
+        return
+      }
+      const button = event.target.closest?.('button[data-knowledge-citation]')
+      if (!button || !event.currentTarget.contains(button)) return
+      this.openKnowledgeCitation(message, button.dataset.knowledgeCitation)
+    },
+    openKnowledgeCitation(message, citationId) {
+      if (!message.id || message.streaming || message.moderationStatus === 'INTERRUPTED_BLOCKED') return
+      const group = knowledgeSourceGroups(message.attachedDocs, message.content).find(doc => doc.citationIds.includes(citationId))
+      if (!group) return
+      this.citationSelection = {conversationId: this.currentConvId, messageId: message.id, citationId,
+        citationIds: group.citationIds, documentName: group.docName}
+    },
     getBoundConversationModel() {
       if (!this.currentConvId || !this.models.length || !this.conversations.length) return null
       const conversation = this.conversations.find(
@@ -2073,6 +2133,7 @@ export default {
     },
 
     async selectConversation(id) {
+      this.citationSelection = null
       const loadVersion = ++this.messageLoadVersion
       this.currentConvId = id
       const c = this.conversations.find(conv => conv.id === id)
@@ -2174,6 +2235,11 @@ export default {
         const res = await listMessages(convId)
         if (res.code === 200) {
           const loadedMessages = (res.data || []).map(m => ({
+            id: m.id,
+            agentRunId: m.agentRunId || null,
+            attachedDocs: Array.isArray(m.attachedDocs) ? m.attachedDocs : [],
+            moderationStatus: m.moderationStatus,
+            citationValidation: m.citationValidation || null,
             role: m.role,
             content: m.content,
             reasoningContent: m.reasoningContent || '',
@@ -2189,6 +2255,8 @@ export default {
             return
           }
           this.messages = loadedMessages
+          await this.restoreCollaboration(convId, loadedMessages)
+          if (loadVersion !== this.messageLoadVersion || String(this.currentConvId) !== String(convId)) return
           this.$nextTick(() => {
             this.scrollToBottom(true)
             this.focusInput()
@@ -2328,6 +2396,13 @@ export default {
     },
 
     async handleSendMessage() {
+      if (this.canStop || this.collaborationPending) return
+      if (this.collaboration.enabled) return this.prepareCollaboration()
+      if (this.relatedDocumentIds.length && !this.relatedReady) {
+        this.$message.warning('关联资料尚未核对，请刷新或显式清空选择后发送')
+        return
+      }
+      const relatedForRequest = [...this.relatedDocumentIds]
       if (this.isStreaming || this.creatingConv || !this.currentConvId || this.uploadingAttachment) return
       const text = this.inputText.trim()
       if (!text) return
@@ -2384,7 +2459,8 @@ export default {
           message: text,
           enableSearch: enableSearchParam,
           agentCode: this.selectedAgentCode || null,
-          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean)
+          attachmentTokens: attachedFiles.map(f => f.token || f.url).filter(Boolean),
+          ...(relatedForRequest.length ? {relatedDocumentIds: relatedForRequest} : {})
         }
 
         const chatController = new AbortController()
@@ -2472,6 +2548,22 @@ export default {
                 } catch (err) {
                   console.warn('解析联网搜索来源失败', err)
                 }
+              } else if (event === 'knowledge_retrieval') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  aiMessage.knowledgeRetrievalEmpty = payload.state === 'EMPTY'
+                  aiMessage.knowledgeAnswerStopped = payload.answerStopped === true
+                } catch (err) {
+                  console.warn('解析知识库检索状态失败', err)
+                }
+              } else if (event === 'knowledge_coverage') {
+                try {
+                  const coverage = JSON.parse(data || '{}')
+                  if (coverage.strategy === 'EXPLICIT_RELATED_V1' && coverage.evidenceSupportVerified === false
+                      && Number.isInteger(coverage.requestedDocumentCount) && coverage.requestedDocumentCount >= 1 && coverage.requestedDocumentCount <= 3
+                      && Number.isInteger(coverage.mountedDocumentCount) && coverage.mountedDocumentCount >= 0 && coverage.mountedDocumentCount <= coverage.requestedDocumentCount)
+                    aiMessage.knowledgeCoverage = coverage
+                } catch {aiMessage.knowledgeCoverage = null}
               } else if (event === 'doc_recognized') {
                 try {
                   const docs = JSON.parse(data || '[]')
@@ -2479,6 +2571,19 @@ export default {
                   this.$nextTick(() => this.scrollToBottom())
                 } catch (err) {
                   console.warn('解析自动识别挂载文档失败', err)
+                }
+              } else if (event === 'citation_validation') {
+                try {
+                  aiMessage.citationValidation = JSON.parse(data || 'null')
+                } catch (err) {
+                  aiMessage.citationValidation = null
+                }
+              } else if (event === 'message_saved') {
+                try {
+                  const payload = JSON.parse(data || '{}')
+                  if (/^[1-9][0-9]{0,18}$/.test(String(payload.messageId))) aiMessage.id = payload.messageId
+                } catch (err) {
+                  console.warn('解析回答保存状态失败')
                 }
               } else if (event === 'done') {
                 aiMessage.streaming = false
@@ -2521,6 +2626,7 @@ export default {
     },
 
     async handleStopMessage() {
+      if (this.collaborationPreparing || this.collaborationController || this.collaborationConfirmation || this.collaborationPending) return this.stopCollaboration()
       const conversationId = this.currentConvId
       const stoppingChat = !!this.chatAbortController
       if (stoppingChat && conversationId) {
@@ -7353,33 +7459,55 @@ html.dark .ai-chat-wrapper .btn-start-chat:disabled {
 }
 
 /* 自动关联挂载文档面板样式 */
-.attached-docs-panel {
-  margin-top: 10px;
-  padding: 8px 12px;
-  background: rgba(103, 194, 58, 0.08);
-  border: 1px dashed rgba(103, 194, 58, 0.3);
-  border-radius: 8px;
+.knowledge-empty-notice {
+  margin: 10px 0;
 }
-.attached-docs-title {
-  display: flex;
+.knowledge-coverage-note {margin: 10px 0; font-size: 12px; line-height: 1.8; color: var(--el-text-color-regular); overflow-wrap: anywhere}
+
+.markdown-body {
+  --citation-link-color: #3730a3;
+  --citation-link-hover-color: #312e81;
+  --citation-link-bg: #eef2ff;
+  --citation-link-hover-bg: #e0e7ff;
+  --citation-link-border: #c7d2fe;
+  --citation-link-disabled-color: #475569;
+  --citation-link-focus: #4f46e5;
+}
+.markdown-body .knowledge-inline-citation {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 0 5px;
+  min-height: 24px;
+  vertical-align: baseline;
+  font-family: inherit;
   font-size: 12px;
-  color: #67c23a;
-  font-weight: 600;
-  margin-bottom: 6px;
+  line-height: 1.5;
+  border: 1px solid var(--citation-link-border) !important;
+  border-radius: 4px;
+  background: var(--citation-link-bg) !important;
+  color: var(--citation-link-color) !important;
+  cursor: pointer;
 }
-.attached-docs-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+.markdown-body .knowledge-inline-citation:hover,
+.markdown-body .knowledge-inline-citation:active,
+.markdown-body .knowledge-inline-citation:focus-visible {
+  background: var(--citation-link-hover-bg) !important;
+  color: var(--citation-link-hover-color) !important;
+  text-decoration: underline;
 }
-.attached-doc-tag {
-  border-radius: 6px;
+.markdown-body .knowledge-inline-citation:focus-visible {
+  outline: 2px solid var(--citation-link-focus);
+  outline-offset: 2px;
 }
-.doc-match-type {
-  opacity: 0.75;
-  margin-left: 3px;
-  font-size: 11px;
+html.dark .markdown-body {
+  --citation-link-color: #c7d2fe;
+  --citation-link-hover-color: #e0e7ff;
+  --citation-link-bg: #252544;
+  --citation-link-hover-bg: #37305d;
+  --citation-link-border: #6366f1;
+  --citation-link-disabled-color: #94a3b8;
+  --citation-link-focus: #a5b4fc;
 }
 </style>

@@ -1,6 +1,8 @@
 package com.polaris.ai.service;
 
 import com.polaris.ai.dto.DocumentRecognitionResult;
+import com.polaris.ai.dto.RecognizedDoc;
+import com.polaris.ai.domain.AiKnowledgeBase;
 
 import java.util.List;
 
@@ -27,4 +29,10 @@ public interface IAiDocumentRecognitionService {
      * @return 识别挂载结果及隔离格式化 Prompt
      */
     DocumentRecognitionResult recognizeAndMount(String userInput, Long userId, Long deptId, Long boundKnowledgeBaseId);
+
+    DocumentRecognitionResult recognizeAndMount(String userInput, Long userId, Long deptId, Long boundKnowledgeBaseId,
+                                               List<String> relatedDocumentIds);
+
+    /** 提交回答模型前再次检查入口访问范围、索引快照与实际引用文档，不重新检索。 */
+    void validateBeforeAnswer(AiKnowledgeBase snapshot, List<RecognizedDoc> documents);
 }

@@ -41,8 +41,8 @@
         v-else-if="field.component === 'number'"
         :model-value="numberValue(field.key, field.schema)"
         :disabled="disabled"
-        :min="field.schema.minimum"
-        :max="field.schema.maximum"
+        :min="numberOr(field.schema.minimum, undefined)"
+        :max="numberOr(field.schema.maximum, undefined)"
         :step="numberOr(field.ui.step || field.schema.multipleOf, 1)"
         @update:model-value="update(field.key, $event)"
       />

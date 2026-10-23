@@ -23,6 +23,7 @@
         <result property="indexSignature" column="index_signature"/>
         <result property="indexStatus" column="index_status"/>
         <result property="indexError" column="index_error"/>
+        <result property="indexGeneration" column="index_generation"/>
         <result property="deptId"      column="dept_id"/>
         <result property="createBy"    column="create_by"/>
         <result property="createTime"  column="create_time"/>

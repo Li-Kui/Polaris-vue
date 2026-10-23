@@ -10,6 +10,10 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface WorkflowVersionMapper extends BaseMapper<WorkflowVersion> {
 
+    @com.baomidou.mybatisplus.annotation.InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT * FROM ai_workflow_version WHERE tenant_id=#{tenantId} AND version_id=#{versionId} LIMIT 1")
+    WorkflowVersion selectAgentVersion(@Param("tenantId") Long tenantId, @Param("versionId") String versionId);
+
     @Select("SELECT COALESCE(MAX(version_no), 0) + 1 FROM ai_workflow_version "
             + "WHERE definition_id = #{definitionId}")
     int selectNextVersionNo(@Param("definitionId") Long definitionId);

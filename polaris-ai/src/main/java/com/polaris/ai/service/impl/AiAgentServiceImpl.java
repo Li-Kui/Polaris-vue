@@ -8,9 +8,11 @@ import com.polaris.ai.mapper.AiAgentMapper;
 import com.polaris.ai.modelcenter.runtime.ModelDefinitionResolver;
 import com.polaris.ai.modelcenter.runtime.ResolvedModelDefinition;
 import com.polaris.ai.service.IAiAgentService;
+import com.polaris.common.exception.ServiceException;
 import com.polaris.common.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -45,14 +47,32 @@ public class AiAgentServiceImpl extends ServiceImpl<AiAgentMapper, AiAgent> impl
 
     @Override
     public boolean save(AiAgent entity) {
+        entity.setDefinitionRevision(1L);
         fillModelName(entity);
         return super.save(entity);
     }
 
     @Override
+    @Transactional
     public boolean updateById(AiAgent entity) {
+        AiAgent existing = entity.getId() == null ? null : baseMapper.lockScoped(
+                CallerUtils.isPlatformMode() ? currentTenantId() : null, entity.getId());
+        if (existing == null || entity.getDefinitionRevision() == null
+                || !entity.getDefinitionRevision().equals(existing.getDefinitionRevision())) {
+            throw new ServiceException("智能体已变更，请刷新后重新编辑", 409);
+        }
         fillModelName(entity);
+        entity.setDefinitionRevision(existing.getDefinitionRevision() + 1);
         return super.updateById(entity);
+    }
+
+    @Override
+    @Transactional
+    public boolean removeById(java.io.Serializable id) {
+        AiAgent existing = baseMapper.lockScoped(CallerUtils.isPlatformMode() ? currentTenantId() : null,
+                Long.valueOf(id.toString()));
+        if (existing == null) throw new ServiceException("智能体不存在或无权删除");
+        return super.removeById(id);
     }
 
     @Override

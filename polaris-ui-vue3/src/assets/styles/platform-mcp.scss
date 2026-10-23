@@ -1,0 +1,120 @@
+// MCP 页面与 Teleport 弹窗共用样式，避免各弹窗重复覆盖全局按钮规则。
+html :is(.mcp-card, .mcp-connection-dialog, .mcp-catalog-dialog, .mcp-invoke-dialog) {
+  --mcp-accent: #4f46e5;
+  --mcp-accent-hover: #4338ca;
+  --mcp-accent-soft: #eef2ff;
+  --mcp-danger: #b91c1c;
+  --mcp-danger-soft: #fef2f2;
+
+  // 全局弹窗的四重 :not 与深色前缀具有高优先级；在有限 MCP 范围内覆盖。
+  .el-button.el-button.el-button.el-button {
+    background-image: none !important;
+    box-shadow: none !important;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s !important;
+
+    > span { color: inherit !important; }
+
+    &.action-btn-secondary:not(.is-disabled) {
+      color: var(--el-text-color-regular) !important;
+      background: var(--el-bg-color) !important;
+      border: 1px solid var(--el-border-color) !important;
+
+      &:is(:hover, :focus-visible, :active) {
+        color: var(--mcp-accent-hover) !important;
+        background: var(--mcp-accent-soft) !important;
+        border-color: var(--mcp-accent) !important;
+      }
+    }
+
+    &.el-button--primary:not(.is-link):not(.is-text):not(.is-disabled) {
+      color: #fff !important;
+      background: #4f46e5 !important;
+      border: 1px solid #4f46e5 !important;
+
+      &:is(:hover, :focus-visible, :active) {
+        color: #fff !important;
+        background: #4338ca !important;
+        border-color: #4338ca !important;
+      }
+    }
+
+    &.is-link {
+      height: 30px !important;
+      padding: 4px 8px !important;
+      margin: 0 !important;
+      border: 1px solid transparent !important;
+      border-radius: 6px !important;
+      color: var(--mcp-accent) !important;
+      background: transparent !important;
+
+      &.el-button--danger { color: var(--mcp-danger) !important; }
+
+      &:not(.is-disabled):is(:hover, :focus-visible, :active) {
+        color: var(--mcp-accent-hover) !important;
+        background: var(--mcp-accent-soft) !important;
+
+        &.el-button--danger {
+          color: var(--mcp-danger) !important;
+          background: var(--mcp-danger-soft) !important;
+        }
+      }
+    }
+
+    &.is-disabled.is-disabled,
+    &.is-disabled.is-disabled:is(:hover, :focus, :active) {
+      color: var(--el-text-color-placeholder) !important;
+      background: var(--el-fill-color-light) !important;
+      border-color: var(--el-border-color-lighter) !important;
+      opacity: 1 !important;
+      cursor: not-allowed;
+
+      &.is-link { background: transparent !important; border-color: transparent !important; }
+    }
+
+    &:focus-visible { outline: 2px solid var(--mcp-accent); outline-offset: 2px; }
+  }
+
+  .el-tag--success { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+  .el-tag--warning { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+  .el-tag--danger { color: #991b1b; background: #fef2f2; border-color: #fecaca; }
+  .el-tag--info { color: var(--el-text-color-regular); background: var(--el-fill-color-light); border-color: var(--el-border-color-lighter); }
+}
+
+html.dark :is(.mcp-card, .mcp-connection-dialog, .mcp-catalog-dialog, .mcp-invoke-dialog) {
+  --mcp-accent: #93c5fd;
+  --mcp-accent-hover: #bfdbfe;
+  --mcp-accent-soft: #1e293b;
+  --mcp-danger: #fca5a5;
+  --mcp-danger-soft: #3b2029;
+
+  .el-tag--success { color: #86efac; background: #173327; border-color: #28533d; }
+  .el-tag--warning { color: #fcd34d; background: #362d1b; border-color: #5c4826; }
+  .el-tag--danger { color: #fca5a5; background: #3b2029; border-color: #65313f; }
+}
+
+html .el-dialog:is(.mcp-connection-dialog, .mcp-catalog-dialog, .mcp-invoke-dialog) {
+  background: var(--el-bg-color) !important;
+  border: 1px solid var(--el-border-color-lighter) !important;
+  border-radius: 16px !important;
+  backdrop-filter: none !important;
+  color: var(--el-text-color-primary);
+
+  &::before { display: none; }
+
+  .el-dialog__header { border-bottom: 1px solid var(--el-border-color-lighter); padding: 18px 24px; }
+  .el-dialog__title { color: var(--el-text-color-primary) !important; font-size: 16px !important; }
+  .el-dialog__body { padding: 20px 24px; }
+  .el-dialog__footer { border-top: 1px solid var(--el-border-color-lighter); padding: 16px 24px; }
+  .el-alert { line-height: 1.6; }
+  .el-table { border: 1px solid var(--el-border-color-lighter); border-radius: 10px; }
+  .el-table .cell { line-height: 1.6; }
+  .el-checkbox { height: auto; }
+  .el-checkbox__label { white-space: normal; line-height: 1.6; }
+  .pagination-container { display: flex; justify-content: flex-end; height: auto; min-height: 48px; padding: 16px 0 0; }
+  .pagination-container .el-pagination { position: static; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+  @media (max-width: 600px) {
+    .el-dialog__header, .el-dialog__body, .el-dialog__footer { padding: 16px; }
+    .el-pagination__jump { display: none; }
+  }
+}

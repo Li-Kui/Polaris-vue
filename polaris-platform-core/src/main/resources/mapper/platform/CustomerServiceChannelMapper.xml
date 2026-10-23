@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.CustomerServiceChannelMapper">
+    <resultMap id="Channel" type="com.polaris.platform.domain.CustomerServiceChannel">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" /><result property="appId" column="app_id" />
+        <result property="releaseId" column="release_id" /><result property="code" column="code" />
+        <result property="name" column="name" /><result property="accessMode" column="access_mode" />
+        <result property="visitorDailySessions" column="visitor_daily_sessions" /><result property="visitorMessageLimit" column="visitor_message_limit" /><result property="allowedOriginsJson" column="allowed_origins_json" />
+        <result property="visitorSpeechEnabled" column="visitor_speech_enabled" /><result property="visitorSpeechLimit" column="visitor_speech_limit" />
+        <result property="capabilityCodesJson" column="capability_codes_json" /><result property="status" column="status" />
+        <result property="revision" column="revision" /><result property="expiresAt" column="expires_at" />
+        <result property="createBy" column="create_by" /><result property="createTime" column="create_time" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+    <select id="selectApp" resultMap="Channel">
+        select * from platform_customer_channel where tenant_id = #{tenantId} and app_id = #{appId} order by create_time desc limit 21
+    </select>
+    <select id="select" resultMap="Channel">
+        select * from platform_customer_channel where tenant_id = #{tenantId} and id = #{id}
+    </select>
+    <select id="lock" resultMap="Channel">
+        select * from platform_customer_channel where tenant_id = #{tenantId} and id = #{id} for update
+    </select>
+    <select id="selectCode" resultMap="Channel">
+        select * from platform_customer_channel where tenant_id = #{tenantId} and code = #{code}
+    </select>
+    <select id="selectEmbed" resultMap="Channel">
+        select * from platform_customer_channel where code = #{code}
+    </select>
+    <insert id="insert">
+        insert into platform_customer_channel (id,tenant_id,app_id,release_id,code,name,access_mode,visitor_daily_sessions,visitor_message_limit,visitor_speech_enabled,visitor_speech_limit,allowed_origins_json,
+            capability_codes_json,status,revision,expires_at,create_by,create_time,update_time)
+        values (#{id},#{tenantId},#{appId},#{releaseId},#{code},#{name},#{accessMode},#{visitorDailySessions},#{visitorMessageLimit},#{visitorSpeechEnabled},#{visitorSpeechLimit},#{allowedOriginsJson},
+            #{capabilityCodesJson},'DISABLED',1,#{expiresAt},#{createBy},#{createTime},#{updateTime})
+    </insert>
+    <update id="update">
+        update platform_customer_channel set name=#{name},access_mode=#{accessMode},visitor_daily_sessions=#{visitorDailySessions},
+            visitor_message_limit=#{visitorMessageLimit},visitor_speech_enabled=#{visitorSpeechEnabled},visitor_speech_limit=#{visitorSpeechLimit},allowed_origins_json=#{allowedOriginsJson},
+            capability_codes_json=#{capabilityCodesJson},status=#{status},expires_at=#{expiresAt},
+            revision=revision+1,update_time=#{updateTime}
+        where tenant_id=#{tenantId} and id=#{id} and revision=#{revision}
+    </update>
+</mapper>

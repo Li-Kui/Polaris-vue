@@ -94,6 +94,10 @@ public class AiKnowledgeBase extends BaseEntity
     @Schema(description = "最近一次索引失败原因")
     private String indexError;
 
+    /** 服务端索引发布代次；构建及资料/配置变更都会使旧构建失效。 */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    private Long indexGeneration;
+
     /** 部门 ID */
     @Schema(description = "部门 ID")
     private Long deptId;

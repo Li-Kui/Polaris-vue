@@ -3,17 +3,21 @@ package com.polaris.ai.modelcenter.runtime;
 import com.polaris.ai.runtime.CapabilityExecutor;
 import com.polaris.ai.runtime.ModelExecutionResult;
 import com.polaris.ai.runtime.ModelRuntimeSpec;
+import com.polaris.ai.runtime.RuntimePolicySpec;
 import com.polaris.ai.runtime.chat.ChatCapabilityInvocation;
 import com.polaris.ai.runtime.stream.ModelStreamEvent;
+import com.polaris.common.exception.ServiceException;
 import dev.langchain4j.data.message.ImageContent;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.openai.OpenAiChatRequestParameters;
 import org.springframework.stereotype.Service;
 
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
+import java.net.URI;
+import java.util.*;
 import java.util.concurrent.Flow;
 
 /**
@@ -66,6 +70,103 @@ public class ChatRuntimeService {
                         requestedFeatures(request, activeFeatures, true),
                         overrides));
         return capabilityExecutor.stream(runtime, invocation);
+    }
+
+    /** 有限协作只读预检，不创建 Provider 请求；每轮调用仍须重新解析当前定义。 */
+    public void validateAgentOnce(Long modelId, ChatRequest request, String expectedHash) {
+        resolveAgentOnce(modelId, request, expectedHash);
+    }
+    public void validateAgentOnce(Long modelId, ChatRequest request, String expectedHash, List<CapabilityParameterOverride> overrides) {
+        resolveAgentOnce(modelId, request, expectedHash, overrides);
+    }
+
+    /** 每轮协作使用独立有界流请求；不修改模型定义或全局重试、超时策略。 */
+    public Flow.Publisher<ModelStreamEvent> streamAgentOnce(
+            Long modelId, ChatRequest request, String expectedHash, long remainingMillis) {
+        return streamAgentOnce(modelId, request, expectedHash, remainingMillis, List.of());
+    }
+    public Flow.Publisher<ModelStreamEvent> streamAgentOnce(
+            Long modelId, ChatRequest request, String expectedHash, long remainingMillis, List<CapabilityParameterOverride> overrides) {
+        ModelRuntimeSpec runtime = resolveAgentOnce(modelId, request, expectedHash, overrides);
+        if (remainingMillis < 100) throw new ServiceException("AGENT_DEADLINE_EXCEEDED");
+        RuntimePolicySpec policy = runtime.runtimePolicy();
+        int limit = (int) Math.min(300_000L, remainingMillis);
+        RuntimePolicySpec bounded = new RuntimePolicySpec(policy.maxConcurrency(),
+                Math.min(policy.connectTimeoutMs(), limit), Math.min(policy.readTimeoutMs(), limit),
+                0, policy.qpsLimit(), policy.priority());
+        ModelRuntimeSpec single = new ModelRuntimeSpec(runtime.modelId(), runtime.modelCode(), runtime.modelRevision(),
+                runtime.connectionId(), runtime.connectionRevision(), runtime.providerCode(), runtime.protocolCode(),
+                runtime.networkMode(), runtime.baseUrl(), runtime.modelName(), runtime.capabilityCode(),
+                runtime.invocationParameters(), runtime.featureParameters(), runtime.activeFeatures(), runtime.providerExtraConfig(),
+                runtime.credentials(), bounded, runtime.schemaVersion(), runtime.schemaHash(), runtime.runtimeDefinitionHash());
+        return capabilityExecutor.stream(single, new ChatCapabilityInvocation(request));
+    }
+
+    private ModelRuntimeSpec resolveAgentOnce(Long modelId, ChatRequest request, String expectedHash) {
+        return resolveAgentOnce(modelId, request, expectedHash, List.of());
+    }
+    private ModelRuntimeSpec resolveAgentOnce(Long modelId, ChatRequest request, String expectedHash, List<CapabilityParameterOverride> overrides) {
+        if (request == null || expectedHash == null || !expectedHash.matches("[a-f0-9]{64}")) {
+            throw new ServiceException("AGENT_MODEL_SNAPSHOT_INVALID");
+        }
+        ModelRuntimeSpec runtime = runtimeResolver.resolve(new ModelRuntimeRequest<>(modelId,
+                new ChatCapabilityInvocation(request), requestedFeatures(request, Set.of(), true), overrides));
+        if (!Objects.equals(modelId, runtime.modelId()) || !Objects.equals(expectedHash, runtime.runtimeDefinitionHash())
+                || !"CHAT_COMPLETION".equals(runtime.capabilityCode()) || !runtime.activeFeatures().contains(STREAMING)
+                || request.toolSpecifications() != null && !request.toolSpecifications().isEmpty()
+                && !runtime.activeFeatures().contains("TOOL_CALLING")) {
+            throw new ServiceException("AGENT_MODEL_SNAPSHOT_CHANGED");
+        }
+        return runtime;
+    }
+
+    /** 仅显式 QA 审阅使用：对已解析的单次 Runtime 检查后追加固定扩展，不写回模型配置。 */
+    public Flow.Publisher<ModelStreamEvent> streamQaNonThinkingReview(
+            Long modelId, ChatRequest request, String expectedDefinitionHash) {
+        if (request == null || expectedDefinitionHash == null
+                || !expectedDefinitionHash.matches("[a-f0-9]{64}")
+                || request.messages() == null || request.messages().size() != 2
+                || !(request.messages().get(0) instanceof SystemMessage)
+                || !(request.messages().get(1) instanceof UserMessage user)
+                || user.contents().stream().anyMatch(content -> !(content instanceof TextContent))
+                || (request.toolSpecifications() != null && !request.toolSpecifications().isEmpty())) {
+            throw qaModeUnavailable();
+        }
+        var invocation = new ChatCapabilityInvocation(request);
+        ModelRuntimeSpec runtime = runtimeResolver.resolve(new ModelRuntimeRequest<>(
+                modelId, invocation, Set.of(STREAMING), List.of()));
+        if (!Objects.equals(modelId, runtime.modelId())
+                || !Objects.equals(expectedDefinitionHash, runtime.runtimeDefinitionHash())
+                || !"DASHSCOPE".equals(runtime.providerCode())
+                || !"OPENAI_COMPATIBLE".equals(runtime.protocolCode())
+                || !"DIRECT".equals(runtime.networkMode())
+                || !"qwen3.8-27b".equals(runtime.modelName())
+                || !"CHAT_COMPLETION".equals(runtime.capabilityCode())
+                || !runtime.activeFeatures().equals(Set.of(STREAMING))
+                || !runtime.providerExtraConfig().isEmpty()
+                || !qaDashScopeEndpoint(runtime.baseUrl())) {
+            throw qaModeUnavailable();
+        }
+        // 不接收任意 extra_body。仅本次 QA 请求传顶层 enable_thinking=false；常规模型默认参数由 SDK 合并。
+        var selected = ChatRequest.builder().messages(request.messages())
+                .parameters(OpenAiChatRequestParameters.builder()
+                        .customParameters(Map.of("enable_thinking", false)).build()).build();
+        return capabilityExecutor.stream(runtime, new ChatCapabilityInvocation(selected));
+    }
+
+    private boolean qaDashScopeEndpoint(String baseUrl) {
+        try {
+            var uri = URI.create(baseUrl);
+            return "https".equalsIgnoreCase(uri.getScheme())
+                    && "dashscope.aliyuncs.com".equalsIgnoreCase(uri.getHost())
+                    && (uri.getPort() == -1 || uri.getPort() == 443)
+                    && uri.getRawUserInfo() == null && uri.getRawQuery() == null && uri.getRawFragment() == null
+                    && Set.of("/compatible-mode/v1", "/compatible-mode/v1/").contains(uri.getRawPath());
+        } catch (RuntimeException ignored) { return false; }
+    }
+
+    private ServiceException qaModeUnavailable() {
+        return new ServiceException("QA_NON_THINKING_UNAVAILABLE: 模型、连接或运行时不满足已核验范围", 409);
     }
 
     /** SSE 是页面传输方式；未启用厂商流式能力时使用普通调用，仍保留能力校验。 */

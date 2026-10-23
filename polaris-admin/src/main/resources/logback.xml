@@ -83,6 +83,8 @@
 	<logger name="com.polaris" level="info" />
 	<!-- Spring日志级别控制  -->
 	<logger name="org.springframework" level="warn" />
+    <!-- SDK 的异常/调试日志可能包含远端原文和会话头；MCP 使用业务层安全错误提示。 -->
+    <logger name="io.modelcontextprotocol" level="off" />
 
 	<root level="info">
 		<appender-ref ref="console" />
@@ -98,4 +100,4 @@
     <logger name="sys-user" level="info">
         <appender-ref ref="sys-user"/>
     </logger>
-</configuration> 
+</configuration>

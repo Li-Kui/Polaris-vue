@@ -85,6 +85,17 @@ public class ModelAggregateService {
                         .toList());
     }
 
+    /** 编辑参数使用与保存／执行相同的四层解析结果；仅返回已授权连接的非敏感 Schema。 */
+    public List<CapabilitySchemaEditorVO> schemaContext(Long connectionId, String modelName) {
+        if (connectionId == null || connectionId <= 0 || modelName != null && modelName.length() > 256) {
+            throw new ServiceException("模型参数上下文无效", 400);
+        }
+        ProviderConnectionVO connection = connectionService.get(connectionId);
+        return schemaRegistry.list().stream().map(definition -> CapabilitySchemaEditorVO.from(
+                schemaResolver.resolve(definition.code(), definition.schemaVersion(), connection.protocolCode(),
+                        connection.providerCode(), modelName == null ? "" : modelName.trim()).definition())).toList();
+    }
+
     @Transactional(readOnly = true)
     public List<ModelSummaryVO> list() {
         List<AiModelConfig> models = modelMapper.selectAvailableModelConfigs(

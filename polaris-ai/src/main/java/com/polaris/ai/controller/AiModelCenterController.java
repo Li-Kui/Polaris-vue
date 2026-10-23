@@ -46,6 +46,12 @@ public class AiModelCenterController {
         this.optionsService = optionsService;
     }
 
+    @Operation(summary = "获取连接及模型解析后的能力参数")
+    @GetMapping("/schema-context")
+    public ResultData<?> schemaContext(@RequestParam Long connectionId, @RequestParam(required = false) String modelName) {
+        return ResultData.ok(aggregateService.schemaContext(connectionId, modelName));
+    }
+
     @Operation(summary = "获取 Model Editor 上下文")
     @GetMapping("/editor-context")
     public ResultData<ModelEditorContextVO> editorContext() {

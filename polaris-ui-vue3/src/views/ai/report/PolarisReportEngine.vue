@@ -5,7 +5,7 @@
       <div class="banner-top-row">
         <div class="banner-badge">
           <el-icon><cpu /></el-icon>
-          <span>Polaris-AI 深度可视化诊断大屏</span>
+          <span>{{ compact ? '分析报告' : 'Polaris-AI 深度可视化诊断大屏' }}</span>
         </div>
         <div class="banner-chip-group">
           <span class="banner-chip" v-if="metaInfo.code">编号: {{ metaInfo.code }}</span>
@@ -24,7 +24,7 @@
       <div v-if="displaySummary" class="summary-glass-card">
         <div class="card-header">
           <span class="header-icon glow-gold"><el-icon><opportunity /></el-icon></span>
-          <span class="header-title">高管极简摘要与决策研判 (Executive Summary)</span>
+          <span class="header-title">{{ compact ? '核心结论' : '高管极简摘要与决策研判 (Executive Summary)' }}</span>
         </div>
         <div class="summary-content">
           <p>{{ displaySummary }}</p>
@@ -98,23 +98,23 @@
       <div v-if="displaySwot" class="swot-matrix-card">
         <div class="card-header">
           <span class="header-icon glow-purple"><el-icon><grid /></el-icon></span>
-          <span class="header-title">{{ displaySwot.title || 'SWOT 综合态势研判矩阵' }}</span>
+          <span class="header-title">{{ displaySwot.title || (compact ? '综合态势分析' : 'SWOT 综合态势研判矩阵') }}</span>
         </div>
         <div class="swot-grid">
           <div class="swot-box swot-s">
-            <div class="swot-tag">S · 优势 (Strengths)</div>
+            <div class="swot-tag">{{ compact ? '优势' : 'S · 优势 (Strengths)' }}</div>
             <ul><li v-for="(item, i) in displaySwot.strengths" :key="i">{{ item }}</li></ul>
           </div>
           <div class="swot-box swot-w">
-            <div class="swot-tag">W · 劣势 (Weaknesses)</div>
+            <div class="swot-tag">{{ compact ? '劣势' : 'W · 劣势 (Weaknesses)' }}</div>
             <ul><li v-for="(item, i) in displaySwot.weaknesses" :key="i">{{ item }}</li></ul>
           </div>
           <div class="swot-box swot-o">
-            <div class="swot-tag">O · 机会 (Opportunities)</div>
+            <div class="swot-tag">{{ compact ? '机会' : 'O · 机会 (Opportunities)' }}</div>
             <ul><li v-for="(item, i) in displaySwot.opportunities" :key="i">{{ item }}</li></ul>
           </div>
           <div class="swot-box swot-t">
-            <div class="swot-tag">T · 威胁 (Threats)</div>
+            <div class="swot-tag">{{ compact ? '威胁' : 'T · 威胁 (Threats)' }}</div>
             <ul><li v-for="(item, i) in displaySwot.threats" :key="i">{{ item }}</li></ul>
           </div>
         </div>
@@ -124,7 +124,7 @@
       <div v-if="displayActionPlan && displayActionPlan.length > 0" class="action-plan-card">
         <div class="card-header">
           <span class="header-icon glow-emerald"><el-icon><check /></el-icon></span>
-          <span class="header-title">建议改进与行动计划看板 (Action Plan)</span>
+          <span class="header-title">{{ compact ? '建议行动计划' : '建议改进与行动计划看板 (Action Plan)' }}</span>
         </div>
         <el-table :data="displayActionPlan" border stripe style="width: 100%" class="action-table">
           <el-table-column label="优先级" prop="priority" width="95" align="center">
@@ -227,6 +227,14 @@ export default {
     structuredSchema: {
       type: Object,
       default: null
+    },
+    compact: {
+      type: Boolean,
+      default: false
+    },
+    colorMode: {
+      type: String,
+      default: 'light'
     },
     theme: {
       type: String,
@@ -379,6 +387,9 @@ export default {
     }
   },
   watch: {
+    colorMode() {
+      this.$nextTick(() => { if (!this.isUnmounted) this.initCharts() })
+    },
     displayCharts: {
       deep: true,
       handler() {
@@ -681,8 +692,22 @@ export default {
         const container = document.getElementById(`engine-vis-chart-${index}`)
         if (container && !this.isUnmounted) {
           try {
-            const chart = echarts.init(container)
+            const dark = this.colorMode === 'dark'
+            const chart = echarts.init(container, dark ? 'dark' : undefined)
             const option = this.buildEchartOption(block)
+            option.backgroundColor = 'transparent'
+            if (dark) {
+              const text = '#e2e8f0'
+              option.textStyle = { ...option.textStyle, color: text }
+              option.legend = { ...option.legend, textStyle: { color: text } }
+              option.tooltip = { ...option.tooltip, renderMode: 'richText', backgroundColor: '#172033', borderColor: '#334155', textStyle: { color: text } }
+              if (option.xAxis) option.xAxis.axisLabel = { ...option.xAxis.axisLabel, color: text }
+              if (option.yAxis) {
+                option.yAxis.axisLabel = { ...option.yAxis.axisLabel, color: text }
+                option.yAxis.splitLine = { lineStyle: { color: '#334155', type: 'dashed' } }
+              }
+              for (const series of option.series || []) series.label = { ...series.label, color: text }
+            }
             chart.setOption(option)
             this.chartInstances.push(chart)
           } catch (e) {

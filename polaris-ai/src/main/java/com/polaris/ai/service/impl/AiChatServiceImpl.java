@@ -3,9 +3,8 @@ package com.polaris.ai.service.impl;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.polaris.ai.attachment.AttachmentParserHelper;
 import com.polaris.ai.attachment.MultimodalMediaHelper;
-import com.polaris.ai.chat.AiAssistant;
-import com.polaris.ai.chat.CancellableStreamingChatCall;
 import com.polaris.ai.chat.CancellableStreamingChatModel;
+import com.polaris.ai.chat.DirectChatAssistant;
 import com.polaris.ai.chat.policy.DirectChatPolicy;
 import com.polaris.ai.chat.policy.DirectChatPolicyResolver;
 import com.polaris.ai.core.context.CallerContext;
@@ -13,12 +12,15 @@ import com.polaris.ai.core.context.CallerContextHolder;
 import com.polaris.ai.domain.AiConversation;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.helper.SsePushHelper;
+import com.polaris.ai.knowledge.ChatKnowledgeCitationValidator;
+import com.polaris.ai.knowledge.ChatKnowledgeEvidenceService;
+import com.polaris.ai.knowledge.ChatKnowledgeMessages;
+import com.polaris.ai.knowledge.ChatKnowledgeRetrievalException;
 import com.polaris.ai.mapper.AiChatMapper;
 import com.polaris.ai.modelcenter.runtime.*;
 import com.polaris.ai.modelcenter.service.ModelAggregateAccessGuard;
 import com.polaris.ai.modelcenter.service.ModelDefaultInternalService;
 import com.polaris.ai.observability.AiObservability;
-import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.safety.stream.StreamingModerationSession;
 import com.polaris.ai.service.IAiAgentService;
 import com.polaris.ai.service.IAiChatService;
@@ -29,8 +31,6 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.rag.content.retriever.ContentRetriever;
-import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.service.AiServices;
 import dev.langchain4j.service.TokenStream;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -49,8 +49,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
-
 /**
  * AI 对话 Service 实现类 —— 基于 LangChain4j
  * <p>
@@ -62,6 +60,9 @@ import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metad
 @Slf4j
 @Service
 public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation> implements IAiChatService {
+    @Autowired
+    private com.polaris.ai.agent.collaboration.ChatGenerationFence chatGenerationFence;
+    private static final java.util.concurrent.ConcurrentHashMap<Long,com.polaris.ai.agent.collaboration.ChatGenerationFence.Frame> ACTIVE_GENERATION_FRAMES=new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * 流式聊天语言模型
@@ -108,7 +109,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
     private IAiKnowledgeService knowledgeService;
 
     @Autowired
-    private AiVectorStoreResolver vectorStoreResolver;
+    private ChatKnowledgeEvidenceService knowledgeEvidence;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -187,7 +188,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (conv == null) {
             return new ArrayList<>();
         }
-        return aiChatMapper.selectMessagesByConversationId(conversationId);
+        var messages=aiChatMapper.selectMessagesByConversationId(conversationId);
+        if (messages==null) return new ArrayList<>();
+        knowledgeEvidence.restoreHistory(messages);
+        return messages;
     }
 
     @Override
@@ -222,6 +226,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (ownedConversation == null) {
             return 0;
         }
+        if(chatGenerationFence!=null)chatGenerationFence.cancelForDeletion(id,userId);
         aiChatMapper.deleteMessagesByConversationId(id);
         return aiChatMapper.deleteConversation(id, userId);
     }
@@ -236,6 +241,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (ownedIds == null || ownedIds.isEmpty()) {
             return 0;
         }
+        if(chatGenerationFence!=null)ownedIds.forEach(id->chatGenerationFence.cancelForDeletion(id,userId));
         aiChatMapper.deleteMessagesByConversationIds(ownedIds);
         return aiChatMapper.deleteConversationsBatch(ownedIds, userId);
     }
@@ -245,9 +251,10 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (conversationId == null || aiChatMapper.selectConversationById(conversationId, userId) == null) {
             return false;
         }
+        boolean persisted=chatGenerationFence!=null && chatGenerationFence.cancel(conversationId,userId);
         java.util.concurrent.atomic.AtomicBoolean cancellation = ACTIVE_CONVERSATIONS.get(conversationId);
         if (cancellation == null) {
-            return false;
+            return persisted;
         }
         cancellation.set(true);
         AiObservability.recordTerminal("cancelled");
@@ -257,6 +264,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
         // 使用 value 条件删除，防止旧流的完成回调误删随后启动的新流。
         ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+        closeGenerationFrame(conversationId,cancellation);
         return true;
     }
 
@@ -272,6 +280,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         if (cancelAction != null) {
             cancelAction.run();
         }
+        closeGenerationFrame(conversationId,cancellation);
     }
 
     // ----------------------------------------------------------------
@@ -295,7 +304,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             return;
         }
         chatInternal(request.conversationId(), request.message(), null, request.attachmentTokens(),
-                request.agentCode(), request.enableSearch(), userId, emitter, isCancelled);
+                request.agentCode(), request.enableSearch(), userId, emitter, isCancelled, request.relatedDocumentIds());
     }
 
     @Override
@@ -305,7 +314,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
 
     @Override
     public void chat(Long conversationId, String userInput, String fileUrl, String agentCode, Boolean enableSearch, Long userId, SseEmitter emitter, java.util.concurrent.atomic.AtomicBoolean isCancelled) {
-        chatInternal(conversationId, userInput, fileUrl, java.util.List.of(), agentCode, enableSearch, userId, emitter, isCancelled);
+        chatInternal(conversationId, userInput, fileUrl, java.util.List.of(), agentCode, enableSearch, userId, emitter, isCancelled, java.util.List.of());
     }
 
     private void chatInternal(
@@ -317,7 +326,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             Boolean enableSearch,
             Long userId,
             SseEmitter emitter,
-            java.util.concurrent.atomic.AtomicBoolean isCancelled) {
+            java.util.concurrent.atomic.AtomicBoolean isCancelled,
+            java.util.List<String> relatedDocumentIds) {
 
         if (conversationId == null || userInput == null || userInput.trim().isEmpty()) {
             if (sseHelper != null) {
@@ -344,6 +354,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
         }
 
         boolean streamStarted = false;
+        final java.util.concurrent.atomic.AtomicReference<com.polaris.ai.agent.collaboration.ChatGenerationFence.Frame> generationFrame=new java.util.concurrent.atomic.AtomicReference<>();
         try {
             // 1. 鉴权：会话必须属于当前用户
             AiConversation conv = aiChatMapper.selectConversationById(conversationId, userId);
@@ -354,6 +365,11 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 } catch (Exception ignored) {
                 }
                 return;
+            }
+
+            if(chatGenerationFence!=null) {
+                var frame=chatGenerationFence.enter(conversationId,userId,cancellation,()->cancelStream(conversationId,cancellation));
+                generationFrame.set(frame);if(frame!=null)ACTIVE_GENERATION_FRAMES.put(conversationId,frame);
             }
 
             // 2. 输入前置安全检测与附件准备
@@ -471,25 +487,39 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             AiKnowledgeBase accessibleKnowledgeBase = conv.getKnowledgeBaseId() == null
                     ? null : knowledgeService.selectAccessibleKnowledgeBaseById(conv.getKnowledgeBaseId());
             if (conv.getKnowledgeBaseId() != null && accessibleKnowledgeBase == null) {
-                log.warn(">>> 会话 {} 绑定了当前用户无权访问的知识库 {}，本次禁用 RAG",
-                        conversationId, conv.getKnowledgeBaseId());
+                throw new ChatKnowledgeRetrievalException("知识库不存在或访问权限已失效，请重新选择知识库");
             }
 
-            // 3.5 智能识别与动态挂载关联文档
-            Long accessibleKnowledgeBaseId = accessibleKnowledgeBase == null
-                    ? null : accessibleKnowledgeBase.getId();
-            com.polaris.ai.dto.DocumentRecognitionResult recResult = documentRecognitionService.recognizeAndMount(
+            // 3.5 在当前授权线程内只召回一次，不再由模型代理进行第二次检索。
+            throwIfChatCancelled(cancellation);
+            java.util.List<String> related = com.polaris.ai.knowledge.KnowledgeRetrievalService.validateRelatedPlan(relatedDocumentIds, java.util.List.of(), 50);
+            com.polaris.ai.dto.DocumentRecognitionResult recResult = related.isEmpty() ? documentRecognitionService.recognizeAndMount(
                     userInput, userId, accessibleKnowledgeBase == null ? null : accessibleKnowledgeBase.getDeptId(),
-                    accessibleKnowledgeBaseId);
+                    conv.getKnowledgeBaseId()) : documentRecognitionService.recognizeAndMount(userInput, userId,
+                    accessibleKnowledgeBase == null ? null : accessibleKnowledgeBase.getDeptId(), conv.getKnowledgeBaseId(), related);
+            throwIfChatCancelled(cancellation);
+            if (recResult == null) throw new ChatKnowledgeRetrievalException("知识库检索返回无效结果，本次未调用回答模型，请稍后重试");
+            documentRecognitionService.validateBeforeAnswer(accessibleKnowledgeBase, recResult.getRecognizedDocs());
+            if (!related.isEmpty()) {
+                var coverage = objectMapper.createObjectNode();
+                coverage.put("strategy", recResult.getRetrievalStrategy());
+                coverage.put("requestedDocumentCount", related.size());
+                coverage.put("mountedDocumentCount", related.size() - recResult.getMissingRelatedDocumentIds().size());
+                coverage.put("evidenceSupportVerified", false);
+                sseHelper.sendSse(emitter, "knowledge_coverage", objectMapper.writeValueAsString(coverage));
+            }
             if (recResult != null && recResult.isHasRecognizedDocs()) {
                 try {
                     String jsonDocs = objectMapper.writeValueAsString(recResult.getRecognizedDocs());
                     sseHelper.sendSse(emitter, "doc_recognized", jsonDocs);
-                    log.info(">>> [AiChatService] 自动识别挂载文档推送 SSE: {}", jsonDocs);
                 } catch (Exception e) {
                     log.error(">>> [AiChatService] 推送 doc_recognized SSE 事件异常", e);
                 }
+            } else if (accessibleKnowledgeBase != null) {
+                sseHelper.sendSse(emitter, "knowledge_retrieval", "{\"state\":\"EMPTY\",\"answerStopped\":true}");
+                throw new ChatKnowledgeRetrievalException("本轮知识库检索未找到可引用依据，已停止回答生成。请调整问题或指定文件；也可取消知识库关联后使用普通聊天。");
             }
+            final String citationArchive=ChatKnowledgeEvidenceService.encode(recResult.getKnowledgeCitations(),objectMapper);
 
             // Direct Chat 的业务策略不进入 Model Center Runtime。
             DirectChatPolicy directChatPolicy = directChatPolicyResolver.resolve(
@@ -498,32 +528,12 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             // 构建完整的消息上下文（SystemMessage + 历史消息）
             List<ChatMessage> messages = buildMessages(
                     conversationId, directChatPolicy, userMsg);
-            if (recResult != null && recResult.getFormattedContextPrompt() != null && !recResult.getFormattedContextPrompt().isEmpty()) {
-                messages.add(dev.langchain4j.data.message.SystemMessage.from(recResult.getFormattedContextPrompt()));
-            }
+            ChatKnowledgeMessages.appendToCurrentUser(messages, recResult.getFormattedContextPrompt());
             if (selectedAgent != null && selectedAgent.getSystemPrompt() != null && !selectedAgent.getSystemPrompt().trim().isEmpty()) {
                 messages.add(0, dev.langchain4j.data.message.SystemMessage.from(selectedAgent.getSystemPrompt()));
             }
-
-            // 4.1 判断是否需要启用向量检索器
-            ContentRetriever contentRetriever = null;
-            if (accessibleKnowledgeBase != null
-                    && "READY".equalsIgnoreCase(accessibleKnowledgeBase.getIndexStatus())) {
-                log.info(">>> 会话关联知识库ID: {}, 启用 RAG 向量检索...", accessibleKnowledgeBase.getId());
-                AiVectorStoreResolver.VectorContext vectorContext = vectorStoreResolver.resolve(accessibleKnowledgeBase);
-                contentRetriever = EmbeddingStoreContentRetriever.builder()
-                        .embeddingStore(vectorContext.embeddingStore())
-                        .embeddingModel(vectorContext.embeddingModel())
-                        .maxResults(accessibleKnowledgeBase.getRetrievalTopK() == null
-                                ? 5 : accessibleKnowledgeBase.getRetrievalTopK())
-                        .minScore(accessibleKnowledgeBase.getRetrievalMinScore() == null
-                                ? 0.5 : accessibleKnowledgeBase.getRetrievalMinScore())
-                        .filter(metadataKey("knowledge_base_id")
-                                .isEqualTo(accessibleKnowledgeBase.getId().toString()))
-                        .build();
-            } else if (accessibleKnowledgeBase != null) {
-                log.warn(">>> 知识库 {} 索引状态为 {}，本次禁用 RAG",
-                        accessibleKnowledgeBase.getId(), accessibleKnowledgeBase.getIndexStatus());
+            if (accessibleKnowledgeBase != null && recResult.isHasRecognizedDocs()) {
+                ChatKnowledgeMessages.applyCitationScopePolicy(messages);
             }
 
             // 5. 使用 AiServices 动态构建代理并注册工具类
@@ -584,8 +594,8 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     }
                 }
 
-                boolean plainChat = tools.isEmpty() && contentRetriever == null;
-                boolean useModelCenterRuntime = plainChat;
+                // 上下文已就绪；无工具时知识库问答与普通聊天都使用可取消的统一 Runtime。
+                boolean useModelCenterRuntime = tools.isEmpty();
                 Long targetModelId = selectedAgent != null
                         ? selectedAgent.getModelConfigId()
                         : conv.getModelConfigId();
@@ -673,7 +683,15 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                                     }
                                                 }
                                             }
-                                            aiChatMapper.insertMessage(aiMsg);
+                                            if ("SAFE".equals(aiMsg.getModerationStatus())) {
+                                                aiMsg.setKnowledgeCitations(citationArchive);
+                                                aiMsg.setCitationValidation(ChatKnowledgeCitationValidator.evaluate(aiMsg.getContent(),recResult.getKnowledgeCitations()));
+                                            }
+                                            if (aiChatMapper.insertMessage(aiMsg)==1 && aiMsg.getId()!=null && citationArchive!=null
+                                                    && "SAFE".equals(aiMsg.getModerationStatus())) {
+                                                sseHelper.sendSse(emitter,"citation_validation",objectMapper.writeValueAsString(aiMsg.getCitationValidation()));
+                                                sseHelper.sendSse(emitter,"message_saved","{\"messageId\":"+aiMsg.getId()+"}");
+                                            }
                                         }
                                     } catch (Exception e) {
                                         log.error("持久化 AI 消息回复异常, conversationId={}", conversationId, e);
@@ -706,11 +724,14 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                 return;
                             }
                             try {
+                                if(generationFrame.get()!=null)generationFrame.get().check();
+                                throwIfChatCancelled(cancellation);
                                 moderatedHandler.onComplete(totalTokens);
                             } finally {
                                 clearActiveChatCall(conversationId, activeCallRef);
                                 com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                                 ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                                closeGenerationFrame(conversationId,cancellation);
                                 try {
                                     emitter.complete();
                                 } catch (Exception ignored) {
@@ -734,6 +755,7 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     }
                     com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
                     ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                    closeGenerationFrame(conversationId,cancellation);
                     if (!cancellation.get() && sseHelper != null) {
                         sseHelper.sendSse(emitter, "error", chatErrorMessage(error));
                     }
@@ -743,6 +765,9 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     }
                 };
 
+                throwIfChatCancelled(cancellation);
+                // 工具路由/模型准备可能耗时；发往回答模型前再次校验，不重新 Embedding。
+                documentRecognitionService.validateBeforeAnswer(accessibleKnowledgeBase, recResult.getRecognizedDocs());
                 throwIfChatCancelled(cancellation);
                 if (useModelCenterRuntime) {
                     ChatRequest runtimeRequest = ChatRequest.builder()
@@ -771,37 +796,6 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                                             cancelAction.run();
                                         }
                                     }));
-                } else if (tools.isEmpty() && contentRetriever == null) {
-                    // 无工具和知识库检索时使用响应式接口，使取消操作能够下传到底层订阅。
-                    CancellableStreamingChatCall activeCall = CancellableStreamingChatCall.start(
-                            targetChatModel, messages, new dev.langchain4j.model.chat.response.StreamingChatResponseHandler() {
-                                @Override
-                                public void onPartialResponse(String response) {
-                                    partialResponse.accept(response);
-                                }
-
-                                @Override
-                                public void onPartialThinking(dev.langchain4j.model.chat.response.PartialThinking thinking) {
-                                    partialThinking.accept(thinking);
-                                }
-
-                                @Override
-                                public void onCompleteResponse(dev.langchain4j.model.chat.response.ChatResponse response) {
-                                    completeResponse.accept(response);
-                                }
-
-                                @Override
-                                public void onError(Throwable error) {
-                                    streamError.accept(error);
-                                }
-                            }, aiTaskExecutor);
-                    Runnable cancelAction = activeCall::cancel;
-                    activeCallRef.set(cancelAction);
-                    ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
-                    if (terminalCallbackHandled.get() || cancellation.get()) {
-                        ACTIVE_STREAM_CANCEL_ACTIONS.remove(conversationId, cancelAction);
-                        if (!activeCall.isTerminated()) activeCall.cancel();
-                    }
                 } else {
                     // 声明式代理的每一轮模型请求都通过可取消装饰器，客户端断开时立即取消底层订阅。
                     CancellableStreamingChatModel cancellableModel =
@@ -809,14 +803,13 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                     Runnable cancelAction = cancellableModel::cancel;
                     activeCallRef.set(cancelAction);
                     ACTIVE_STREAM_CANCEL_ACTIONS.put(conversationId, cancelAction);
-                    AiServices<AiAssistant> builder = AiServices.builder(AiAssistant.class)
+                    AiServices<DirectChatAssistant> builder = AiServices.builder(DirectChatAssistant.class)
                             .streamingChatModel(cancellableModel)
+                            .chatMemory(ChatKnowledgeMessages.historyMemory(messages))
                             .tools(tools);
-                    if (contentRetriever != null) {
-                        builder.contentRetriever(contentRetriever);
-                    }
-                    AiAssistant assistant = builder.build();
-                    TokenStream tokenStream = assistant.chat(messages);
+                    DirectChatAssistant assistant = builder.build();
+                    UserMessage currentUser = (UserMessage) messages.get(messages.size() - 1);
+                    TokenStream tokenStream = assistant.chat(currentUser.contents());
                     tokenStream.onPartialResponse(partialResponse)
                             .onPartialThinking(partialThinking)
                             .beforeToolExecution(ignored -> throwIfChatCancelled(cancellation))
@@ -830,10 +823,18 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
                 com.polaris.ai.utils.ChatContextHolder.clearThreadContext();
             }
         } catch (Exception e) {
-            log.error("执行 AI 对话发生系统异常: conversationId={}", conversationId, e);
+            boolean cancelled = cancellation.get() || e instanceof java.util.concurrent.CancellationException;
+            if (cancelled) {
+                log.info(">>> 会话 {} 的 AI 请求已取消", conversationId);
+            } else if (e instanceof ChatKnowledgeRetrievalException) {
+                log.warn(">>> 会话 {} 的知识库请求已停止: {}", conversationId, e.getMessage());
+            } else {
+                log.error("执行 AI 对话发生系统异常: conversationId={}", conversationId, e);
+            }
             com.polaris.ai.utils.ChatContextHolder.clearTasks(conversationId);
             ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
-            sseHelper.sendSse(emitter, "error", chatErrorMessage(e));
+            closeGenerationFrame(conversationId,cancellation);
+            if (!cancelled) sseHelper.sendSse(emitter, "error", chatErrorMessage(e));
             try {
                 emitter.complete();
             } catch (Exception ignored) {
@@ -842,11 +843,20 @@ public class AiChatServiceImpl extends ServiceImpl<AiChatMapper, AiConversation>
             // 异步流启动成功后由 onComplete/onError 释放；所有前置校验、审核拦截和初始化失败路径在此释放。
             if (!streamStarted) {
                 ACTIVE_CONVERSATIONS.remove(conversationId, cancellation);
+                closeGenerationFrame(conversationId,cancellation);
             }
         }
     }
 
+    private void closeGenerationFrame(Long conversation,java.util.concurrent.atomic.AtomicBoolean cancellation) {
+        var frame=ACTIVE_GENERATION_FRAMES.get(conversation);
+        if(frame!=null && frame.owns(cancellation) && ACTIVE_GENERATION_FRAMES.remove(conversation,frame)) {
+            try {frame.close();}catch(RuntimeException unavailable) { /* 许可已经本地失效，数据库占用按原租约到期收敛，不重跑。 */ }
+        }
+    }
+
     private String chatErrorMessage(Throwable error) {
+        if (error instanceof ChatKnowledgeRetrievalException) return error.getMessage();
         String message = String.valueOf(error.getMessage());
         if (message.contains("FEATURE_NOT_ENABLED")) {
             String feature = message.contains("TOOL_CALLING") ? "工具调用"

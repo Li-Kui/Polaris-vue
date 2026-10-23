@@ -2,6 +2,7 @@ package com.polaris.ai.workflow.compiler;
 
 import com.polaris.ai.workflow.contract.WorkflowErrorCategory;
 import com.polaris.ai.workflow.contract.WorkflowErrorCode;
+import com.polaris.ai.workflow.contract.WorkflowMcpNodeContract;
 import com.polaris.ai.workflow.contract.WorkflowSchemaVersions;
 import com.polaris.ai.workflow.definition.WorkflowDefinitionSpec;
 import com.polaris.ai.workflow.definition.WorkflowDiagnostic;
@@ -168,6 +169,24 @@ public class WorkflowDefinitionValidator {
                         path + ".onError", "写节点不能使用SKIP错误策略"));
             }
             validateRetry(node, path, diagnostics);
+            if (WorkflowMcpNodeContract.TYPE.equals(node.getType())) {
+                try { WorkflowMcpNodeContract.snapshotVersion(node.getConfig()); }
+                catch (IllegalArgumentException ignored) {
+                    diagnostics.add(error("MCP_TOOL_SNAPSHOT_REQUIRED", nodeId, path + ".config", "请先选择当前已审批MCP工具并确认版本快照"));
+                }
+                if (node.getRetryPolicy() != null && !Integer.valueOf(1).equals(node.getRetryPolicy().getMaxAttempts())) {
+                    diagnostics.add(error("MCP_NODE_RETRY_NOT_ALLOWED", nodeId, path + ".retryPolicy", "MCP节点只能尝试一次，不允许自动重试"));
+                }
+                if (node.getOutputSchemaOverride() != null && !node.getOutputSchemaOverride().isNull()) {
+                    diagnostics.add(error("MCP_OUTPUT_OVERRIDE_NOT_ALLOWED", nodeId, path + ".outputSchemaOverride", "MCP输出契约来自已审批工具，不能覆盖以绕过契约校验"));
+                }
+                var references = node.getResourceRefs();
+                if (references == null || references.size() != 1 || references.get(0) == null
+                        || !"MCP_TOOL".equals(references.get(0).getKind())
+                        || !Boolean.TRUE.equals(references.get(0).getRequired())) {
+                    diagnostics.add(error("MCP_TOOL_BINDING_REQUIRED", nodeId, path + ".resourceRefs", "MCP节点必须且只能显式绑定一个必需工具"));
+                }
+            }
             if ("image".equals(node.getType()) && node.getRetryPolicy() != null
                     && node.getRetryPolicy().getMaxAttempts() != null
                     && node.getRetryPolicy().getMaxAttempts() > 1) {
@@ -240,6 +259,23 @@ public class WorkflowDefinitionValidator {
             WorkflowDefinitionSpec.Node node, String path,
             List<WorkflowDiagnostic> diagnostics) {
         if (!"agent".equals(node.getType()) || node.getConfig() == null) return;
+        if ("2.0".equals(node.getTypeVersion())) {
+            if (node.getRetryPolicy() != null && !Integer.valueOf(1).equals(node.getRetryPolicy().getMaxAttempts()))
+                diagnostics.add(error("AGENT_RETRY_NOT_ALLOWED", node.getId(), path + ".retryPolicy", "协作智能体只能尝试一次，不允许自动重试"));
+            if (node.getOutputSchemaOverride() != null && !node.getOutputSchemaOverride().isNull())
+                diagnostics.add(error("AGENT_OUTPUT_OVERRIDE_NOT_ALLOWED", node.getId(), path + ".outputSchemaOverride", "协作输出契约不能被覆盖或以历史样本替代"));
+            try { com.polaris.ai.workflow.contract.WorkflowAgentNodeContract.snapshotVersion(node.getConfig()); }
+            catch (RuntimeException invalid) { diagnostics.add(error("AGENT_SNAPSHOT_INVALID", node.getId(), path + ".config", "请确认当前 Agent 及知识快照")); }
+            var refs = node.getResourceRefs() == null ? List.<WorkflowDefinitionSpec.ResourceRef>of() : node.getResourceRefs();
+            if (refs.stream().filter(ref -> "AGENT".equals(ref.getKind())).count() != 1
+                    || refs.stream().filter(ref -> "KNOWLEDGE_BASE".equals(ref.getKind())).count() > 1
+                    || refs.stream().anyMatch(ref -> !Set.of("AGENT", "KNOWLEDGE_BASE").contains(ref.getKind()) || !Boolean.TRUE.equals(ref.getRequired()))
+                    || node.getConfig().has("knowledgeId") != refs.stream().anyMatch(ref -> "KNOWLEDGE_BASE".equals(ref.getKind())))
+                diagnostics.add(error("AGENT_RESOURCE_SCOPE_INVALID", node.getId(), path + ".resourceRefs", "仅允许一个必需 Agent 和至多一个显式绑定的必需知识库"));
+            if (node.getInputMapping() == null || !node.getInputMapping().containsKey("question"))
+                diagnostics.add(error("AGENT_QUESTION_REQUIRED", node.getId(), path + ".inputMapping", "请显式映射本次问题 question"));
+            return;
+        }
         boolean hasTask = !node.getConfig().path("task").asString("").trim().isEmpty();
         boolean hasInput = node.getInputMapping() != null && !node.getInputMapping().isEmpty();
         if (!hasTask && !hasInput) {
@@ -713,7 +749,7 @@ public class WorkflowDefinitionValidator {
             diagnostics.add(error("RETRY_ATTEMPTS_INVALID", node.getId(),
                     path + ".retryPolicy.maxAttempts", "最大尝试次数必须在1到10之间"));
         }
-        if (!Set.of("FIXED", "EXPONENTIAL").contains(retry.getBackoff())) {
+        if (retry.getBackoff() == null || !Set.of("FIXED", "EXPONENTIAL").contains(retry.getBackoff())) {
             diagnostics.add(error("RETRY_BACKOFF_INVALID", node.getId(),
                     path + ".retryPolicy.backoff", "重试退避类型无效"));
         }
@@ -1502,7 +1538,8 @@ public class WorkflowDefinitionValidator {
                 return;
             }
             boolean expression = !isBlank(binding.getExpression());
-            boolean literal = binding.getValue() != null;
+            // POJO 往返序列化会为表达式补上 value:null；仍保留独立 null 常量的语义。
+            boolean literal = binding.getValue() != null && (!expression || !binding.getValue().isNull());
             if (expression == literal) {
                 diagnostics.add(error("VALUE_BINDING_AMBIGUOUS", nodeId, path + "." + key,
                         "映射必须且只能配置expression或value之一"));

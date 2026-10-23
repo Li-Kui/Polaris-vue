@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.polaris.platform.mapper.PlatformMcpToolMapper">
+    <resultMap id="McpToolResult" type="com.polaris.platform.domain.PlatformMcpTool">
+        <id property="id" column="id" />
+        <result property="tenantId" column="tenant_id" />
+        <result property="connectionId" column="connection_id" />
+        <result property="toolName" column="tool_name" />
+        <result property="toolTitle" column="tool_title" />
+        <result property="description" column="description" />
+        <result property="inputSchema" column="input_schema" />
+        <result property="outputSchema" column="output_schema" />
+        <result property="definitionJson" column="definition_json" />
+        <result property="structureHash" column="structure_hash" />
+        <result property="revision" column="revision" />
+        <result property="connectionEpoch" column="connection_epoch" />
+        <result property="catalogStatus" column="catalog_status" />
+        <result property="reviewStatus" column="review_status" />
+        <result property="enabled" column="enabled" />
+        <result property="classification" column="classification" />
+        <result property="schemaSupported" column="schema_supported" />
+        <result property="schemaError" column="schema_error" />
+        <result property="reviewedRevision" column="reviewed_revision" />
+        <result property="reviewedBy" column="reviewed_by" />
+        <result property="reviewedTime" column="reviewed_time" />
+        <result property="reviewNote" column="review_note" />
+        <result property="lastSeenTime" column="last_seen_time" />
+        <result property="createBy" column="create_by" />
+        <result property="createTime" column="create_time" />
+        <result property="updateBy" column="update_by" />
+        <result property="updateTime" column="update_time" />
+    </resultMap>
+    <sql id="columns">
+        select id, tenant_id, connection_id, tool_name, tool_title, description,
+               input_schema, output_schema, definition_json, structure_hash, revision,
+               connection_epoch, catalog_status, review_status, enabled, classification,
+               schema_supported, schema_error, reviewed_revision, reviewed_by,
+               reviewed_time, review_note, last_seen_time, create_by, create_time, update_by, update_time
+        from platform_mcp_tool
+    </sql>
+    <select id="selectWorkflowResources" resultMap="McpToolResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId}
+        order by connection_id, tool_name, id
+        limit 2000
+    </select>
+    <select id="selectByConnection" resultMap="McpToolResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId} and connection_id = #{connectionId}
+        <if test="catalogStatus != null and catalogStatus != ''">and catalog_status = #{catalogStatus}</if>
+        order by tool_name, id
+    </select>
+    <select id="selectByNames" resultMap="McpToolResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId} and connection_id = #{connectionId}
+        <choose>
+            <when test="names != null and names.size() > 0">
+                and tool_name in <foreach collection="names" item="name" open="(" separator="," close=")">#{name}</foreach>
+            </when>
+            <otherwise>and 1 = 0</otherwise>
+        </choose>
+    </select>
+    <update id="markMissing">
+        update platform_mcp_tool set catalog_status = 'MISSING', review_status = 'PENDING', enabled = '1',
+            classification = null, reviewed_revision = null, reviewed_by = null, reviewed_time = null,
+            review_note = null, revision = revision + 1, update_by = #{operator}, update_time = sysdate()
+        where tenant_id = #{tenantId} and connection_id = #{connectionId} and catalog_status != 'MISSING'
+        <if test="names != null and names.size() > 0">
+            and tool_name not in <foreach collection="names" item="name" open="(" separator="," close=")">#{name}</foreach>
+        </if>
+    </update>
+    <select id="selectById" resultMap="McpToolResult">
+        <include refid="columns" />
+        where tenant_id = #{tenantId} and id = #{id}
+    </select>
+    <select id="countByConnection" resultType="long">
+        select count(*) from platform_mcp_tool where tenant_id = #{tenantId} and connection_id = #{connectionId}
+    </select>
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into platform_mcp_tool
+        (tenant_id, connection_id, tool_name, tool_title, description, input_schema, output_schema,
+         definition_json, structure_hash, revision, connection_epoch, catalog_status,
+         review_status, enabled, schema_supported, schema_error, last_seen_time, create_by, create_time)
+        values
+        (#{tenantId}, #{connectionId}, #{toolName}, #{toolTitle}, #{description}, #{inputSchema}, #{outputSchema},
+         #{definitionJson}, #{structureHash}, 1, #{connectionEpoch}, 'PRESENT', 'PENDING', '1',
+         #{schemaSupported}, #{schemaError}, sysdate(), #{createBy}, sysdate())
+    </insert>
+    <update id="update">
+        update platform_mcp_tool set tool_title = #{toolTitle}, description = #{description},
+            input_schema = #{inputSchema}, output_schema = #{outputSchema}, definition_json = #{definitionJson},
+            structure_hash = #{structureHash}, connection_epoch = #{connectionEpoch},
+            catalog_status = #{catalogStatus}, review_status = #{reviewStatus}, enabled = #{enabled},
+            classification = #{classification}, schema_supported = #{schemaSupported}, schema_error = #{schemaError},
+            reviewed_revision = #{reviewedRevision}, reviewed_by = #{reviewedBy}, reviewed_time = #{reviewedTime},
+            review_note = #{reviewNote}, last_seen_time = #{lastSeenTime}, revision = revision + 1,
+            update_by = #{updateBy}, update_time = sysdate()
+        where tenant_id = #{tenantId} and connection_id = #{connectionId} and id = #{id} and revision = #{revision}
+    </update>
+    <update id="markSeen">
+        update platform_mcp_tool set last_seen_time = sysdate()
+        where tenant_id = #{tenantId} and id = #{id}
+    </update>
+    <update id="invalidateByConnection">
+        update platform_mcp_tool set catalog_status = 'STALE', review_status = 'PENDING', enabled = '1',
+            classification = null, reviewed_revision = null, reviewed_by = null,
+            reviewed_time = null, review_note = null, revision = revision + 1, update_time = sysdate()
+        where tenant_id = #{tenantId} and connection_id = #{connectionId}
+    </update>
+</mapper>

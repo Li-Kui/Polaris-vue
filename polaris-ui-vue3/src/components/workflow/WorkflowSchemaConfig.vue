@@ -18,6 +18,8 @@
         :model-value="modelValue?.[field.name] || {}"
         :disabled="disabled"
         :nested-objects="true"
+        :compact="compact"
+        :teleported="teleported"
         @update:model-value="update(field.name, $event)"
         @validation="nestedValidationChanged(field.name, $event)"
       />
@@ -25,6 +27,7 @@
         v-else-if="field.schema.enum"
         :model-value="modelValue?.[field.name]"
         :disabled="disabled"
+        :teleported="teleported"
         clearable
         style="width: 100%"
         @change="update(field.name, $event)"
@@ -32,7 +35,7 @@
         <el-option
           v-for="option in field.schema.enum"
           :key="String(option)"
-          :label="String(option)"
+          :label="compact ? workflowOptionLabel(option) : String(option)"
           :value="option"
         />
       </el-select>
@@ -50,6 +53,7 @@
         v-else-if="field.schema.type === 'array' && field.schema.items?.type === 'string'"
         :model-value="modelValue?.[field.name] || []"
         :disabled="disabled"
+        :teleported="teleported"
         multiple
         filterable
         allow-create
@@ -68,11 +72,11 @@
         <el-input
           :model-value="jsonDrafts[field.name]"
           :disabled="disabled"
-          :placeholder="field.schema.placeholder"
+          :placeholder="field.schema.placeholder || (compact ? `请输入${fieldLabel(field).replace(/ \*$/, '')}，格式为 JSON${field.schema.type === 'array' ? ' 数组' : ' 对象'}` : undefined)"
           :aria-label="fieldLabel(field)"
           :aria-invalid="Boolean(jsonErrors[field.name])"
           type="textarea"
-          :rows="10"
+          :rows="compact ? 4 : 10"
           @input="updateJson(field.name, $event)"
         />
         <div v-if="jsonErrors[field.name]" class="field-error" role="alert">
@@ -108,6 +112,8 @@
 </template>
 
 <script>
+import {workflowDisplayLabel, workflowOptionLabel} from '@/utils/workflowDisplayLabels'
+
 export default {
   name: 'WorkflowSchemaConfig',
   props: {
@@ -128,6 +134,14 @@ export default {
       default: () => ({})
     },
     showType: {
+      type: Boolean,
+      default: false
+    },
+    teleported: {
+      type: Boolean,
+      default: true
+    },
+    compact: {
       type: Boolean,
       default: false
     },
@@ -186,6 +200,7 @@ export default {
     }
   },
   methods: {
+    workflowOptionLabel,
     isNestedField(field) {
       return this.nestedObjects && field.schema.type === 'object' && field.schema.properties && !field.schema.enum
     },
@@ -199,7 +214,8 @@ export default {
         systemPrompt: '系统提示词',
         additionalSystemPrompt: '补充系统提示词'
       }
-      const label = field.schema.title || fallbackLabels[field.name] || field.name
+      const label = this.compact ? workflowDisplayLabel(field.name, field.schema.title)
+        : field.schema.title || fallbackLabels[field.name] || field.name
       return this.requiredFields.has(field.name) ? `${label} *` : label
     },
     fieldValue(field) {

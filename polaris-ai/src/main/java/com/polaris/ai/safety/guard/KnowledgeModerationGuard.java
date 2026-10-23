@@ -1,5 +1,6 @@
 package com.polaris.ai.safety.guard;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.safety.dto.ModerationRequest;
@@ -132,9 +133,15 @@ public class KnowledgeModerationGuard {
         }
 
         if (moderation.isAllowed()) {
+            // 检测期间发生隔离/删除时，迟到的 ALLOW 不得恢复 SAFE。
+            int changed = documentMapper.update(null, new LambdaUpdateWrapper<AiDocument>()
+                    .eq(AiDocument::getId, doc.getId()).eq(AiDocument::getKnowledgeBaseId, doc.getKnowledgeBaseId())
+                    .eq(AiDocument::getStatus, "1").eq(AiDocument::getModerationStatus, "SCANNING")
+                    .set(AiDocument::getModerationStatus, "SAFE")
+                    .set(AiDocument::getModerationVersion, moderation.dictionaryVersion()));
+            if (changed != 1) throw new IllegalStateException("文档安全状态已变化，停止导入");
             doc.setModerationStatus("SAFE");
             doc.setModerationVersion(moderation.dictionaryVersion());
-            documentMapper.updateById(doc);
         } else {
             quarantineService.quarantine(doc, moderation, sourceFile);
         }

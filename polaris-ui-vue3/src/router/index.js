@@ -86,6 +86,18 @@ export const constantRoutes = [
     ]
   },
   {
+    path: '/platform/visitor/:code',
+    component: () => import('@/views/platform/customerService/CustomerVisitorEntry.vue'),
+    hidden: true,
+    meta: { title: '在线客服' }
+  },
+  {
+    path: '/platform/customer/:code',
+    component: () => import('@/views/platform/customerService/CustomerEntry.vue'),
+    hidden: true,
+    meta: { title: '客服文字接待' }
+  },
+  {
     path: '/app/:shareCode',
     component: () => import('@/views/workflowApp/RuntimePage.vue'),
     hidden: true,
@@ -149,6 +161,12 @@ export const constantRoutes = [
         meta: { title: '智能体编排', icon: 'user' }
       },
       {
+        path: 'customer-service',
+        component: () => import('@/views/platform/customerService/index.vue'),
+        name: 'PlatformCustomerService',
+        meta: { title: '数字人客服', icon: 'chat', requiresTenantAdmin: true }
+      },
+      {
         path: 'workflow',
         component: () => import('@/views/platform/workflow/index.vue'),
         name: 'PlatformWorkflow',
@@ -177,6 +195,12 @@ export const constantRoutes = [
         component: () => import('@/views/platform/connector/index.vue'),
         name: 'PlatformConnector',
         meta: { title: 'API 连接器', icon: 'connection' }
+      },
+      {
+        path: 'mcp',
+        component: () => import('@/views/platform/mcp/index.vue'),
+        name: 'PlatformMcp',
+        meta: { title: 'MCP 连接', icon: 'connection' }
       },
       {
         path: 'user',

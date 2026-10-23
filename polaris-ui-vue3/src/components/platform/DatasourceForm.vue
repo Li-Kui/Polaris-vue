@@ -38,21 +38,22 @@
         </el-form-item>
         <el-form-item
           v-if="editing && form.passwordConfigured && form.credentialAction === 'KEEP'"
-          label="账号密码"
+          label="数据库密码"
         >
-          <el-alert
-            title="密码已配置"
-            type="success"
-            :closable="false"
-            show-icon
-            class="credential-alert"
-          >
-            <template #default>
-              <el-button link type="primary" @click="replacePassword">更换密码</el-button>
-            </template>
-          </el-alert>
+          <div class="credential-status" role="status">
+            <el-icon class="credential-status__icon"><CircleCheckFilled /></el-icon>
+            <div class="credential-status__copy">
+              <strong>密码已配置</strong>
+              <span>已安全保存，无需重复输入</span>
+            </div>
+            <button
+              type="button"
+              class="credential-status__action"
+              @click="replacePassword"
+            >更换密码</button>
+          </div>
         </el-form-item>
-        <el-form-item v-else label="账号密码" prop="credential.password">
+        <el-form-item v-else label="数据库密码" prop="credential.password">
           <el-input
             v-model="form.credential.password"
             type="password"
@@ -72,18 +73,36 @@
     </section>
 
     <el-collapse class="advanced-settings">
-      <el-collapse-item title="SSL 与超时设置" name="advanced">
+      <el-collapse-item name="advanced">
+        <template #title>
+          <span class="advanced-settings__title">SSL 与超时设置</span>
+        </template>
         <section class="form-section advanced-section">
           <el-form-item label="标准 SSL">
-            <el-switch v-model="form.sslEnabled" active-text="启用" inactive-text="关闭" />
+            <el-switch
+              v-model="form.sslEnabled"
+              active-text="启用"
+              inactive-text="关闭"
+              class="ssl-switch"
+            />
           </el-form-item>
           <div class="field-grid">
             <el-form-item label="连接超时">
-              <el-input-number v-model="form.connectTimeoutSeconds" :min="1" :max="30" />
+              <el-input-number
+                v-model="form.connectTimeoutSeconds"
+                :min="1"
+                :max="30"
+                class="timeout-number"
+              />
               <span class="unit">秒</span>
             </el-form-item>
             <el-form-item label="查询超时">
-              <el-input-number v-model="form.queryTimeoutSeconds" :min="1" :max="30" />
+              <el-input-number
+                v-model="form.queryTimeoutSeconds"
+                :min="1"
+                :max="30"
+                class="timeout-number"
+              />
               <span class="unit">秒</span>
             </el-form-item>
           </div>
@@ -95,6 +114,7 @@
 
 <script setup>
 import {ref} from 'vue'
+import {CircleCheckFilled} from '@element-plus/icons-vue'
 
 const props = defineProps({
   form: {type: Object, required: true},
@@ -187,9 +207,76 @@ defineExpose({validate, buildPayload})
   grid-template-columns: minmax(0, 1fr) 150px;
 }
 
-.credential-alert {
+.credential-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
   width: 100%;
-  min-height: 32px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--el-color-success-light-7);
+  border-radius: 10px;
+  background: var(--el-color-success-light-9);
+}
+
+.credential-status__icon {
+  color: var(--el-color-success);
+  font-size: 20px;
+}
+
+.credential-status__copy {
+  min-width: 0;
+
+  strong,
+  span {
+    display: block;
+  }
+
+  strong {
+    color: var(--el-text-color-primary);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  span {
+    margin-top: 2px;
+    color: var(--el-text-color-secondary);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+}
+
+.credential-status__action {
+  appearance: none;
+  height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #4f46e5;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+
+  &:hover,
+  &:focus {
+    background: rgba(79, 70, 229, 0.1);
+    color: #3730a3;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(79, 70, 229, 0.42);
+    outline-offset: 1px;
+  }
+
+  &:active {
+    background: rgba(79, 70, 229, 0.16);
+    color: #312e81;
+  }
 }
 
 .credential-heading {
@@ -216,12 +303,136 @@ defineExpose({validate, buildPayload})
 }
 
 .advanced-settings {
-  border-top: 1px solid var(--el-border-color-lighter);
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  --advanced-border: rgba(79, 70, 229, 0.2);
+  --advanced-bg: rgba(79, 70, 229, 0.065);
+  --advanced-body-bg: rgba(255, 255, 255, 0.58);
+
+  overflow: hidden;
+  margin-top: 2px;
+  border: 1px solid var(--advanced-border);
+  border-radius: 12px;
+  background: var(--advanced-bg);
+  box-shadow: 0 8px 22px -18px rgba(79, 70, 229, 0.7);
+
+  :deep(.el-collapse-item__header) {
+    min-height: 50px;
+    padding: 0 16px;
+    border-bottom: 0;
+    background: transparent;
+    color: var(--el-text-color-primary);
+    transition: background-color 0.2s ease;
+
+    &:hover {
+      background: rgba(79, 70, 229, 0.08);
+    }
+  }
+
+  :deep(.el-collapse-item__arrow) {
+    margin-left: auto;
+    color: #6366f1;
+  }
+
+  :deep(.el-collapse-item__wrap) {
+    border-top: 1px solid var(--advanced-border);
+    border-bottom: 0;
+    background: var(--advanced-body-bg);
+  }
+
+  :deep(.el-collapse-item__content) {
+    padding: 16px;
+  }
+}
+
+.advanced-settings__title {
+  color: var(--el-text-color-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
 }
 
 .advanced-section {
-  padding: 4px 2px 8px;
+  padding: 0;
+}
+
+.ssl-switch {
+  --el-switch-on-color: #4f46e5;
+  --el-switch-off-color: #cbd5e1;
+
+  :deep(.el-switch__core) {
+    border-color: #cbd5e1 !important;
+    background-color: #cbd5e1 !important;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+  }
+
+  :deep(.el-switch__action) {
+    background-color: #ffffff !important;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.24);
+  }
+
+  :deep(.el-switch__label) {
+    color: var(--el-text-color-regular) !important;
+    font-weight: 600;
+    opacity: 1;
+  }
+
+  :deep(.el-switch__label.is-active) {
+    color: #4f46e5 !important;
+    font-weight: 700;
+  }
+
+  &.is-checked :deep(.el-switch__core) {
+    border-color: #4f46e5 !important;
+    background-color: #4f46e5 !important;
+  }
+}
+
+.timeout-number {
+  :deep(.el-input-number__decrease),
+  :deep(.el-input-number__increase) {
+    border-color: var(--el-border-color) !important;
+    background: var(--el-fill-color-light) !important;
+    color: var(--el-text-color-regular) !important;
+    opacity: 1;
+
+    &:hover {
+      color: #4f46e5 !important;
+    }
+  }
+}
+
+:global(.dark) .ssl-switch,
+:global(.theme-dark) .ssl-switch {
+  --el-switch-on-color: #38bdf8;
+  --el-switch-off-color: #475569;
+
+  :deep(.el-switch__core) {
+    border-color: #475569 !important;
+    background-color: #475569 !important;
+  }
+
+  :deep(.el-switch__label.is-active) {
+    color: #38bdf8 !important;
+  }
+
+  &.is-checked :deep(.el-switch__core) {
+    border-color: #38bdf8 !important;
+    background-color: #38bdf8 !important;
+  }
+}
+
+:global(.dark) .advanced-settings,
+:global(.theme-dark) .advanced-settings {
+  --advanced-border: rgba(56, 189, 248, 0.22);
+  --advanced-bg: rgba(56, 189, 248, 0.08);
+  --advanced-body-bg: rgba(15, 23, 42, 0.42);
+
+  :deep(.el-collapse-item__header:hover) {
+    background: rgba(56, 189, 248, 0.08);
+  }
+
+  :deep(.el-collapse-item__arrow) {
+    color: #38bdf8;
+  }
 }
 
 .unit {

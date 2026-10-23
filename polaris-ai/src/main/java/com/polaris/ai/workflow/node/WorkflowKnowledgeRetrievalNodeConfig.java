@@ -1,15 +1,23 @@
 package com.polaris.ai.workflow.node;
 
+import com.polaris.ai.context.SecurityCallerContext;
+import com.polaris.ai.core.context.CallerContext;
+import com.polaris.ai.core.context.CallerContextHolder;
+import com.polaris.ai.core.context.WorkflowScopedCallerContext;
+import com.polaris.ai.workflow.security.WorkflowPrincipalSecurityContextResolver;
 import com.polaris.ai.workflow.service.WorkflowKnowledgeRetrievalService;
 import com.polaris.ai.workflow.spi.*;
+import com.polaris.common.core.domain.model.LoginUser;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.core.context.SecurityContextHolder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /** 知识库检索节点2.0：节点只编排输入、资源和稳定输出契约。 */
@@ -18,7 +26,8 @@ public class WorkflowKnowledgeRetrievalNodeConfig {
 
     @Bean
     public WorkflowNodeHandler knowledgeRetrievalWorkflowNodeHandler(
-            WorkflowKnowledgeRetrievalService retrievalService) {
+            WorkflowKnowledgeRetrievalService retrievalService,
+            WorkflowPrincipalSecurityContextResolver principals) {
         WorkflowNodeDescriptor descriptor = new WorkflowNodeDescriptor(
                 "knowledge_retrieval", "2.0", "知识库检索", "ai",
                 configSchema(), inputSchema(), outputSchema(), WorkflowSideEffect.READ,
@@ -34,9 +43,41 @@ public class WorkflowKnowledgeRetrievalNodeConfig {
 
             @Override
             public WorkflowNodeResult execute(com.polaris.ai.workflow.spi.WorkflowNodeContext context) {
-                return WorkflowNodeResult.success(retrievalService.retrieve(context));
+                // 持久化执行和单节点试运行都不在原请求线程，必须按稳定主体实时恢复，不能继承线程池残留身份。
+                CallerContext previousCaller = CallerContextHolder.get();
+                var previousSecurity = SecurityContextHolder.getContext();
+                try {
+                    context.cancellation().throwIfCancellationRequested();
+                    var refreshed = principals.resolve(context).orElseThrow(() -> denied("工作流执行主体已失效，未进行知识库检索"));
+                    var authentication = refreshed.getAuthentication();
+                    if (authentication == null || !authentication.isAuthenticated()) throw denied("工作流执行主体未认证，未进行知识库检索");
+                    Object principal = authentication.getPrincipal();
+                    CallerContext caller = principal instanceof CallerContext value ? value
+                            : principal instanceof LoginUser user && "ADMIN".equals(context.principalType()) && context.tenantId() == null
+                            ? new SecurityCallerContext(user) : null;
+                    if (caller == null || !Objects.equals(caller.getTenantId(),
+                            context.tenantId() == null ? null : context.tenantId().toString())) throw denied("工作流执行主体租户不匹配，未进行知识库检索");
+                    if ("API_KEY".equals(context.principalType()) && !(caller instanceof WorkflowScopedCallerContext)) throw denied("工作流 API 主体缺少流程范围，未进行知识库检索");
+                    if (caller instanceof WorkflowScopedCallerContext scoped
+                            && (context.workflowCode() == null || !scoped.canAccessWorkflow(context.workflowCode()))) throw denied("工作流授权已失效，未进行知识库检索");
+                    for (var resource : context.resources().values()) {
+                        if (resource.handle() instanceof WorkflowKnowledgeResourceHandle handle
+                                && !Objects.equals(handle.knowledge().getTenantId(), context.tenantId())) throw denied("知识库资源租户不匹配，未进行知识库检索");
+                    }
+                    SecurityContextHolder.setContext(refreshed);
+                    CallerContextHolder.set(caller);
+                    context.cancellation().throwIfCancellationRequested();
+                    return WorkflowNodeResult.success(retrievalService.retrieve(context));
+                } finally {
+                    CallerContextHolder.set(previousCaller);
+                    SecurityContextHolder.setContext(previousSecurity);
+                }
             }
         };
+    }
+
+    private static WorkflowNodeExecutionException denied(String message) {
+        return new WorkflowNodeExecutionException("PERMISSION_DENIED", message, true);
     }
 
     private static ObjectNode configSchema() {
@@ -82,9 +123,14 @@ public class WorkflowKnowledgeRetrievalNodeConfig {
         ObjectNode filters = objectSchema(Map.of("documentIds", documentIds));
         filters.put("title", "过滤条件");
         filters.put("description", "可选：只在指定文档中检索");
+        ObjectNode related = JsonNodeFactory.instance.objectNode();
+        related.put("type", "array"); related.put("maxItems", 3); related.put("uniqueItems", true);
+        related.set("items", stringSchema().put("pattern", "^[1-9][0-9]{0,18}$"));
+        related.put("title", "关联补全文档 ID"); related.put("description", "显式补全最多三份同库资料；仅单知识库，不扩张过滤范围；不代表证据充分");
         ObjectNode schema = objectSchema(Map.of(
                 "query", query,
                 "searchContext", searchContext,
+                "relatedDocumentIds", related,
                 "filters", filters));
         schema.putArray("required").add("query");
         return schema;

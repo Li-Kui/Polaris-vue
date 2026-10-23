@@ -9,6 +9,10 @@ import com.polaris.ai.domain.AiDocument;
 import com.polaris.ai.domain.AiKnowledgeBase;
 import com.polaris.ai.mapper.AiDocumentMapper;
 import com.polaris.ai.mapper.AiKnowledgeMapper;
+import com.polaris.ai.knowledge.KnowledgeDocumentParser;
+import com.polaris.ai.knowledge.KnowledgeDocumentSnapshot;
+import com.polaris.ai.knowledge.KnowledgeDocumentSnapshotStore;
+import com.polaris.ai.knowledge.KnowledgeIndexPublisher;
 import com.polaris.ai.rag.AiVectorStoreProperties;
 import com.polaris.ai.rag.AiVectorStoreResolver;
 import com.polaris.ai.runtime.embedding.EmbeddingRuntimeDescriptor;
@@ -23,7 +27,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -68,7 +71,22 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     private com.polaris.ai.safety.guard.KnowledgeModerationGuard knowledgeModerationGuard;
 
     @Autowired
-    private com.polaris.ai.attachment.AttachmentTextExtractor attachmentTextExtractor;
+    private KnowledgeDocumentParser documentParser;
+
+    @Autowired
+    private KnowledgeDocumentSnapshotStore documentSnapshots;
+
+    @Autowired
+    private KnowledgeIndexPublisher indexPublisher;
+
+    @Autowired
+    private com.polaris.ai.knowledge.KnowledgeVectorCollectionRegistry vectorCollections;
+
+    @Autowired
+    private com.polaris.ai.knowledge.KnowledgeDocumentWorkerFence documentWorker;
+
+    @Autowired
+    private com.polaris.ai.knowledge.KnowledgeRebuildTaskService rebuildTasks;
 
     // ================================================================
     //  知识库 CRUD
@@ -103,6 +121,10 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         applyDefaultsAndValidate(kb);
         EmbeddingRuntimeDescriptor descriptor = vectorStoreResolver.prepare(kb);
         validateEmbeddingModelScope(kb, descriptor);
+        // 新库不得采用外部传入的活动集合；只有创建新候选并通过发布 CAS 才能绑定。
+        kb.setVectorCollection(null);
+        kb.setIndexSignature(null);
+        kb.setIndexGeneration(0L);
         kb.setIndexVersion(0L);
         kb.setIndexStatus("EMPTY");
         kb.setIndexError(null);
@@ -131,10 +153,24 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             kb.setIndexStatus("STALE");
             kb.setIndexError(null);
         }
-        int result = aiKnowledgeMapper.updateById(kb);
-        if (indexConfigChanged) {
-            updateIndexState(kb.getId(), "STALE", "索引配置已变更，请重建知识库索引");
+        // 外部提交的活动指针、状态、签名与代次一律不写回，避免编辑表单覆盖后台发布。
+        AiKnowledgeBase changes = new AiKnowledgeBase();
+        changes.setName(kb.getName()); changes.setDescription(kb.getDescription());
+        changes.setDeptId(existing.getDeptId()); changes.setUpdateBy(kb.getUpdateBy());
+        changes.setEmbeddingModelId(kb.getEmbeddingModelId()); changes.setEmbeddingDimension(kb.getEmbeddingDimension());
+        changes.setEmbeddingModelRevision(kb.getEmbeddingModelRevision()); changes.setEmbeddingSchemaHash(kb.getEmbeddingSchemaHash());
+        changes.setChunkSize(kb.getChunkSize()); changes.setChunkOverlap(kb.getChunkOverlap()); changes.setSplitterType(kb.getSplitterType());
+        changes.setRetrievalTopK(kb.getRetrievalTopK()); changes.setRetrievalMinScore(kb.getRetrievalMinScore());
+        LambdaUpdateWrapper<AiKnowledgeBase> update = new LambdaUpdateWrapper<AiKnowledgeBase>()
+                .eq(AiKnowledgeBase::getId, existing.getId())
+                .eq(AiKnowledgeBase::getIndexGeneration, Objects.requireNonNull(existing.getIndexGeneration(), "请先执行 SQL 22"))
+                .setSql("index_generation = index_generation + 1");
+        if (indexConfigChanged || "BUILDING".equals(existing.getIndexStatus())) {
+            update.set(AiKnowledgeBase::getIndexStatus, "STALE")
+                    .set(AiKnowledgeBase::getIndexError, "索引配置已变更，请重建知识库索引");
         }
+        int result = aiKnowledgeMapper.update(changes, update);
+        if (result != 1) throw new IllegalStateException("知识库已变化，请刷新后重试");
         return result;
     }
 
@@ -146,6 +182,7 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         }
         return aiKnowledgeMapper.update(null, new LambdaUpdateWrapper<AiKnowledgeBase>()
                 .eq(AiKnowledgeBase::getEmbeddingModelId, modelConfigId)
+                .setSql("index_generation = index_generation + 1")
                 .set(AiKnowledgeBase::getIndexStatus, "STALE")
                 .set(AiKnowledgeBase::getIndexError, abbreviate(reason, 1000)));
     }
@@ -155,6 +192,7 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     public int deleteKnowledgeBase(Long id)
     {
         AiKnowledgeBase knowledgeBase = aiKnowledgeMapper.selectById(id);
+        if (knowledgeBase != null) indexPublisher.documentChanged(knowledgeBase);
         // 1. 删除向量数据库中该知识库下的所有向量分片
         if (knowledgeBase != null && knowledgeBase.getVectorCollection() != null) {
             try {
@@ -168,7 +206,9 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         // 2. 级联逻辑删除数据库中的文档列表与知识库本身
         aiDocumentMapper.delete(new LambdaQueryWrapper<AiDocument>()
                 .eq(AiDocument::getKnowledgeBaseId, id));
-        return aiKnowledgeMapper.deleteById(id);
+        int changed = aiKnowledgeMapper.deleteById(id);
+        if (changed > 0) documentSnapshots.retire(id, null);
+        return changed;
     }
 
     // ================================================================
@@ -188,11 +228,16 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public int insertDocument(AiDocument doc)
     {
+        // 与插入同一事务；先锁父库代次，使候选切换不可能漏掉刚提交的资料。
+        indexPublisher.documentChanged(aiKnowledgeMapper.selectById(doc.getKnowledgeBaseId()));
         doc.setStatus("0"); // 待解析
         doc.setWordCount(0);
-        return aiDocumentMapper.insert(doc);
+        int changed = aiDocumentMapper.insert(doc);
+        if (changed != 1) throw new IllegalStateException("文档保存失败");
+        return changed;
     }
 
     @Override
@@ -203,6 +248,7 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         // 1. 从向量库清除该文档的向量
         if (document != null) {
             AiKnowledgeBase knowledgeBase = aiKnowledgeMapper.selectById(document.getKnowledgeBaseId());
+            if (knowledgeBase != null) indexPublisher.documentChanged(knowledgeBase);
             if (knowledgeBase != null && knowledgeBase.getVectorCollection() != null) {
                 try {
                     Filter filter = metadataKey("document_id").isEqualTo(id.toString());
@@ -214,118 +260,111 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         }
 
         // 2. 逻辑删除数据库记录
-        return aiDocumentMapper.deleteById(id);
+        int changed = aiDocumentMapper.deleteById(id);
+        if (changed > 0 && document != null) documentSnapshots.retire(document.getKnowledgeBaseId(), id);
+        return changed;
     }
 
     // ================================================================
     //  RAG 核心：切片与向量化
     // ================================================================
 
-    /**
-     * 异步解析文档并向量化
-     */
     @Override
-    @Async("threadPoolTaskExecutor")
-    public void importDocumentAsync(Long docId)
+    public void runKnowledgeImportTask(AiKnowledgeBase source, Long documentId)
     {
-        AiDocument doc = aiDocumentMapper.selectById(docId);
-        if (doc == null) {
-            log.error("未找到待导入的文档，ID: {}", docId);
-            return;
-        }
-        AiKnowledgeBase knowledgeBase = aiKnowledgeMapper.selectById(doc.getKnowledgeBaseId());
-        if (knowledgeBase == null) {
-            markDocumentFailed(doc, "所属知识库不存在");
-            return;
-        }
+        AiKnowledgeBase frozen = new AiKnowledgeBase(); org.springframework.beans.BeanUtils.copyProperties(source, frozen);
+        AiDocument doc = aiDocumentMapper.selectById(documentId);
+        if (doc == null || !Objects.equals(doc.getKnowledgeBaseId(), frozen.getId())
+                || !"0".equals(doc.getStatus()) || KnowledgeIndexPublisher.excluded(doc))
+            throw new IllegalStateException("待导入文档已变化，请显式重建");
         try {
-            applyDefaultsAndValidate(knowledgeBase);
-            if (knowledgeBase.getVectorCollection() == null
-                    || !"READY".equalsIgnoreCase(knowledgeBase.getIndexStatus())) {
-                boolean rebuiltHere = rebuildKnowledgeBase(knowledgeBase.getId());
-                if (!rebuiltHere) {
-                    waitForActiveRebuild(knowledgeBase.getId());
-                    AiDocument refreshedDocument = aiDocumentMapper.selectById(docId);
-                    AiKnowledgeBase refreshedKnowledgeBase = aiKnowledgeMapper.selectById(knowledgeBase.getId());
-                    if (refreshedDocument != null && !"2".equals(refreshedDocument.getStatus())
-                            && refreshedKnowledgeBase != null
-                            && "READY".equalsIgnoreCase(refreshedKnowledgeBase.getIndexStatus())) {
-                        AiVectorStoreResolver.VectorContext refreshedContext =
-                                vectorStoreResolver.resolve(refreshedKnowledgeBase);
-                        indexDocument(refreshedDocument, refreshedKnowledgeBase,
-                                refreshedKnowledgeBase.getIndexVersion(), refreshedContext);
-                    }
-                }
-                return;
-            }
-            AiVectorStoreResolver.VectorContext context = vectorStoreResolver.resolve(knowledgeBase);
-            indexDocument(doc, knowledgeBase, knowledgeBase.getIndexVersion(), context);
-        } catch (Exception e) {
-            log.error(">>> 文档 {} 向量化失败", doc.getName(), e);
-            markDocumentFailed(doc, e.getMessage());
+            applyDefaultsAndValidate(frozen);
+            indexPublisher.requireImportCurrent(frozen);
+            indexPublisher.taskManifest(indexPublisher.manifest(List.of(doc)));
+            AiVectorStoreResolver.VectorContext context = vectorStoreResolver.resolve(frozen);
+            indexPublisher.requireImportCurrent(frozen);
+            indexDocument(doc, frozen, frozen.getIndexVersion(), context, () -> indexPublisher.requireImportCurrent(frozen));
+        } catch (RuntimeException e) {
+            documentWorker.failPending(frozen, doc);
+            throw e;
         }
     }
 
     @Override
-    @Async("threadPoolTaskExecutor")
     public void rebuildKnowledgeBaseAsync(Long knowledgeBaseId)
     {
-        rebuildKnowledgeBase(knowledgeBaseId);
+        rebuildTasks.submit(knowledgeBaseId, null, null);
     }
 
     private boolean rebuildKnowledgeBase(Long knowledgeBaseId)
+    {
+        return rebuildKnowledgeBase(knowledgeBaseId, null);
+    }
+
+    @Override
+    public void runKnowledgeRebuildTask(KnowledgeIndexPublisher.Build build)
+    {
+        rebuildKnowledgeBase(build.source().getId(), build);
+    }
+
+    private boolean rebuildKnowledgeBase(Long knowledgeBaseId, KnowledgeIndexPublisher.Build reserved)
     {
         if (knowledgeBaseId == null || !ACTIVE_REBUILDS.add(knowledgeBaseId)) {
             log.info(">>> 知识库 {} 已有重建任务运行，忽略重复请求", knowledgeBaseId);
             return false;
         }
-        AiKnowledgeBase knowledgeBase = aiKnowledgeMapper.selectById(knowledgeBaseId);
+        AiKnowledgeBase knowledgeBase = reserved == null ? aiKnowledgeMapper.selectById(knowledgeBaseId) : new AiKnowledgeBase();
+        if (reserved != null) org.springframework.beans.BeanUtils.copyProperties(reserved.source(), knowledgeBase);
         if (knowledgeBase == null) {
             ACTIVE_REBUILDS.remove(knowledgeBaseId);
             return true;
         }
 
+        KnowledgeIndexPublisher.Build build = null;
+        com.polaris.ai.knowledge.KnowledgeVectorCollectionRegistry.Handle candidateHandle = null;
         try {
+            // 先保存发布代次再做外部调用；跨实例旧 worker 无法覆盖新候选或新配置。
+            build = reserved == null ? indexPublisher.begin(knowledgeBase) : reserved;
+            knowledgeBase.setIndexGeneration(build.generation());
+            KnowledgeIndexPublisher.Build claimed = build;
             applyDefaultsAndValidate(knowledgeBase);
             EmbeddingRuntimeDescriptor descriptor =
                     vectorStoreResolver.prepare(knowledgeBase);
             long nextVersion = knowledgeBase.getIndexVersion() == null
                     ? 1L : knowledgeBase.getIndexVersion() + 1L;
-            String nextCollection = vectorStoreResolver.newVersionCollection(knowledgeBase, nextVersion);
+            String nextCollection = vectorStoreResolver.newVersionCollection(knowledgeBase, nextVersion)
+                    + "_b" + UUID.randomUUID().toString().replace("-", "");
 
-            updateIndexState(knowledgeBaseId, "BUILDING", null);
+            indexPublisher.requireCurrent(build);
+            // 先独立提交归属意图，随后标记远端可能已收到请求；没有登记成功绝不创建集合。
+            candidateHandle = vectorCollections.reserve(build,nextVersion,nextCollection);
+            vectorCollections.creating(candidateHandle);
             AiVectorStoreResolver.VectorContext context =
-                    vectorStoreResolver.resolveForCollection(knowledgeBase, nextCollection);
+                    vectorStoreResolver.resolveNewCollection(knowledgeBase, nextCollection, candidateHandle.ownershipMarker());
+            indexPublisher.requireCurrent(build);
+            vectorCollections.writing(candidateHandle);
 
             AiDocument query = new AiDocument();
             query.setKnowledgeBaseId(knowledgeBaseId);
             List<AiDocument> documents = aiDocumentMapper.selectDocumentList(query);
-            if (documents == null || documents.isEmpty()) {
-                knowledgeBase.setIndexVersion(nextVersion);
-                knowledgeBase.setVectorCollection(nextCollection);
-                knowledgeBase.setIndexSignature(calculateIndexSignature(
-                        knowledgeBase, descriptor));
-                knowledgeBase.setIndexStatus("EMPTY");
-                knowledgeBase.setIndexError(null);
-                aiKnowledgeMapper.updateById(knowledgeBase);
-                updateIndexState(knowledgeBaseId, "EMPTY", null);
-                return true;
-            }
+            List<KnowledgeIndexPublisher.Entry> manifest = indexPublisher.manifest(documents);
+            indexPublisher.taskManifest(manifest);
 
             for (AiDocument document : documents) {
                 if ("QUARANTINED".equals(document.getModerationStatus())
                         || "AUTO_DELETED".equals(document.getModerationStatus())) {
                     log.info(">>> 重建索引跳过已隔离/清理的文档: id={}, name={}", document.getId(), document.getName());
+                    indexPublisher.taskDocumentCompleted();
                     continue;
                 }
-                if (document.getFileUrl() == null || !java.nio.file.Files.exists(java.nio.file.Path.of(document.getFileUrl()))) {
-                    log.warn(">>> 重建索引跳过物理文件不存在的文档: id={}, name={}", document.getId(), document.getName());
-                    continue;
-                }
+                // 缺失文件交给结构化解析明确失败，不能跳过后仍宣称整个新索引 READY。
                 try {
-                    indexDocument(document, knowledgeBase, nextVersion, context);
+                    indexDocument(document, knowledgeBase, nextVersion, context,
+                            () -> indexPublisher.requireCurrent(claimed));
+                    indexPublisher.taskDocumentCompleted();
                 } catch (Exception e) {
-                    markDocumentFailed(document, e.getMessage());
+                    // 文档运行作用域已按 owner 处理失败；不得在作用域外用旧实体回写。
+                    if (indexPublisher.current(build)) documentWorker.failPending(knowledgeBase, document);
                     throw e;
                 }
             }
@@ -334,35 +373,22 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             knowledgeBase.setVectorCollection(nextCollection);
             knowledgeBase.setIndexSignature(calculateIndexSignature(
                     knowledgeBase, descriptor));
-            knowledgeBase.setIndexStatus("READY");
-            knowledgeBase.setIndexError(null);
-            aiKnowledgeMapper.updateById(knowledgeBase);
-            updateIndexState(knowledgeBaseId, "READY", null);
+            indexPublisher.requireCurrent(build);
+            vectorCollections.built(candidateHandle);
+            indexPublisher.activate(build, knowledgeBase, manifest);
             log.info(">>> 知识库 {} 索引版本 {} 构建成功，collection={}",
                     knowledgeBaseId, nextVersion, nextCollection);
         } catch (Exception e) {
             log.error(">>> 知识库 {} 索引重建失败", knowledgeBaseId, e);
-            updateIndexState(knowledgeBaseId, "FAILED", abbreviate(e.getMessage(), 1000));
+            try {vectorCollections.abandon(candidateHandle);} catch (RuntimeException registryFailure) {
+                // 登记存储不可用时保留原状态，不谎称远端已回滚，不重试远端写入或删除。
+                log.warn("候选集合失败收尾未完成，需后续核验登记状态");
+            }
+            if (build != null) indexPublisher.failed(build);
         } finally {
             ACTIVE_REBUILDS.remove(knowledgeBaseId);
         }
         return true;
-    }
-
-    private void waitForActiveRebuild(Long knowledgeBaseId)
-    {
-        long deadline = System.currentTimeMillis() + 60_000L;
-        while (ACTIVE_REBUILDS.contains(knowledgeBaseId) && System.currentTimeMillis() < deadline) {
-            try {
-                Thread.sleep(200L);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("等待知识库重建时被中断", e);
-            }
-        }
-        if (ACTIVE_REBUILDS.contains(knowledgeBaseId)) {
-            throw new IllegalStateException("等待知识库重建超时");
-        }
     }
 
     private void indexDocument(
@@ -371,28 +397,60 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             Long indexVersion,
             AiVectorStoreResolver.VectorContext context)
     {
+        indexDocument(doc, knowledgeBase, indexVersion, context, () -> { });
+    }
+
+    private void indexDocument(
+            AiDocument doc,
+            AiKnowledgeBase knowledgeBase,
+            Long indexVersion,
+            AiVectorStoreResolver.VectorContext context,
+            Runnable checkBuild)
+    {
+        checkBuild.run();
+        documentWorker.run(knowledgeBase, doc, () -> indexOwnedDocument(doc, knowledgeBase, indexVersion, context, () -> {
+            checkBuild.run();
+            documentWorker.check();
+        }));
+    }
+
+    private void indexOwnedDocument(
+            AiDocument doc,
+            AiKnowledgeBase knowledgeBase,
+            Long indexVersion,
+            AiVectorStoreResolver.VectorContext context,
+            Runnable checkBuild)
+    {
         log.info(">>> 开始安全检测与向量化文档: {}, collection={}", doc.getName(), context.collectionName());
         doc.setStatus("1");
         doc.setModerationStatus("SCANNING");
-        aiDocumentMapper.updateById(doc);
+        documentWorker.mutate(() -> {
+            if (aiDocumentMapper.update(null, new LambdaUpdateWrapper<AiDocument>()
+                .eq(AiDocument::getId, doc.getId()).eq(AiDocument::getKnowledgeBaseId, knowledgeBase.getId())
+                .and(state -> state.isNull(AiDocument::getModerationStatus).or()
+                        .notIn(AiDocument::getModerationStatus, "QUARANTINED", "AUTO_DELETED"))
+                .set(AiDocument::getStatus, "1").set(AiDocument::getModerationStatus, "SCANNING")) != 1)
+                throw new IllegalStateException("文档已失效或隔离，停止导入");
+        });
 
         java.nio.file.Path filePath = (doc.getFileUrl() != null && !doc.getFileUrl().isBlank())
                 ? java.nio.file.Path.of(doc.getFileUrl()) : null;
-        String content;
-        try {
-            content = attachmentTextExtractor.extract(filePath, doc.getName());
-            if (content == null || content.trim().isEmpty() || content.startsWith("[解析附件时发生错误")) {
-                doc.setModerationStatus("SCAN_FAILED");
-                doc.setStatus("3");
-                aiDocumentMapper.updateById(doc);
-                throw new IllegalStateException("文件内容提取为空或解析错误");
-            }
-        } catch (Exception e) {
+        KnowledgeDocumentParser.Result parsed = documentParser.parse(filePath, doc.getName());
+        checkBuild.run();
+        if (!parsed.success()) {
             doc.setModerationStatus("SCAN_FAILED");
             doc.setStatus("3");
-            aiDocumentMapper.updateById(doc);
-            throw e;
+            documentWorker.mutate(() -> {
+                if (aiDocumentMapper.update(null, new LambdaUpdateWrapper<AiDocument>()
+                    .eq(AiDocument::getId, doc.getId()).eq(AiDocument::getKnowledgeBaseId, knowledgeBase.getId())
+                    .eq(AiDocument::getModerationStatus, "SCANNING").eq(AiDocument::getStatus, "1")
+                    .set(AiDocument::getModerationStatus, "SCAN_FAILED").set(AiDocument::getStatus, "3")) != 1)
+                    throw new IllegalStateException("文档状态已变化，停止记录解析失败");
+                documentSnapshots.parseFailed(knowledgeBase, doc, indexVersion, context.collectionName(), parsed.errorCode());
+            });
+            throw new IllegalStateException("知识库文档解析失败：" + parsed.errorCode());
         }
+        String content = parsed.content();
 
         com.polaris.ai.safety.dto.ModerationResult moderation = knowledgeModerationGuard.moderateContent(
                 doc,
@@ -400,11 +458,13 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
                 moderationFacade
         );
 
-        knowledgeModerationGuard.apply(doc, moderation, filePath);
+        checkBuild.run();
         if (!moderation.isAllowed()) {
+            documentWorker.mutate(() -> indexPublisher.completeImport(() -> knowledgeModerationGuard.apply(doc, moderation, filePath)));
             log.warn(">>> 知识库文档 {} 安全检测未通过: {}", doc.getName(), moderation.finalAction());
             return;
         }
+        documentWorker.mutate(() -> knowledgeModerationGuard.apply(doc, moderation, filePath));
 
         Document document = Document.from(content);
         document.metadata().put("knowledge_base_id", doc.getKnowledgeBaseId().toString());
@@ -416,6 +476,11 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             document.metadata().put("dept_id", knowledgeBase.getDeptId().toString());
         }
 
+        // 在高重叠配置下先拒绝明显超出快照预算的输入，避免先生成巨量分块。
+        if ((long) content.length() / Math.max(1, knowledgeBase.getChunkSize() - knowledgeBase.getChunkOverlap()) > 2000) {
+            documentWorker.mutate(() -> documentSnapshots.parseFailed(knowledgeBase, doc, indexVersion, context.collectionName(), "CHUNK_LIMIT"));
+            throw new IllegalStateException("分块数量超出本批资源预算");
+        }
         DocumentSplitter splitter = createSplitter(knowledgeBase);
         List<TextSegment> segments = splitter.split(document);
         List<TextSegment> indexedSegments = new ArrayList<>();
@@ -427,29 +492,53 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             segment.metadata().put("chunk_no", String.valueOf(i));
             indexedSegments.add(segment);
         }
-        if (indexedSegments.isEmpty()) {
+        if (indexedSegments.isEmpty() || indexedSegments.size() > 2000) {
+            documentWorker.mutate(() -> documentSnapshots.parseFailed(knowledgeBase, doc, indexVersion, context.collectionName(), "CHUNK_LIMIT"));
             throw new IllegalStateException("文档未生成可用的向量分片");
         }
 
-        int batchSize = context.descriptor().batchSize();
-        for (int offset = 0; offset < indexedSegments.size(); offset += batchSize) {
-            int end = Math.min(offset + batchSize, indexedSegments.size());
-            List<TextSegment> batch = new ArrayList<>(indexedSegments.subList(offset, end));
-            List<Embedding> embeddings = context.embeddingModel().embedAll(batch).content();
-            if (embeddings == null || embeddings.size() != batch.size()) {
-                throw new IllegalStateException("向量模型返回数量与分片数量不一致");
+        List<String> allPointIds = new ArrayList<>();
+        for (int i = 0; i < indexedSegments.size(); i++)
+            allPointIds.add(stablePointId(context.collectionName(), doc.getId(), i, indexedSegments.get(i).text()));
+        KnowledgeDocumentSnapshot snapshot = documentWorker.readOrWrite(() -> documentSnapshots.prepare(knowledgeBase, doc, indexVersion,
+                context.collectionName(), parsed, indexedSegments, allPointIds));
+        try {
+            int batchSize = context.descriptor().batchSize();
+            if (batchSize < 1) throw new IllegalStateException("向量批大小无效");
+            for (int offset = 0; offset < indexedSegments.size(); offset += batchSize) {
+                checkBuild.run();
+                int end = Math.min(offset + batchSize, indexedSegments.size());
+                List<TextSegment> batch = new ArrayList<>(indexedSegments.subList(offset, end));
+                List<Embedding> embeddings = context.embeddingModel().embedAll(batch).content();
+                checkBuild.run();
+                if (embeddings == null || embeddings.size() != batch.size()
+                        || embeddings.stream().anyMatch(embedding -> embedding == null || embedding.dimension() != context.descriptor().dimension()
+                        || containsInvalidCoordinate(embedding.vector()))) {
+                    throw new IllegalStateException("向量模型返回数量、维度或坐标无效");
+                }
+                context.embeddingStore().addAll(new ArrayList<>(allPointIds.subList(offset, end)), embeddings, batch);
             }
-            List<String> pointIds = new ArrayList<>(batch.size());
-            for (int i = 0; i < batch.size(); i++) {
-                pointIds.add(stablePointId(context.collectionName(), doc.getId(), offset + i, batch.get(i).text()));
-            }
-            context.embeddingStore().addAll(pointIds, embeddings, batch);
+            checkBuild.run();
+            documentWorker.mutate(() -> indexPublisher.completeImport(() -> {
+                documentSnapshots.ready(snapshot);
+                if (aiDocumentMapper.update(null, new LambdaUpdateWrapper<AiDocument>()
+                    .eq(AiDocument::getId, doc.getId()).eq(AiDocument::getKnowledgeBaseId, knowledgeBase.getId())
+                    .eq(AiDocument::getStatus, "1").eq(AiDocument::getModerationStatus, "SAFE")
+                    .set(AiDocument::getStatus, "2").set(AiDocument::getWordCount, content.length())) != 1)
+                    throw new IllegalStateException("文档状态已变化");
+            }));
+            doc.setStatus("2");
+            doc.setWordCount(content.length());
+        } catch (Exception e) {
+            documentSnapshots.failed(snapshot);
+            throw e;
         }
-
-        doc.setStatus("2");
-        doc.setWordCount(content.length());
-        aiDocumentMapper.updateById(doc);
         log.info(">>> 文档 {} 向量化入库成功，共 {} 个分片", doc.getName(), indexedSegments.size());
+    }
+
+    private boolean containsInvalidCoordinate(float[] values) {
+        for (float value : values) if (!Float.isFinite(value)) return true;
+        return false;
     }
 
     private DocumentSplitter createSplitter(AiKnowledgeBase knowledgeBase)
@@ -562,21 +651,6 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
         }
     }
 
-    private void updateIndexState(Long knowledgeBaseId, String status, String error)
-    {
-        aiKnowledgeMapper.update(null, new LambdaUpdateWrapper<AiKnowledgeBase>()
-                .eq(AiKnowledgeBase::getId, knowledgeBaseId)
-                .set(AiKnowledgeBase::getIndexStatus, status)
-                .set(AiKnowledgeBase::getIndexError, error));
-    }
-
-    private void markDocumentFailed(AiDocument document, String error)
-    {
-        document.setStatus("3");
-        document.setRemark(abbreviate(error, 500));
-        aiDocumentMapper.updateById(document);
-    }
-
     private String abbreviate(String value, int maxLength)
     {
         if (value == null || value.length() <= maxLength) {
@@ -598,7 +672,7 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             return;
         }
 
-        log.info(">>> 检测到系统启动，开始按知识库重建 {} 向量索引...", vectorStoreProperties.getType());
+        log.info(">>> 检测到系统启动，提交 {} 知识库索引任务...", vectorStoreProperties.getType());
         List<AiKnowledgeBase> knowledgeBases = aiKnowledgeMapper.selectList(
                 new LambdaQueryWrapper<AiKnowledgeBase>().orderByAsc(AiKnowledgeBase::getId));
         if (knowledgeBases == null || knowledgeBases.isEmpty()) {
@@ -606,19 +680,14 @@ public class AiKnowledgeServiceImpl extends ServiceImpl<AiKnowledgeMapper, AiKno
             return;
         }
 
-        // 异步后台加载，不阻塞 Spring 启动线程
-        new Thread(() -> {
-            int successCount = 0;
-            for (AiKnowledgeBase knowledgeBase : knowledgeBases) {
-                rebuildKnowledgeBase(knowledgeBase.getId());
-                AiKnowledgeBase refreshed = aiKnowledgeMapper.selectById(knowledgeBase.getId());
-                if (refreshed != null
-                        && ("READY".equals(refreshed.getIndexStatus())
-                        || "EMPTY".equals(refreshed.getIndexStatus()))) {
-                    successCount++;
-                }
+        // 不自建裸线程，不接管中断任务；仅保存新任务并交给专用有界线程池。
+        for (AiKnowledgeBase knowledgeBase : knowledgeBases) {
+            try {
+                var task = rebuildTasks.submitStartup(knowledgeBase);
+                log.info(">>> 启动索引提交：knowledgeId={}, state={}", knowledgeBase.getId(), task == null ? "SKIPPED_ACTIVE" : task.state());
+            } catch (RuntimeException e) {
+                log.warn(">>> 启动索引任务保存失败：knowledgeId={}，请检查数据库版本后显式重建", knowledgeBase.getId());
             }
-            log.info(">>> 向量索引重建完毕，成功加载 {}/{} 个知识库", successCount, knowledgeBases.size());
-        }, "polaris-vector-rebuild").start();
+        }
     }
 }
